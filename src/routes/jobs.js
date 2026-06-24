@@ -44,7 +44,11 @@ router.post('/run-sync', (req, res) => {
       jobState.status = 'idle';
       jobState.finishedAt = new Date().toISOString();
       jobState.lastResult = result;
-      logger.info('Sync completed', { result });
+      logger.info('Sync completed', {
+        successfulEntities: result.successfulEntities,
+        failedEntities: result.failedEntities,
+        totalAdsCollected: result.totalAdsCollected,
+      });
     })
     .catch((err) => {
       jobState.status = 'idle';
