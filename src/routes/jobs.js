@@ -31,15 +31,30 @@ router.post('/run-sync', (req, res) => {
     });
   }
 
+  let entityId;
+  const rawEntityId = req.body?.entity_id;
+
+  if (rawEntityId !== undefined && rawEntityId !== null) {
+    entityId = String(rawEntityId).trim();
+    if (!entityId) {
+      return res.status(400).json({
+        error: 'entity_id must be a non-empty string',
+      });
+    }
+  }
+
   jobState.status = 'running';
   jobState.startedAt = new Date().toISOString();
   jobState.finishedAt = null;
   jobState.lastResult = null;
   jobState.lastError = null;
 
-  logger.info('POST /jobs/run-sync — sync started');
+  logger.info('POST /jobs/run-sync — sync started', {
+    mode: entityId ? 'single-entity' : 'full',
+    ...(entityId && { entityId }),
+  });
 
-  dailySync()
+  dailySync(entityId)
     .then((result) => {
       jobState.status = 'idle';
       jobState.finishedAt = new Date().toISOString();

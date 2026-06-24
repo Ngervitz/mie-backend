@@ -2,10 +2,20 @@ const supabase = require('../clients/supabase');
 const { buildApifyInput, runActor } = require('../clients/apify');
 const logger = require('../lib/logger');
 
-async function collect() {
-  logger.info('Collect started');
+async function collect(entityId) {
+  const mode = entityId ? 'single-entity' : 'full';
+  logger.info('Collect started', {
+    mode,
+    ...(entityId && { entityId }),
+  });
 
-  const { data: entities, error } = await supabase.from('monitored_entities').select('*');
+  let query = supabase.from('monitored_entities').select('*');
+
+  if (entityId) {
+    query = query.eq('id', entityId);
+  }
+
+  const { data: entities, error } = await query;
 
   if (error) {
     logger.error('Failed to fetch monitored_entities', { error: error.message });
@@ -70,6 +80,7 @@ async function collect() {
   };
 
   logger.info('Collect finished', {
+    mode,
     successfulEntities,
     failedEntities,
     totalAdsCollected,
