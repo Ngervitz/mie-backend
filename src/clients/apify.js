@@ -31,8 +31,13 @@ async function fetchAllDatasetItems(datasetId) {
 }
 
 async function runActor(input) {
-  const { defaultDatasetId } = await client.actor(env.apifyActorId).call(input);
-  return fetchAllDatasetItems(defaultDatasetId);
+  const run = await client.actor(env.apifyActorId).call(input);
+  const items = await fetchAllDatasetItems(run.defaultDatasetId);
+
+  return {
+    items,
+    apifyRunId: run.id || null,
+  };
 }
 
 module.exports = { buildApifyInput, runActor };

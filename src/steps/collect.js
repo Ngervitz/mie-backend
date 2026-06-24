@@ -1,5 +1,6 @@
 const supabase = require('../clients/supabase');
 const { buildApifyInput, runActor } = require('../clients/apify');
+const { saveSnapshot } = require('./snapshot');
 const logger = require('../lib/logger');
 
 async function collect(entityId) {
@@ -26,6 +27,7 @@ async function collect(entityId) {
   let successfulEntities = 0;
   let failedEntities = 0;
   let totalAdsCollected = 0;
+  let totalSnapshotsInserted = 0;
 
   for (const entity of entities) {
     const entityId = entity.id;
@@ -42,25 +44,53 @@ async function collect(entityId) {
     }
 
     try {
-      const ads = await runActor(buildApifyInput(url));
+      const { items, apifyRunId } = await runActor(buildApifyInput(url));
+      const ads = Array.isArray(items) ? items : [];
       const adsCount = ads.length;
       const collectedAt = new Date().toISOString();
 
       totalAdsCollected += adsCount;
-      successfulEntities += 1;
-
-      results.push({
-        entityId,
-        entityName,
-        adsCount,
-        collectedAt,
-      });
 
       logger.info('Entity collect completed', {
         entityId,
         entityName,
         adsCount,
       });
+
+      try {
+        const { snapshotsInserted } = await saveSnapshot({
+          entityId,
+          ads,
+          collectedAt,
+          apifyRunId,
+        });
+
+        totalSnapshotsInserted += snapshotsInserted;
+        successfulEntities += 1;
+
+        results.push({
+          entityId,
+          entityName,
+          adsCount,
+          snapshotsInserted,
+          collectedAt,
+        });
+
+        logger.info('Entity snapshot completed', {
+          entityId,
+          entityName,
+          adsCount,
+          snapshotsInserted,
+        });
+      } catch (snapshotErr) {
+        failedEntities += 1;
+        logger.error('Entity snapshot failed', {
+          entityId,
+          entityName,
+          adsCount,
+          error: snapshotErr.message,
+        });
+      }
     } catch (err) {
       failedEntities += 1;
       logger.error('Entity collect failed', {
@@ -72,18 +102,20 @@ async function collect(entityId) {
   }
 
   const summary = {
-    status: 'collect_complete',
+    status: 'snapshot_complete',
     successfulEntities,
     failedEntities,
     totalAdsCollected,
+    totalSnapshotsInserted,
     results,
   };
 
-  logger.info('Collect finished', {
+  logger.info('Snapshot run finished', {
     mode,
     successfulEntities,
     failedEntities,
     totalAdsCollected,
+    totalSnapshotsInserted,
   });
 
   return summary;
