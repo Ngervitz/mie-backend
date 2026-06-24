@@ -64,6 +64,7 @@ router.post('/run-sync', (req, res) => {
         failedEntities: result.failedEntities,
         totalAdsCollected: result.totalAdsCollected,
         totalSnapshotsInserted: result.totalSnapshotsInserted,
+        totalReconciledEntities: result.totalReconciledEntities,
       });
     })
     .catch((err) => {

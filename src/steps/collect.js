@@ -1,7 +1,17 @@
 const supabase = require('../clients/supabase');
 const { buildApifyInput, runActor } = require('../clients/apify');
 const { saveSnapshot } = require('./snapshot');
+const { reconcileEntity } = require('./reconcile');
 const logger = require('../lib/logger');
+
+function toReconcileCounts(reconcileResult) {
+  return {
+    new: reconcileResult.new.length,
+    reactivated: reconcileResult.reactivated.length,
+    persistent: reconcileResult.persistent.length,
+    disappeared: reconcileResult.disappeared.length,
+  };
+}
 
 async function collect(entityId) {
   const mode = entityId ? 'single-entity' : 'full';
@@ -28,6 +38,7 @@ async function collect(entityId) {
   let failedEntities = 0;
   let totalAdsCollected = 0;
   let totalSnapshotsInserted = 0;
+  let totalReconciledEntities = 0;
 
   for (const entity of entities) {
     const entityId = entity.id;
@@ -58,7 +69,7 @@ async function collect(entityId) {
       });
 
       try {
-        const { snapshotsInserted } = await saveSnapshot({
+        const { snapshotId, snapshotsInserted } = await saveSnapshot({
           entityId,
           ads,
           collectedAt,
@@ -66,22 +77,46 @@ async function collect(entityId) {
         });
 
         totalSnapshotsInserted += snapshotsInserted;
-        successfulEntities += 1;
-
-        results.push({
-          entityId,
-          entityName,
-          adsCount,
-          snapshotsInserted,
-          collectedAt,
-        });
 
         logger.info('Entity snapshot completed', {
           entityId,
           entityName,
           adsCount,
           snapshotsInserted,
+          snapshotId,
         });
+
+        try {
+          const reconcileResult = await reconcileEntity({ entityId, snapshotId });
+          const reconciled = toReconcileCounts(reconcileResult);
+
+          totalReconciledEntities += 1;
+          successfulEntities += 1;
+
+          results.push({
+            entityId,
+            entityName,
+            adsCount,
+            snapshotsInserted,
+            reconciled,
+            collectedAt,
+          });
+
+          logger.info('Entity reconcile finished', {
+            entityId,
+            entityName,
+            snapshotId,
+            reconciled,
+          });
+        } catch (reconcileErr) {
+          failedEntities += 1;
+          logger.error('Entity reconcile failed', {
+            entityId,
+            entityName,
+            snapshotId,
+            error: reconcileErr.message,
+          });
+        }
       } catch (snapshotErr) {
         failedEntities += 1;
         logger.error('Entity snapshot failed', {
@@ -102,20 +137,22 @@ async function collect(entityId) {
   }
 
   const summary = {
-    status: 'snapshot_complete',
+    status: 'reconcile_complete',
     successfulEntities,
     failedEntities,
     totalAdsCollected,
     totalSnapshotsInserted,
+    totalReconciledEntities,
     results,
   };
 
-  logger.info('Snapshot run finished', {
+  logger.info('Reconcile run finished', {
     mode,
     successfulEntities,
     failedEntities,
     totalAdsCollected,
     totalSnapshotsInserted,
+    totalReconciledEntities,
   });
 
   return summary;

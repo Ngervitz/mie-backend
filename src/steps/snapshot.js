@@ -24,14 +24,18 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
   const adsFound = adsArray.length;
   const status = adsFound > 0 ? 'success' : 'empty';
 
-  const { error } = await supabase.from('ad_snapshots').insert({
-    entity_id: entityId,
-    snapshot_date: toSnapshotDate(collectedAt),
-    raw_json: adsArray,
-    ads_found: adsFound,
-    status,
-    apify_run_id: apifyRunId ?? null,
-  });
+  const { data, error } = await supabase
+    .from('ad_snapshots')
+    .insert({
+      entity_id: entityId,
+      snapshot_date: toSnapshotDate(collectedAt),
+      raw_json: adsArray,
+      ads_found: adsFound,
+      status,
+      apify_run_id: apifyRunId ?? null,
+    })
+    .select('id')
+    .single();
 
   if (error) {
     throw new Error(`Failed to insert ad_snapshots for entity ${entityId}: ${error.message}`);
@@ -40,10 +44,11 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
   logger.info('Snapshot saved', {
     entityId,
     adsFound,
+    snapshotId: data.id,
     snapshotsInserted: 1,
   });
 
-  return { snapshotsInserted: 1 };
+  return { snapshotId: data.id, snapshotsInserted: 1 };
 }
 
 module.exports = { saveSnapshot };
