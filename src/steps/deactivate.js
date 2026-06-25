@@ -19,7 +19,7 @@ async function deactivateDisappearedAds({ entityId, disappeared }) {
       deactivated: 0,
       skipped: 0,
     });
-    return { deactivated: 0, skipped: 0 };
+    return { deactivated: 0, skipped: 0, deactivatedIds: [] };
   }
 
   const updatedAt = new Date().toISOString();
@@ -33,12 +33,16 @@ async function deactivateDisappearedAds({ entityId, disappeared }) {
     .eq('entity_id', entityId)
     .eq('is_active', true)
     .in('ad_archive_id', disappearedIds)
-    .select('id');
+    .select('id, ad_archive_id');
 
   if (error) {
     throw new Error(`Failed to deactivate ads for entity ${entityId}: ${error.message}`);
   }
 
+  const deactivatedIds = (data || [])
+    .map((row) => row.ad_archive_id)
+    .filter((id) => id !== null && id !== undefined)
+    .map(String);
   const deactivated = (data || []).length;
   const skipped = disappearedIds.length - deactivated;
 
@@ -49,7 +53,8 @@ async function deactivateDisappearedAds({ entityId, disappeared }) {
     skipped,
   });
 
-  return { deactivated, skipped };
+  // deactivatedIds is internal-only (consumed by Events); not exposed publicly.
+  return { deactivated, skipped, deactivatedIds };
 }
 
 module.exports = { deactivateDisappearedAds };

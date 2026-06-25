@@ -5,6 +5,7 @@ const { reconcileEntity } = require('./reconcile');
 const { upsertAds } = require('./upsert');
 const { deactivateDisappearedAds } = require('./deactivate');
 const { saveAdVersions } = require('./version');
+const { insertEvents } = require('./events');
 const logger = require('../lib/logger');
 
 function toReconcileCounts(reconcileResult) {
@@ -113,29 +114,17 @@ async function collect(entityId) {
             const { recordsToVersion, ...upserted } = upsertResult;
 
             try {
-              const deactivated = await deactivateDisappearedAds({
+              const deactivateResult = await deactivateDisappearedAds({
                 entityId,
                 disappeared: reconcileResult.disappeared,
               });
+
+              const { deactivatedIds, ...deactivated } = deactivateResult;
 
               try {
                 const versioned = await saveAdVersions({
                   recordsToVersion,
                   detectedAt: collectedAt,
-                });
-
-                successfulEntities += 1;
-
-                results.push({
-                  entityId,
-                  entityName,
-                  adsCount,
-                  snapshotsInserted,
-                  reconciled,
-                  upserted,
-                  deactivated,
-                  versioned,
-                  collectedAt,
                 });
 
                 logger.info('Entity version finished', {
@@ -144,6 +133,47 @@ async function collect(entityId) {
                   snapshotId,
                   versioned,
                 });
+
+                try {
+                  const events = await insertEvents({
+                    entityId,
+                    entityName,
+                    reconcileResult,
+                    deactivateResult,
+                    recordsToVersion,
+                    collectedAt,
+                  });
+
+                  successfulEntities += 1;
+
+                  results.push({
+                    entityId,
+                    entityName,
+                    adsCount,
+                    snapshotsInserted,
+                    reconciled,
+                    upserted,
+                    deactivated,
+                    versioned,
+                    events,
+                    collectedAt,
+                  });
+
+                  logger.info('Entity events finished', {
+                    entityId,
+                    entityName,
+                    snapshotId,
+                    events,
+                  });
+                } catch (eventsErr) {
+                  failedEntities += 1;
+                  logger.error('Entity events failed', {
+                    entityId,
+                    entityName,
+                    snapshotId,
+                    error: eventsErr.message,
+                  });
+                }
               } catch (versionErr) {
                 failedEntities += 1;
                 logger.error('Entity version failed', {
@@ -207,7 +237,7 @@ async function collect(entityId) {
   }
 
   const summary = {
-    status: 'version_complete',
+    status: 'events_complete',
     successfulEntities,
     failedEntities,
     totalAdsCollected,
@@ -216,7 +246,7 @@ async function collect(entityId) {
     results,
   };
 
-  logger.info('Version run finished', {
+  logger.info('Events run finished', {
     mode,
     successfulEntities,
     failedEntities,
