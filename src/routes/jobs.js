@@ -22,7 +22,7 @@ router.get('/status', (req, res) => {
   });
 });
 
-router.post('/run-sync', (req, res) => {
+const runSyncHandler = (req, res) => {
   if (jobState.status === 'running') {
     return res.status(409).json({
       error: 'Sync already in progress',
@@ -32,7 +32,7 @@ router.post('/run-sync', (req, res) => {
   }
 
   let entityId;
-  const rawEntityId = req.body?.entity_id;
+  const rawEntityId = req.body?.entity_id ?? req.query?.entity_id;
 
   if (rawEntityId !== undefined && rawEntityId !== null) {
     entityId = String(rawEntityId).trim();
@@ -79,6 +79,9 @@ router.post('/run-sync', (req, res) => {
     status: 'running',
     startedAt: jobState.startedAt,
   });
-});
+};
+
+router.post('/run-sync', runSyncHandler);
+router.get('/run-sync', runSyncHandler);
 
 module.exports = router;
