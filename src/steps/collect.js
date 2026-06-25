@@ -2,6 +2,7 @@ const supabase = require('../clients/supabase');
 const { buildApifyInput, runActor } = require('../clients/apify');
 const { saveSnapshot } = require('./snapshot');
 const { reconcileEntity } = require('./reconcile');
+const { upsertAds } = require('./upsert');
 const logger = require('../lib/logger');
 
 function toReconcileCounts(reconcileResult) {
@@ -91,16 +92,6 @@ async function collect(entityId) {
           const reconciled = toReconcileCounts(reconcileResult);
 
           totalReconciledEntities += 1;
-          successfulEntities += 1;
-
-          results.push({
-            entityId,
-            entityName,
-            adsCount,
-            snapshotsInserted,
-            reconciled,
-            collectedAt,
-          });
 
           logger.info('Entity reconcile finished', {
             entityId,
@@ -108,6 +99,42 @@ async function collect(entityId) {
             snapshotId,
             reconciled,
           });
+
+          try {
+            const upserted = await upsertAds({
+              entityId,
+              snapshotId,
+              reconciled: reconcileResult,
+              collectedAt,
+            });
+
+            successfulEntities += 1;
+
+            results.push({
+              entityId,
+              entityName,
+              adsCount,
+              snapshotsInserted,
+              reconciled,
+              upserted,
+              collectedAt,
+            });
+
+            logger.info('Entity upsert finished', {
+              entityId,
+              entityName,
+              snapshotId,
+              upserted,
+            });
+          } catch (upsertErr) {
+            failedEntities += 1;
+            logger.error('Entity upsert failed', {
+              entityId,
+              entityName,
+              snapshotId,
+              error: upsertErr.message,
+            });
+          }
         } catch (reconcileErr) {
           failedEntities += 1;
           logger.error('Entity reconcile failed', {
@@ -137,7 +164,7 @@ async function collect(entityId) {
   }
 
   const summary = {
-    status: 'reconcile_complete',
+    status: 'upsert_complete',
     successfulEntities,
     failedEntities,
     totalAdsCollected,
@@ -146,7 +173,7 @@ async function collect(entityId) {
     results,
   };
 
-  logger.info('Reconcile run finished', {
+  logger.info('Upsert run finished', {
     mode,
     successfulEntities,
     failedEntities,
