@@ -24,16 +24,25 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
   const adsFound = adsArray.length;
   const status = adsFound > 0 ? 'success' : 'empty';
 
+  // One snapshot per entity per day.
+  // First run performs INSERT.
+  // Subsequent runs on the same day UPDATE the existing snapshot.
   const { data, error } = await supabase
     .from('ad_snapshots')
-    .insert({
-      entity_id: entityId,
-      snapshot_date: toSnapshotDate(collectedAt),
-      raw_json: adsArray,
-      ads_found: adsFound,
-      status,
-      apify_run_id: apifyRunId ?? null,
-    })
+    .upsert(
+      {
+        entity_id: entityId,
+        snapshot_date: toSnapshotDate(collectedAt),
+        raw_json: adsArray,
+        ads_found: adsFound,
+        status,
+        apify_run_id: apifyRunId ?? null,
+      },
+      {
+        onConflict: 'entity_id,snapshot_date',
+        ignoreDuplicates: false,
+      },
+    )
     .select('id')
     .single();
 
