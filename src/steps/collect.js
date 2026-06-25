@@ -3,6 +3,7 @@ const { buildApifyInput, runActor } = require('../clients/apify');
 const { saveSnapshot } = require('./snapshot');
 const { reconcileEntity } = require('./reconcile');
 const { upsertAds } = require('./upsert');
+const { saveAdVersions } = require('./version');
 const logger = require('../lib/logger');
 
 function toReconcileCounts(reconcileResult) {
@@ -101,24 +102,49 @@ async function collect(entityId) {
           });
 
           try {
-            const upserted = await upsertAds({
+            const upsertResult = await upsertAds({
               entityId,
               snapshotId,
               reconciled: reconcileResult,
               collectedAt,
             });
 
-            successfulEntities += 1;
+            const { recordsToVersion, ...upserted } = upsertResult;
 
-            results.push({
-              entityId,
-              entityName,
-              adsCount,
-              snapshotsInserted,
-              reconciled,
-              upserted,
-              collectedAt,
-            });
+            try {
+              const versioned = await saveAdVersions({
+                recordsToVersion,
+                detectedAt: collectedAt,
+              });
+
+              successfulEntities += 1;
+
+              results.push({
+                entityId,
+                entityName,
+                adsCount,
+                snapshotsInserted,
+                reconciled,
+                upserted,
+                versioned,
+                collectedAt,
+              });
+
+              logger.info('Entity version finished', {
+                entityId,
+                entityName,
+                snapshotId,
+                versioned,
+              });
+            } catch (versionErr) {
+              failedEntities += 1;
+              logger.error('Entity version failed', {
+                entityId,
+                entityName,
+                snapshotId,
+                error: versionErr.message,
+              });
+            }
 
             logger.info('Entity upsert finished', {
               entityId,
@@ -164,7 +190,7 @@ async function collect(entityId) {
   }
 
   const summary = {
-    status: 'upsert_complete',
+    status: 'version_complete',
     successfulEntities,
     failedEntities,
     totalAdsCollected,
@@ -173,7 +199,7 @@ async function collect(entityId) {
     results,
   };
 
-  logger.info('Upsert run finished', {
+  logger.info('Version run finished', {
     mode,
     successfulEntities,
     failedEntities,

@@ -132,30 +132,62 @@ function buildAdFromRaw(rawItem, entityId, snapshotId, collectedAt) {
   };
 }
 
-async function loadCopyHashMap(entityId, adArchiveIds) {
-  const copyHashMap = new Map();
+async function loadAdInfoMap(entityId, adArchiveIds) {
+  const adInfoMap = new Map();
 
   if (adArchiveIds.length === 0) {
-    return copyHashMap;
+    return adInfoMap;
   }
 
   const { data, error } = await supabase
     .from('ads')
-    .select('ad_archive_id, copy_hash')
+    .select('id, ad_archive_id, copy_hash')
     .eq('entity_id', entityId)
     .in('ad_archive_id', adArchiveIds);
 
   if (error) {
-    throw new Error(`Failed to fetch copy_hash for entity ${entityId}: ${error.message}`);
+    throw new Error(`Failed to fetch ad info for entity ${entityId}: ${error.message}`);
   }
 
   for (const row of data || []) {
     if (row.ad_archive_id) {
-      copyHashMap.set(String(row.ad_archive_id), row.copy_hash ?? null);
+      adInfoMap.set(String(row.ad_archive_id), {
+        id: row.id,
+        copy_hash: row.copy_hash ?? null,
+      });
     }
   }
 
-  return copyHashMap;
+  return adInfoMap;
+}
+
+function buildRecordToVersion(adId, fields) {
+  return {
+    ad_id: adId,
+    ad_text: fields.ad_text,
+    cta_text: fields.cta_text,
+    landing_url: fields.landing_url,
+    platforms: fields.platforms,
+    ad_format: fields.ad_format,
+    image_url: fields.image_url,
+    video_url: fields.video_url,
+    creative_hash: fields.creative_hash,
+    copy_hash: fields.copy_hash,
+  };
+}
+
+function buildVersionFieldsFromRaw(rawItem, adText, copyHash) {
+  return {
+    ad_text: adText,
+    cta_text: null,
+    landing_url: null,
+    platforms: extractPlatforms(rawItem),
+    ad_format: extractAdFormat(rawItem),
+    image_url: null,
+    video_url: null,
+    creative_hash: null,
+    copy_hash: copyHash,
+  };
 }
 
 async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
@@ -200,7 +232,7 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
 
   if (newIds.length === 0 && reactivatedIds.length === 0 && persistentIds.length === 0) {
     logger.info('Entity upsert finished', { entityId, snapshotId, ...counters });
-    return counters;
+    return { ...counters, recordsToVersion: [] };
   }
 
   const { data: snapshot, error: snapshotError } = await supabase
@@ -217,8 +249,9 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
   const rawJson = Array.isArray(snapshot.raw_json) ? snapshot.raw_json : [];
   const dateOnly = toDateOnly(collectedAt);
   const updatedAt = new Date().toISOString();
+  const recordsToVersion = [];
 
-  const copyHashMap = await loadCopyHashMap(entityId, [
+  const adInfoMap = await loadAdInfoMap(entityId, [
     ...reactivatedIds,
     ...persistentIds,
   ]);
@@ -241,13 +274,20 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
   }
 
   if (rowsToInsert.length > 0) {
-    const { error: insertError } = await supabase.from('ads').insert(rowsToInsert);
+    const { data: insertedAds, error: insertError } = await supabase
+      .from('ads')
+      .insert(rowsToInsert)
+      .select('id, ad_text, cta_text, landing_url, platforms, ad_format, image_url, video_url, creative_hash, copy_hash');
 
     if (insertError) {
       throw new Error(`Failed to insert ads for entity ${entityId}: ${insertError.message}`);
     }
 
-    counters.inserted = rowsToInsert.length;
+    counters.inserted = insertedAds.length;
+
+    for (const ad of insertedAds) {
+      recordsToVersion.push(buildRecordToVersion(ad.id, ad));
+    }
   }
 
   for (const adArchiveId of reactivatedIds) {
@@ -264,9 +304,11 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
 
     const adText = extractAdText(rawItem);
     const newCopyHash = computeCopyHash(adText);
-    const previousCopyHash = copyHashMap.get(adArchiveId) ?? null;
+    const adInfo = adInfoMap.get(adArchiveId);
+    const previousCopyHash = adInfo?.copy_hash ?? null;
+    const copyChanged = newCopyHash !== previousCopyHash;
 
-    if (newCopyHash !== previousCopyHash) {
+    if (copyChanged) {
       counters.copyChanged += 1;
     }
 
@@ -290,6 +332,15 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
       );
     }
 
+    if (copyChanged && adInfo?.id) {
+      recordsToVersion.push(
+        buildRecordToVersion(
+          adInfo.id,
+          buildVersionFieldsFromRaw(rawItem, adText, newCopyHash),
+        ),
+      );
+    }
+
     counters.reactivated += 1;
   }
 
@@ -307,7 +358,8 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
 
     const adText = extractAdText(rawItem);
     const newCopyHash = computeCopyHash(adText);
-    const previousCopyHash = copyHashMap.get(adArchiveId) ?? null;
+    const adInfo = adInfoMap.get(adArchiveId);
+    const previousCopyHash = adInfo?.copy_hash ?? null;
 
     if (newCopyHash !== previousCopyHash) {
       const { error: updateError } = await supabase
@@ -331,6 +383,15 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
 
       counters.persistentUpdated += 1;
       counters.copyChanged += 1;
+
+      if (adInfo?.id) {
+        recordsToVersion.push(
+          buildRecordToVersion(
+            adInfo.id,
+            buildVersionFieldsFromRaw(rawItem, adText, newCopyHash),
+          ),
+        );
+      }
     } else {
       const { error: updateError } = await supabase
         .from('ads')
@@ -363,7 +424,7 @@ async function upsertAds({ entityId, snapshotId, reconciled, collectedAt }) {
     skippedDisappeared: counters.skippedDisappeared,
   });
 
-  return counters;
+  return { ...counters, recordsToVersion };
 }
 
 module.exports = { upsertAds };
