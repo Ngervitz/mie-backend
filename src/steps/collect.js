@@ -3,6 +3,7 @@ const { buildApifyInput, runActor } = require('../clients/apify');
 const { saveSnapshot } = require('./snapshot');
 const { reconcileEntity } = require('./reconcile');
 const { upsertAds } = require('./upsert');
+const { deactivateDisappearedAds } = require('./deactivate');
 const { saveAdVersions } = require('./version');
 const logger = require('../lib/logger');
 
@@ -112,37 +113,53 @@ async function collect(entityId) {
             const { recordsToVersion, ...upserted } = upsertResult;
 
             try {
-              const versioned = await saveAdVersions({
-                recordsToVersion,
-                detectedAt: collectedAt,
-              });
-
-              successfulEntities += 1;
-
-              results.push({
+              const deactivated = await deactivateDisappearedAds({
                 entityId,
-                entityName,
-                adsCount,
-                snapshotsInserted,
-                reconciled,
-                upserted,
-                versioned,
-                collectedAt,
+                disappeared: reconcileResult.disappeared,
               });
 
-              logger.info('Entity version finished', {
-                entityId,
-                entityName,
-                snapshotId,
-                versioned,
-              });
-            } catch (versionErr) {
+              try {
+                const versioned = await saveAdVersions({
+                  recordsToVersion,
+                  detectedAt: collectedAt,
+                });
+
+                successfulEntities += 1;
+
+                results.push({
+                  entityId,
+                  entityName,
+                  adsCount,
+                  snapshotsInserted,
+                  reconciled,
+                  upserted,
+                  deactivated,
+                  versioned,
+                  collectedAt,
+                });
+
+                logger.info('Entity version finished', {
+                  entityId,
+                  entityName,
+                  snapshotId,
+                  versioned,
+                });
+              } catch (versionErr) {
+                failedEntities += 1;
+                logger.error('Entity version failed', {
+                  entityId,
+                  entityName,
+                  snapshotId,
+                  error: versionErr.message,
+                });
+              }
+            } catch (deactivateErr) {
               failedEntities += 1;
-              logger.error('Entity version failed', {
+              logger.error('Entity deactivate failed', {
                 entityId,
                 entityName,
                 snapshotId,
-                error: versionErr.message,
+                error: deactivateErr.message,
               });
             }
 
