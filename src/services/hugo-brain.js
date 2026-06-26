@@ -426,7 +426,7 @@ async function callClaude(hugoContext) {
       },
       body: JSON.stringify({
         model: MODEL_ARCHITECT,
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.2,
         system: CLAUDE_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: buildClaudeUserPrompt(hugoContext) }],
