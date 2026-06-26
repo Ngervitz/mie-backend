@@ -1,7 +1,7 @@
 const { buildHugoContext } = require('../routes/reports');
 const logger = require('../lib/logger');
 
-const MODEL_ARCHITECT = 'claude-3-5-sonnet-20241022';
+const MODEL_ARCHITECT = 'claude-sonnet-4-6';
 const MODEL_AUDITOR = 'gpt-4o';
 
 // Structured error so the route can map status + safe body directly.
