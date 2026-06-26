@@ -454,6 +454,9 @@ async function callClaude(hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: 'Missing content text' });
   }
 
+  // TEMPORARY diagnostic: log the full raw Claude text before parsing.
+  logger.info('Claude raw response (diagnostic)', { rawText: text });
+
   const parsed = extractJsonObject(text);
   if (!parsed.ok) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: text });
