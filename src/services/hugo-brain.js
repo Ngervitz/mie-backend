@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const { buildHugoContext } = require('../routes/reports');
 const logger = require('../lib/logger');
 
@@ -439,8 +437,7 @@ async function callClaude(hugoContext) {
   }
 
   if (!response.ok) {
-    const raw = await response.text();
-    throw new HugoError(502, { error: 'Claude API error', status: response.status, raw });
+    throw new HugoError(502, { error: 'Claude API error', detail: `HTTP ${response.status}` });
   }
 
   let data;
@@ -456,12 +453,9 @@ async function callClaude(hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: 'Missing content text' });
   }
 
-  // TEMPORARY diagnostic: log the full raw Claude text before parsing.
-  logger.info('Claude raw response (diagnostic)', { rawText: text });
-
   const parsed = extractJsonObject(text);
   if (!parsed.ok) {
-    throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: text });
+    throw new HugoError(502, { error: 'Invalid JSON from Claude' });
   }
 
   const rawUsage = data && data.usage ? data.usage : {};
@@ -495,7 +489,7 @@ async function callGpt(claudeAnalysis, hugoContext) {
       },
       body: JSON.stringify({
         model: MODEL_AUDITOR,
-        max_tokens: 2500,
+        max_tokens: 6000,
         temperature: 0.1,
         response_format: { type: 'json_object' },
         messages: [
@@ -529,15 +523,7 @@ async function callGpt(claudeAnalysis, hugoContext) {
 
   const parsed = safeJsonParse(content);
   if (!parsed.ok) {
-    // TEMPORARY diagnostic: dump the full raw GPT content to a temp file.
-    try {
-      const tmpDir = path.resolve('./tmp');
-      fs.mkdirSync(tmpDir, { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, 'gpt-raw.txt'), String(content), 'utf8');
-    } catch (writeErr) {
-      logger.error('Failed to write GPT raw diagnostic file', { error: writeErr.message });
-    }
-    throw new HugoError(502, { error: 'Invalid JSON from GPT', parseError: parsed.error, raw: content });
+    throw new HugoError(502, { error: 'Invalid JSON from GPT' });
   }
 
   const rawUsage = data && data.usage ? data.usage : {};
