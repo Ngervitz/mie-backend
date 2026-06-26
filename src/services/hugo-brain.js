@@ -4,6 +4,26 @@ const logger = require('../lib/logger');
 const MODEL_ARCHITECT = 'claude-sonnet-4-6';
 const MODEL_AUDITOR = 'gpt-4o';
 
+// Static, estimate-only model pricing (USD per 1M tokens). Actual billing may differ.
+const PRICING = {
+  claude: { inputPerMillion: 3.0, outputPerMillion: 15.0 },
+  gpt: { inputPerMillion: 2.5, outputPerMillion: 10.0 },
+};
+
+const PRICING_NOTE =
+  'Estimated using static model prices configured in Hugo Brain; actual provider billing may differ.';
+
+function toIntToken(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+function round6(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round((n + Number.EPSILON) * 1e6) / 1e6;
+}
+
 // Structured error so the route can map status + safe body directly.
 class HugoError extends Error {
   constructor(status, body) {
@@ -324,6 +344,7 @@ function extractJsonObject(text) {
 }
 
 async function callClaude(hugoContext) {
+  const startedMs = Date.now();
   logger.info('Claude request started', { model: MODEL_ARCHITECT });
 
   let response;
@@ -370,11 +391,25 @@ async function callClaude(hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: text });
   }
 
+  const rawUsage = data && data.usage ? data.usage : {};
+  const inputTokens = toIntToken(rawUsage.input_tokens);
+  const outputTokens = toIntToken(rawUsage.output_tokens);
+
   logger.info('Claude response parsed', { model: MODEL_ARCHITECT });
-  return parsed.value;
+
+  return {
+    analysis: parsed.value,
+    durationMs: Date.now() - startedMs,
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+    },
+  };
 }
 
 async function callGpt(claudeAnalysis, hugoContext) {
+  const startedMs = Date.now();
   logger.info('GPT request started', { model: MODEL_AUDITOR });
 
   let response;
@@ -424,8 +459,21 @@ async function callGpt(claudeAnalysis, hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from GPT', raw: content });
   }
 
+  const rawUsage = data && data.usage ? data.usage : {};
+  const inputTokens = toIntToken(rawUsage.prompt_tokens);
+  const outputTokens = toIntToken(rawUsage.completion_tokens);
+
   logger.info('GPT response parsed', { model: MODEL_AUDITOR });
-  return parsed.value;
+
+  return {
+    output: parsed.value,
+    durationMs: Date.now() - startedMs,
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+    },
+  };
 }
 
 async function runHugo({ date } = {}) {
@@ -439,8 +487,11 @@ async function runHugo({ date } = {}) {
 
   // Step 1 — context (reuses the exact GET /reports/hugo-context builder).
   let hugoContext;
+  let contextDurationMs = 0;
   try {
+    const contextStart = Date.now();
     hugoContext = await buildHugoContext({ date });
+    contextDurationMs = Date.now() - contextStart;
   } catch (err) {
     logger.error('Hugo context build failed', { error: err.message });
     throw new HugoError(500, { error: 'Failed to run Hugo' });
@@ -456,14 +507,48 @@ async function runHugo({ date } = {}) {
   });
 
   // Step 2 — Claude analyst.
-  const claudeAnalysis = await callClaude(hugoContext);
+  const claudeResult = await callClaude(hugoContext);
+  const claudeAnalysis = claudeResult.analysis;
+  const claudeDurationMs = claudeResult.durationMs;
 
   // Step 3 — GPT auditor / formatter.
-  const gptOutput = await callGpt(claudeAnalysis, hugoContext);
+  const gptResult = await callGpt(claudeAnalysis, hugoContext);
+  const gptOutput = gptResult.output;
+  const gptDurationMs = gptResult.durationMs;
 
   const durationMs = Date.now() - startedMs;
 
-  logger.info('Hugo run completed', { date: hugoContext.date, durationMs });
+  const usage = {
+    claude: claudeResult.usage,
+    gpt: gptResult.usage,
+    totalTokens: claudeResult.usage.totalTokens + gptResult.usage.totalTokens,
+  };
+
+  const claudeCostUsd = round6(
+    (usage.claude.inputTokens / 1e6) * PRICING.claude.inputPerMillion
+      + (usage.claude.outputTokens / 1e6) * PRICING.claude.outputPerMillion,
+  );
+  const gptCostUsd = round6(
+    (usage.gpt.inputTokens / 1e6) * PRICING.gpt.inputPerMillion
+      + (usage.gpt.outputTokens / 1e6) * PRICING.gpt.outputPerMillion,
+  );
+  const financial = {
+    claudeCostUsd,
+    gptCostUsd,
+    totalRunCostUsd: round6(claudeCostUsd + gptCostUsd),
+    pricingNote: PRICING_NOTE,
+  };
+
+  logger.info('Hugo run completed', {
+    durationMs,
+    contextDurationMs,
+    claudeDurationMs,
+    gptDurationMs,
+    claudeTokens: usage.claude.totalTokens,
+    gptTokens: usage.gpt.totalTokens,
+    totalTokens: usage.totalTokens,
+    estimatedCostUsd: financial.totalRunCostUsd,
+  });
 
   const finalAnalysis = gptOutput.finalAnalysis || {};
   const outputs = {
@@ -488,7 +573,14 @@ async function runHugo({ date } = {}) {
       modelAuditor: MODEL_AUDITOR,
       daysOfHistory: hugoContext.history.daysAvailable,
       totalEvents: hugoContext.today.totalEvents,
-      durationMs,
+      telemetry: {
+        durationMs,
+        contextDurationMs,
+        claudeDurationMs,
+        gptDurationMs,
+      },
+      usage,
+      financial,
     },
   };
 }
