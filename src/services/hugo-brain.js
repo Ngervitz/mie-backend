@@ -525,6 +525,9 @@ async function callGpt(claudeAnalysis, hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from GPT', raw: 'Missing message content' });
   }
 
+  // TEMPORARY diagnostic: log the full raw GPT content before parsing.
+  logger.info('GPT raw response (diagnostic)', { rawContent: content });
+
   const parsed = safeJsonParse(content);
   if (!parsed.ok) {
     throw new HugoError(502, { error: 'Invalid JSON from GPT', raw: content });
