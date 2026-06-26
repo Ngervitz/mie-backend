@@ -6,6 +6,7 @@ const logger = require('./lib/logger');
 const app = express();
 
 app.use(express.json());
+app.use(express.static('public'));
 app.use('/jobs', jobsRouter);
 app.use('/reports', reportsRouter);
 
