@@ -301,6 +301,28 @@ function safeJsonParse(text) {
   }
 }
 
+// Tolerant extraction for model output that may be wrapped in Markdown fences
+// or surrounded by extra prose. Strips ```json / ``` fences, then isolates the
+// outermost { ... } block before parsing.
+function extractJsonObject(text) {
+  let candidate = String(text).trim();
+
+  // Remove Markdown code fences (```json ... ``` or ``` ... ```).
+  candidate = candidate
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    candidate = candidate.slice(firstBrace, lastBrace + 1);
+  }
+
+  return safeJsonParse(candidate);
+}
+
 async function callClaude(hugoContext) {
   logger.info('Claude request started', { model: MODEL_ARCHITECT });
 
@@ -343,7 +365,7 @@ async function callClaude(hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: 'Missing content text' });
   }
 
-  const parsed = safeJsonParse(text);
+  const parsed = extractJsonObject(text);
   if (!parsed.ok) {
     throw new HugoError(502, { error: 'Invalid JSON from Claude', raw: text });
   }
