@@ -45,6 +45,24 @@ body {
   padding: 24px 20px 64px;
 }
 
+/* ---------- Back navigation to Executive Brief ---------- */
+.brief-backnav {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 16px 20px 0;
+}
+
+.brief-backnav-link {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.brief-backnav-link:hover {
+  color: var(--blue);
+  text-decoration: underline;
+}
+
 /* ---------- Header ---------- */
 .header {
   display: flex;

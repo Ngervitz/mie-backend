@@ -219,6 +219,26 @@ HTML simple (solo h2/h3/p/ul/li, sin CSS inline, sin assets externos):
 - watchTomorrow.
 Generar también una versión plain text legible sin HTML.
 
+Al final del email.html, agregá EXACTAMENTE este bloque de navegación (mantené las URLs absolutas de producción tal cual):
+
+<hr style="margin:24px 0;border:none;border-top:1px solid #e5e5e5;">
+
+<p style="font-size:12px;color:#666;">
+
+<a href="https://mie-backend-production.up.railway.app/hugo-brief.html"
+style="color:#333;text-decoration:underline;">
+Ver Executive Brief completo →
+</a>
+
+&nbsp;&nbsp;|&nbsp;&nbsp;
+
+<a href="https://mie-backend-production.up.railway.app/mie-dashboard.html"
+style="color:#999;text-decoration:none;">
+Ver datos operativos
+</a>
+
+</p>
+
 DASHBOARD (derivado de brief; puede incluir datos de supportingData):
 {
   "attention": "",
@@ -240,6 +260,7 @@ VOZ
 - Integrar whyItMatters de forma natural.
 - Cerrar con la recommendedAction concreta o con "Sin novedades relevantes hoy."
 - No exponer supportingData.
+- FORMATO FONÉTICO (estricto, para que el texto suene natural al leerse en voz alta): escribí los números en palabras, deletreá las siglas con espacios entre letras, y escribí las monedas con palabras completas. Ejemplos: "26/06" -> "veintiséis de junio"; "MIE" -> "M I E"; "USD 500" o "$500" -> "quinientos dólares".
 
 SALIDA
 

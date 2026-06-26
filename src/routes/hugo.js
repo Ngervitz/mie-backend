@@ -1,6 +1,7 @@
 const express = require('express');
 const { runHugo } = require('../services/hugo-brain');
-const { isValidDateOnly } = require('./reports');
+const { generateVoiceBrief } = require('../services/hugo-voice');
+const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
 
 const router = express.Router();
@@ -28,6 +29,35 @@ router.post('/run', async (req, res) => {
 
     logger.error('Hugo run failed', { error: err && err.message ? err.message : 'unknown' });
     return res.status(500).json({ error: 'Failed to run Hugo' });
+  }
+});
+
+router.get('/voice', async (req, res) => {
+  const rawDate = req.query?.date;
+
+  let date;
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    date = String(rawDate);
+  } else {
+    // Missing date defaults to today (UTC), consistent with the rest of Hugo.
+    date = todayUtc();
+  }
+
+  try {
+    const result = await generateVoiceBrief({ date });
+    return res.json(result);
+  } catch (err) {
+    // VoiceError and HugoError both carry a safe status + body (no secrets).
+    if (err && typeof err.status === 'number' && err.body) {
+      logger.error('Hugo voice failed', { status: err.status, error: err.body.error });
+      return res.status(err.status).json(err.body);
+    }
+
+    logger.error('Hugo voice failed', { error: err && err.message ? err.message : 'unknown' });
+    return res.status(500).json({ error: 'Failed to generate voice brief' });
   }
 });
 
