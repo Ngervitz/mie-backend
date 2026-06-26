@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { buildHugoContext } = require('../routes/reports');
 const logger = require('../lib/logger');
 
@@ -385,7 +387,7 @@ function safeJsonParse(text) {
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch (err) {
-    return { ok: false, error: err };
+    return { ok: false, error: err.message };
   }
 }
 
@@ -525,12 +527,17 @@ async function callGpt(claudeAnalysis, hugoContext) {
     throw new HugoError(502, { error: 'Invalid JSON from GPT', raw: 'Missing message content' });
   }
 
-  // TEMPORARY diagnostic: log the full raw GPT content before parsing.
-  logger.info('GPT raw response (diagnostic)', { rawContent: content });
-
   const parsed = safeJsonParse(content);
   if (!parsed.ok) {
-    throw new HugoError(502, { error: 'Invalid JSON from GPT', raw: content });
+    // TEMPORARY diagnostic: dump the full raw GPT content to a temp file.
+    try {
+      const tmpDir = path.resolve('./tmp');
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'gpt-raw.txt'), String(content), 'utf8');
+    } catch (writeErr) {
+      logger.error('Failed to write GPT raw diagnostic file', { error: writeErr.message });
+    }
+    throw new HugoError(502, { error: 'Invalid JSON from GPT', parseError: parsed.error, raw: content });
   }
 
   const rawUsage = data && data.usage ? data.usage : {};
