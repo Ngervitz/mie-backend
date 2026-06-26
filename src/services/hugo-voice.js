@@ -106,6 +106,24 @@ async function loadVoiceScript(date) {
   return voice.script;
 }
 
+// Safely read an ElevenLabs error response body for diagnostics. Never throws;
+// returns a string (parsed JSON re-stringified when possible) or a marker.
+async function readElevenLabsErrorBody(response) {
+  try {
+    const raw = await response.text();
+    if (!raw) {
+      return '<empty body>';
+    }
+    try {
+      return JSON.stringify(JSON.parse(raw));
+    } catch (parseErr) {
+      return raw;
+    }
+  } catch (err) {
+    return '<unreadable body>';
+  }
+}
+
 async function generateElevenLabsAudio(text) {
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
   const modelId = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL_ID;
@@ -132,14 +150,18 @@ async function generateElevenLabsAudio(text) {
   }
 
   if (response.status === 429 || response.status === 402) {
-    logger.error('ElevenLabs quota/rate limit', { status: response.status });
+    // Diagnostics only: status + provider body. Never logs the API key or headers.
+    const body = await readElevenLabsErrorBody(response);
+    logger.error('ElevenLabs request failed', { status: response.status, body });
     throw new VoiceError(502, {
       error: 'Voice provider rate limit reached or insufficient credits.',
     });
   }
 
   if (!response.ok) {
-    logger.error('ElevenLabs generation failed', { status: response.status });
+    // Diagnostics only: status + provider body. Never logs the API key or headers.
+    const body = await readElevenLabsErrorBody(response);
+    logger.error('ElevenLabs request failed', { status: response.status, body });
     throw new VoiceError(502, { error: `Voice provider generation failed (HTTP ${response.status}).` });
   }
 
