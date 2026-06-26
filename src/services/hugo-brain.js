@@ -326,7 +326,8 @@ async function callClaude(hugoContext) {
   }
 
   if (!response.ok) {
-    throw new HugoError(502, { error: 'Claude API error', detail: `HTTP ${response.status}` });
+    const raw = await response.text();
+    throw new HugoError(502, { error: 'Claude API error', status: response.status, raw });
   }
 
   let data;
