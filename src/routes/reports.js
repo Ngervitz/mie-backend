@@ -186,22 +186,17 @@ router.get('/daily-summary', async (req, res) => {
   }
 });
 
-router.get('/hugo-context', async (req, res) => {
-  const rawDate = req.query?.date;
-
-  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
-    if (!isValidDateOnly(String(rawDate))) {
-      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
-    }
-  }
-
-  const date = rawDate ? String(rawDate) : todayUtc();
+// Shared builder reused by GET /reports/hugo-context and POST /hugo/run.
+// `inputDate` must already be a valid YYYY-MM-DD string (validated by callers)
+// or omitted, in which case today (UTC) is used. Throws on query errors.
+async function buildHugoContext({ date: inputDate } = {}) {
+  const date = inputDate ? String(inputDate) : todayUtc();
   const startDate = shiftDateUtc(date, -(HISTORY_WINDOW_DAYS - 1));
   const endExclusive = shiftDateUtc(date, 1);
 
-  logger.info('Reports hugo-context requested', { date, startDate, endExclusive });
+  logger.info('Hugo context build started', { date, startDate, endExclusive });
 
-  try {
+  {
     // --- Query 1: events for the selected date (same selection as daily-summary).
     const { data: todayRows, error: todayError } = await supabase
       .from('events')
@@ -384,15 +379,16 @@ router.get('/hugo-context', async (req, res) => {
       byEntity: historyByEntity,
     };
 
-    // --- Active ads by entity (output).
-    const activeAdsByEntity = [...activeAdsMap.entries()]
-      .map(([entityId, count]) => {
-        const entityName = nameFor(entityId);
+    // --- Active ads by entity (output): one item per monitored entity,
+    // including entities with zero active ads.
+    const activeAdsByEntity = entities
+      .map((entity) => {
+        const entityName = entity.name ?? null;
         return {
-          entityId,
+          entityId: entity.id,
           entityName,
           isStrategic: isStrategicName(entityName),
-          activeAds: count,
+          activeAds: activeAdsMap.get(entity.id) || 0,
         };
       })
       .sort((a, b) => {
@@ -503,7 +499,7 @@ router.get('/hugo-context', async (req, res) => {
       dataNote: 'Events are aggregated at date granularity (detected_at). This endpoint returns structured context only, with no interpretation.',
     };
 
-    return res.json({
+    return {
       generatedAt: new Date().toISOString(),
       date,
       today,
@@ -512,7 +508,24 @@ router.get('/hugo-context', async (req, res) => {
       activeAds: { byEntity: activeAdsByEntity },
       limitations,
       meta,
-    });
+    };
+  }
+}
+
+router.get('/hugo-context', async (req, res) => {
+  const rawDate = req.query?.date;
+
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+  }
+
+  const date = rawDate ? String(rawDate) : todayUtc();
+
+  try {
+    const context = await buildHugoContext({ date });
+    return res.json(context);
   } catch (err) {
     logger.error('Reports hugo-context failed', { date, error: err.message });
     return res.status(500).json({ error: 'Failed to build hugo context' });
@@ -520,3 +533,6 @@ router.get('/hugo-context', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.buildHugoContext = buildHugoContext;
+module.exports.isValidDateOnly = isValidDateOnly;
+module.exports.todayUtc = todayUtc;
