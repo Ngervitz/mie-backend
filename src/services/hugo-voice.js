@@ -6,6 +6,11 @@ const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
 const DEFAULT_BUCKET = 'hugo-voice';
 const MAX_TRANSCRIPT_CHARS = 1000;
 const ELEVENLABS_TTS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
+// Browser-compatible MP3 (44.1 kHz, 128 kbps).
+const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
+// Anything smaller than this is almost certainly an error payload, not audio.
+const MIN_AUDIO_BYTES = 2048;
+const AUDIO_CONTENT_TYPE = 'audio/mpeg';
 
 // Structured error so the route can map a safe status + body directly.
 // Never carries secrets or raw provider responses.
@@ -124,15 +129,32 @@ async function readElevenLabsErrorBody(response) {
   }
 }
 
+// Sniff the first bytes for an MP3 signature: either an "ID3" tag header
+// or an MPEG audio frame sync (0xFF followed by 0xE0-set top bits).
+function looksLikeMp3(buffer) {
+  if (!buffer || buffer.length < 2) {
+    return false;
+  }
+  if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
+    return true; // "ID3"
+  }
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0; // MPEG frame sync
+}
+
 async function generateElevenLabsAudio(text) {
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
   const modelId = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL_ID;
+  const url = `${ELEVENLABS_TTS_BASE}/${voiceId}?output_format=${ELEVENLABS_OUTPUT_FORMAT}`;
 
-  logger.info('ElevenLabs generation started', { modelId, chars: text.length });
+  logger.info('ElevenLabs generation started', {
+    modelId,
+    outputFormat: ELEVENLABS_OUTPUT_FORMAT,
+    chars: text.length,
+  });
 
   let response;
   try {
-    response = await fetch(`${ELEVENLABS_TTS_BASE}/${voiceId}`, {
+    response = await fetch(url, {
       method: 'POST',
       headers: {
         'xi-api-key': process.env.ELEVENLABS_API_KEY,
@@ -165,11 +187,42 @@ async function generateElevenLabsAudio(text) {
     throw new VoiceError(502, { error: `Voice provider generation failed (HTTP ${response.status}).` });
   }
 
+  // Even with HTTP 200, ElevenLabs can return a JSON/text error payload.
+  // Guard against uploading non-audio bytes that the browser can't decode.
+  const responseContentType = response.headers.get('content-type') || '';
+  if (/application\/json|text\//i.test(responseContentType)) {
+    const body = await readElevenLabsErrorBody(response);
+    logger.error('ElevenLabs returned non-audio response', {
+      contentType: responseContentType,
+      body,
+    });
+    throw new VoiceError(502, { error: 'Voice provider returned a non-audio response.' });
+  }
+
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  if (!buffer.length) {
-    throw new VoiceError(502, { error: 'Voice provider returned an empty audio file.' });
+  logger.info('ElevenLabs response received', {
+    contentType: responseContentType,
+    bytes: buffer.length,
+  });
+
+  if (buffer.length < MIN_AUDIO_BYTES) {
+    logger.error('ElevenLabs audio rejected', {
+      reason: 'suspiciously-small',
+      bytes: buffer.length,
+      minBytes: MIN_AUDIO_BYTES,
+    });
+    throw new VoiceError(502, { error: 'Voice provider returned an invalid audio file.' });
+  }
+
+  if (!looksLikeMp3(buffer)) {
+    logger.error('ElevenLabs audio rejected', {
+      reason: 'not-mp3-signature',
+      contentType: responseContentType,
+      bytes: buffer.length,
+    });
+    throw new VoiceError(502, { error: 'Voice provider returned an invalid audio file.' });
   }
 
   logger.info('ElevenLabs generation completed', { bytes: buffer.length });
@@ -255,8 +308,15 @@ async function generateVoiceBrief({ date }) {
   const buffer = await generateElevenLabsAudio(transcript);
 
   // 5) Upload with upsert:false so a concurrent writer cannot be clobbered.
+  logger.info('Voice storage upload started', {
+    date,
+    bucket,
+    fileName,
+    contentType: AUDIO_CONTENT_TYPE,
+    bytes: buffer.length,
+  });
   const { error: uploadError } = await supabase.storage.from(bucket).upload(fileName, buffer, {
-    contentType: 'audio/mpeg',
+    contentType: AUDIO_CONTENT_TYPE,
     upsert: false,
   });
 
