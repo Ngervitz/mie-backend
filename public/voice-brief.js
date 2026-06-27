@@ -94,7 +94,7 @@
     app.innerHTML =
       renderHeader(data.date) +
       '<section class="section">' +
-        '<audio controls preload="auto" style="width:100%;" src="' + escapeHtml(data.audioUrl) + '"></audio>' +
+        '<audio id="voice-audio" controls preload="auto" style="width:100%;"></audio>' +
       '</section>' +
       '<section class="section">' +
         '<div class="dq-grid">' + cachedTag + '</div>' +
@@ -104,6 +104,18 @@
         '<div class="card">' + transcriptHtml + '</div>' +
       '</section>' +
       renderNav();
+
+    // Assign the source as a DOM property and force the resource-selection
+    // algorithm. A media element injected via innerHTML does not reliably load
+    // its src attribute, which is why the Play button appeared to do nothing.
+    var audioEl = document.getElementById('voice-audio');
+    if (audioEl && data.audioUrl) {
+      audioEl.addEventListener('error', function () {
+        console.error('Voice audio failed to load:', audioEl.error);
+      });
+      audioEl.src = data.audioUrl;
+      audioEl.load();
+    }
   }
 
   function load(date) {
