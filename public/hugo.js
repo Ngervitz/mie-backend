@@ -284,7 +284,7 @@
   }
 
   function submitQuestion() {
-    if (asking || !knowledge) return;
+    if (asking) return;
     var question = String(input.value || '').trim();
     inputError.textContent = '';
     if (!question) return;
@@ -294,7 +294,7 @@
     fetch('/hugo/ask', {
       method: 'POST',
       headers: { 'content-type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ date: knowledge.date, question: question, history: history }),
+      body: JSON.stringify({ date: (knowledge && knowledge.date) || new Date().toISOString().slice(0, 10), question: question, history: history }),
     })
       .then(function (res) {
         return res.json().then(function (body) { return { ok: res.ok, body: body }; });
