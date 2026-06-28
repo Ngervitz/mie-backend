@@ -1,5 +1,8 @@
 const { buildHugoContext } = require('../routes/reports');
+const { saveDailyKnowledge } = require('./daily-knowledge');
 const logger = require('../lib/logger');
+
+const DAILY_KNOWLEDGE_VERSION = 1;
 
 const MODEL_ARCHITECT = 'claude-sonnet-4-6';
 const MODEL_AUDITOR = 'gpt-4o';
@@ -262,13 +265,54 @@ VOZ
 - No exponer supportingData.
 - FORMATO FONÉTICO (estricto, para que el texto suene natural al leerse en voz alta): escribí los números en palabras, deletreá las siglas con espacios entre letras, y escribí las monedas con palabras completas. Ejemplos: "26/06" -> "veintiséis de junio"; "MIE" -> "M I E"; "USD 500" o "$500" -> "quinientos dólares".
 
+PREGUNTAS DE SEGUIMIENTO (auditedBrief.brief.followUpQuestions)
+
+Inmediatamente DESPUÉS de watchTomorrow, agregá dentro de auditedBrief.brief el campo followUpQuestions: un array de EXACTAMENTE tres strings en español. Solo strings: sin IDs, sin metadata, sin categorías, sin confianza, sin objetos.
+
+Generá exactamente tres preguntas de seguimiento que profundicen naturalmente el Executive Brief de hoy. Las preguntas deben surgir de la evidencia de hoy y representar las tres direcciones más valiosas para un análisis más profundo.
+
+Las preguntas DEBEN:
+- estar siempre en español
+- usar el tono ejecutivo de Hugo
+- surgir naturalmente de la inteligencia de hoy
+- ser específicas
+- invitar a un razonamiento más profundo
+- mejorar la toma de decisiones
+- anticipar lo que un ejecutivo debería preguntar a continuación
+
+Las preguntas NO DEBEN:
+- ser genéricas
+- repetir el briefing de hoy
+- pedir información ya explicada
+- resumir el Executive Brief
+
+REGLA CRÍTICA: Nunca generes una pregunta cuya respuesta ya esté explícitamente presente en el Executive Brief. Cada pregunta debe PROFUNDIZAR el análisis en lugar de pedir información ya provista.
+
+Ejemplos buenos:
+- ¿Qué evidencia respalda esta conclusión?
+- ¿Qué productos está impulsando Creditel?
+- ¿Hace cuántos días observamos esta intensidad de pauta?
+- ¿Qué indicador confirmaría esta tendencia?
+- ¿Qué hipótesis sigue siendo incierta?
+- ¿Qué competidor merece seguimiento durante la próxima semana?
+
+Ejemplos malos:
+- ¿Qué pasó hoy?
+- ¿Cuál es la recomendación?
+- ¿Por qué aumentó el nivel de atención?
+- ¿Qué es importante?
+
+followUpQuestions pertenece a brief (es juicio ejecutivo de Hugo), nunca a supportingData. No lo expongas en voice ni en email.
+
 SALIDA
 
 Devolvé EXCLUSIVAMENTE JSON válido con esta forma:
 
 {
   "auditedBrief": {
-    "brief": {},
+    "brief": {
+      "followUpQuestions": ["string", "string", "string"]
+    },
     "supportingData": {}
   },
   "email": {
@@ -553,13 +597,28 @@ async function runHugo({ date } = {}) {
     || gptOutput.auditedAnalysis
     || gptOutput.finalAnalysis
     || {};
+
+  // MIE-12 — guarantee analysis.brief.followUpQuestions always exists as a
+  // string array, without altering any other existing field.
+  if (!finalAnalysis.brief || typeof finalAnalysis.brief !== 'object') {
+    finalAnalysis.brief = {};
+  }
+  finalAnalysis.brief.followUpQuestions = Array.isArray(
+    gptOutput.auditedBrief
+      && gptOutput.auditedBrief.brief
+      && gptOutput.auditedBrief.brief.followUpQuestions,
+  )
+    ? gptOutput.auditedBrief.brief.followUpQuestions
+    : (Array.isArray(finalAnalysis.brief.followUpQuestions)
+      ? finalAnalysis.brief.followUpQuestions
+      : []);
   const outputs = {
     email: gptOutput.email || {},
     dashboard: gptOutput.dashboard || {},
     voice: gptOutput.voice || {},
   };
 
-  return {
+  const response = {
     date: hugoContext.date,
     generatedAt: new Date().toISOString(),
     // attentionLevel is preserved from the backend context, never from the models.
@@ -585,6 +644,25 @@ async function runHugo({ date } = {}) {
       financial,
     },
   };
+
+  // MIE-12.5 — persist the canonical Daily Knowledge object after a successful
+  // run. Persistence must never corrupt or block Hugo: failures are logged and
+  // swallowed so the HTTP response is always returned unchanged.
+  try {
+    await saveDailyKnowledge({
+      date: response.date,
+      knowledge: { ...response, version: DAILY_KNOWLEDGE_VERSION },
+      version: DAILY_KNOWLEDGE_VERSION,
+      generatedAt: response.generatedAt,
+    });
+  } catch (persistErr) {
+    logger.error('Daily Knowledge save failed', {
+      date: response.date,
+      error: persistErr && persistErr.message ? persistErr.message : 'unknown',
+    });
+  }
+
+  return response;
 }
 
 module.exports = { runHugo, HugoError };

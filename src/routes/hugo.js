@@ -1,6 +1,8 @@
 const express = require('express');
 const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
+const { askHugo } = require('../services/hugo-ask');
+const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
 
@@ -58,6 +60,77 @@ router.get('/voice', async (req, res) => {
 
     logger.error('Hugo voice failed', { error: err && err.message ? err.message : 'unknown' });
     return res.status(500).json({ error: 'Failed to generate voice brief' });
+  }
+});
+
+router.post('/ask', async (req, res) => {
+  const rawDate = req.body?.date;
+
+  let date;
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    date = String(rawDate);
+  } else {
+    date = todayUtc();
+  }
+
+  const rawQuestion = req.body?.question;
+  const question = typeof rawQuestion === 'string' ? rawQuestion.trim() : '';
+  if (!question) {
+    return res.status(400).json({ error: 'Question is required.' });
+  }
+
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+
+  try {
+    const result = await askHugo({ date, question, history });
+    return res.json(result);
+  } catch (err) {
+    // AskError carries a safe status + body (no secrets, no stack traces).
+    if (err && typeof err.status === 'number' && err.body) {
+      logger.error('Hugo ask failed', { status: err.status, error: err.body.error });
+      return res.status(err.status).json(err.body);
+    }
+
+    logger.error('Hugo ask failed', { error: err && err.message ? err.message : 'unknown' });
+    return res.status(500).json({ error: 'Failed to ask Hugo.' });
+  }
+});
+
+// Read-only Daily Knowledge resource.
+// - POST /hugo/run GENERATES Daily Knowledge (Claude + GPT) and persists it.
+// - GET /hugo/knowledge READS the already-persisted Daily Knowledge only.
+// Hugo Web must consume GET /hugo/knowledge as the canonical source for the
+// Executive Brief. POST /hugo/run is intended for manual regeneration and
+// administrative workflows, NOT for normal frontend page loads.
+// This handler never calls runHugo, buildHugoContext, Claude or GPT, and never
+// writes to the database.
+router.get('/knowledge', async (req, res) => {
+  const rawDate = req.query?.date;
+
+  let date;
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    date = String(rawDate);
+  } else {
+    date = todayUtc();
+  }
+
+  try {
+    const knowledge = await loadDailyKnowledge(date);
+    if (!knowledge) {
+      return res.status(404).json({ error: 'Daily Knowledge not found for requested date.' });
+    }
+
+    // Return exactly what is stored — no transformation, no wrapping.
+    return res.json(knowledge);
+  } catch (err) {
+    logger.error('Hugo knowledge failed', { date, error: err && err.message ? err.message : 'unknown' });
+    return res.status(500).json({ error: 'Failed to load Daily Knowledge' });
   }
 });
 

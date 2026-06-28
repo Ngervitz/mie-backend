@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Hugo</title>
+  <link rel="stylesheet" href="hugo.css" />
+</head>
+<body>
+  <div id="scene">
+
+    <!-- Background Layer -->
+    <div id="background-layer"></div>
+
+    <!-- Avatar Layer (visual only) -->
+    <div id="avatar-layer">
+      <div id="avatar-container">
+        <iframe
+          src="https://embed.liveavatar.com/v1/a6cf4933-662e-46b9-a113-fd9e0e46f0ea?orientation=horizontal"
+          allow="microphone"
+          title="Hugo LiveAvatar">
+        </iframe>
+      </div>
+    </div>
+
+    <!-- Intelligence Layer -->
+    <div id="intelligence-layer">
+
+      <header id="hugo-header">
+        <div class="header-left">HUGO</div>
+        <div class="header-center" id="header-date"></div>
+        <div class="header-right" id="header-badges"></div>
+      </header>
+
+      <div id="left-col">
+        <section id="brief-panel" class="panel"></section>
+        <section id="questions-panel" class="panel hidden"></section>
+        <section id="answer-panel" class="panel hidden"></section>
+      </div>
+
+      <aside id="market-panel" class="panel hidden"></aside>
+
+    </div>
+
+    <!-- Workspace Layer -->
+    <div id="workspace-layer">
+      <!-- MIE-15: Hugo actions render here -->
+    </div>
+
+    <!-- Input Layer -->
+    <div id="input-layer">
+      <div id="input-wrap">
+        <textarea id="question-input" rows="1" placeholder="Preguntale a Hugo..."></textarea>
+        <button id="send-btn" type="button">Enviar</button>
+      </div>
+      <div id="input-error"></div>
+    </div>
+
+    <!-- Full-screen overlay (load errors) -->
+    <div id="overlay" class="hidden"></div>
+
+  </div>
+
+  <script src="hugo.js"></script>
+</body>
+</html>
