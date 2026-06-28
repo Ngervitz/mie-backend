@@ -2,6 +2,7 @@ const express = require('express');
 const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
 const { askHugo } = require('../services/hugo-ask');
+const { handleOpenAiChatCompletion } = require('../services/hugo-openai');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
@@ -131,6 +132,50 @@ router.get('/knowledge', async (req, res) => {
   } catch (err) {
     logger.error('Hugo knowledge failed', { date, error: err && err.message ? err.message : 'unknown' });
     return res.status(500).json({ error: 'Failed to load Daily Knowledge' });
+  }
+});
+
+// OpenAI-compatible Chat Completions wrapper for LiveAvatar FULL Mode.
+// Private endpoint: requires the X-Hugo-OpenAI-Secret header. Reuses askHugo
+// via the hugo-openai service; never duplicates Hugo logic.
+router.post('/openai/chat/completions', async (req, res) => {
+  const secret = process.env.HUGO_OPENAI_WRAPPER_SECRET;
+  if (!secret) {
+    return res.status(500).json({
+      error: {
+        message: 'Hugo OpenAI wrapper secret is not configured.',
+        type: 'server_error',
+        code: 'missing_secret',
+      },
+    });
+  }
+
+  const provided = req.get('X-Hugo-OpenAI-Secret');
+  if (!provided || provided !== secret) {
+    return res.status(401).json({
+      error: {
+        message: 'Unauthorized.',
+        type: 'invalid_request_error',
+        code: 'invalid_api_key',
+      },
+    });
+  }
+
+  try {
+    const result = await handleOpenAiChatCompletion(req.body || {});
+    return res.json(result);
+  } catch (err) {
+    // OpenAiError carries a safe OpenAI-compatible status + body.
+    if (err && typeof err.status === 'number' && err.body) {
+      return res.status(err.status).json(err.body);
+    }
+    return res.status(500).json({
+      error: {
+        message: 'Failed to process request.',
+        type: 'server_error',
+        code: 'internal_error',
+      },
+    });
   }
 });
 
