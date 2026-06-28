@@ -321,8 +321,17 @@ audio { width: 100%; margin-top: 4px; }
 }
 .q-btn:hover { background: rgba(255, 255, 255, 0.11); border-color: rgba(255, 255, 255, 0.2); }
 
-/* Answer panel */
+/* Answer panel — floats above the input, separate from the Executive Brief column. */
 #answer-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 100px;
+  margin: 0 auto;
+  width: min(680px, 92vw);
+  max-height: 40vh;
+  overflow-y: auto;
+  z-index: 5;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.35s ease, transform 0.35s ease;
@@ -490,15 +499,18 @@ audio { width: 100%; margin-top: 4px; }
   }
 
   #left-col,
-  #market-panel {
+  #market-panel,
+  #answer-panel {
     position: static;
     width: auto;
     max-height: none;
     bottom: auto;
     overflow: visible;
     pointer-events: auto;
+    transform: none;
   }
   #left-col { margin-bottom: 12px; }
+  #answer-panel { margin: 0 0 12px; }
   #brief-panel { max-height: none; overflow: visible; }
 
   #hugo-header { height: 56px; }
