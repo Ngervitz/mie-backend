@@ -150,7 +150,14 @@ router.post('/openai/chat/completions', async (req, res) => {
     });
   }
 
-  const provided = req.get('X-Hugo-OpenAI-Secret');
+  // Accept either X-Hugo-OpenAI-Secret or Authorization: Bearer <secret>
+  // (HeyGen LiveAvatar FULL Mode sends the key via the Bearer header).
+  // Prefer X-Hugo-OpenAI-Secret when both are present.
+  const headerSecret = req.headers['x-hugo-openai-secret'];
+  const authHeader = req.headers.authorization || '';
+  const bearerSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const provided = headerSecret || bearerSecret;
+
   if (!provided || provided !== secret) {
     return res.status(401).json({
       error: {
