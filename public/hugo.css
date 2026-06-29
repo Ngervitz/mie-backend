@@ -515,3 +515,82 @@ audio { width: 100%; margin-top: 4px; }
 
   #hugo-header { height: 56px; }
 }
+
+/* ---------- Desktop scene polish (MIE-14B) ---------- */
+@media (min-width: 768px) {
+  /* 1. Background fills the viewport, warmer than pure black. */
+  body { background: #050508; }
+  #scene { background: #050508; }
+  #background-layer {
+    background: radial-gradient(120% 90% at 50% 0%, #0c0e16 0%, #07080f 52%, #050508 100%);
+  }
+
+  /* 2. Avatar becomes the visual center, filling the space between header and input. */
+  #avatar-container {
+    position: fixed;
+    top: 56px;
+    left: 0;
+    right: 0;
+    bottom: 96px;
+    width: auto;
+    height: auto;
+    max-width: none;
+    aspect-ratio: auto;
+    border-radius: 0;
+  }
+  #avatar-container iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  /* 3. Left panel — anchored glass frame (single frame; inner cards transparent). */
+  #left-col {
+    position: fixed;
+    top: 80px;
+    left: 24px;
+    bottom: auto;
+    width: 380px;
+    max-height: calc(100vh - 180px);
+    overflow-y: auto;
+    pointer-events: auto;
+    background: rgba(8, 8, 16, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 20px;
+  }
+  #left-col .panel {
+    background: transparent;
+    border: none;
+    padding: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  #brief-panel { max-height: none; overflow: visible; }
+
+  /* 4. Right panel — same glass treatment. */
+  #market-panel {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    width: 260px;
+    max-height: calc(100vh - 180px);
+    overflow-y: auto;
+    background: rgba(8, 8, 16, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  /* 5. Input — primary interaction area: centered and wider. */
+  #input-layer { bottom: 24px; }
+  #input-wrap { width: 70vw; max-width: 860px; }
+  #input-error { width: 70vw; max-width: 860px; }
+
+  /* 6. Header — lightweight overlay above all layers. */
+  #hugo-header { z-index: 20; }
+}
