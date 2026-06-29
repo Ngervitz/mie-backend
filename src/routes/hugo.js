@@ -2,7 +2,7 @@ const express = require('express');
 const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
 const { askHugo } = require('../services/hugo-ask');
-const { handleOpenAiChatCompletion } = require('../services/hugo-openai');
+const { handleOpenAiChatCompletion, streamOpenAiChatCompletion } = require('../services/hugo-openai');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
@@ -169,9 +169,20 @@ router.post('/openai/chat/completions', async (req, res) => {
   }
 
   try {
+    // ElevenLabs / OpenAI streaming: deliver the answer as SSE chunks.
+    if (req.body && req.body.stream === true) {
+      await streamOpenAiChatCompletion(req.body, res);
+      return undefined;
+    }
+
     const result = await handleOpenAiChatCompletion(req.body || {});
     return res.json(result);
   } catch (err) {
+    // If the SSE stream already started writing, we can't send a JSON error.
+    if (res.headersSent) {
+      try { res.end(); } catch (endErr) { /* noop */ }
+      return undefined;
+    }
     // OpenAiError carries a safe OpenAI-compatible status + body.
     if (err && typeof err.status === 'number' && err.body) {
       return res.status(err.status).json(err.body);
