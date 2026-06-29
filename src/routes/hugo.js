@@ -3,6 +3,7 @@ const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
 const { askHugo } = require('../services/hugo-ask');
 const { handleOpenAiChatCompletion, streamOpenAiChatCompletion } = require('../services/hugo-openai');
+const { startAvatarSession } = require('../services/hugo-avatar');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
@@ -191,6 +192,30 @@ router.post('/openai/chat/completions', async (req, res) => {
       error: {
         message: 'Failed to process request.',
         type: 'server_error',
+        code: 'internal_error',
+      },
+    });
+  }
+});
+
+// Start a LiveAvatar LITE session bridged to the ElevenLabs Agent (whose
+// Custom LLM is Hugo's OpenAI-compatible wrapper). Thin adapter: it mints a
+// session token and starts the session on LiveAvatar, then returns only
+// client-safe connection data. No secrets are ever returned to the frontend.
+router.post('/avatar/session', async (req, res) => {
+  try {
+    const result = await startAvatarSession();
+    return res.json(result);
+  } catch (err) {
+    // AvatarError carries a safe status + body (no secrets, no raw bodies).
+    if (err && typeof err.status === 'number' && err.body) {
+      return res.status(err.status).json(err.body);
+    }
+    return res.status(500).json({
+      error: {
+        status: 500,
+        provider: 'liveavatar',
+        message: 'Failed to start avatar session.',
         code: 'internal_error',
       },
     });
