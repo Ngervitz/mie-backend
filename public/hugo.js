@@ -389,10 +389,48 @@
     if (fallback) fallback.style.display = 'block';
   }
 
+  // TEMP DEBUG (MIE-17A-AUDIT): all logs prefixed with [Hugo Avatar].
+  function avatarLog() {
+    var args = ['[Hugo Avatar]'].concat(Array.prototype.slice.call(arguments));
+    console.log.apply(console, args);
+  }
+
+  function audioElState(audioEl) {
+    if (!audioEl) return { exists: false };
+    var srcObject = audioEl.srcObject || null;
+    var audioTracks = null;
+    if (srcObject && typeof srcObject.getAudioTracks === 'function') {
+      audioTracks = srcObject.getAudioTracks().length;
+    }
+    return {
+      exists: true,
+      muted: audioEl.muted,
+      volume: audioEl.volume,
+      paused: audioEl.paused,
+      hasSrcObject: !!srcObject,
+      audioTracks: audioTracks,
+    };
+  }
+
+  function videoElState(videoEl) {
+    if (!videoEl) return { exists: false };
+    return {
+      exists: true,
+      paused: videoEl.paused,
+      readyState: videoEl.readyState,
+      hasSrcObject: !!videoEl.srcObject,
+      display: videoEl.style.display,
+    };
+  }
+
   function handleAvatarTrack(track) {
     if (!track || !track.kind) return;
 
+    avatarLog('handleAvatarTrack called', { kind: track && track.kind });
+    avatarLog('detected track.kind:', track.kind);
+
     if (track.kind === 'video') {
+      avatarLog('treating track as VIDEO');
       var videoEl = document.getElementById('avatar-video');
       if (!videoEl) return;
       track.attach(videoEl);
@@ -401,23 +439,49 @@
       showAvatarLive();
       // First video track is live; the timeout must never fire afterwards.
       clearTimeout(avatarFallbackTimerId);
+      avatarLog('fallback timer cancelled (video went live)');
+      avatarLog('video attached; element state:', videoElState(videoEl));
       return;
     }
 
     if (track.kind === 'audio') {
+      avatarLog('treating track as AUDIO');
       var audioEl = document.getElementById('avatar-audio');
       if (!audioEl) return;
+
       track.attach(audioEl);
+
+      // Defensive fallback: some LiveKit builds/browsers don't populate
+      // srcObject via attach(). If so, wire the raw MediaStreamTrack directly.
+      if (!audioEl.srcObject && track.mediaStreamTrack) {
+        try {
+          avatarLog('audio srcObject missing after attach; applying MediaStream fallback');
+          audioEl.srcObject = new MediaStream([track.mediaStreamTrack]);
+        } catch (streamErr) {
+          avatarLog('audio MediaStream fallback failed', streamErr);
+        }
+      }
+
+      avatarLog('audio attached; element state:', audioElState(audioEl));
+
       var playPromise = audioEl.play();
       if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(function (err) {
-          console.warn('Avatar audio autoplay blocked until user interaction.', err);
-        });
+        playPromise
+          .then(function () {
+            avatarLog('audioEl.play() succeeded; element state:', audioElState(audioEl));
+          })
+          .catch(function (err) {
+            avatarLog('audioEl.play() failed (autoplay likely blocked until user interaction)', err);
+            console.warn('Avatar audio autoplay blocked until user interaction.', err);
+          });
+      } else {
+        avatarLog('audioEl.play() returned no promise; element state:', audioElState(audioEl));
       }
     }
   }
 
   function initAvatar() {
+    avatarLog('initAvatar started');
     showAvatarLoading();
 
     fetch('/hugo/avatar/session', {
@@ -434,30 +498,86 @@
         if (!livekitUrl || !clientToken) {
           throw new Error('missing_credentials');
         }
+        avatarLog('/hugo/avatar/session succeeded', {
+          session_id: session && session.session_id,
+          hasLivekitUrl: !!livekitUrl,
+          hasClientToken: !!clientToken,
+          ws_url: session && session.ws_url,
+        });
 
         // UMD global name varies by build; accept both spellings.
         var LiveKit = window.LivekitClient || window.LiveKitClient;
         if (!LiveKit || !LiveKit.Room) {
+          avatarLog('LiveKit SDK unavailable; using fallback');
           showAvatarFallback();
           return;
         }
 
         avatarFallbackTimerId = setTimeout(function () {
           if (avatarVideoLive) return;
+          avatarLog('fallback timer fired (no video after timeout)');
           console.warn('Avatar timeout.');
           showAvatarFallback();
         }, 15000);
 
         var room = new LiveKit.Room();
+        // TEMP DEBUG (MIE-17A-AUDIT): expose room for browser inspection.
+        window.__hugoLiveKitRoom = room;
+        avatarLog('LiveKit room created');
 
-        if (LiveKit.RoomEvent && LiveKit.RoomEvent.TrackSubscribed) {
-          room.on(LiveKit.RoomEvent.TrackSubscribed, function (track) {
-            handleAvatarTrack(track);
-          });
+        if (LiveKit.RoomEvent) {
+          var RoomEvent = LiveKit.RoomEvent;
+
+          if (RoomEvent.TrackSubscribed) {
+            room.on(RoomEvent.TrackSubscribed, function (track, publication, participant) {
+              avatarLog('RoomEvent.TrackSubscribed', {
+                trackKind: track && track.kind,
+                trackSid: track && track.sid,
+                publicationKind: publication && publication.kind,
+                publicationSource: publication && publication.source,
+                publicationTrackSid: publication && publication.trackSid,
+                participantIdentity: participant && participant.identity,
+                participantSid: participant && participant.sid,
+              });
+              handleAvatarTrack(track);
+            });
+          }
+
+          if (RoomEvent.TrackUnsubscribed) {
+            room.on(RoomEvent.TrackUnsubscribed, function (track, publication, participant) {
+              avatarLog('RoomEvent.TrackUnsubscribed', {
+                trackKind: track && track.kind,
+                trackSid: track && track.sid,
+                participantIdentity: participant && participant.identity,
+              });
+            });
+          }
+
+          if (RoomEvent.ParticipantConnected) {
+            room.on(RoomEvent.ParticipantConnected, function (participant) {
+              avatarLog('RoomEvent.ParticipantConnected', {
+                identity: participant && participant.identity,
+                sid: participant && participant.sid,
+              });
+            });
+          }
+
+          if (RoomEvent.ParticipantDisconnected) {
+            room.on(RoomEvent.ParticipantDisconnected, function (participant) {
+              avatarLog('RoomEvent.ParticipantDisconnected', {
+                identity: participant && participant.identity,
+                sid: participant && participant.sid,
+              });
+            });
+          }
         }
 
+        avatarLog('before room.connect(...)');
         room.connect(livekitUrl, clientToken)
           .then(function () {
+            avatarLog('room.connect(...) resolved', {
+              state: room.state,
+            });
             // Attach any tracks already published at connect time (consume only).
             var participants = room.remoteParticipants || room.participants;
             if (participants && typeof participants.forEach === 'function') {
@@ -472,16 +592,39 @@
             }
           })
           .catch(function (err) {
+            avatarLog('room.connect(...) rejected; using fallback', err);
             console.warn('LiveKit connection failed.', err);
             clearTimeout(avatarFallbackTimerId);
             showAvatarFallback();
           });
       })
       .catch(function (err) {
+        avatarLog('avatar session unavailable; using fallback', err);
         console.warn('Avatar session unavailable; using fallback.', err);
         showAvatarFallback();
       });
   }
+
+  // TEMP DEBUG (MIE-17A-AUDIT): on-demand snapshot of avatar/audio state.
+  window.__hugoAvatarDebug = function () {
+    var room = window.__hugoLiveKitRoom || null;
+    var remoteCount = null;
+    if (room) {
+      var participants = room.remoteParticipants || room.participants;
+      if (participants && typeof participants.size === 'number') {
+        remoteCount = participants.size;
+      } else if (participants && typeof participants.length === 'number') {
+        remoteCount = participants.length;
+      }
+    }
+    return {
+      hasRoom: !!room,
+      roomState: room ? room.state : undefined,
+      remoteParticipants: remoteCount,
+      audioElement: audioElState(document.getElementById('avatar-audio')),
+      videoElement: videoElState(document.getElementById('avatar-video')),
+    };
+  };
 
   // ---------- Events ----------
   sendBtn.addEventListener('click', submitQuestion);
