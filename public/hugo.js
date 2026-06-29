@@ -307,8 +307,18 @@
   // Workspace, or Ask Hugo. On any failure it falls back to the static iframe.
   var avatarFallbackTimerId;
   var avatarVideoLive = false;
-  // MIE-18A: single in-flight connection promise, prevents duplicate inits/rooms.
-  var avatarConnectPromise = null;
+
+  // MIE-18B: single source of truth for the avatar session lifecycle.
+  // Guarantees exactly one session/room and one in-flight connection attempt.
+  // Allowed states: idle | connecting | connected | failed | disconnected
+  var avatarLifecycle = {
+    state: 'idle',
+    room: null,
+    connectPromise: null,
+    sessionId: null,
+  };
+  // Distinguishes an intentional teardown from an unexpected SDK disconnect.
+  var avatarDisposing = false;
 
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
@@ -449,33 +459,107 @@
     }
   }
 
-  function isRoomConnected() {
-    var room = window.__hugoLiveKitRoom;
-    if (!room) return false;
-    if (window.LivekitClient && window.LivekitClient.ConnectionState) {
-      return room.state === window.LivekitClient.ConnectionState.Connected;
+  // MIE-18B: lifecycle state transition + logging (never throws).
+  function setLifecycleState(state) {
+    try {
+      avatarLifecycle.state = state;
+      avatarLog('lifecycle ' + state);
+    } catch (err) {
+      // never throw
     }
-    return room.state === 'connected';
   }
 
-  // MIE-18A: resolve only once the avatar is fully connected. Reuses any
-  // in-flight connection and never starts a second initAvatar()/room.
+  // MIE-18B: connected-state check supporting both the enum and the string.
+  function isRoomConnected(room) {
+    var r = room || avatarLifecycle.room || window.__hugoLiveKitRoom;
+    if (!r) return false;
+    if (window.LivekitClient && window.LivekitClient.ConnectionState) {
+      return r.state === window.LivekitClient.ConnectionState.Connected;
+    }
+    return r.state === 'connected';
+  }
+
+  // MIE-18B: safely tear down and forget the current room. Never throws.
+  // Nulls references BEFORE disconnecting and guards the Disconnected handler
+  // via avatarDisposing so intentional teardown is not treated as a failure.
+  function disposeAvatarRoom() {
+    try {
+      var room = avatarLifecycle.room || window.__hugoLiveKitRoom;
+      avatarLifecycle.room = null;
+      window.__hugoLiveKitRoom = null;
+      avatarVideoLive = false;
+      clearTimeout(avatarFallbackTimerId);
+
+      if (room && typeof room.disconnect === 'function') {
+        avatarDisposing = true;
+        try {
+          room.disconnect();
+        } catch (err) {
+          // never throw
+        }
+        avatarDisposing = false;
+        avatarLog('room disposed');
+      }
+    } catch (err) {
+      avatarDisposing = false;
+      // never throw
+    }
+  }
+
+  // MIE-18B: clear stale promise/session and dispose any unhealthy room.
+  function cleanupAvatarLifecycle(targetState) {
+    try {
+      avatarLifecycle.connectPromise = null;
+      avatarLifecycle.sessionId = null;
+      disposeAvatarRoom();
+      setLifecycleState(targetState || 'failed');
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-18B: idempotent connection entry point with a synchronous mutex.
+  // - reuse an existing healthy connected room (no new session/room/init);
+  // - reuse the single in-flight connection attempt;
+  // - otherwise start exactly one fresh attempt, marking state/promise
+  //   synchronously BEFORE any async work begins.
   function ensureAvatarConnected() {
-    if (isRoomConnected()) {
-      avatarLog('avatar already connected');
-      return Promise.resolve();
+    // 1) Healthy connected room → reuse, no network/SDK work.
+    if (avatarLifecycle.room && isRoomConnected(avatarLifecycle.room)) {
+      if (avatarLifecycle.state !== 'connected') setLifecycleState('connected');
+      avatarLog('session reused');
+      avatarLog('room reused');
+      return Promise.resolve(avatarLifecycle.room);
     }
-    if (avatarConnectPromise) {
+
+    // 2) An attempt is already in flight → return the same promise.
+    if (avatarLifecycle.state === 'connecting' && avatarLifecycle.connectPromise) {
       avatarLog('waiting for connection');
-      return avatarConnectPromise;
+      return avatarLifecycle.connectPromise;
     }
-    avatarLog('avatar connection requested');
-    avatarConnectPromise = initAvatar().catch(function (err) {
-      // Allow a future manual attempt; no automatic retry/reconnect logic.
-      avatarConnectPromise = null;
-      throw err;
-    });
-    return avatarConnectPromise;
+
+    // 3) Fresh attempt. A retry is only reachable here after failed/disconnected.
+    if (avatarLifecycle.state === 'failed' || avatarLifecycle.state === 'disconnected') {
+      avatarLog('manual retry started');
+    }
+
+    // Synchronous mutex: set state + promise BEFORE any fetch/connect happens.
+    // initAvatar() (and its fetch) is deferred to a microtask so connectPromise
+    // is assigned before any async work starts.
+    setLifecycleState('connecting');
+    avatarLifecycle.connectPromise = Promise.resolve()
+      .then(function () { return initAvatar(); })
+      .then(function (room) {
+        // Connected. Keep the room; clear only the in-flight marker.
+        avatarLifecycle.connectPromise = null;
+        return room;
+      })
+      .catch(function (err) {
+        // Failed attempt: clear stale promise/session, dispose unhealthy room.
+        cleanupAvatarLifecycle('failed');
+        throw err;
+      });
+    return avatarLifecycle.connectPromise;
   }
 
   // MIE-18A: the single CTA entry point. Unlocks audio, ensures the LiveKit
@@ -592,6 +676,7 @@
     showAvatarLoading();
 
     return new Promise(function (resolve, reject) {
+      avatarLog('session creation requested');
       fetch('/hugo/avatar/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json', Accept: 'application/json' },
@@ -612,6 +697,8 @@
             hasClientToken: !!clientToken,
             ws_url: session && session.ws_url,
           });
+          // Track the active session id (never logged as a secret elsewhere).
+          avatarLifecycle.sessionId = (session && session.session_id) || null;
 
           // UMD global name varies by build; accept both spellings.
           var LiveKit = window.LivekitClient || window.LiveKitClient;
@@ -631,12 +718,30 @@
           }, 15000);
 
           var room = new LiveKit.Room();
+          // Single source of truth for the active room.
+          avatarLifecycle.room = room;
           // TEMP DEBUG (MIE-17A-AUDIT): expose room for browser inspection.
           window.__hugoLiveKitRoom = room;
           avatarLog('LiveKit room created');
 
           if (LiveKit.RoomEvent) {
             var RoomEvent = LiveKit.RoomEvent;
+
+            // MIE-18B: react to an UNEXPECTED native disconnect only. An
+            // intentional teardown (avatarDisposing) must be ignored here.
+            if (RoomEvent.Disconnected) {
+              room.on(RoomEvent.Disconnected, function (reason) {
+                if (avatarDisposing) return;
+                // Ignore stale events from a room we've already replaced.
+                if (avatarLifecycle.room && avatarLifecycle.room !== room) return;
+                avatarLog('native room disconnected', { reason: reason == null ? null : String(reason) });
+                cleanupAvatarLifecycle('disconnected');
+                showAvatarFallback();
+                // Re-enable the CTA so the user can manually start a new session.
+                conversationStarted = false;
+                setHugoConversationState('fallback');
+              });
+            }
 
             if (RoomEvent.TrackSubscribed) {
               room.on(RoomEvent.TrackSubscribed, function (track, publication, participant) {
@@ -688,6 +793,7 @@
               avatarLog('room.connect(...) resolved', {
                 state: room.state,
               });
+              setLifecycleState('connected');
               // Only advance to 'ready' if the CTA flow hasn't moved further.
               if (hugoConversationState === 'connecting') {
                 setHugoConversationState('ready');
@@ -704,7 +810,7 @@
                   }
                 });
               }
-              resolve();
+              resolve(room);
             })
             .catch(function (err) {
               avatarLog('room.connect(...) rejected; using fallback', err);
@@ -716,7 +822,7 @@
             });
         })
         .catch(function (err) {
-          avatarLog('avatar session unavailable; using fallback', err);
+          avatarLog('session creation failed', err);
           console.warn('Avatar session unavailable; using fallback.', err);
           showAvatarFallback();
           setHugoConversationState('fallback');
@@ -741,6 +847,13 @@
       hasRoom: !!room,
       roomState: room ? room.state : undefined,
       remoteParticipants: remoteCount,
+      // MIE-18B: lifecycle visibility for QA (no secrets/tokens exposed).
+      lifecycle: {
+        state: avatarLifecycle.state,
+        hasRoom: !!avatarLifecycle.room,
+        hasConnectPromise: !!avatarLifecycle.connectPromise,
+        hasSessionId: !!avatarLifecycle.sessionId,
+      },
       audioElement: audioElState(document.getElementById('avatar-audio')),
       videoElement: videoElState(document.getElementById('avatar-video')),
     };
