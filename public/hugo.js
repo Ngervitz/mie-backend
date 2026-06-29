@@ -356,6 +356,133 @@
       });
   }
 
+  // ---------- LiveAvatar (LITE Mode via LiveKit) ----------
+  // The avatar is fully independent: it never blocks the Brief, Questions,
+  // Workspace, or Ask Hugo. On any failure it falls back to the static iframe.
+  var avatarFallbackTimerId;
+  var avatarVideoLive = false;
+
+  function showAvatarLoading() {
+    var status = document.getElementById('avatar-status');
+    var video = document.getElementById('avatar-video');
+    var fallback = document.getElementById('avatar-fallback');
+    if (status) status.textContent = 'Conectando...';
+    if (video) video.style.display = 'none';
+    if (fallback) fallback.style.display = 'none';
+  }
+
+  function showAvatarLive() {
+    var status = document.getElementById('avatar-status');
+    var video = document.getElementById('avatar-video');
+    var fallback = document.getElementById('avatar-fallback');
+    if (status) status.textContent = '';
+    if (video) video.style.display = 'block';
+    if (fallback) fallback.style.display = 'none';
+  }
+
+  function showAvatarFallback() {
+    var status = document.getElementById('avatar-status');
+    var video = document.getElementById('avatar-video');
+    var fallback = document.getElementById('avatar-fallback');
+    if (status) status.textContent = '';
+    if (video) video.style.display = 'none';
+    if (fallback) fallback.style.display = 'block';
+  }
+
+  function handleAvatarTrack(track) {
+    if (!track || !track.kind) return;
+
+    if (track.kind === 'video') {
+      var videoEl = document.getElementById('avatar-video');
+      if (!videoEl) return;
+      track.attach(videoEl);
+      videoEl.style.display = 'block';
+      avatarVideoLive = true;
+      showAvatarLive();
+      // First video track is live; the timeout must never fire afterwards.
+      clearTimeout(avatarFallbackTimerId);
+      return;
+    }
+
+    if (track.kind === 'audio') {
+      var audioEl = document.getElementById('avatar-audio');
+      if (!audioEl) return;
+      track.attach(audioEl);
+      var playPromise = audioEl.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(function (err) {
+          console.warn('Avatar audio autoplay blocked until user interaction.', err);
+        });
+      }
+    }
+  }
+
+  function initAvatar() {
+    showAvatarLoading();
+
+    fetch('/hugo/avatar/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Accept: 'application/json' },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('session_failed');
+        return res.json();
+      })
+      .then(function (session) {
+        var livekitUrl = session && session.livekit_url;
+        var clientToken = session && session.livekit_client_token;
+        if (!livekitUrl || !clientToken) {
+          throw new Error('missing_credentials');
+        }
+
+        // UMD global name varies by build; accept both spellings.
+        var LiveKit = window.LivekitClient || window.LiveKitClient;
+        if (!LiveKit || !LiveKit.Room) {
+          showAvatarFallback();
+          return;
+        }
+
+        avatarFallbackTimerId = setTimeout(function () {
+          if (avatarVideoLive) return;
+          console.warn('Avatar timeout.');
+          showAvatarFallback();
+        }, 15000);
+
+        var room = new LiveKit.Room();
+
+        if (LiveKit.RoomEvent && LiveKit.RoomEvent.TrackSubscribed) {
+          room.on(LiveKit.RoomEvent.TrackSubscribed, function (track) {
+            handleAvatarTrack(track);
+          });
+        }
+
+        room.connect(livekitUrl, clientToken)
+          .then(function () {
+            // Attach any tracks already published at connect time (consume only).
+            var participants = room.remoteParticipants || room.participants;
+            if (participants && typeof participants.forEach === 'function') {
+              participants.forEach(function (participant) {
+                var pubs = participant && (participant.trackPublications || participant.tracks);
+                if (pubs && typeof pubs.forEach === 'function') {
+                  pubs.forEach(function (pub) {
+                    if (pub && pub.track) handleAvatarTrack(pub.track);
+                  });
+                }
+              });
+            }
+          })
+          .catch(function (err) {
+            console.warn('LiveKit connection failed.', err);
+            clearTimeout(avatarFallbackTimerId);
+            showAvatarFallback();
+          });
+      })
+      .catch(function (err) {
+        console.warn('Avatar session unavailable; using fallback.', err);
+        showAvatarFallback();
+      });
+  }
+
   // ---------- Events ----------
   sendBtn.addEventListener('click', submitQuestion);
   input.addEventListener('input', autoGrow);
@@ -367,4 +494,7 @@
   });
 
   load();
+
+  // Avatar runs independently of the rest of Hugo and never blocks it.
+  initAvatar();
 })();

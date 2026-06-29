@@ -15,11 +15,32 @@
     <!-- Avatar Layer (visual only) -->
     <div id="avatar-layer">
       <div id="avatar-container">
-        <iframe
-          src="https://embed.liveavatar.com/v1/a6cf4933-662e-46b9-a113-fd9e0e46f0ea?orientation=horizontal"
-          allow="microphone"
-          title="Hugo LiveAvatar">
-        </iframe>
+
+        <video
+          id="avatar-video"
+          autoplay
+          playsinline
+          style="width:100%;height:100%;object-fit:cover;display:none;">
+        </video>
+
+        <audio
+          id="avatar-audio"
+          autoplay>
+        </audio>
+
+        <div id="avatar-fallback" style="display:none;width:100%;height:100%;">
+          <iframe
+            src="https://embed.liveavatar.com/v1/a6cf4933-662e-46b9-a113-fd9e0e46f0ea?orientation=horizontal"
+            allow="microphone"
+            title="Hugo LiveAvatar">
+          </iframe>
+        </div>
+
+        <div
+          id="avatar-status"
+          style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:#cbd5e1;font-size:14px;letter-spacing:0.02em;pointer-events:none;">
+        </div>
+
       </div>
     </div>
 
@@ -62,6 +83,7 @@
 
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script src="hugo.js"></script>
 </body>
 </html>
