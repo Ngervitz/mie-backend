@@ -66,19 +66,47 @@ async function startAvatarSession() {
     const { apiKey, avatarId, secretId, agentId } = requireConfig();
 
     // 1) Mint a LITE session token bound to the ElevenLabs Agent connector.
+    // NOTE (MIE-19B): this payload intentionally carries NO greeting / welcome /
+    // first_message / opening field. The LiveAvatar LITE session API
+    // (ElevenLabsAgentConfigSchema) does not expose any auto-greeting toggle —
+    // it only accepts secret_id, agent_id, optional voice_id and optional
+    // dynamic_variables. Therefore any unwanted speech on session start comes
+    // from the ElevenLabs Agent's own "First message" setting, which must be
+    // cleared in the ElevenLabs Agent dashboard (set it empty) so Hugo stays
+    // silent until the CTA sends the first user_message.
+    const sessionPayload = {
+      mode: 'LITE',
+      avatar_id: avatarId,
+      elevenlabs_agent_config: {
+        secret_id: secretId,
+        agent_id: agentId,
+      },
+    };
+
+    // Safe greeting-field audit (no secrets): confirms we never send a greeting.
+    const GREETING_FIELDS = [
+      'greeting', 'welcome_message', 'initial_message', 'first_message',
+      'conversation_start', 'auto_start', 'autoGreeting', 'opening_message',
+      'initial_response',
+    ];
+    const greetingFieldsPresent = GREETING_FIELDS.filter((f) => (
+      Object.prototype.hasOwnProperty.call(sessionPayload, f)
+      || Object.prototype.hasOwnProperty.call(sessionPayload.elevenlabs_agent_config, f)
+    ));
+    logger.info('Hugo avatar session payload shape', {
+      mode: sessionPayload.mode,
+      hasAvatarId: !!avatarId,
+      hasAgentConfig: !!sessionPayload.elevenlabs_agent_config,
+      greetingFieldsPresent,
+      greetingDisabledInPayload: greetingFieldsPresent.length === 0,
+    });
+
     let tokenRes;
     try {
       tokenRes = await fetch(`${LIVEAVATAR_BASE}/sessions/token`, {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          mode: 'LITE',
-          avatar_id: avatarId,
-          elevenlabs_agent_config: {
-            secret_id: secretId,
-            agent_id: agentId,
-          },
-        }),
+        body: JSON.stringify(sessionPayload),
       });
     } catch (err) {
       throw new AvatarError(502, errBody(502, 'liveavatar', 'Failed to reach LiveAvatar.', 'provider_unreachable'));

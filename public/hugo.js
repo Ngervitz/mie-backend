@@ -380,6 +380,173 @@
     };
   }
 
+  // ===== MIE-19C (AUDIT ONLY) — LiveKit lifecycle instrumentation =====
+  // Logging-only. Never changes application behavior. Prefix: [Hugo LiveKit].
+  var auditSnapshotTimerId = null;
+  var auditReconnectingAtMs = 0;
+
+  function lkParticipantCount(room) {
+    var r = room || window.__hugoLiveKitRoom;
+    if (!r) return null;
+    var p = r.remoteParticipants || r.participants;
+    if (p && typeof p.size === 'number') return p.size;
+    if (p && typeof p.length === 'number') return p.length;
+    return null;
+  }
+
+  function lkLog(event, extra) {
+    try {
+      var room = window.__hugoLiveKitRoom;
+      var entry = {
+        event: event,
+        ts: Date.now(),
+        roomState: room ? room.state : null,
+        participantCount: lkParticipantCount(room),
+        lifecycleState: avatarLifecycle ? avatarLifecycle.state : null,
+      };
+      if (extra) {
+        Object.keys(extra).forEach(function (k) { entry[k] = extra[k]; });
+      }
+      console.log('[Hugo LiveKit]', entry);
+    } catch (err) {
+      // audit logging must never throw
+    }
+  }
+
+  function stopAuditSnapshots() {
+    try {
+      if (auditSnapshotTimerId) {
+        clearInterval(auditSnapshotTimerId);
+        auditSnapshotTimerId = null;
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // Periodic debug snapshot every 30s while connected. Single timer, self-stops.
+  function startAuditSnapshots() {
+    try {
+      if (auditSnapshotTimerId) return; // never duplicate timers
+      auditSnapshotTimerId = setInterval(function () {
+        try {
+          if (!isRoomConnected()) {
+            stopAuditSnapshots();
+            return;
+          }
+          lkLog('periodic snapshot', {
+            audioElement: audioElState(document.getElementById('avatar-audio')),
+            videoElement: videoElState(document.getElementById('avatar-video')),
+          });
+        } catch (err) {
+          // never throw
+        }
+      }, 30000);
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // Attach log-only listeners for every available RoomEvent. These are ADDITIVE
+  // and separate from the behavior listeners; they never mutate state or flow.
+  function instrumentRoomAudit(room, LiveKit) {
+    try {
+      if (!room || !LiveKit || !LiveKit.RoomEvent) return;
+      var E = LiveKit.RoomEvent;
+
+      if (E.Connected) {
+        room.on(E.Connected, function () {
+          lkLog('RoomEvent.Connected', { roomSid: room.sid || null });
+          startAuditSnapshots();
+        });
+      }
+      if (E.Reconnecting) {
+        room.on(E.Reconnecting, function () {
+          auditReconnectingAtMs = Date.now();
+          lkLog('RoomEvent.Reconnecting');
+        });
+      }
+      if (E.Reconnected) {
+        room.on(E.Reconnected, function () {
+          lkLog('RoomEvent.Reconnected', {
+            elapsedMs: auditReconnectingAtMs ? (Date.now() - auditReconnectingAtMs) : null,
+          });
+          auditReconnectingAtMs = 0;
+        });
+      }
+      if (E.Disconnected) {
+        room.on(E.Disconnected, function (reason) {
+          lkLog('RoomEvent.Disconnected', {
+            reason: reason == null ? null : String(reason),
+            intentional: !!avatarDisposing,
+          });
+          stopAuditSnapshots();
+        });
+      }
+      if (E.ConnectionQualityChanged) {
+        room.on(E.ConnectionQualityChanged, function (quality, participant) {
+          lkLog('RoomEvent.ConnectionQualityChanged', {
+            quality: quality == null ? null : String(quality),
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+      if (E.TrackSubscribed) {
+        room.on(E.TrackSubscribed, function (track, publication, participant) {
+          lkLog('RoomEvent.TrackSubscribed', {
+            trackKind: track && track.kind,
+            trackSid: track && track.sid,
+            publicationSource: publication && publication.source,
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+      if (E.TrackUnsubscribed) {
+        room.on(E.TrackUnsubscribed, function (track, publication, participant) {
+          lkLog('RoomEvent.TrackUnsubscribed', {
+            trackKind: track && track.kind,
+            trackSid: track && track.sid,
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+      if (E.DataReceived) {
+        room.on(E.DataReceived, function (payload, participant, kind, topic) {
+          var bytes = null;
+          try {
+            bytes = (payload && payload.byteLength != null)
+              ? payload.byteLength
+              : (payload && payload.length != null ? payload.length : null);
+          } catch (sizeErr) {
+            bytes = null;
+          }
+          // Never log the message text/content — size + topic only.
+          lkLog('RoomEvent.DataReceived', {
+            bytes: bytes,
+            topic: topic == null ? null : String(topic),
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+      if (E.ParticipantConnected) {
+        room.on(E.ParticipantConnected, function (participant) {
+          lkLog('RoomEvent.ParticipantConnected', {
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+      if (E.ParticipantDisconnected) {
+        room.on(E.ParticipantDisconnected, function (participant) {
+          lkLog('RoomEvent.ParticipantDisconnected', {
+            participantIdentity: participant && participant.identity,
+          });
+        });
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
   // MIE-17B: forward the user's text to the ElevenLabs Agent over the LiveKit
   // data channel so the avatar can respond by voice. This is independent of and
   // never interferes with the existing /hugo/ask flow. Only the user's text is
@@ -407,6 +574,9 @@
       };
       var bytes = new TextEncoder().encode(JSON.stringify(payload));
 
+      // MIE-19C (AUDIT): data-channel publish telemetry (size only, no text).
+      lkLog('data publish started', { payloadSize: bytes.length });
+
       var result = room.localParticipant.publishData(bytes, {
         reliable: true,
         topic: 'agent-control',
@@ -415,11 +585,20 @@
 
       if (result && typeof result.then === 'function') {
         result
-          .then(function () { avatarLog('publishData resolved'); })
-          .catch(function (err) { avatarLog('publishData rejected', err); });
+          .then(function () {
+            avatarLog('publishData resolved');
+            lkLog('data publish resolved', { payloadSize: bytes.length });
+          })
+          .catch(function (err) {
+            avatarLog('publishData rejected', err);
+            lkLog('data publish rejected', { payloadSize: bytes.length });
+          });
+      } else {
+        lkLog('data publish resolved', { payloadSize: bytes.length });
       }
     } catch (err) {
       avatarLog('publishData rejected', err);
+      lkLog('data publish rejected');
     }
   }
 
@@ -657,15 +836,35 @@
 
       avatarLog('audio attached; element state:', audioElState(audioEl));
 
+      // MIE-19C (AUDIT): detailed audio-track state at attach time.
+      try {
+        var mst = track.mediaStreamTrack;
+        lkLog('audio track attached', {
+          trackSid: track && track.sid,
+          readyState: mst && mst.readyState,
+          muted: track && typeof track.isMuted === 'boolean'
+            ? track.isMuted
+            : (mst ? mst.muted : null),
+          enabled: mst ? mst.enabled : null,
+          hasSrcObject: !!audioEl.srcObject,
+          paused: audioEl.paused,
+          currentTime: audioEl.currentTime,
+        });
+      } catch (auditErr) {
+        // never throw
+      }
+
       var playPromise = audioEl.play();
       if (playPromise && typeof playPromise.catch === 'function') {
         playPromise
           .then(function () {
             avatarLog('audioEl.play() succeeded; element state:', audioElState(audioEl));
+            lkLog('audio play success', { currentTime: audioEl.currentTime });
           })
           .catch(function (err) {
             avatarLog('audioEl.play() failed (autoplay likely blocked until user interaction)', err);
             console.warn('Avatar audio autoplay blocked until user interaction.', err);
+            lkLog('audio play failed', { paused: audioEl.paused });
           });
       } else {
         avatarLog('audioEl.play() returned no promise; element state:', audioElState(audioEl));
@@ -727,6 +926,9 @@
           // TEMP DEBUG (MIE-17A-AUDIT): expose room for browser inspection.
           window.__hugoLiveKitRoom = room;
           avatarLog('LiveKit room created');
+
+          // MIE-19C (AUDIT ONLY): attach additive log-only LiveKit listeners.
+          instrumentRoomAudit(room, LiveKit);
 
           if (LiveKit.RoomEvent) {
             var RoomEvent = LiveKit.RoomEvent;
@@ -800,6 +1002,10 @@
               });
               setLifecycleState('connected');
               avatarLog('avatar connected');
+              // MIE-19C (AUDIT): begin periodic snapshots (idempotent; also
+              // started by RoomEvent.Connected when that event is emitted).
+              lkLog('connect resolved');
+              startAuditSnapshots();
               // Only advance to 'ready' if the CTA flow hasn't moved further.
               // The avatar is connected but SILENT: it never speaks until the
               // user clicks the CTA. Make the CTA active and clearly waiting.
@@ -852,6 +1058,32 @@
         remoteCount = participants.length;
       }
     }
+    // MIE-19C (AUDIT): track counts + channel availability (no secrets).
+    var audioTracks = null;
+    var videoTracks = null;
+    var dataChannelAvailable = false;
+    var localParticipantConnected = false;
+    var roomSid = null;
+    var connectionState = room ? room.state : undefined;
+    try {
+      if (room) {
+        roomSid = room.sid || null;
+        var lp = room.localParticipant || null;
+        localParticipantConnected = !!lp;
+        dataChannelAvailable = !!(lp && typeof lp.publishData === 'function');
+      }
+      var audioEl = document.getElementById('avatar-audio');
+      var videoEl = document.getElementById('avatar-video');
+      if (audioEl && audioEl.srcObject && typeof audioEl.srcObject.getAudioTracks === 'function') {
+        audioTracks = audioEl.srcObject.getAudioTracks().length;
+      }
+      if (videoEl && videoEl.srcObject && typeof videoEl.srcObject.getVideoTracks === 'function') {
+        videoTracks = videoEl.srcObject.getVideoTracks().length;
+      }
+    } catch (err) {
+      // never throw
+    }
+
     return {
       hasRoom: !!room,
       roomState: room ? room.state : undefined,
@@ -865,6 +1097,15 @@
       },
       audioElement: audioElState(document.getElementById('avatar-audio')),
       videoElement: videoElState(document.getElementById('avatar-video')),
+      // MIE-19C (AUDIT) — LiveKit connection snapshot (no secrets/tokens).
+      lifecycleState: avatarLifecycle.state,
+      remoteParticipantCount: remoteCount,
+      localParticipantConnected: localParticipantConnected,
+      audioTracks: audioTracks,
+      videoTracks: videoTracks,
+      dataChannelAvailable: dataChannelAvailable,
+      roomSid: roomSid,
+      connectionState: connectionState,
     };
   };
 
