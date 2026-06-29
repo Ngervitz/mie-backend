@@ -310,6 +310,9 @@
         if (history.length > 3) history = history.slice(-3);
         input.value = '';
         autoGrow();
+        // MIE-17B: after the existing Ask flow fully succeeds, forward ONLY the
+        // original user text to the ElevenLabs Agent. Never blocks Hugo Ask.
+        sendUserMessageToAgent(question);
       })
       .catch(function () {
         inputError.textContent = 'Error de conexión.';
@@ -421,6 +424,49 @@
       hasSrcObject: !!videoEl.srcObject,
       display: videoEl.style.display,
     };
+  }
+
+  // MIE-17B: forward the user's text to the ElevenLabs Agent over the LiveKit
+  // data channel so the avatar can respond by voice. This is independent of and
+  // never interferes with the existing /hugo/ask flow. Only the user's text is
+  // sent — never Hugo's answer, Daily Knowledge, or the Executive Brief.
+  function sendUserMessageToAgent(text) {
+    var message = String(text == null ? '' : text).trim();
+    if (!message) return;
+
+    var room = window.__hugoLiveKitRoom;
+    var connected = room && (room.state === 'connected' || (window.LivekitClient
+      && window.LivekitClient.ConnectionState
+      && room.state === window.LivekitClient.ConnectionState.Connected));
+
+    if (!room || !connected || !room.localParticipant) {
+      console.warn('[Hugo Avatar] room unavailable');
+      return;
+    }
+
+    try {
+      avatarLog('preparing user_message');
+      var payload = {
+        event_type: 'elevenlabs_agent_command',
+        elevenlabs_event_type: 'user_message',
+        data: { text: message },
+      };
+      var bytes = new TextEncoder().encode(JSON.stringify(payload));
+
+      var result = room.localParticipant.publishData(bytes, {
+        reliable: true,
+        topic: 'agent-control',
+      });
+      avatarLog('payload published');
+
+      if (result && typeof result.then === 'function') {
+        result
+          .then(function () { avatarLog('publishData resolved'); })
+          .catch(function (err) { avatarLog('publishData rejected', err); });
+      }
+    } catch (err) {
+      avatarLog('publishData rejected', err);
+    }
   }
 
   function handleAvatarTrack(track) {
