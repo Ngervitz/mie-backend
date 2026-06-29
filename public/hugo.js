@@ -21,7 +21,6 @@
   // MIE-18A: conversation-first state machine.
   // Allowed: connecting | ready | briefing | idle | thinking | speaking | fallback | error
   var hugoConversationState = 'connecting';
-  var conversationStarted = false;
 
   var MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -562,17 +561,22 @@
     return avatarLifecycle.connectPromise;
   }
 
-  // MIE-18A: the single CTA entry point. Unlocks audio, ensures the LiveKit
-  // connection, then sends exactly one briefing request to the ElevenLabs Agent.
+  // MIE-19: the CTA is the ONLY place allowed to start the conversation /
+  // dispatch the initial briefing. The avatar may already be connected silently;
+  // it never speaks until the user clicks here.
   function startConversation() {
     avatarLog('CTA clicked');
-    if (conversationStarted) {
-      avatarLog('conversation already started; ignoring duplicate click');
+
+    // 1) Synchronous briefing mutex — MUST run before any async work so that
+    //    repeated/fast clicks can never dispatch more than one briefing.
+    if (window.__hugoBriefingDispatched) {
+      avatarLog('briefing already dispatched; ignoring duplicate click');
       return;
     }
-    conversationStarted = true;
+    window.__hugoBriefingDispatched = true;
+    avatarLog('briefing dispatch locked');
 
-    // 1) The click is the official audio-unlock gesture.
+    // 2) The click is the official audio-unlock gesture (no autoplay hacks).
     window.__hugoAudioUnlocked = true;
     avatarLog('audio unlock attempted');
     var audioEl = document.getElementById('avatar-audio');
@@ -589,7 +593,7 @@
       avatarLog('audio unlock: no audio track attached yet');
     }
 
-    // 2) Ensure connection, then send the briefing once connected.
+    // 3) Ensure connection, then send exactly ONE briefing once connected.
     setHugoConversationState('connecting');
     ensureAvatarConnected()
       .then(function () {
@@ -606,8 +610,8 @@
       })
       .catch(function (err) {
         avatarLog('briefing failed', err);
-        // Permit another attempt on a subsequent click.
-        conversationStarted = false;
+        // Release the mutex so the user can retry manually.
+        window.__hugoBriefingDispatched = false;
         setHugoConversationState('error');
       });
   }
@@ -737,8 +741,9 @@
                 avatarLog('native room disconnected', { reason: reason == null ? null : String(reason) });
                 cleanupAvatarLifecycle('disconnected');
                 showAvatarFallback();
-                // Re-enable the CTA so the user can manually start a new session.
-                conversationStarted = false;
+                // Release the briefing mutex so the user can manually start a
+                // new conversation after reconnecting.
+                window.__hugoBriefingDispatched = false;
                 setHugoConversationState('fallback');
               });
             }
@@ -794,9 +799,13 @@
                 state: room.state,
               });
               setLifecycleState('connected');
+              avatarLog('avatar connected');
               // Only advance to 'ready' if the CTA flow hasn't moved further.
+              // The avatar is connected but SILENT: it never speaks until the
+              // user clicks the CTA. Make the CTA active and clearly waiting.
               if (hugoConversationState === 'connecting') {
                 setHugoConversationState('ready');
+                avatarLog('waiting for user');
               }
               // Attach any tracks already published at connect time (consume only).
               var participants = room.remoteParticipants || room.participants;
