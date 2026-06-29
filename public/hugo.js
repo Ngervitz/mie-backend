@@ -18,6 +18,11 @@
   var history = [];
   var asking = false;
 
+  // MIE-18A: conversation-first state machine.
+  // Allowed: connecting | ready | briefing | idle | thinking | speaking | fallback | error
+  var hugoConversationState = 'connecting';
+  var conversationStarted = false;
+
   var MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
   function escapeHtml(value) {
@@ -79,7 +84,7 @@
 
     html +=
       '<div class="voice-row">' +
-        '<button class="btn btn-primary" id="voice-btn" type="button">&#9654; Iniciar briefing</button>' +
+        '<button class="btn btn-primary" id="voice-btn" type="button">&#9654; Iniciar conversación con Hugo</button>' +
         '<div class="voice-status" id="voice-status"></div>' +
         '<div id="voice-area"></div>' +
       '</div>';
@@ -131,8 +136,12 @@
 
     briefPanel.innerHTML = html;
 
+    // MIE-18A: the CTA is now the single entry point of the whole conversation.
+    // It no longer calls /hugo/voice; it starts the ElevenLabs Agent flow.
     var voiceBtn = document.getElementById('voice-btn');
-    if (voiceBtn) voiceBtn.addEventListener('click', startBriefing);
+    if (voiceBtn) voiceBtn.addEventListener('click', startConversation);
+    // Sync the freshly rendered button with the current state.
+    setHugoConversationState(hugoConversationState);
   }
 
   function renderMarket() {
@@ -184,72 +193,6 @@
       submitQuestion();
     });
     return btn;
-  }
-
-  // ---------- Voice ----------
-  function startBriefing() {
-    if (!knowledge || !knowledge.date) return;
-    var voiceBtn = document.getElementById('voice-btn');
-    var status = document.getElementById('voice-status');
-    var area = document.getElementById('voice-area');
-
-    if (voiceBtn) voiceBtn.disabled = true;
-    if (status) status.textContent = 'Cargando...';
-    if (area) area.innerHTML = '';
-
-    fetch('/hugo/voice?date=' + encodeURIComponent(knowledge.date), {
-      headers: { Accept: 'application/json' },
-    })
-      .then(function (res) {
-        return res.json().then(function (body) { return { ok: res.ok, body: body }; });
-      })
-      .then(function (result) {
-        if (!result.ok || !result.body || !result.body.audioUrl) {
-          throw new Error('unavailable');
-        }
-        if (status) status.textContent = '';
-        renderVoice(area, result.body);
-      })
-      .catch(function () {
-        if (status) status.textContent = 'Audio no disponible.';
-        if (voiceBtn) voiceBtn.disabled = false;
-      });
-  }
-
-  function renderVoice(area, data) {
-    if (!area) return;
-    var hasTranscript = typeof data.transcript === 'string' && data.transcript.trim();
-
-    var html = '<audio id="voice-audio" controls preload="auto"></audio>';
-    if (hasTranscript) {
-      html +=
-        '<button class="transcript-toggle" id="transcript-toggle" type="button">Mostrar transcripción</button>' +
-        '<div class="transcript-body hidden" id="transcript-body"></div>';
-    }
-    area.innerHTML = html;
-
-    var audioEl = document.getElementById('voice-audio');
-    if (audioEl) {
-      audioEl.addEventListener('error', function () {
-        console.error('Voice audio failed to load:', audioEl.error);
-      });
-      audioEl.src = data.audioUrl;
-      audioEl.load();
-      var playPromise = audioEl.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(function () { /* autoplay may be blocked; controls remain available */ });
-      }
-    }
-
-    if (hasTranscript) {
-      var toggle = document.getElementById('transcript-toggle');
-      var body = document.getElementById('transcript-body');
-      body.textContent = data.transcript;
-      toggle.addEventListener('click', function () {
-        var nowHidden = body.classList.toggle('hidden');
-        toggle.textContent = nowHidden ? 'Mostrar transcripción' : 'Ocultar transcripción';
-      });
-    }
   }
 
   // ---------- Ask ----------
@@ -364,6 +307,8 @@
   // Workspace, or Ask Hugo. On any failure it falls back to the static iframe.
   var avatarFallbackTimerId;
   var avatarVideoLive = false;
+  // MIE-18A: single in-flight connection promise, prevents duplicate inits/rooms.
+  var avatarConnectPromise = null;
 
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
@@ -469,6 +414,120 @@
     }
   }
 
+  // MIE-18A: lightweight, explicit conversation state machine. No framework.
+  function setHugoConversationState(state) {
+    try {
+      hugoConversationState = state;
+      avatarLog('state ->', state);
+
+      var btn = document.getElementById('voice-btn');
+      var status = document.getElementById('voice-status');
+
+      if (btn) {
+        if (state === 'connecting' || state === 'ready'
+          || state === 'fallback' || state === 'error') {
+          btn.disabled = false;
+          btn.innerHTML = '&#9654; Iniciar conversación con Hugo';
+        } else if (state === 'briefing') {
+          btn.disabled = true;
+          btn.textContent = 'Hugo está preparando el briefing...';
+        } else if (state === 'idle') {
+          btn.disabled = true;
+          btn.textContent = 'Conversación iniciada';
+        } else if (state === 'thinking' || state === 'speaking') {
+          btn.disabled = true;
+        }
+      }
+
+      if (status) {
+        if (state === 'connecting') status.textContent = 'Conectando con Hugo...';
+        else if (state === 'error') status.textContent = 'No se pudo iniciar la conversación.';
+        else status.textContent = '';
+      }
+    } catch (err) {
+      // State updates must never break the page.
+    }
+  }
+
+  function isRoomConnected() {
+    var room = window.__hugoLiveKitRoom;
+    if (!room) return false;
+    if (window.LivekitClient && window.LivekitClient.ConnectionState) {
+      return room.state === window.LivekitClient.ConnectionState.Connected;
+    }
+    return room.state === 'connected';
+  }
+
+  // MIE-18A: resolve only once the avatar is fully connected. Reuses any
+  // in-flight connection and never starts a second initAvatar()/room.
+  function ensureAvatarConnected() {
+    if (isRoomConnected()) {
+      avatarLog('avatar already connected');
+      return Promise.resolve();
+    }
+    if (avatarConnectPromise) {
+      avatarLog('waiting for connection');
+      return avatarConnectPromise;
+    }
+    avatarLog('avatar connection requested');
+    avatarConnectPromise = initAvatar().catch(function (err) {
+      // Allow a future manual attempt; no automatic retry/reconnect logic.
+      avatarConnectPromise = null;
+      throw err;
+    });
+    return avatarConnectPromise;
+  }
+
+  // MIE-18A: the single CTA entry point. Unlocks audio, ensures the LiveKit
+  // connection, then sends exactly one briefing request to the ElevenLabs Agent.
+  function startConversation() {
+    avatarLog('CTA clicked');
+    if (conversationStarted) {
+      avatarLog('conversation already started; ignoring duplicate click');
+      return;
+    }
+    conversationStarted = true;
+
+    // 1) The click is the official audio-unlock gesture.
+    window.__hugoAudioUnlocked = true;
+    avatarLog('audio unlock attempted');
+    var audioEl = document.getElementById('avatar-audio');
+    if (audioEl && audioEl.srcObject) {
+      var unlockPromise = audioEl.play();
+      if (unlockPromise && typeof unlockPromise.then === 'function') {
+        unlockPromise
+          .then(function () { avatarLog('audio unlock success'); })
+          .catch(function (err) { avatarLog('audio unlock failure', err); });
+      } else {
+        avatarLog('audio unlock success');
+      }
+    } else {
+      avatarLog('audio unlock: no audio track attached yet');
+    }
+
+    // 2) Ensure connection, then send the briefing once connected.
+    setHugoConversationState('connecting');
+    ensureAvatarConnected()
+      .then(function () {
+        avatarLog('avatar connected');
+        setHugoConversationState('briefing');
+        avatarLog('briefing requested');
+        var briefingText = 'Comenzá el briefing competitivo de hoy para Nicolás.\n'
+          + 'Sé breve, preciso y hablá como Hugo.';
+        sendUserMessageToAgent(briefingText);
+        avatarLog('briefing sent');
+        // Speaking-completion sync with LiveKit is a future sprint; transition
+        // to the idle conversational state immediately without blocking the UI.
+        setHugoConversationState('idle');
+      })
+      .catch(function (err) {
+        avatarLog('briefing failed', err);
+        // Permit another attempt on a subsequent click.
+        conversationStarted = false;
+        setHugoConversationState('error');
+      });
+  }
+
   function handleAvatarTrack(track) {
     if (!track || !track.kind) return;
 
@@ -526,129 +585,144 @@
     }
   }
 
+  // MIE-18A: returns a Promise that resolves ONLY once the room is connected,
+  // and rejects on any failure (always falling back to the iframe first).
   function initAvatar() {
     avatarLog('initAvatar started');
     showAvatarLoading();
 
-    fetch('/hugo/avatar/session', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', Accept: 'application/json' },
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error('session_failed');
-        return res.json();
+    return new Promise(function (resolve, reject) {
+      fetch('/hugo/avatar/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Accept: 'application/json' },
       })
-      .then(function (session) {
-        var livekitUrl = session && session.livekit_url;
-        var clientToken = session && session.livekit_client_token;
-        if (!livekitUrl || !clientToken) {
-          throw new Error('missing_credentials');
-        }
-        avatarLog('/hugo/avatar/session succeeded', {
-          session_id: session && session.session_id,
-          hasLivekitUrl: !!livekitUrl,
-          hasClientToken: !!clientToken,
-          ws_url: session && session.ws_url,
-        });
+        .then(function (res) {
+          if (!res.ok) throw new Error('session_failed');
+          return res.json();
+        })
+        .then(function (session) {
+          var livekitUrl = session && session.livekit_url;
+          var clientToken = session && session.livekit_client_token;
+          if (!livekitUrl || !clientToken) {
+            throw new Error('missing_credentials');
+          }
+          avatarLog('/hugo/avatar/session succeeded', {
+            session_id: session && session.session_id,
+            hasLivekitUrl: !!livekitUrl,
+            hasClientToken: !!clientToken,
+            ws_url: session && session.ws_url,
+          });
 
-        // UMD global name varies by build; accept both spellings.
-        var LiveKit = window.LivekitClient || window.LiveKitClient;
-        if (!LiveKit || !LiveKit.Room) {
-          avatarLog('LiveKit SDK unavailable; using fallback');
-          showAvatarFallback();
-          return;
-        }
-
-        avatarFallbackTimerId = setTimeout(function () {
-          if (avatarVideoLive) return;
-          avatarLog('fallback timer fired (no video after timeout)');
-          console.warn('Avatar timeout.');
-          showAvatarFallback();
-        }, 15000);
-
-        var room = new LiveKit.Room();
-        // TEMP DEBUG (MIE-17A-AUDIT): expose room for browser inspection.
-        window.__hugoLiveKitRoom = room;
-        avatarLog('LiveKit room created');
-
-        if (LiveKit.RoomEvent) {
-          var RoomEvent = LiveKit.RoomEvent;
-
-          if (RoomEvent.TrackSubscribed) {
-            room.on(RoomEvent.TrackSubscribed, function (track, publication, participant) {
-              avatarLog('RoomEvent.TrackSubscribed', {
-                trackKind: track && track.kind,
-                trackSid: track && track.sid,
-                publicationKind: publication && publication.kind,
-                publicationSource: publication && publication.source,
-                publicationTrackSid: publication && publication.trackSid,
-                participantIdentity: participant && participant.identity,
-                participantSid: participant && participant.sid,
-              });
-              handleAvatarTrack(track);
-            });
+          // UMD global name varies by build; accept both spellings.
+          var LiveKit = window.LivekitClient || window.LiveKitClient;
+          if (!LiveKit || !LiveKit.Room) {
+            avatarLog('LiveKit SDK unavailable; using fallback');
+            showAvatarFallback();
+            setHugoConversationState('fallback');
+            reject(new Error('livekit_sdk_unavailable'));
+            return;
           }
 
-          if (RoomEvent.TrackUnsubscribed) {
-            room.on(RoomEvent.TrackUnsubscribed, function (track, publication, participant) {
-              avatarLog('RoomEvent.TrackUnsubscribed', {
-                trackKind: track && track.kind,
-                trackSid: track && track.sid,
-                participantIdentity: participant && participant.identity,
-              });
-            });
-          }
+          avatarFallbackTimerId = setTimeout(function () {
+            if (avatarVideoLive) return;
+            avatarLog('fallback timer fired (no video after timeout)');
+            console.warn('Avatar timeout.');
+            showAvatarFallback();
+          }, 15000);
 
-          if (RoomEvent.ParticipantConnected) {
-            room.on(RoomEvent.ParticipantConnected, function (participant) {
-              avatarLog('RoomEvent.ParticipantConnected', {
-                identity: participant && participant.identity,
-                sid: participant && participant.sid,
-              });
-            });
-          }
+          var room = new LiveKit.Room();
+          // TEMP DEBUG (MIE-17A-AUDIT): expose room for browser inspection.
+          window.__hugoLiveKitRoom = room;
+          avatarLog('LiveKit room created');
 
-          if (RoomEvent.ParticipantDisconnected) {
-            room.on(RoomEvent.ParticipantDisconnected, function (participant) {
-              avatarLog('RoomEvent.ParticipantDisconnected', {
-                identity: participant && participant.identity,
-                sid: participant && participant.sid,
-              });
-            });
-          }
-        }
+          if (LiveKit.RoomEvent) {
+            var RoomEvent = LiveKit.RoomEvent;
 
-        avatarLog('before room.connect(...)');
-        room.connect(livekitUrl, clientToken)
-          .then(function () {
-            avatarLog('room.connect(...) resolved', {
-              state: room.state,
-            });
-            // Attach any tracks already published at connect time (consume only).
-            var participants = room.remoteParticipants || room.participants;
-            if (participants && typeof participants.forEach === 'function') {
-              participants.forEach(function (participant) {
-                var pubs = participant && (participant.trackPublications || participant.tracks);
-                if (pubs && typeof pubs.forEach === 'function') {
-                  pubs.forEach(function (pub) {
-                    if (pub && pub.track) handleAvatarTrack(pub.track);
-                  });
-                }
+            if (RoomEvent.TrackSubscribed) {
+              room.on(RoomEvent.TrackSubscribed, function (track, publication, participant) {
+                avatarLog('RoomEvent.TrackSubscribed', {
+                  trackKind: track && track.kind,
+                  trackSid: track && track.sid,
+                  publicationKind: publication && publication.kind,
+                  publicationSource: publication && publication.source,
+                  publicationTrackSid: publication && publication.trackSid,
+                  participantIdentity: participant && participant.identity,
+                  participantSid: participant && participant.sid,
+                });
+                handleAvatarTrack(track);
               });
             }
-          })
-          .catch(function (err) {
-            avatarLog('room.connect(...) rejected; using fallback', err);
-            console.warn('LiveKit connection failed.', err);
-            clearTimeout(avatarFallbackTimerId);
-            showAvatarFallback();
-          });
-      })
-      .catch(function (err) {
-        avatarLog('avatar session unavailable; using fallback', err);
-        console.warn('Avatar session unavailable; using fallback.', err);
-        showAvatarFallback();
-      });
+
+            if (RoomEvent.TrackUnsubscribed) {
+              room.on(RoomEvent.TrackUnsubscribed, function (track, publication, participant) {
+                avatarLog('RoomEvent.TrackUnsubscribed', {
+                  trackKind: track && track.kind,
+                  trackSid: track && track.sid,
+                  participantIdentity: participant && participant.identity,
+                });
+              });
+            }
+
+            if (RoomEvent.ParticipantConnected) {
+              room.on(RoomEvent.ParticipantConnected, function (participant) {
+                avatarLog('RoomEvent.ParticipantConnected', {
+                  identity: participant && participant.identity,
+                  sid: participant && participant.sid,
+                });
+              });
+            }
+
+            if (RoomEvent.ParticipantDisconnected) {
+              room.on(RoomEvent.ParticipantDisconnected, function (participant) {
+                avatarLog('RoomEvent.ParticipantDisconnected', {
+                  identity: participant && participant.identity,
+                  sid: participant && participant.sid,
+                });
+              });
+            }
+          }
+
+          avatarLog('before room.connect(...)');
+          room.connect(livekitUrl, clientToken)
+            .then(function () {
+              avatarLog('room.connect(...) resolved', {
+                state: room.state,
+              });
+              // Only advance to 'ready' if the CTA flow hasn't moved further.
+              if (hugoConversationState === 'connecting') {
+                setHugoConversationState('ready');
+              }
+              // Attach any tracks already published at connect time (consume only).
+              var participants = room.remoteParticipants || room.participants;
+              if (participants && typeof participants.forEach === 'function') {
+                participants.forEach(function (participant) {
+                  var pubs = participant && (participant.trackPublications || participant.tracks);
+                  if (pubs && typeof pubs.forEach === 'function') {
+                    pubs.forEach(function (pub) {
+                      if (pub && pub.track) handleAvatarTrack(pub.track);
+                    });
+                  }
+                });
+              }
+              resolve();
+            })
+            .catch(function (err) {
+              avatarLog('room.connect(...) rejected; using fallback', err);
+              console.warn('LiveKit connection failed.', err);
+              clearTimeout(avatarFallbackTimerId);
+              showAvatarFallback();
+              setHugoConversationState('fallback');
+              reject(err);
+            });
+        })
+        .catch(function (err) {
+          avatarLog('avatar session unavailable; using fallback', err);
+          console.warn('Avatar session unavailable; using fallback.', err);
+          showAvatarFallback();
+          setHugoConversationState('fallback');
+          reject(err);
+        });
+    });
   }
 
   // TEMP DEBUG (MIE-17A-AUDIT): on-demand snapshot of avatar/audio state.
@@ -684,6 +758,10 @@
 
   load();
 
-  // Avatar runs independently of the rest of Hugo and never blocks it.
-  initAvatar();
+  // MIE-18A: connect the avatar automatically on load (single connection path).
+  // Runs independently of the rest of Hugo and never blocks it.
+  setHugoConversationState('connecting');
+  ensureAvatarConnected().catch(function () {
+    // Failure already logged + fell back to the iframe; never break the page.
+  });
 })();
