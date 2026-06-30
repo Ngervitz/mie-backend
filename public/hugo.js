@@ -8,10 +8,52 @@
   var questionsPanel = document.getElementById('questions-panel');
   var answerPanel = document.getElementById('answer-panel');
   var marketPanel = document.getElementById('market-panel');
+  var executionPanel = document.getElementById('execution-panel');
   var input = document.getElementById('question-input');
   var sendBtn = document.getElementById('send-btn');
   var inputError = document.getElementById('input-error');
   var overlay = document.getElementById('overlay');
+  var hugoPresence = document.getElementById('hugo-presence');
+
+  // MIE-23: presentation mode switch. Avatar mode is the default and must remain
+  // unchanged. Abstract mode is a reversible visual layer only.
+  // Resolution order: window.__HUGO_PRESENTATION_MODE → URL param → localStorage → avatar.
+  function resolvePresentationMode() {
+    try {
+      var injected = window.__HUGO_PRESENTATION_MODE;
+      if (injected === 'abstract' || injected === 'avatar') return injected;
+      var params = new URLSearchParams(window.location.search);
+      var fromUrl = params.get('presentation') || params.get('PRESENTATION_MODE');
+      if (fromUrl === 'abstract' || fromUrl === 'avatar') return fromUrl;
+      var stored = localStorage.getItem('hugo_presentation_mode');
+      if (stored === 'abstract' || stored === 'avatar') return stored;
+    } catch (err) {
+      // never throw
+    }
+    return 'avatar';
+  }
+
+  var PRESENTATION_MODE = resolvePresentationMode();
+  var isAbstractMode = PRESENTATION_MODE === 'abstract';
+
+  function applyPresentationMode() {
+    try {
+      document.body.setAttribute('data-presentation-mode', PRESENTATION_MODE);
+      if (hugoPresence) {
+        if (isAbstractMode) {
+          hugoPresence.classList.remove('hidden');
+          hugoPresence.setAttribute('aria-hidden', 'false');
+        } else {
+          hugoPresence.classList.add('hidden');
+          hugoPresence.setAttribute('aria-hidden', 'true');
+        }
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  applyPresentationMode();
 
   // ---- State (memory only, never persisted) ----
   var knowledge = null;
@@ -21,6 +63,24 @@
   // MIE-18A: conversation-first state machine.
   // Allowed: connecting | ready | briefing | idle | thinking | speaking | fallback | error
   var hugoConversationState = 'connecting';
+
+  // MIE-22B: the briefing is modeled as ordered CHAPTERS, not cards. They stay
+  // hidden until Hugo "reaches" each one, then reveal sequentially. The reveal
+  // TRIGGER for v1 is a deterministic timer; the architecture is organised around
+  // chapters so a future version can swap the trigger for real speech events
+  // (revealNextChapter) without touching the UX. Presence flags below let us skip
+  // empty chapters and never reveal a section that has no real content.
+  var marketHasRows = false;
+  var questionsHasItems = false;
+  var executionHasData = false;
+
+  // Ordered list of present chapters (each = array of DOM elements to reveal).
+  var briefingChapters = [];
+  var nextChapterIndex = 0;
+  var chapterRevealTimerId = null;
+  var briefingRevealStarted = false;
+  // v1 pacing between chapter reveals (placeholder for real speech events).
+  var CHAPTER_REVEAL_INTERVAL_MS = 3500;
 
   var MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -81,23 +141,40 @@
     var b = brief();
     var html = '';
 
+    // The CTA + welcome are the meeting's entry point — always visible. They are
+    // NOT a chapter; everything below them is revealed progressively.
     html +=
       '<div class="voice-row">' +
         '<button class="btn btn-primary" id="voice-btn" type="button">&#9654; Iniciar conversación con Hugo</button>' +
         '<div class="voice-status" id="voice-status"></div>' +
+        '<div class="welcome-note" id="welcome-note">Hugo tiene listo el briefing competitivo de hoy. Cuando quieras, iniciá la reunión y te lo presenta.</div>' +
+        '<button type="button" class="report-expand-link" id="report-expand-link">Ver informe completo</button>' +
         '<div id="voice-area"></div>' +
       '</div>';
 
-    if (b.headline) {
-      html += '<h1 class="headline">' + escapeHtml(b.headline) + '</h1>';
-    }
-    if (b.whyItMatters) {
-      html += '<p class="why-it-matters">' + escapeHtml(b.whyItMatters) + '</p>';
+    // Chapter 1 — Executive Brief (the lead of the document).
+    if (b.headline || b.whyItMatters) {
+      html += '<div class="chapter hidden" id="chapter-brief">';
+      if (b.headline) html += '<h1 class="headline">' + escapeHtml(b.headline) + '</h1>';
+      if (b.whyItMatters) html += '<p class="why-it-matters">' + escapeHtml(b.whyItMatters) + '</p>';
+      html += '</div>';
     }
 
+    // Chapter 2 — Recommended Action (revealed right after the brief).
+    var action = b.recommendedAction;
+    if (action && (action.action || action.reason)) {
+      html += '<div class="chapter hidden brief-section" id="chapter-action"><div class="section-label">Acción recomendada</div>';
+      html += '<div class="action-card">';
+      if (action.priority) html += '<span class="action-priority">' + escapeHtml(action.priority) + '</span>';
+      if (action.action) html += '<div class="action-text">' + escapeHtml(action.action) + '</div>';
+      if (action.reason) html += '<div class="action-reason">' + escapeHtml(action.reason) + '</div>';
+      html += '</div></div>';
+    }
+
+    // Chapter 3 — Top Stories.
     var stories = Array.isArray(b.topStories) ? b.topStories : [];
     if (stories.length) {
-      html += '<div class="brief-section"><div class="section-label">Top Stories</div>';
+      html += '<div class="chapter hidden brief-section" id="chapter-stories"><div class="section-label">Top Stories</div>';
       stories.forEach(function (s) {
         s = s || {};
         html += '<div class="story">';
@@ -109,19 +186,10 @@
       html += '</div>';
     }
 
-    var action = b.recommendedAction;
-    if (action && (action.action || action.reason)) {
-      html += '<div class="brief-section"><div class="section-label">Acción recomendada</div>';
-      html += '<div class="action-card">';
-      if (action.priority) html += '<span class="action-priority">' + escapeHtml(action.priority) + '</span>';
-      if (action.action) html += '<div class="action-text">' + escapeHtml(action.action) + '</div>';
-      if (action.reason) html += '<div class="action-reason">' + escapeHtml(action.reason) + '</div>';
-      html += '</div></div>';
-    }
-
+    // Chapter 4 — Watch Tomorrow.
     var watch = Array.isArray(b.watchTomorrow) ? b.watchTomorrow : [];
     if (watch.length) {
-      html += '<div class="brief-section"><div class="section-label">Vigilar mañana</div>';
+      html += '<div class="chapter hidden brief-section" id="chapter-watch"><div class="section-label">Vigilar mañana</div>';
       watch.forEach(function (w) {
         w = w || {};
         html += '<div class="watch-item">';
@@ -139,6 +207,8 @@
     // It no longer calls /hugo/voice; it starts the ElevenLabs Agent flow.
     var voiceBtn = document.getElementById('voice-btn');
     if (voiceBtn) voiceBtn.addEventListener('click', startConversation);
+    var expandLink = document.getElementById('report-expand-link');
+    if (expandLink) expandLink.addEventListener('click', revealFullReport);
     // Sync the freshly rendered button with the current state.
     setHugoConversationState(hugoConversationState);
   }
@@ -147,6 +217,7 @@
     var inv = supportingData().marketInventory;
     var rows = Array.isArray(inv) ? inv.slice(0, 8) : [];
     if (!rows.length) {
+      marketHasRows = false;
       marketPanel.classList.add('hidden');
       return;
     }
@@ -162,7 +233,101 @@
         '</div>';
     });
     marketPanel.innerHTML = html;
-    marketPanel.classList.remove('hidden');
+    // MIE-22B: content is ready, but Supporting Information stays hidden until the
+    // reveal sequence reaches it — nothing appears before Hugo presents it.
+    marketHasRows = true;
+  }
+
+  // MIE-22B — Execution Summary. Operational transparency, NOT a technical
+  // dashboard. Strictly consumes real values exposed by the backend
+  // (knowledge.generatedAt + knowledge.meta). Anything missing is simply omitted;
+  // nothing is ever estimated, calculated or fabricated. If no real value exists
+  // at all, the whole section stays hidden.
+  function renderExecution() {
+    var meta = (knowledge && knowledge.meta) || null;
+    if (!meta) {
+      executionHasData = false;
+      executionPanel.classList.add('hidden');
+      return;
+    }
+
+    var rows = '';
+    var generated = fmtClock(knowledge && knowledge.generatedAt);
+    if (generated) {
+      rows += execItem('Generado', generated);
+    }
+
+    var durationMs = meta.telemetry && meta.telemetry.durationMs;
+    var duration = fmtDuration(durationMs);
+    if (duration) {
+      rows += execItem('Duración', duration);
+    }
+
+    // AI Cost is the TOTAL execution cost the backend reports (it already
+    // aggregates every measured provider, e.g. Claude + GPT). We never display a
+    // single-provider cost and never sum anything ourselves.
+    var totalCost = meta.financial && meta.financial.totalRunCostUsd;
+    var cost = fmtCostUsd(totalCost);
+    if (cost) {
+      rows += execItem('Costo IA', cost);
+    }
+
+    // Models actually used, exactly as exposed by the backend. The per-provider
+    // cost breakdown stays internal and is never shown.
+    var models = [];
+    if (meta.modelArchitect) models.push(String(meta.modelArchitect));
+    if (meta.modelAuditor) models.push(String(meta.modelAuditor));
+
+    if (!rows && !models.length) {
+      executionHasData = false;
+      executionPanel.classList.add('hidden');
+      return;
+    }
+
+    var html = '<div class="panel-title">Ejecución</div>';
+    if (rows) html += '<div class="exec-grid">' + rows + '</div>';
+    if (models.length) {
+      html += '<div class="exec-models"><div class="exec-label">Modelos</div><div class="exec-model-list">';
+      models.forEach(function (m) {
+        html += '<span class="exec-model">' + escapeHtml(m) + '</span>';
+      });
+      html += '</div></div>';
+    }
+
+    executionPanel.innerHTML = html;
+    executionHasData = true;
+  }
+
+  function execItem(label, value) {
+    return '<div class="exec-item">' +
+      '<div class="exec-label">' + escapeHtml(label) + '</div>' +
+      '<div class="exec-value">' + escapeHtml(value) + '</div>' +
+    '</div>';
+  }
+
+  // Local wall-clock HH:MM for the generation timestamp. Returns '' if unparseable.
+  function fmtClock(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var hh = String(d.getHours()).padStart(2, '0');
+    var mm = String(d.getMinutes()).padStart(2, '0');
+    return hh + ':' + mm;
+  }
+
+  // Human duration: "9.4 s" under a minute, "1.5 min" otherwise. '' if invalid.
+  function fmtDuration(ms) {
+    var n = Number(ms);
+    if (!isFinite(n) || n <= 0) return '';
+    if (n < 60000) return (n / 1000).toFixed(1) + ' s';
+    return (n / 60000).toFixed(1) + ' min';
+  }
+
+  // Total cost as "USD X.XXXX". '' if not a real number.
+  function fmtCostUsd(value) {
+    var n = Number(value);
+    if (!isFinite(n) || n < 0) return '';
+    return 'USD ' + n.toFixed(4);
   }
 
   function renderQuestions() {
@@ -170,6 +335,7 @@
     var qs = Array.isArray(b.followUpQuestions) ? b.followUpQuestions.slice(0, 3) : [];
     qs = qs.filter(function (q) { return typeof q === 'string' && q.trim(); });
     if (!qs.length) {
+      questionsHasItems = false;
       questionsPanel.classList.add('hidden');
       return;
     }
@@ -179,7 +345,8 @@
       '<div class="q-list" id="suggested-list"></div>';
     var list = document.getElementById('suggested-list');
     qs.forEach(function (q) { list.appendChild(questionButton(q)); });
-    questionsPanel.classList.remove('hidden');
+    // MIE-22B: kept hidden until the reveal sequence reaches the questions.
+    questionsHasItems = true;
   }
 
   function questionButton(q) {
@@ -194,35 +361,246 @@
     return btn;
   }
 
+  // ---------- MIE-22B: Briefing chapter reveal ----------
+  // Build the ordered list of PRESENT chapters. Reveal order matches the
+  // document's visual order so nothing ever pops in above already-shown content:
+  //   Executive Brief → Recommended Action → Top Stories → Watch Tomorrow →
+  //   Suggested Questions → Supporting Information (Market + Execution).
+  function buildBriefingChapters() {
+    briefingChapters = [];
+    nextChapterIndex = 0;
+
+    function addChapter(els) {
+      var present = (els || []).filter(Boolean);
+      if (present.length) briefingChapters.push(present);
+    }
+
+    addChapter([document.getElementById('chapter-brief')]);
+    addChapter([document.getElementById('chapter-action')]);
+    addChapter([document.getElementById('chapter-stories')]);
+    addChapter([document.getElementById('chapter-watch')]);
+    addChapter([questionsHasItems ? questionsPanel : null]);
+    // Supporting Information is a single chapter: the market table plus the
+    // quiet execution summary, revealed together.
+    addChapter([
+      marketHasRows ? marketPanel : null,
+      executionHasData ? executionPanel : null,
+    ]);
+  }
+
+  // Reveal one chapter (fade + subtle vertical motion via the .revealed class).
+  function clearChapterFocus() {
+    try {
+      var focused = document.querySelectorAll('.chapter.chapter-focus');
+      for (var i = 0; i < focused.length; i++) focused[i].classList.remove('chapter-focus');
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function setChapterFocus(chapter) {
+    if (!isAbstractMode || !chapter) return;
+    clearChapterFocus();
+    chapter.forEach(function (el) { if (el) el.classList.add('chapter-focus'); });
+  }
+
+  function finishBriefingReveal() {
+    if (!isAbstractMode) return;
+    clearChapterFocus();
+    document.body.classList.add('briefing-complete');
+  }
+
+  // MIE-23: reveal the entire document immediately — no conversation, no voice.
+  function revealFullReport() {
+    try {
+      if (chapterRevealTimerId) {
+        clearTimeout(chapterRevealTimerId);
+        chapterRevealTimerId = null;
+      }
+      buildBriefingChapters();
+      briefingChapters.forEach(function (chapter) {
+        chapter.forEach(function (el) {
+          if (!el) return;
+          el.classList.remove('hidden');
+          el.classList.add('revealed');
+          el.classList.remove('chapter-focus');
+        });
+      });
+      var welcome = document.getElementById('welcome-note');
+      if (welcome) welcome.classList.add('hidden');
+      clearChapterFocus();
+      document.body.classList.add('report-expanded');
+      document.body.classList.add('briefing-complete');
+      briefingRevealStarted = true;
+      var expandLink = document.getElementById('report-expand-link');
+      if (expandLink) expandLink.classList.add('hidden');
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function revealChapter(chapter) {
+    if (!chapter) return;
+    chapter.forEach(function (el) {
+      if (!el) return;
+      el.classList.remove('hidden');
+    });
+    // Double rAF so the transition runs from the pre-reveal state.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        chapter.forEach(function (el) { if (el) el.classList.add('revealed'); });
+        setChapterFocus(chapter);
+        var anchor = chapter[0];
+        if (anchor && typeof anchor.scrollIntoView === 'function') {
+          try { anchor.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { /* noop */ }
+        }
+      });
+    });
+  }
+
+  // Advance to the next chapter. This is the single SEAM the reveal is built
+  // around: v1 calls it on a timer; a future version can call it from real
+  // speech events without changing anything else.
+  function revealNextChapter() {
+    if (nextChapterIndex >= briefingChapters.length) {
+      if (chapterRevealTimerId) { clearTimeout(chapterRevealTimerId); chapterRevealTimerId = null; }
+      finishBriefingReveal();
+      return;
+    }
+    revealChapter(briefingChapters[nextChapterIndex]);
+    nextChapterIndex += 1;
+    scheduleNextChapterReveal();
+  }
+
+  function scheduleNextChapterReveal() {
+    if (chapterRevealTimerId) { clearTimeout(chapterRevealTimerId); chapterRevealTimerId = null; }
+    if (nextChapterIndex >= briefingChapters.length) return;
+    chapterRevealTimerId = setTimeout(revealNextChapter, CHAPTER_REVEAL_INTERVAL_MS);
+  }
+
+  // Begin the progressive reveal. Idempotent: the briefing is presented once per
+  // page session (a reconnect after idle never replays it). Triggered when Hugo
+  // starts the briefing (and as a safety net when the avatar is unavailable so
+  // the report is never trapped empty after an explicit start).
+  function startBriefingReveal() {
+    if (briefingRevealStarted) return;
+    briefingRevealStarted = true;
+
+    var welcome = document.getElementById('welcome-note');
+    if (welcome) welcome.classList.add('hidden');
+
+    buildBriefingChapters();
+    revealNextChapter();
+  }
+
+  // MIE-23: animate the abstract presence from existing conversational state and,
+  // when available, LiveKit audio playback. No parallel integration.
+  function syncAbstractPresence() {
+    if (!isAbstractMode || !hugoPresence) return;
+    var speaking = false;
+    if (['briefing', 'speaking', 'connecting'].indexOf(hugoConversationState) !== -1) {
+      speaking = true;
+    }
+    if (asking) speaking = true;
+    try {
+      var audioEl = document.getElementById('avatar-audio');
+      if (audioEl && audioEl.srcObject && !audioEl.paused && !audioEl.muted) {
+        speaking = true;
+      }
+    } catch (err) {
+      // never throw
+    }
+    hugoPresence.classList.toggle('presence-speaking', speaking);
+    hugoPresence.classList.toggle('presence-active', avatarConversationActive || speaking);
+  }
+
+  function wireAbstractAudioPresence(audioEl) {
+    if (!isAbstractMode || !audioEl || audioEl.__hugoPresenceWired) return;
+    audioEl.__hugoPresenceWired = true;
+    ['play', 'pause', 'ended', 'volumechange'].forEach(function (evt) {
+      audioEl.addEventListener(evt, syncAbstractPresence);
+    });
+  }
+
   // ---------- Ask ----------
   function setAsking(on) {
     asking = on;
     sendBtn.disabled = on;
     sendBtn.textContent = on ? 'Pensando...' : 'Enviar';
+    syncAbstractPresence();
   }
 
-  function renderAnswer(data) {
-    var html = '<p class="answer-text">' + escapeHtml(data.answer || '') + '</p>';
+  // MIE-22B: the Q&A is no longer a floating overlay. Each exchange is appended
+  // into the report as a new "Conversación" section — like adding an appendix to
+  // today's briefing. It lives in the document flow (right column), so it never
+  // covers Hugo and never floats over the report.
+  function ensureConversationOpen() {
+    if (answerPanel.classList.contains('conversation-open')) return;
+    answerPanel.classList.add('conversation-open');
+    answerPanel.classList.remove('hidden');
+    var title = document.createElement('div');
+    title.className = 'panel-title';
+    title.textContent = 'Conversación';
+    answerPanel.appendChild(title);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { answerPanel.classList.add('visible'); });
+    });
+  }
+
+  // Insert the question immediately as a new section, with a pending answer slot
+  // directly below it. Returns refs so the answer can be filled in on response.
+  function appendQuestionEntry(questionText) {
+    ensureConversationOpen();
+
+    var entry = document.createElement('div');
+    entry.className = 'qa-entry';
+
+    var q = document.createElement('div');
+    q.className = 'qa-question';
+    q.textContent = questionText;
+
+    var a = document.createElement('div');
+    a.className = 'qa-answer qa-pending';
+    a.textContent = 'Hugo está pensando...';
+
+    entry.appendChild(q);
+    entry.appendChild(a);
+    answerPanel.appendChild(entry);
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { entry.classList.add('revealed'); });
+    });
+    if (typeof entry.scrollIntoView === 'function') {
+      try { entry.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { /* noop */ }
+    }
+
+    return { entry: entry, answerNode: a };
+  }
+
+  function fillAnswer(ref, data) {
+    if (!ref || !ref.answerNode) return;
+    ref.answerNode.classList.remove('qa-pending');
+    ref.answerNode.textContent = data.answer || '';
 
     var next = Array.isArray(data.nextQuestions) ? data.nextQuestions : [];
     next = next.filter(function (q) { return typeof q === 'string' && q.trim(); }).slice(0, 3);
     if (next.length) {
-      html += '<div class="q-list" id="next-list"></div>';
-    }
-
-    answerPanel.innerHTML = html;
-    answerPanel.classList.remove('hidden');
-
-    if (next.length) {
-      var list = document.getElementById('next-list');
+      var list = document.createElement('div');
+      list.className = 'q-list';
       next.forEach(function (q) { list.appendChild(questionButton(q)); });
+      ref.entry.appendChild(list);
     }
 
-    // Force fade-in even when replacing an existing answer.
-    answerPanel.classList.remove('visible');
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () { answerPanel.classList.add('visible'); });
-    });
+    if (ref.entry && typeof ref.entry.scrollIntoView === 'function') {
+      try { ref.entry.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { /* noop */ }
+    }
+  }
+
+  function fillAnswerError(ref, message) {
+    if (!ref || !ref.answerNode) return;
+    ref.answerNode.classList.remove('qa-pending');
+    ref.answerNode.classList.add('qa-error');
+    ref.answerNode.textContent = message || 'No se pudo obtener respuesta.';
   }
 
   function submitQuestion() {
@@ -235,6 +613,12 @@
     // MIE-17C: sending a message is real conversation activity.
     resetAvatarIdleTimer('user_message');
 
+    // MIE-22B: the question becomes a section of the report immediately, and the
+    // input clears as the text moves into the document.
+    var ref = appendQuestionEntry(question);
+    input.value = '';
+    autoGrow();
+
     fetch('/hugo/ask', {
       method: 'POST',
       headers: { 'content-type': 'application/json', Accept: 'application/json' },
@@ -246,22 +630,20 @@
       .then(function (result) {
         if (!result.ok) {
           var msg = result.body && result.body.error ? result.body.error : 'No se pudo obtener respuesta.';
-          inputError.textContent = msg;
+          fillAnswerError(ref, msg);
           return;
         }
-        renderAnswer(result.body);
+        fillAnswer(ref, result.body);
         // MIE-17C: Hugo finished responding — real conversation activity.
         resetAvatarIdleTimer('hugo_response');
         history.push({ question: question, answer: result.body.answer || '' });
         if (history.length > 3) history = history.slice(-3);
-        input.value = '';
-        autoGrow();
         // MIE-17B: after the existing Ask flow fully succeeds, forward ONLY the
         // original user text to the ElevenLabs Agent. Never blocks Hugo Ask.
         sendUserMessageToAgent(question);
       })
       .catch(function () {
-        inputError.textContent = 'Error de conexión.';
+        fillAnswerError(ref, 'Error de conexión.');
       })
       .then(function () {
         setAsking(false);
@@ -299,6 +681,10 @@
         renderBrief();
         renderMarket();
         renderQuestions();
+        renderExecution();
+        // MIE-22B: prepare the (still hidden) chapter sequence. Nothing is shown
+        // until the user starts the briefing — the workspace stays clean.
+        buildBriefingChapters();
       })
       .catch(function () {
         showOverlay('Error cargando el briefing.');
@@ -685,6 +1071,7 @@
         else if (state === 'error') status.textContent = 'No se pudo iniciar la conversación.';
         else status.textContent = '';
       }
+      syncAbstractPresence();
     } catch (err) {
       // State updates must never break the page.
     }
@@ -1145,6 +1532,7 @@
       }
       avatarStopExecuted = true;
       avatarConversationActive = false;
+      syncAbstractPresence();
       var sessionId = avatarLifecycle.sessionId;
       avatarLog('stop flow', { reason: reason || 'manual', hasSessionId: !!sessionId });
 
@@ -1257,6 +1645,7 @@
     avatarConversationActive = true;
     avatarStopExecuted = false;
     avatarLog('conversation active');
+    syncAbstractPresence();
 
     // MIE-17C: clicking the CTA is real conversation activity — (re)start the
     // idle timer. This also covers the explicit reconnect-after-idle case.
@@ -1294,6 +1683,9 @@
           sendUserMessageToAgent(briefingText);
           avatarLog('briefing sent');
           hasDeliveredInitialBrief = true;
+          // MIE-22B: Hugo is now presenting — begin revealing the report chapter
+          // by chapter (deterministic v1 trigger; idempotent).
+          startBriefingReveal();
           // Speaking-completion sync with LiveKit is a future sprint; transition
           // to the idle conversational state immediately without blocking the UI.
           setHugoConversationState('idle');
@@ -1316,6 +1708,10 @@
         window.__hugoBriefingDispatched = false;
         avatarConversationActive = false;
         clearAvatarIdleTimer();
+        // MIE-22B: the user explicitly asked for the briefing. Even if the avatar
+        // could not connect, reveal the report so it is never trapped empty.
+        // Idempotent, so a later successful retry never double-reveals.
+        startBriefingReveal();
         setHugoConversationState('error');
       });
   }
@@ -1363,6 +1759,7 @@
       }
 
       avatarLog('audio attached; element state:', audioElState(audioEl));
+      wireAbstractAudioPresence(audioEl);
 
       // MIE-19C (AUDIT): detailed audio-track state at attach time.
       try {
@@ -1388,11 +1785,13 @@
           .then(function () {
             avatarLog('audioEl.play() succeeded; element state:', audioElState(audioEl));
             lkLog('audio play success', { currentTime: audioEl.currentTime });
+            syncAbstractPresence();
           })
           .catch(function (err) {
             avatarLog('audioEl.play() failed (autoplay likely blocked until user interaction)', err);
             console.warn('Avatar audio autoplay blocked until user interaction.', err);
             lkLog('audio play failed', { paused: audioEl.paused });
+            syncAbstractPresence();
           });
       } else {
         avatarLog('audioEl.play() returned no promise; element state:', audioElState(audioEl));
@@ -1532,6 +1931,29 @@
                   identity: participant && participant.identity,
                   sid: participant && participant.sid,
                 });
+              });
+            }
+
+            // MIE-23: reuse LiveKit speaking signal for abstract presence (no parallel integration).
+            if (RoomEvent.ActiveSpeakersChanged && isAbstractMode) {
+              room.on(RoomEvent.ActiveSpeakersChanged, function (speakers) {
+                try {
+                  if (!hugoPresence) return;
+                  var remoteSpeaking = false;
+                  if (Array.isArray(speakers)) {
+                    for (var si = 0; si < speakers.length; si++) {
+                      var sp = speakers[si];
+                      if (sp && room.localParticipant && sp !== room.localParticipant) {
+                        remoteSpeaking = true;
+                        break;
+                      }
+                    }
+                  }
+                  hugoPresence.classList.toggle('presence-speaking', remoteSpeaking);
+                  syncAbstractPresence();
+                } catch (spErr) {
+                  // never throw
+                }
               });
             }
           }
@@ -1699,6 +2121,12 @@
       executeAvatarStopFlow('visibilitychange');
     }
   });
+
+  // MIE-22B: public seam for the reveal sequence. v1 advances chapters on a
+  // timer; a future version can drive this from real avatar speech events
+  // (e.g. on each spoken section) without changing any other UX.
+  window.__hugoRevealNextChapter = revealNextChapter;
+  window.__hugoPresentationMode = PRESENTATION_MODE;
 
   load();
 

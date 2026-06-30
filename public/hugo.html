@@ -53,12 +53,23 @@
         <div class="header-right" id="header-badges"></div>
       </header>
 
-      <div id="left-col">
-        <section id="brief-panel" class="panel"></section>
-        <section id="questions-panel" class="panel hidden"></section>
+      <!-- MIE-23: abstract Hugo presence (hidden in avatar mode) -->
+      <div id="hugo-presence" class="hidden" aria-hidden="true">
+        <div class="presence-orb" aria-hidden="true">
+          <span class="presence-core"></span>
+          <span class="presence-ring"></span>
+          <span class="presence-line"></span>
+        </div>
       </div>
 
-      <aside id="market-panel" class="panel hidden"></aside>
+      <div id="left-col">
+        <section id="brief-panel" class="panel"></section>
+        <section id="questions-panel" class="panel chapter hidden"></section>
+      </div>
+
+      <aside id="market-panel" class="panel chapter hidden"></aside>
+
+      <section id="execution-panel" class="panel chapter hidden"></section>
 
       <section id="answer-panel" class="panel hidden"></section>
 
