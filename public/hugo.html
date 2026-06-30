@@ -14,6 +14,13 @@
 
     <!-- Avatar Layer (visual only) -->
     <div id="avatar-layer">
+      <!-- Audio outside #avatar-container so abstract mode (collapsed/hidden
+           container) never suspends remote playback or triggers idle teardown. -->
+      <audio
+        id="avatar-audio"
+        autoplay>
+      </audio>
+
       <div id="avatar-container">
 
         <video
@@ -22,11 +29,6 @@
           playsinline
           style="width:100%;height:100%;object-fit:cover;display:none;">
         </video>
-
-        <audio
-          id="avatar-audio"
-          autoplay>
-        </audio>
 
         <div id="avatar-fallback" style="display:none;width:100%;height:100%;">
           <iframe

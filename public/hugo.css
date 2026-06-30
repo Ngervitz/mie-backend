@@ -844,6 +844,16 @@ body[data-presentation-mode="abstract"] #avatar-fallback,
 body[data-presentation-mode="abstract"] #avatar-status {
   display: none !important;
 }
+/* Keep remote audio playable — must not inherit collapsed container suppression. */
+body[data-presentation-mode="abstract"] #avatar-audio {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
 
 /* ---- Layout: pulse center-left, document right (reference composition) ---- */
 body[data-presentation-mode="abstract"] #intelligence-layer {

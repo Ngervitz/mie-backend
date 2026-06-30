@@ -41,6 +41,15 @@
   var abstractRemoteSpeaking = false;
   var abstractEndedUntil = 0;
 
+  function lifecycleLog(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[HUGO lifecycle]', msg, extra);
+      else console.log('[HUGO lifecycle]', msg);
+    } catch (err) {
+      // never throw
+    }
+  }
+
   function applyPresentationMode() {
     try {
       if (isAbstractMode) {
@@ -478,6 +487,9 @@
       finishBriefingReveal();
       return;
     }
+    if (avatarConversationActive) {
+      resetAvatarIdleTimer('briefing_chapter');
+    }
     revealChapter(briefingChapters[nextChapterIndex]);
     nextChapterIndex += 1;
     scheduleNextChapterReveal();
@@ -525,7 +537,7 @@
       || hugoConversationState === 'connecting';
     var speaking = audioSpeaking || abstractRemoteSpeaking
       || hugoConversationState === 'speaking';
-    var ended = Date.now() < abstractEndedUntil;
+    var ended = !avatarConversationActive && Date.now() < abstractEndedUntil;
 
     var pulseState = 'idle';
     if (ended) pulseState = 'ended';
@@ -558,10 +570,21 @@
   }
 
   function wireAbstractAudioPresence(audioEl) {
-    if (!isAbstractMode || !audioEl || audioEl.__hugoPresenceWired) return;
-    audioEl.__hugoPresenceWired = true;
-    ['play', 'pause', 'ended', 'volumechange'].forEach(function (evt) {
-      audioEl.addEventListener(evt, syncAbstractPresence);
+    wireAvatarAudioLifecycle(audioEl);
+  }
+
+  // Remote audio play = real conversation activity (all presentation modes).
+  function wireAvatarAudioLifecycle(audioEl) {
+    if (!audioEl || audioEl.__hugoLifecycleWired) return;
+    audioEl.__hugoLifecycleWired = true;
+    function onAudioActivity(evt) {
+      if (isAbstractMode) syncAbstractPresence();
+      if (avatarConversationActive && (evt === 'play' || evt === 'playing')) {
+        resetAvatarIdleTimer('remote_audio');
+      }
+    }
+    ['play', 'playing', 'pause', 'ended', 'volumechange'].forEach(function (evt) {
+      audioEl.addEventListener(evt, function () { onAudioActivity(evt); });
     });
   }
 
@@ -1414,6 +1437,7 @@
         renewAvatarSession();
       }, delaySec * 1000);
       avatarLog('renewal scheduled', { inSeconds: Math.round(delaySec) });
+      lifecycleLog('renewal scheduled', { inSeconds: Math.round(delaySec) });
     } catch (err) {
       // never throw
     }
@@ -1557,6 +1581,7 @@
         avatarLog('idle timeout reached (45s of conversation inactivity)');
         executeAvatarStopFlow('idle_timeout');
       }, AVATAR_IDLE_MS);
+      lifecycleLog('idle reset', { reason: reason || 'unknown' });
       avatarLog('idle timer reset', { reason: reason || 'unknown' });
     } catch (err) {
       // never throw
@@ -1578,6 +1603,7 @@
       }
       avatarStopExecuted = true;
       avatarConversationActive = false;
+      lifecycleLog('stopped: reason=' + (reason || 'manual'));
       syncAbstractPresence();
       var sessionId = avatarLifecycle.sessionId;
       avatarLog('stop flow', { reason: reason || 'manual', hasSessionId: !!sessionId });
@@ -1692,7 +1718,10 @@
     // later stop flow can run exactly once for THIS session.
     avatarConversationActive = true;
     avatarStopExecuted = false;
+    abstractEndedUntil = 0;
+    abstractRemoteSpeaking = false;
     avatarLog('conversation active');
+    lifecycleLog((isAbstractMode ? 'abstract ' : '') + 'start');
     syncAbstractPresence();
 
     // MIE-17C: clicking the CTA is real conversation activity — (re)start the
@@ -1885,6 +1914,7 @@
           var maxDur = session && session.max_session_duration;
           avatarLifecycle.maxSessionDuration = (typeof maxDur === 'number'
             && isFinite(maxDur) && maxDur > 0) ? maxDur : DEFAULT_MAX_SESSION_DURATION;
+          lifecycleLog('session created');
 
           // UMD global name varies by build; accept both spellings.
           var LiveKit = window.LivekitClient || window.LiveKitClient;
@@ -1982,8 +2012,8 @@
               });
             }
 
-            // MIE-23: reuse LiveKit speaking signal for abstract presence (no parallel integration).
-            if (RoomEvent.ActiveSpeakersChanged && isAbstractMode) {
+            // MIE-23 / MIE-24: LiveKit speaking signal — abstract presence + idle reset.
+            if (RoomEvent.ActiveSpeakersChanged) {
               room.on(RoomEvent.ActiveSpeakersChanged, function (speakers) {
                 try {
                   abstractRemoteSpeaking = false;
@@ -1996,7 +2026,10 @@
                       }
                     }
                   }
-                  syncAbstractPresence();
+                  if (abstractRemoteSpeaking && avatarConversationActive) {
+                    resetAvatarIdleTimer('livekit_speaker');
+                  }
+                  if (isAbstractMode) syncAbstractPresence();
                 } catch (spErr) {
                   // never throw
                 }
@@ -2012,6 +2045,7 @@
               });
               setLifecycleState('connected');
               avatarLog('avatar connected');
+              lifecycleLog('livekit connected');
               // MIE-19C (AUDIT): begin periodic snapshots (idempotent; also
               // started by RoomEvent.Connected when that event is emitted).
               lkLog('connect resolved');
