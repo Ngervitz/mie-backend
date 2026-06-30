@@ -115,6 +115,19 @@ html, body {
   border: 0;
 }
 
+/* Remote LiveKit audio — outside #avatar-container for abstract lifecycle, but must
+   never participate in #avatar-layer flex layout (avatar or abstract mode). */
+#avatar-audio {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  margin: 0;
+}
+
 /* ---------- Report (the document) ---------- */
 #intelligence-layer {
   z-index: 3;
@@ -275,7 +288,7 @@ html, body {
 }
 .report-expand-link:hover { color: var(--text-muted); }
 
-audio { width: 100%; margin-top: 4px; }
+audio:not(#avatar-audio) { width: 100%; margin-top: 4px; }
 
 .transcript-toggle {
   background: none;
@@ -671,6 +684,11 @@ audio { width: 100%; margin-top: 4px; }
 #intelligence-layer::-webkit-scrollbar-thumb:hover,
 #answer-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
 
+/* Avatar mode — abstract-only DOM must not affect layout or CTA styling. */
+body[data-presentation-mode="avatar"] #hugo-presence {
+  display: none !important;
+}
+
 /* ============================================================================
    DESKTOP â€” two-column workspace (priority experience)
    ============================================================================ */
@@ -836,16 +854,6 @@ body[data-presentation-mode="abstract"] #avatar-video,
 body[data-presentation-mode="abstract"] #avatar-fallback,
 body[data-presentation-mode="abstract"] #avatar-status {
   display: none !important;
-}
-/* Keep remote audio playable — must not inherit collapsed container suppression. */
-body[data-presentation-mode="abstract"] #avatar-audio {
-  position: fixed;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
 }
 
 /* Single continuous document. */
