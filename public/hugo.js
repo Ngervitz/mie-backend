@@ -348,6 +348,15 @@
   var DEFAULT_MAX_SESSION_DURATION = 300;
   var RENEWAL_LEAD_SECONDS = 30;
 
+  // MIE-17B: on-demand lifecycle flags.
+  // - avatarConversationActive: true only between an explicit CTA start and a
+  //   stop. Gates ALL background activity (keep-alive, renewal). When false there
+  //   must be NO session, NO timers, NO network activity → ZERO credits.
+  // - avatarStopExecuted: idempotency latch so pagehide + beforeunload +
+  //   visibilitychange together fire the stop flow at most once per session.
+  var avatarConversationActive = false;
+  var avatarStopExecuted = false;
+
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
     var video = document.getElementById('avatar-video');
@@ -990,6 +999,20 @@
       ensureAvatarConnected()
         .then(function () {
           avatarLifecycle.renewing = false;
+          // MIE-17B: if the conversation was stopped (tab hidden / unload) while
+          // this renewal was reconnecting, do NOT keep the freshly created
+          // session alive — tear it down immediately so no orphan session leaks.
+          if (!avatarConversationActive) {
+            avatarLog('renewal completed after stop; tearing down fresh session');
+            var freshSid = avatarLifecycle.sessionId;
+            if (freshSid) sendAvatarStop(freshSid);
+            stopAvatarKeepAlive();
+            stopNativeKeepAlive();
+            clearRenewalTimer();
+            cleanupAvatarLifecycle('disconnected');
+            setRenewalStatus('');
+            return;
+          }
           setRenewalStatus('');
           avatarLog('renewal connected');
           // The next renewal is scheduled by initAvatar's connect handler.
@@ -1009,6 +1032,84 @@
       avatarLifecycle.renewing = false;
       clearRenewalTimer();
       avatarLog('renewal failed');
+    }
+  }
+
+  // MIE-17B: tell the backend to stop the LiveAvatar session. Prefers
+  // navigator.sendBeacon (survives page unload) with a urlencoded body; falls
+  // back to a keepalive fetch. Never throws. Never blocks the browser.
+  function sendAvatarStop(sessionId) {
+    try {
+      if (!sessionId) return;
+      var url = '/hugo/avatar/stop';
+
+      if (navigator && typeof navigator.sendBeacon === 'function') {
+        try {
+          // URLSearchParams → application/x-www-form-urlencoded (beacon-safe).
+          var params = new URLSearchParams();
+          params.set('session_id', sessionId);
+          var queued = navigator.sendBeacon(url, params);
+          avatarLog('stop sent via beacon', { queued: !!queued });
+          if (queued) return;
+        } catch (beaconErr) {
+          // fall through to fetch
+        }
+      }
+
+      // Fallback: keepalive fetch is best-effort during unload.
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+        keepalive: true,
+      })
+        .then(function () { avatarLog('stop sent via fetch'); })
+        .catch(function (err) { console.warn('[Hugo Avatar] stop request failed', err); });
+    } catch (err) {
+      console.warn('[Hugo Avatar] stop request error');
+    }
+  }
+
+  // MIE-17B: the ONE centralized stop path. Idempotent (runs at most once per
+  // session via avatarStopExecuted), tears down EVERYTHING, and is safe to call
+  // from pagehide / beforeunload / visibilitychange or a normal end-of-conversation.
+  function executeAvatarStopFlow(reason) {
+    try {
+      if (avatarStopExecuted) {
+        avatarLog('stop flow ignored (already executed)');
+        return;
+      }
+      // Nothing to stop: no session, no room, not active → ZERO work / requests.
+      if (!avatarConversationActive && !avatarLifecycle.sessionId && !avatarLifecycle.room) {
+        return;
+      }
+      avatarStopExecuted = true;
+      avatarConversationActive = false;
+      var sessionId = avatarLifecycle.sessionId;
+      avatarLog('stop flow', { reason: reason || 'manual', hasSessionId: !!sessionId });
+
+      // 1) Ask the backend to stop the LiveAvatar session (stops credit usage).
+      if (sessionId) sendAvatarStop(sessionId);
+
+      // 2) Clear EVERY timer/interval/timeout and disconnect the room. Note:
+      //    cleanupAvatarLifecycle → disposeAvatarRoom already stops the keep-alive
+      //    interval, the native keep-alive timer/socket, the renewal timer and the
+      //    fallback timeout, and calls room.disconnect(); we also call them here
+      //    explicitly so no timer can possibly survive a stop.
+      stopAvatarKeepAlive();
+      stopNativeKeepAlive();
+      clearRenewalTimer();
+
+      // 3) Disconnect LiveKit + reset all room/session references via the existing
+      //    cleanup path. avatarStopExecuted guards the native Disconnected handler
+      //    so this intentional teardown is not treated as an error.
+      cleanupAvatarLifecycle('disconnected');
+
+      // 4) Reset conversation flags so a fresh CTA can start a new session later.
+      window.__hugoBriefingDispatched = false;
+      avatarLog('stop flow complete');
+    } catch (err) {
+      // never throw — must not block the browser during unload.
     }
   }
 
@@ -1083,6 +1184,13 @@
     }
     window.__hugoBriefingDispatched = true;
     avatarLog('briefing dispatch locked');
+
+    // MIE-17B: a brand-new session begins here. Mark the conversation active
+    // (enables keep-alive/renewal once connected) and reset the stop latch so a
+    // later stop flow can run exactly once for THIS session.
+    avatarConversationActive = true;
+    avatarStopExecuted = false;
+    avatarLog('conversation active');
 
     // 2) The click is the official audio-unlock gesture (no autoplay hacks).
     window.__hugoAudioUnlocked = true;
@@ -1275,6 +1383,9 @@
             if (RoomEvent.Disconnected) {
               room.on(RoomEvent.Disconnected, function (reason) {
                 if (avatarDisposing) return;
+                // MIE-17B: during an intentional stop we orchestrate teardown
+                // ourselves; do not show fallback or reset state from here.
+                if (avatarStopExecuted) return;
                 // MIE-21: during a controlled renewal we orchestrate teardown
                 // ourselves; ignore the old room's native disconnect here.
                 if (avatarLifecycle.renewing) return;
@@ -1346,13 +1457,21 @@
               // started by RoomEvent.Connected when that event is emitted).
               lkLog('connect resolved');
               startAuditSnapshots();
-              // MIE-20: keep the LiveAvatar session alive while connected.
-              startAvatarKeepAlive();
-              // MIE-20B: official native LITE keep-alive over the session control
-              // WebSocket (guarded on ws_url; no-op + log in connector mode).
-              startNativeKeepAlive();
-              // MIE-21: schedule the single renewal before this session expires.
-              scheduleAvatarRenewal();
+              // MIE-17B: background activity (keep-alive + renewal) runs ONLY for
+              // an active conversation. Without this gate an idle/unused session
+              // would keep consuming credits. The only connect paths are the CTA
+              // and renewal, both of which keep avatarConversationActive = true.
+              if (avatarConversationActive) {
+                // MIE-20: keep the LiveAvatar session alive while connected.
+                startAvatarKeepAlive();
+                // MIE-20B: official native LITE keep-alive over the session control
+                // WebSocket (guarded on ws_url; no-op + log in connector mode).
+                startNativeKeepAlive();
+                // MIE-21: schedule the single renewal before this session expires.
+                scheduleAvatarRenewal();
+              } else {
+                avatarLog('connected without active conversation; no keep-alive/renewal');
+              }
               // Only advance to 'ready' if the CTA flow hasn't moved further.
               // The avatar is connected but SILENT: it never speaks until the
               // user clicks the CTA. Make the CTA active and clearly waiting.
@@ -1445,6 +1564,8 @@
         maxSessionDuration: avatarLifecycle.maxSessionDuration,
         renewing: avatarLifecycle.renewing,
         renewalTimerActive: !!avatarRenewalTimerId,
+        conversationActive: avatarConversationActive,
+        stopExecuted: avatarStopExecuted,
         nativeKeepAlive: {
           socketOpen: !!(avatarNativeKaSocket && avatarNativeKaSocket.readyState === 1),
           timerActive: !!avatarNativeKaTimerId,
@@ -1474,22 +1595,25 @@
     }
   });
 
-  // MIE-20: stop the keep-alive loop when the page goes away (no leaks).
-  window.addEventListener('pagehide', stopAvatarKeepAlive);
-  window.addEventListener('beforeunload', stopAvatarKeepAlive);
-  // MIE-20B: also tear down the native LITE keep-alive socket on unload.
-  window.addEventListener('pagehide', stopNativeKeepAlive);
-  window.addEventListener('beforeunload', stopNativeKeepAlive);
-  // MIE-21: clear the renewal timer on unload (no leaks).
-  window.addEventListener('pagehide', clearRenewalTimer);
-  window.addEventListener('beforeunload', clearRenewalTimer);
+  // MIE-17B: ONE centralized, idempotent stop path for every teardown trigger.
+  // executeAvatarStopFlow() stops the backend session, disconnects LiveKit, and
+  // clears all timers — running at most once per session, so pagehide +
+  // beforeunload + visibilitychange can never fire three simultaneous stops.
+  window.addEventListener('pagehide', function () { executeAvatarStopFlow('pagehide'); });
+  window.addEventListener('beforeunload', function () { executeAvatarStopFlow('beforeunload'); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') {
+      executeAvatarStopFlow('visibilitychange');
+    }
+  });
 
   load();
 
-  // MIE-18A: connect the avatar automatically on load (single connection path).
-  // Runs independently of the rest of Hugo and never blocks it.
-  setHugoConversationState('connecting');
-  ensureAvatarConnected().catch(function () {
-    // Failure already logged + fell back to the iframe; never break the page.
-  });
+  // MIE-17B: ON-DEMAND LIFECYCLE. The avatar session is NO LONGER created on page
+  // load — that wasted LiveAvatar credits for anyone merely reading the Brief.
+  // We deliberately do NOT call ensureAvatarConnected()/initAvatar() here. The
+  // ONLY path allowed to create a session is the CTA (startConversation). On load
+  // we just present the enabled CTA in a neutral "ready to start" state; zero
+  // LiveAvatar credits are consumed until the user clicks.
+  setHugoConversationState('ready');
 })();

@@ -3,7 +3,7 @@ const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
 const { askHugo } = require('../services/hugo-ask');
 const { handleOpenAiChatCompletion, streamOpenAiChatCompletion } = require('../services/hugo-openai');
-const { startAvatarSession, keepAliveAvatarSession } = require('../services/hugo-avatar');
+const { startAvatarSession, keepAliveAvatarSession, stopAvatarSession } = require('../services/hugo-avatar');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
@@ -238,6 +238,30 @@ router.post('/avatar/keepalive', async (req, res) => {
   } catch (err) {
     const status = err && typeof err.status === 'number' ? err.status : 502;
     return res.status(status).json({ error: 'LiveAvatar keep-alive failed', status });
+  }
+});
+
+// MIE-17B: stop proxy. Ends the LiveAvatar session so credits stop accruing.
+// Accepts BOTH application/json and application/x-www-form-urlencoded so the
+// browser can use navigator.sendBeacon() during unload. Idempotent: a second
+// stop (or stopping an already-closed session) still returns ok. Never throws
+// in a way that could block the closing browser; never exposes secrets.
+router.post('/avatar/stop', express.urlencoded({ extended: false }), async (req, res) => {
+  const raw = req.body && req.body.session_id;
+  const sessionId = typeof raw === 'string' ? raw.trim() : '';
+  if (!sessionId) {
+    return res.status(400).json({ error: 'session_id is required' });
+  }
+
+  try {
+    await stopAvatarSession(sessionId);
+    return res.json({ ok: true });
+  } catch (err) {
+    // Idempotent + unload-safe: never surface a failure that could matter to a
+    // closing browser. Log the upstream issue and still report ok.
+    const status = err && typeof err.status === 'number' ? err.status : 502;
+    logger.warn('Hugo avatar stop upstream issue', { status });
+    return res.json({ ok: true });
   }
 });
 

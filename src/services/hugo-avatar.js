@@ -198,4 +198,40 @@ async function keepAliveAvatarSession(sessionId) {
   return { ok: true };
 }
 
-module.exports = { startAvatarSession, keepAliveAvatarSession, AvatarError };
+// MIE-17B: stop a LiveAvatar LITE session so credits stop accruing the moment a
+// conversation ends (or the tab/browser closes). Idempotent by design: stopping
+// an already-closed session is treated as success. API key stays server-side.
+async function stopAvatarSession(sessionId) {
+  const startedMs = Date.now();
+  logger.info('Hugo avatar stop started', { hasSessionId: !!sessionId });
+
+  const apiKey = process.env.LIVEAVATAR_API_KEY;
+  if (!apiKey) {
+    logger.error('Hugo avatar stop failed', { durationMs: Date.now() - startedMs, status: 500 });
+    throw new AvatarError(500, errBody(500, 'config', 'LiveAvatar stop failed', 'missing_config'));
+  }
+
+  let res;
+  try {
+    res = await fetch(`${LIVEAVATAR_BASE}/sessions/stop`, {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, reason: 'USER_CLOSED' }),
+    });
+  } catch (err) {
+    logger.error('Hugo avatar stop failed', { durationMs: Date.now() - startedMs, status: 502 });
+    throw new AvatarError(502, errBody(502, 'liveavatar', 'LiveAvatar stop failed', 'provider_unreachable'));
+  }
+
+  // Idempotent: any reached response (including 4xx for an already-closed
+  // session) means the session is gone/closing. Never treat that as a failure.
+  logger.info('Hugo avatar stop completed', { durationMs: Date.now() - startedMs, status: res.status });
+  return { ok: true };
+}
+
+module.exports = {
+  startAvatarSession,
+  keepAliveAvatarSession,
+  stopAvatarSession,
+  AvatarError,
+};
