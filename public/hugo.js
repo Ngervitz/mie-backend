@@ -36,9 +36,20 @@
   var PRESENTATION_MODE = resolvePresentationMode();
   var isAbstractMode = PRESENTATION_MODE === 'abstract';
 
+  // MIE-23B: remote speaking flag — set ONLY by the existing LiveKit
+  // ActiveSpeakersChanged handler; read by syncAbstractPresence (no parallel listeners).
+  var abstractRemoteSpeaking = false;
+  var abstractEndedUntil = 0;
+
   function applyPresentationMode() {
     try {
-      document.body.setAttribute('data-presentation-mode', PRESENTATION_MODE);
+      if (isAbstractMode) {
+        document.body.setAttribute('data-presentation-mode', PRESENTATION_MODE);
+        document.body.setAttribute('data-hugo-conversation', hugoConversationState);
+      } else {
+        document.body.setAttribute('data-presentation-mode', PRESENTATION_MODE);
+        document.body.removeAttribute('data-hugo-conversation');
+      }
       if (hugoPresence) {
         if (isAbstractMode) {
           hugoPresence.classList.remove('hidden');
@@ -493,25 +504,38 @@
     revealNextChapter();
   }
 
-  // MIE-23: animate the abstract presence from existing conversational state and,
-  // when available, LiveKit audio playback. No parallel integration.
+  // MIE-23 / MIE-23B: pulse states via existing conversational + audio + LiveKit
+  // signals. One function, no parallel listeners.
   function syncAbstractPresence() {
     if (!isAbstractMode || !hugoPresence) return;
-    var speaking = false;
-    if (['briefing', 'speaking', 'connecting'].indexOf(hugoConversationState) !== -1) {
-      speaking = true;
-    }
-    if (asking) speaking = true;
+
+    var audioSpeaking = false;
     try {
       var audioEl = document.getElementById('avatar-audio');
       if (audioEl && audioEl.srcObject && !audioEl.paused && !audioEl.muted) {
-        speaking = true;
+        audioSpeaking = true;
       }
     } catch (err) {
       // never throw
     }
-    hugoPresence.classList.toggle('presence-speaking', speaking);
-    hugoPresence.classList.toggle('presence-active', avatarConversationActive || speaking);
+
+    var thinking = asking
+      || hugoConversationState === 'thinking'
+      || hugoConversationState === 'briefing'
+      || hugoConversationState === 'connecting';
+    var speaking = audioSpeaking || abstractRemoteSpeaking
+      || hugoConversationState === 'speaking';
+    var ended = Date.now() < abstractEndedUntil;
+
+    var pulseState = 'idle';
+    if (ended) pulseState = 'ended';
+    else if (speaking) pulseState = 'speaking';
+    else if (thinking) pulseState = 'thinking';
+
+    var states = ['idle', 'thinking', 'speaking', 'ended'];
+    for (var si = 0; si < states.length; si++) {
+      hugoPresence.classList.toggle('presence-state-' + states[si], pulseState === states[si]);
+    }
   }
 
   function wireAbstractAudioPresence(audioEl) {
@@ -1071,6 +1095,9 @@
         else if (state === 'error') status.textContent = 'No se pudo iniciar la conversación.';
         else status.textContent = '';
       }
+      if (isAbstractMode) {
+        document.body.setAttribute('data-hugo-conversation', state);
+      }
       syncAbstractPresence();
     } catch (err) {
       // State updates must never break the page.
@@ -1561,6 +1588,8 @@
       // conversación con Hugo"). Note: hasDeliveredInitialBrief is intentionally
       // NOT reset here — it is page-session scoped.
       setHugoConversationState('ready');
+      if (isAbstractMode) abstractEndedUntil = Date.now() + 2600;
+      syncAbstractPresence();
       avatarLog('stop flow complete');
     } catch (err) {
       // never throw — must not block the browser during unload.
@@ -1938,18 +1967,16 @@
             if (RoomEvent.ActiveSpeakersChanged && isAbstractMode) {
               room.on(RoomEvent.ActiveSpeakersChanged, function (speakers) {
                 try {
-                  if (!hugoPresence) return;
-                  var remoteSpeaking = false;
+                  abstractRemoteSpeaking = false;
                   if (Array.isArray(speakers)) {
                     for (var si = 0; si < speakers.length; si++) {
                       var sp = speakers[si];
                       if (sp && room.localParticipant && sp !== room.localParticipant) {
-                        remoteSpeaking = true;
+                        abstractRemoteSpeaking = true;
                         break;
                       }
                     }
                   }
-                  hugoPresence.classList.toggle('presence-speaking', remoteSpeaking);
                   syncAbstractPresence();
                 } catch (spErr) {
                   // never throw
