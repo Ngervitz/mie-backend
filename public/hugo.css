@@ -1,12 +1,33 @@
-:root {
-  --text: #f5f7fa;
-  --text-muted: #aab2c0;
-  --text-faint: #7e8696;
-  --panel-bg: rgba(18, 22, 30, 0.62);
-  --panel-border: rgba(255, 255, 255, 0.09);
-  --panel-radius: 16px;
-  --blur: blur(12px);
+/* ============================================================================
+   Hugo — Executive Intelligence Dashboard
+   MIE-22 Visual Pass (CSS ONLY — no DOM, IDs, classes, or behavior changed).
+   Design language: Bloomberg clarity · Apple whitespace · Notion typography ·
+   Linear restraint. Hierarchy through type and space, not color or borders.
+   ============================================================================ */
 
+:root {
+  /* Type colors — calm, high-contrast, identity preserved. */
+  --text: #f4f6fa;
+  --text-strong: #ffffff;
+  --text-muted: #aab3c2;
+  --text-faint: #79828f;
+
+  /* Surfaces — lighter glass, fewer visible edges. */
+  --panel-bg: rgba(16, 20, 28, 0.55);
+  --panel-bg-solid: rgba(9, 11, 18, 0.80);
+  --panel-border: rgba(255, 255, 255, 0.055);
+  --panel-border-soft: rgba(255, 255, 255, 0.04);
+  --panel-radius: 18px;
+  --blur: blur(16px);
+
+  /* Depth — soft, executive, never decorative. */
+  --shadow-soft: 0 20px 55px -28px rgba(0, 0, 0, 0.75);
+  --shadow-frame: 0 34px 80px -32px rgba(0, 0, 0, 0.7);
+
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.10);
+
+  /* Attention / confidence — branding preserved verbatim. */
   --att-normal: #8a93a3;
   --att-interesting: #3b82f6;
   --att-high: #f59e0b;
@@ -29,6 +50,10 @@ html, body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
+  letter-spacing: 0.002em;
 }
 
 #scene {
@@ -67,8 +92,10 @@ html, body {
 #avatar-container {
   width: clamp(320px, 34vw, 720px);
   aspect-ratio: 16 / 9;
-  border-radius: 18px;
+  border-radius: 20px;
   overflow: hidden;
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-frame);
 }
 
 #avatar-container iframe {
@@ -84,36 +111,38 @@ html, body {
   pointer-events: none;
 }
 
-/* Header */
+/* Header — quiet overlay, type-led wordmark. */
 #hugo-header {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 20px;
-  background: rgba(8, 10, 14, 0.55);
+  padding: 0 26px;
+  background: rgba(8, 10, 14, 0.5);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
-  border-bottom: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border-soft);
   pointer-events: auto;
   z-index: 5;
 }
 
 #hugo-header .header-left {
   font-weight: 700;
-  letter-spacing: 0.18em;
-  font-size: 0.95rem;
+  letter-spacing: 0.26em;
+  font-size: 0.92rem;
+  color: var(--text-strong);
 }
 
 #hugo-header .header-center {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 #hugo-header .header-right {
@@ -125,13 +154,13 @@ html, body {
 /* Columns */
 #left-col {
   position: absolute;
-  top: 72px;
+  top: 76px;
   left: 24px;
   width: 420px;
-  bottom: 116px;
+  bottom: 120px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   overflow-y: auto;
   pointer-events: none;
   padding-right: 2px;
@@ -139,7 +168,7 @@ html, body {
 
 #market-panel {
   position: absolute;
-  top: 72px;
+  top: 76px;
   right: 24px;
   width: 300px;
   max-height: 60vh;
@@ -153,53 +182,53 @@ html, body {
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--panel-border);
   border-radius: var(--panel-radius);
-  padding: 18px;
+  padding: 24px;
   pointer-events: auto;
 }
 
 #brief-panel { max-height: 60vh; overflow-y: auto; }
 
 .panel .panel-title {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.16em;
   color: var(--text-faint);
-  margin: 0 0 12px;
+  margin: 0 0 16px;
 }
 
 /* Brief content */
 .voice-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 22px;
 }
 
 .btn {
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.055);
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 9px 14px;
+  border-radius: 12px;
+  padding: 12px 16px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.18s ease, border-color 0.18s ease;
   pointer-events: auto;
 }
 
-.btn:hover { background: rgba(255, 255, 255, 0.13); }
-.btn:disabled { opacity: 0.55; cursor: default; }
+.btn:hover { background: rgba(255, 255, 255, 0.11); }
+.btn:disabled { opacity: 0.5; cursor: default; }
 
 .btn-primary {
-  background: rgba(59, 130, 246, 0.18);
-  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(59, 130, 246, 0.4);
 }
-.btn-primary:hover { background: rgba(59, 130, 246, 0.3); }
+.btn-primary:hover { background: rgba(59, 130, 246, 0.26); }
 
-.voice-status { font-size: 0.82rem; color: var(--text-muted); }
+.voice-status { font-size: 0.82rem; color: var(--text-muted); letter-spacing: 0.01em; }
 
 audio { width: 100%; margin-top: 4px; }
 
@@ -220,138 +249,188 @@ audio { width: 100%; margin-top: 4px; }
   margin-top: 8px;
   font-size: 0.86rem;
   color: var(--text-muted);
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
+/* Hero headline — the Executive Brief dominates through type and space. */
 .headline {
-  font-size: 1.35rem;
+  font-size: 1.62rem;
   font-weight: 700;
-  line-height: 1.25;
-  margin: 0 0 10px;
+  line-height: 1.22;
+  letter-spacing: -0.012em;
+  color: var(--text-strong);
+  margin: 0 0 14px;
 }
 
 .why-it-matters {
-  font-size: 0.95rem;
+  font-size: 1rem;
+  line-height: 1.62;
   color: var(--text-muted);
-  margin: 0 0 18px;
+  margin: 0 0 24px;
+  max-width: 60ch;
 }
 
-.brief-section { margin-top: 16px; }
+.brief-section { margin-top: 28px; }
 .brief-section:first-of-type { margin-top: 0; }
 
 .section-label {
-  font-size: 0.7rem;
+  font-size: 0.67rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.16em;
   color: var(--text-faint);
-  margin: 0 0 8px;
+  margin: 0 0 14px;
 }
 
+/* Top Stories — separation by rhythm, not heavy rules. */
 .story {
-  border-left: 2px solid rgba(255, 255, 255, 0.12);
-  padding-left: 12px;
-  margin-bottom: 12px;
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 18px;
 }
 .story:last-child { margin-bottom: 0; }
 .story .story-entity {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #93b4f5;
-  margin-bottom: 3px;
+  letter-spacing: 0.12em;
+  color: #8fb0f0;
+  margin-bottom: 5px;
 }
-.story .story-fact { font-size: 0.94rem; font-weight: 600; margin-bottom: 3px; }
-.story .story-interpretation { font-size: 0.85rem; color: var(--text-muted); }
+.story .story-fact {
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+.story .story-interpretation {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
 
+/* Recommended Action — draws the eye through elevation + type, not loud color. */
 .action-card {
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  position: relative;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-left: 2px solid rgba(59, 130, 246, 0.7);
   border-radius: 12px;
-  padding: 14px;
+  padding: 18px 18px 18px 20px;
+  box-shadow: var(--shadow-soft);
 }
 .action-card .action-priority {
   display: inline-block;
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #bcd2fb;
+  letter-spacing: 0.14em;
+  color: #aecbfb;
+  margin-bottom: 8px;
+}
+.action-card .action-text {
+  font-size: 1.02rem;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--text-strong);
   margin-bottom: 6px;
 }
-.action-card .action-text { font-size: 0.96rem; font-weight: 600; margin-bottom: 4px; }
-.action-card .action-reason { font-size: 0.84rem; color: var(--text-muted); }
+.action-card .action-reason {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
 
-.watch-item { margin-bottom: 10px; }
+/* Watch Tomorrow — clearly secondary: lighter, quieter, more compact. */
+.watch-item { margin-bottom: 13px; }
 .watch-item:last-child { margin-bottom: 0; }
-.watch-item .watch-entity { font-size: 0.84rem; font-weight: 600; }
-.watch-item .watch-signal { font-size: 0.88rem; }
-.watch-item .watch-if { font-size: 0.8rem; color: var(--text-faint); margin-top: 2px; }
+.watch-item .watch-entity {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+}
+.watch-item .watch-signal {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.watch-item .watch-if {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
 
-/* Market */
+/* Market / Supporting Information — quiet reference, numbers stand out. */
 .market-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
   font-size: 0.88rem;
 }
 .market-row:last-child { border-bottom: none; }
-.market-row .market-entity { color: var(--text); }
-.market-row .market-ads { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.market-row .market-entity { color: var(--text-muted); }
+.market-row .market-ads {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
 
 /* Suggested / next questions */
-.q-list { display: flex; flex-direction: column; gap: 8px; }
+.q-list { display: flex; flex-direction: column; gap: 10px; }
 .q-btn {
   font: inherit;
-  font-size: 0.86rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
   text-align: left;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 12px;
+  padding: 12px 14px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.18s ease, border-color 0.18s ease;
   pointer-events: auto;
 }
-.q-btn:hover { background: rgba(255, 255, 255, 0.11); border-color: rgba(255, 255, 255, 0.2); }
+.q-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); }
 
 /* Answer panel — floats above the input, separate from the Executive Brief column. */
 #answer-panel {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 100px;
+  bottom: 104px;
   margin: 0 auto;
-  width: min(680px, 92vw);
+  width: min(700px, 92vw);
   max-height: 40vh;
   overflow-y: auto;
   z-index: 5;
+  box-shadow: var(--shadow-soft);
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.35s ease, transform 0.35s ease;
 }
 #answer-panel.visible { opacity: 1; transform: none; }
-.answer-text { font-size: 0.95rem; line-height: 1.55; white-space: pre-wrap; margin: 0 0 14px; }
+.answer-text { font-size: 0.98rem; line-height: 1.62; white-space: pre-wrap; margin: 0 0 16px; }
 
 /* ---------- Badges ---------- */
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 5px 10px;
+  padding: 5px 11px;
   border-radius: 999px;
-  border: 1px solid currentColor;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  background: rgba(255, 255, 255, 0.03);
 }
 .badge::before {
   content: "";
@@ -389,7 +468,7 @@ audio { width: 100%; margin-top: 4px; }
 }
 
 #input-wrap {
-  width: min(680px, 92vw);
+  width: min(700px, 92vw);
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -397,8 +476,8 @@ audio { width: 100%; margin-top: 4px; }
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--panel-border);
-  border-radius: 14px;
-  padding: 8px 8px 8px 14px;
+  border-radius: 16px;
+  padding: 8px 8px 8px 16px;
   pointer-events: auto;
 }
 
@@ -410,10 +489,10 @@ audio { width: 100%; margin-top: 4px; }
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.95rem;
-  line-height: 1.4;
+  font-size: 0.96rem;
+  line-height: 1.45;
   max-height: 120px;
-  padding: 8px 0;
+  padding: 9px 0;
 }
 #question-input::placeholder { color: var(--text-faint); }
 
@@ -423,17 +502,18 @@ audio { width: 100%; margin-top: 4px; }
   font-size: 0.9rem;
   font-weight: 600;
   color: #fff;
-  background: #2563eb;
+  background: var(--accent);
   border: none;
-  border-radius: 10px;
-  padding: 10px 18px;
+  border-radius: 11px;
+  padding: 11px 20px;
   cursor: pointer;
+  transition: background 0.18s ease;
 }
-#send-btn:hover { background: #1d4ed8; }
+#send-btn:hover { background: #2563eb; }
 #send-btn:disabled { opacity: 0.6; cursor: default; }
 
 #input-error {
-  width: min(680px, 92vw);
+  width: min(700px, 92vw);
   min-height: 16px;
   font-size: 0.82rem;
   color: #fda4a4;
@@ -455,25 +535,32 @@ audio { width: 100%; margin-top: 4px; }
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   font-size: 1.1rem;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 
 .hidden { display: none !important; }
 
-/* ---------- Scrollbars ---------- */
+/* ---------- Scrollbars — thin, unobtrusive ---------- */
 #left-col::-webkit-scrollbar,
 #brief-panel::-webkit-scrollbar,
 #market-panel::-webkit-scrollbar,
-#intelligence-layer::-webkit-scrollbar { width: 8px; }
+#answer-panel::-webkit-scrollbar,
+#intelligence-layer::-webkit-scrollbar { width: 7px; }
 #left-col::-webkit-scrollbar-thumb,
 #brief-panel::-webkit-scrollbar-thumb,
 #market-panel::-webkit-scrollbar-thumb,
+#answer-panel::-webkit-scrollbar-thumb,
 #intelligence-layer::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
 }
+#left-col::-webkit-scrollbar-thumb:hover,
+#brief-panel::-webkit-scrollbar-thumb:hover,
+#market-panel::-webkit-scrollbar-thumb:hover,
+#answer-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
 
-/* ---------- Mobile ---------- */
+/* ---------- Mobile (must not regress) ---------- */
 @media (max-width: 768px) {
   #avatar-layer {
     align-items: flex-start;
@@ -483,19 +570,20 @@ audio { width: 100%; margin-top: 4px; }
     width: min(96vw, calc(38vh * 16 / 9));
     height: 38vh;
     aspect-ratio: auto;
-    margin-top: 56px;
+    margin-top: 60px;
+    border-radius: 18px;
   }
 
   /* Intelligence layer becomes an independent scroll region below the avatar. */
   #intelligence-layer {
     position: absolute;
-    top: calc(38vh + 56px);
+    top: calc(38vh + 60px);
     left: 0;
     right: 0;
     bottom: 92px;
     overflow-y: auto;
     pointer-events: auto;
-    padding: 12px;
+    padding: 16px;
   }
 
   #left-col,
@@ -509,35 +597,43 @@ audio { width: 100%; margin-top: 4px; }
     pointer-events: auto;
     transform: none;
   }
-  #left-col { margin-bottom: 12px; }
-  #answer-panel { margin: 0 0 12px; }
+  #left-col { margin-bottom: 16px; gap: 16px; }
+  #answer-panel { margin: 0 0 16px; box-shadow: none; }
   #brief-panel { max-height: none; overflow: visible; }
 
-  #hugo-header { height: 56px; }
+  .headline { font-size: 1.45rem; }
+  .panel { padding: 20px; }
+
+  #hugo-header { height: 56px; padding: 0 18px; }
 }
 
-/* ---------- Desktop scene polish (MIE-14B) ---------- */
+/* ---------- Desktop scene composition (MIE-14B base + MIE-22 polish) ---------- */
 @media (min-width: 768px) {
-  /* 1. Background fills the viewport, warmer than pure black. */
+  /* Calm, deep backdrop. */
   body { background: #050508; }
   #scene { background: #050508; }
   #background-layer {
     background: radial-gradient(120% 90% at 50% 0%, #0c0e16 0%, #07080f 52%, #050508 100%);
   }
 
-  /* Avatar sits naturally between header and input (MIE-14B composition).
-     No full-viewport stretch, no artificial scaling. */
+  /* Avatar = a framed "screen" in Hugo's office, inset from every edge with a
+     soft shadow and rounded corners. The <video> keeps its inline object-fit:
+     cover, so the picture is never stretched, cropped differently, or distorted
+     — only the surrounding container is styled. */
   #avatar-container {
     position: fixed;
-    top: 56px;
-    left: 0;
-    right: 0;
-    bottom: 96px;
+    top: 80px;
+    left: 28px;
+    right: 28px;
+    bottom: 104px;
     width: auto;
     height: auto;
     max-width: none;
     aspect-ratio: auto;
-    border-radius: 0;
+    border-radius: 24px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: var(--shadow-frame);
   }
   #avatar-container iframe {
     width: 100%;
@@ -545,22 +641,25 @@ audio { width: 100%; margin-top: 4px; }
     border: 0;
   }
 
-  /* 3. Left panel — anchored glass frame (single frame; inner cards transparent). */
+  /* Executive Brief — the hero. A single light glass frame; inner cards are
+     transparent so the column reads as one composed report, not stacked widgets. */
   #left-col {
     position: fixed;
-    top: 80px;
+    top: 84px;
     left: 32px;
     bottom: auto;
-    width: 380px;
-    max-height: calc(100vh - 240px);
+    width: 420px;
+    max-height: calc(100vh - 236px);
     overflow-y: auto;
     pointer-events: auto;
-    background: rgba(8, 8, 16, 0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
-    padding: 20px;
+    gap: 0;
+    background: var(--panel-bg-solid);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 30px 28px;
+    box-shadow: var(--shadow-frame);
   }
   #left-col .panel {
     background: transparent;
@@ -569,33 +668,49 @@ audio { width: 100%; margin-top: 4px; }
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+  /* Suggested questions sit under the brief with a quiet divider of whitespace. */
+  #questions-panel:not(.hidden) {
+    margin-top: 26px;
+    padding-top: 24px;
+    border-top: 1px solid var(--panel-border-soft);
+  }
   #brief-panel { max-height: none; overflow: visible; }
 
-  /* 7. Right panel — same glass treatment, lowered slightly, more side spacing. */
+  .headline { font-size: 1.72rem; }
+
+  /* Supporting Information — same glass family, visually lighter / secondary. */
   #market-panel {
     position: fixed;
-    top: 100px;
+    top: 104px;
     right: 32px;
-    width: 260px;
-    max-height: calc(100vh - 240px);
+    width: 272px;
+    max-height: calc(100vh - 256px);
     overflow-y: auto;
-    background: rgba(8, 8, 16, 0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
-    padding: 20px;
+    background: var(--panel-bg-solid);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 24px 22px;
+    box-shadow: var(--shadow-frame);
   }
 
-  /* 5 (refined). Input floats over the office — not attached to a footer. */
-  #input-layer { bottom: 20px; padding: 0; }
+  /* Input floats over the office — not bolted to a footer. */
+  #input-layer { bottom: 22px; padding: 0; }
   #input-wrap {
-    width: 70vw;
-    max-width: 860px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    width: 64vw;
+    max-width: 820px;
+    box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.6);
   }
-  #input-error { width: 70vw; max-width: 860px; }
+  #input-error { width: 64vw; max-width: 820px; }
 
-  /* 6. Header — lightweight overlay above all layers. */
+  /* Header — lightweight overlay above all layers. */
   #hugo-header { z-index: 20; }
+}
+
+/* ---------- Wide desktop — let the brief breathe a touch more ---------- */
+@media (min-width: 1440px) {
+  #left-col { width: 460px; padding: 34px 32px; }
+  .headline { font-size: 1.82rem; }
+  #market-panel { width: 300px; }
 }
