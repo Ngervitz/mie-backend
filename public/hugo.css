@@ -1,12 +1,12 @@
-/* ============================================================================
-   Hugo — Executive Workspace
-   MIE-22A Workspace Redesign (CSS ONLY — no DOM/ID/class/behavior changes).
+﻿/* ============================================================================
+   Hugo â€” Executive Workspace
+   MIE-22A Workspace Redesign (CSS ONLY â€” no DOM/ID/class/behavior changes).
 
    Concept: not a SaaS dashboard. A permanent executive briefing room.
-   - LEFT column  → the avatar (Hugo, the presenter). Stable, refined, never
+   - LEFT column  â†’ the avatar (Hugo, the presenter). Stable, refined, never
      dominant.
-   - RIGHT column → today's intelligence as ONE continuous editorial document
-     (masthead → brief → recommended action → top stories → watch tomorrow →
+   - RIGHT column â†’ today's intelligence as ONE continuous editorial document
+     (masthead â†’ brief â†’ recommended action â†’ top stories â†’ watch tomorrow â†’
      supporting information), scrolling naturally.
    - No application chrome: the top bar becomes the report's editorial masthead;
      the bottom bar becomes a floating "desk console" for the question input.
@@ -97,7 +97,7 @@ html, body {
 }
 
 /* A refined executive frame. The inline object-fit:cover on the <video> is
-   untouched, so the picture is never stretched or re-cropped — only the
+   untouched, so the picture is never stretched or re-cropped â€” only the
    surrounding container is styled. */
 #avatar-container {
   width: clamp(300px, 30vw, 480px);
@@ -123,7 +123,7 @@ html, body {
   pointer-events: auto;
 }
 
-/* Editorial masthead — replaces the old application header. Hugo's identity,
+/* Editorial masthead â€” replaces the old application header. Hugo's identity,
    today's date, and the attention/confidence indicators introduce the briefing
    like a document header, not software navigation. */
 #hugo-header {
@@ -176,7 +176,7 @@ html, body {
   pointer-events: auto;
 }
 
-/* Cards dissolve into the document: no surfaces, no borders — whitespace and
+/* Cards dissolve into the document: no surfaces, no borders â€” whitespace and
    type carry the hierarchy. */
 .panel {
   background: none;
@@ -197,7 +197,7 @@ html, body {
   margin: 0 0 16px;
 }
 
-/* MIE-22B — Briefing chapters. Each chapter is hidden until Hugo reaches it,
+/* MIE-22B â€” Briefing chapters. Each chapter is hidden until Hugo reaches it,
    then revealed with a calm fade + subtle upward motion. .hidden (display:none)
    keeps the document compact so it grows naturally as chapters appear. */
 .chapter {
@@ -224,7 +224,7 @@ html, body {
   margin-bottom: 26px;
 }
 
-/* Pre-briefing welcome — the only report copy visible before Hugo presents. */
+/* Pre-briefing welcome â€” the only report copy visible before Hugo presents. */
 .welcome-note {
   font-size: 0.95rem;
   line-height: 1.6;
@@ -257,7 +257,7 @@ html, body {
 
 .voice-status { font-size: 0.82rem; color: var(--text-muted); letter-spacing: 0.01em; }
 
-/* Secondary — reveal full report without starting conversation (MIE-23). */
+/* Secondary â€” reveal full report without starting conversation (MIE-23). */
 .report-expand-link {
   align-self: flex-start;
   margin-top: 4px;
@@ -297,7 +297,7 @@ audio { width: 100%; margin-top: 4px; }
   white-space: pre-wrap;
 }
 
-/* Executive Brief — the lead of the document. */
+/* Executive Brief â€” the lead of the document. */
 .headline {
   font-size: 1.6rem;
   font-weight: 700;
@@ -326,7 +326,7 @@ audio { width: 100%; margin-top: 4px; }
   margin: 0 0 14px;
 }
 
-/* Top Stories — separated by rhythm, a single hairline lead. */
+/* Top Stories â€” separated by rhythm, a single hairline lead. */
 .story {
   padding-left: 14px;
   border-left: 1px solid rgba(255, 255, 255, 0.07);
@@ -355,7 +355,7 @@ audio { width: 100%; margin-top: 4px; }
   color: var(--text-muted);
 }
 
-/* Recommended Action — draws the eye through elevation + type, calm color. */
+/* Recommended Action â€” draws the eye through elevation + type, calm color. */
 .action-card {
   position: relative;
   background: var(--accent-soft);
@@ -388,7 +388,7 @@ audio { width: 100%; margin-top: 4px; }
   color: var(--text-muted);
 }
 
-/* Watch Tomorrow — clearly secondary: lighter, quieter, compact. */
+/* Watch Tomorrow â€” clearly secondary: lighter, quieter, compact. */
 .watch-item { margin-bottom: 13px; }
 .watch-item:last-child { margin-bottom: 0; }
 .watch-item .watch-entity {
@@ -407,7 +407,7 @@ audio { width: 100%; margin-top: 4px; }
   margin-top: 3px;
 }
 
-/* Supporting Information (Mercado) — a report section, not a floating widget. */
+/* Supporting Information (Mercado) â€” a report section, not a floating widget. */
 .market-row {
   display: flex;
   align-items: center;
@@ -426,7 +426,7 @@ audio { width: 100%; margin-top: 4px; }
   color: var(--text);
 }
 
-/* MIE-22B — Execution Summary. Quiet operational transparency, never a
+/* MIE-22B â€” Execution Summary. Quiet operational transparency, never a
    technical dashboard. Small, secondary, professional. */
 #execution-panel { max-width: 62ch; }
 .exec-grid {
@@ -483,7 +483,7 @@ audio { width: 100%; margin-top: 4px; }
 }
 .q-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); }
 
-/* MIE-22B — Conversation appendix. The Q&A lives inside the report document
+/* MIE-22B â€” Conversation appendix. The Q&A lives inside the report document
    (never a floating overlay, never over the avatar). Each exchange is appended
    as a new section, like an appendix to today's briefing. */
 #answer-panel {
@@ -570,7 +570,7 @@ audio { width: 100%; margin-top: 4px; }
   pointer-events: none;
 }
 
-/* ---------- Input — the executive desk console ---------- */
+/* ---------- Input â€” the executive desk console ---------- */
 #input-layer {
   position: fixed;
   left: 0;
@@ -660,7 +660,7 @@ audio { width: 100%; margin-top: 4px; }
 
 .hidden { display: none !important; }
 
-/* ---------- Scrollbars — thin, unobtrusive ---------- */
+/* ---------- Scrollbars â€” thin, unobtrusive ---------- */
 #intelligence-layer::-webkit-scrollbar,
 #answer-panel::-webkit-scrollbar { width: 7px; }
 #intelligence-layer::-webkit-scrollbar-thumb,
@@ -672,7 +672,7 @@ audio { width: 100%; margin-top: 4px; }
 #answer-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
 
 /* ============================================================================
-   DESKTOP — two-column workspace (priority experience)
+   DESKTOP â€” two-column workspace (priority experience)
    ============================================================================ */
 @media (min-width: 769px) {
   /* Avatar occupies the LEFT column only, vertically centered, never dominant. */
@@ -714,11 +714,11 @@ audio { width: 100%; margin-top: 4px; }
     padding-top: 26px;
     border-top: 1px solid var(--panel-border-soft);
   }
-  /* Execution sits under Mercado within Supporting Information — spacing only,
+  /* Execution sits under Mercado within Supporting Information â€” spacing only,
      no second divider. */
   #execution-panel:not(.hidden) { margin-top: 26px; }
 
-  /* The desk console floats in the report side, above the office — not a
+  /* The desk console floats in the report side, above the office â€” not a
      full-width footer bar. Office background stays visible behind it. */
   #input-layer {
     left: var(--avatar-col);
@@ -730,7 +730,7 @@ audio { width: 100%; margin-top: 4px; }
   #input-error { width: min(560px, 82%); }
 }
 
-/* Wide desktop — a touch more room for the lead. */
+/* Wide desktop â€” a touch more room for the lead. */
 @media (min-width: 1440px) {
   :root { --avatar-col: 38%; }
   #intelligence-layer { padding: 64px 72px 160px; }
@@ -738,7 +738,7 @@ audio { width: 100%; margin-top: 4px; }
 }
 
 /* ============================================================================
-   MOBILE — stacked (must not regress): avatar band on top, report scrolls below
+   MOBILE â€” stacked (must not regress): avatar band on top, report scrolls below
    ============================================================================ */
 @media (max-width: 768px) {
   #avatar-layer {
@@ -787,50 +787,57 @@ audio { width: 100%; margin-top: 4px; }
 }
 
 /* ============================================================================
-   MIE-23 / MIE-23B — Abstract Renderer (visual layer only)
+   MIE-23 / MIE-23B / MIE-24 â€” Abstract Renderer
    Scoped exclusively to abstract mode. Avatar mode is untouched.
    ============================================================================ */
 body[data-presentation-mode="abstract"] {
-  --abstract-measure: 680px;
-  --abstract-accent: #7a9ee0;
-  --abstract-accent-bright: #9eb8f0;
-  --abstract-accent-glow: rgba(122, 158, 224, 0.38);
-  --abstract-halo: rgba(122, 158, 224, 0.14);
+  --abstract-cyan: #00d4f0;
+  --abstract-cyan-dim: rgba(0, 212, 240, 0.55);
+  --abstract-cyan-glow: rgba(0, 210, 255, 0.38);
+  --abstract-cyan-border: rgba(0, 220, 255, 0.18);
+  --abstract-glass: rgba(8, 14, 26, 0.58);
+  --abstract-glass-border: rgba(0, 210, 255, 0.14);
   --abstract-text-focus: #ffffff;
-  --abstract-text-secondary: #b8bcc8;
-  --abstract-text-dim: #9ca3b3;
-  --abstract-input-clearance: 196px;
+  --abstract-text-secondary: #b4bac8;
+  --abstract-text-dim: #8a92a4;
+  --abstract-doc-width: 52%;
+  --abstract-input-clearance: 220px;
+  --abstract-pulse-size: 220px;
 }
 
-/* Depth — ambient space, not a room. */
+/* ---- Scene depth (office night, CSS-only) ---- */
 body[data-presentation-mode="abstract"] #background-layer {
   background:
-    radial-gradient(ellipse 55% 42% at 18% 12%, rgba(122, 158, 224, 0.09) 0%, transparent 62%),
-    radial-gradient(ellipse 48% 38% at 88% 78%, rgba(90, 110, 170, 0.07) 0%, transparent 58%),
-    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(122, 158, 224, 0.06) 0%, transparent 55%),
-    radial-gradient(ellipse 90% 70% at 50% 35%, #0c0e18 0%, #070910 45%, #040408 100%);
+    radial-gradient(1.5px 1.5px at 72% 16%, rgba(255, 190, 90, 0.55) 0%, transparent 100%),
+    radial-gradient(2px 2px at 78% 20%, rgba(255, 170, 70, 0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 85% 14%, rgba(255, 200, 120, 0.45) 0%, transparent 100%),
+    radial-gradient(1px 1px at 68% 22%, rgba(255, 180, 80, 0.35) 0%, transparent 100%),
+    radial-gradient(1px 1px at 90% 18%, rgba(255, 160, 60, 0.3) 0%, transparent 100%),
+    radial-gradient(ellipse 70% 45% at 72% 12%, rgba(255, 150, 50, 0.07) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 40% at 18% 85%, rgba(0, 180, 255, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse 90% 55% at 50% 38%, rgba(0, 160, 220, 0.06) 0%, transparent 60%),
+    linear-gradient(180deg, transparent 58%, rgba(0, 180, 255, 0.025) 70%, rgba(0, 0, 0, 0.55) 88%, #020408 100%),
+    linear-gradient(168deg, #03060c 0%, #060a14 35%, #080e1a 65%, #050810 100%);
+}
+body[data-presentation-mode="abstract"] #background-layer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(0, 200, 255, 0.12) 35%, rgba(0, 200, 255, 0.18) 50%, rgba(0, 200, 255, 0.12) 65%, transparent 95%);
+  pointer-events: none;
 }
 
 /* Hide avatar visuals; keep audio/LiveKit path intact. */
 body[data-presentation-mode="abstract"] #avatar-layer {
-  right: auto;
-  left: 0;
-  bottom: auto;
-  top: 0;
-  width: 0;
-  height: 0;
-  overflow: visible;
-  z-index: 0;
+  right: auto; left: 0; bottom: auto; top: 0;
+  width: 0; height: 0; overflow: visible; z-index: 0;
 }
 body[data-presentation-mode="abstract"] #avatar-container {
-  position: fixed;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-  border: none;
-  box-shadow: none;
+  position: fixed; width: 1px; height: 1px; opacity: 0;
+  overflow: hidden; pointer-events: none; border: none; box-shadow: none;
 }
 body[data-presentation-mode="abstract"] #avatar-video,
 body[data-presentation-mode="abstract"] #avatar-fallback,
@@ -838,235 +845,365 @@ body[data-presentation-mode="abstract"] #avatar-status {
   display: none !important;
 }
 
-/* Single continuous document. */
+/* ---- Layout: pulse center-left, document right (reference composition) ---- */
 body[data-presentation-mode="abstract"] #intelligence-layer {
+  left: 0; right: 0; top: 0; bottom: 0;
+  padding: 68px 40px var(--abstract-input-clearance) 42%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: block;
+}
+
+/* Top bar â€” date left, Hugo right */
+body[data-presentation-mode="abstract"] #hugo-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  max-width: none;
+  width: 100%;
+  padding: 20px 40px;
+  margin: 0;
+  background: linear-gradient(180deg, rgba(2, 5, 10, 0.92) 0%, rgba(2, 5, 10, 0.45) 70%, transparent 100%);
+  border: none;
+  pointer-events: none;
+}
+body[data-presentation-mode="abstract"] #hugo-header .header-left {
+  order: 2;
+  margin-left: auto;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--abstract-text-focus);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+body[data-presentation-mode="abstract"] #hugo-header .header-left::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid var(--abstract-cyan-dim);
+  box-shadow: 0 0 12px rgba(0, 210, 255, 0.2);
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.15), transparent);
+}
+body[data-presentation-mode="abstract"] #hugo-header .header-left::after {
+  content: none;
+}
+body[data-presentation-mode="abstract"] #hugo-header .header-center {
+  order: 1;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--abstract-text-secondary);
+}
+body[data-presentation-mode="abstract"] #hugo-header .header-right {
+  display: none;
+}
+
+/* ---- The Pulse â€” central, 3D, alive ---- */
+body[data-presentation-mode="abstract"] #hugo-presence {
+  position: fixed;
   left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  padding: 36px 24px var(--abstract-input-clearance);
+  width: 42%;
+  top: 50%;
+  transform: translateY(-46%);
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+}
+body[data-presentation-mode="abstract"] .presence-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
+}
+body[data-presentation-mode="abstract"] .presence-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--abstract-text-focus);
+  margin-bottom: 4px;
+  text-shadow: 0 0 24px rgba(0, 210, 255, 0.15);
+}
+body[data-presentation-mode="abstract"] .presence-subtitle {
+  font-size: 0.82rem;
+  color: var(--abstract-text-secondary);
+  margin-bottom: 28px;
+  letter-spacing: 0.02em;
+}
+body[data-presentation-mode="abstract"] .presence-orb {
+  position: relative;
+  width: var(--abstract-pulse-size);
+  height: var(--abstract-pulse-size);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(50, 80, 120, 0.85) 0%, rgba(8, 14, 28, 0.95) 48%, rgba(2, 5, 12, 0.98) 100%);
+  box-shadow:
+    0 0 50px rgba(0, 210, 255, 0.28),
+    0 0 100px rgba(0, 180, 255, 0.12),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 -24px 48px rgba(0, 0, 0, 0.55),
+    inset 0 12px 32px rgba(0, 200, 255, 0.06);
+  border: 1px solid rgba(0, 220, 255, 0.22);
+  flex-shrink: 0;
+  transition: box-shadow 0.6s ease, transform 0.6s ease;
+}
+/* Ambient halo behind orb */
+body[data-presentation-mode="abstract"] .presence-orb::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 200, 255, 0.14) 0%, transparent 62%);
+  filter: blur(24px);
+  z-index: -1;
+  animation: m24-halo-breathe 4.5s ease-in-out infinite;
+}
+body[data-presentation-mode="abstract"] .presence-glass {
+  position: absolute;
+  inset: 11%;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 235, 255, 0.5);
+  box-shadow:
+    0 0 28px rgba(0, 220, 255, 0.35),
+    inset 0 0 24px rgba(0, 200, 255, 0.08);
+  pointer-events: none;
+}
+body[data-presentation-mode="abstract"] .presence-ring {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 220, 255, 0.25);
+  box-shadow: inset 0 0 16px rgba(0, 200, 255, 0.06);
+}
+body[data-presentation-mode="abstract"] .presence-core {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 10px; height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--abstract-cyan);
+  box-shadow: 0 0 16px var(--abstract-cyan-glow), 0 0 32px rgba(0, 210, 255, 0.25);
+  opacity: 0.85;
+}
+body[data-presentation-mode="abstract"] .presence-line {
+  display: none;
+}
+/* Waveform inside orb */
+body[data-presentation-mode="abstract"] .presence-waveform {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 48px;
+  z-index: 2;
+}
+body[data-presentation-mode="abstract"] .presence-waveform span {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #00eeff 0%, #0099cc 100%);
+  box-shadow: 0 0 8px rgba(0, 230, 255, 0.5);
+  animation: m24-wave-idle 1.4s ease-in-out infinite;
+}
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(1) { height: 14px; animation-delay: 0s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(2) { height: 22px; animation-delay: 0.1s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(3) { height: 32px; animation-delay: 0.2s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(4) { height: 40px; animation-delay: 0.3s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(5) { height: 32px; animation-delay: 0.4s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(6) { height: 22px; animation-delay: 0.5s; }
+body[data-presentation-mode="abstract"] .presence-waveform span:nth-child(7) { height: 14px; animation-delay: 0.6s; }
+
+body[data-presentation-mode="abstract"] .presence-pedestal {
+  width: 110px;
+  height: 30px;
+  margin-top: -6px;
+  background: linear-gradient(180deg, #1c2838 0%, #0c1018 55%, #060810 100%);
+  border-radius: 4px 4px 10px 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 200, 255, 0.08);
+}
+body[data-presentation-mode="abstract"] .presence-reflection {
+  width: 200px;
+  height: 50px;
+  margin-top: 6px;
+  background: radial-gradient(ellipse, rgba(0, 200, 255, 0.18) 0%, transparent 68%);
+  filter: blur(10px);
+  transform: scaleY(0.35);
+  opacity: 0.7;
+}
+body[data-presentation-mode="abstract"] .presence-status {
+  margin-top: 14px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--abstract-cyan);
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 16px rgba(0, 210, 255, 0.35);
+  min-height: 1.2em;
 }
 
-body[data-presentation-mode="abstract"] #hugo-header,
-body[data-presentation-mode="abstract"] #hugo-presence,
+/* Pulse states â€” always alive */
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-idle .presence-orb {
+  animation: m24-orb-idle 4.8s ease-in-out infinite;
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-idle .presence-glass {
+  animation: m24-glass-idle 4.8s ease-in-out infinite;
+}
+
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking .presence-orb {
+  animation: m24-orb-think 2.2s ease-in-out infinite;
+  box-shadow:
+    0 0 70px rgba(0, 210, 255, 0.38),
+    0 0 120px rgba(0, 180, 255, 0.18),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 -24px 48px rgba(0, 0, 0, 0.55),
+    inset 0 12px 32px rgba(0, 200, 255, 0.1);
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking .presence-waveform span {
+  animation: m24-wave-think 0.7s ease-in-out infinite;
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking .presence-orb::before {
+  animation: m24-halo-think 2.2s ease-in-out infinite;
+}
+
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-orb {
+  animation: m24-orb-speak 1.5s ease-in-out infinite;
+  box-shadow:
+    0 0 90px rgba(0, 230, 255, 0.45),
+    0 0 140px rgba(0, 200, 255, 0.22),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 -24px 48px rgba(0, 0, 0, 0.55),
+    inset 0 12px 32px rgba(0, 220, 255, 0.14);
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-waveform span {
+  animation: m24-wave-speak 0.45s ease-in-out infinite;
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-glass {
+  border-color: rgba(0, 245, 255, 0.75);
+  box-shadow: 0 0 40px rgba(0, 230, 255, 0.5), inset 0 0 28px rgba(0, 220, 255, 0.12);
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-orb::before {
+  animation: m24-halo-speak 1.5s ease-in-out infinite;
+}
+
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-ended .presence-orb {
+  animation: m24-orb-ended 2.6s ease-out forwards;
+}
+body[data-presentation-mode="abstract"] #hugo-presence.presence-state-ended .presence-waveform span {
+  animation: m24-wave-idle 2s ease-in-out infinite;
+  opacity: 0.5;
+}
+
+@keyframes m24-halo-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+@keyframes m24-orb-idle {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+@keyframes m24-glass-idle {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+@keyframes m24-orb-think {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes m24-halo-think {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+@keyframes m24-orb-speak {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+@keyframes m24-halo-speak {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+@keyframes m24-orb-ended {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.97); opacity: 0.85; }
+}
+@keyframes m24-wave-idle {
+  0%, 100% { transform: scaleY(0.55); opacity: 0.65; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes m24-wave-think {
+  0%, 100% { transform: scaleY(0.6); }
+  50% { transform: scaleY(1.15); }
+}
+@keyframes m24-wave-speak {
+  0%, 100% { transform: scaleY(0.5); }
+  25% { transform: scaleY(1.3); }
+  50% { transform: scaleY(0.7); }
+  75% { transform: scaleY(1.2); }
+}
+
+/* ---- Document column â€” one continuous glass editorial surface ---- */
 body[data-presentation-mode="abstract"] #left-col,
 body[data-presentation-mode="abstract"] #market-panel,
 body[data-presentation-mode="abstract"] #execution-panel,
 body[data-presentation-mode="abstract"] #answer-panel {
   width: 100%;
-  max-width: var(--abstract-measure);
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* Editorial masthead — tighter vertical rhythm. */
-body[data-presentation-mode="abstract"] #hugo-header {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding-bottom: 16px;
-  margin-bottom: 0;
-  border-bottom: none;
-}
-body[data-presentation-mode="abstract"] #hugo-header .header-left {
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.42em;
-  color: var(--abstract-text-dim);
-}
-body[data-presentation-mode="abstract"] #hugo-header .header-center {
+  max-width: none;
   margin-left: 0;
-  font-size: 0.86rem;
-  color: var(--abstract-text-secondary);
-  order: 2;
+  margin-right: 0;
 }
-body[data-presentation-mode="abstract"] #hugo-header .header-right {
-  order: 3;
+
+body[data-presentation-mode="abstract"] #left-col {
+  background: var(--abstract-glass);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid var(--abstract-glass-border);
+  border-radius: 14px;
+  padding: 26px 28px 28px;
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Sections flow inside the same document â€” no separate cards */
+body[data-presentation-mode="abstract"] #market-panel:not(.hidden),
+body[data-presentation-mode="abstract"] #execution-panel:not(.hidden),
+body[data-presentation-mode="abstract"] #answer-panel.conversation-open {
+  background: var(--abstract-glass);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid var(--abstract-glass-border);
+  border-top: 1px solid rgba(0, 210, 255, 0.08);
+  border-radius: 0;
+  box-shadow: none;
   margin-top: 0;
+  padding: 20px 28px 8px;
 }
-body[data-presentation-mode="abstract"] #hugo-header .header-left::after {
-  content: "Executive Brief";
-  display: block;
-  margin-top: 10px;
-  font-size: 1.5rem;
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  color: var(--abstract-text-focus);
-  line-height: 1.2;
+body[data-presentation-mode="abstract"] #left-col:has(~ #market-panel:not(.hidden)),
+body[data-presentation-mode="abstract"] #left-col:has(~ #execution-panel:not(.hidden)),
+body[data-presentation-mode="abstract"] #left-col:has(~ #answer-panel.conversation-open) {
+  border-radius: 14px 14px 0 0;
 }
-
-/* ---- Hugo Pulse (64–80px) ---- */
-body[data-presentation-mode="abstract"] #hugo-presence {
-  position: relative;
-  display: flex;
-  justify-content: flex-start;
-  margin: 10px 0 22px;
-  pointer-events: none;
-}
-/* Ambient halo behind the pulse — depth cue. */
-body[data-presentation-mode="abstract"] #hugo-presence::before {
-  content: "";
-  position: absolute;
-  left: -28px;
-  top: 50%;
-  width: 128px;
-  height: 128px;
-  margin-top: -64px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--abstract-halo) 0%, transparent 68%);
-  filter: blur(18px);
-  opacity: 0.85;
-  transition: opacity 0.8s ease, transform 0.8s ease;
-  pointer-events: none;
-}
-body[data-presentation-mode="abstract"] .presence-orb {
-  position: relative;
-  width: 72px;
-  height: 72px;
-  flex-shrink: 0;
-}
-/* Soft outer halo ring. */
-body[data-presentation-mode="abstract"] .presence-orb::before {
-  content: "";
-  position: absolute;
-  inset: -6px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(122, 158, 224, 0.12) 0%, transparent 70%);
-  opacity: 0.7;
-  transition: opacity 0.6s ease, transform 0.6s ease;
-}
-body[data-presentation-mode="abstract"] .presence-core {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 9px;
-  height: 9px;
-  margin: -4.5px 0 0 -4.5px;
-  border-radius: 50%;
-  background: var(--abstract-accent-bright);
-  box-shadow:
-    0 0 12px var(--abstract-accent-glow),
-    0 0 28px rgba(122, 158, 224, 0.22);
-  transition: transform 0.5s ease, box-shadow 0.5s ease, opacity 0.5s ease;
-}
-body[data-presentation-mode="abstract"] .presence-ring {
-  position: absolute;
-  inset: 14px;
-  border-radius: 50%;
-  border: 1px solid rgba(122, 158, 224, 0.35);
-  transition: transform 0.55s ease, opacity 0.55s ease, border-color 0.55s ease;
-}
-body[data-presentation-mode="abstract"] .presence-line {
-  position: absolute;
-  top: 50%;
-  left: 100%;
-  width: 88px;
-  height: 1px;
-  margin-top: -0.5px;
-  background: linear-gradient(90deg, rgba(122, 158, 224, 0.55), transparent);
-  transform-origin: left center;
-  transition: opacity 0.5s ease, transform 0.5s ease;
+body[data-presentation-mode="abstract"] #execution-panel:not(.hidden),
+body[data-presentation-mode="abstract"] #answer-panel.conversation-open {
+  border-radius: 0 0 14px 14px;
+  padding-bottom: 22px;
 }
 
-/* idle — slow breath, always alive */
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-idle .presence-core {
-  animation: abstract-breathe 4.2s ease-in-out infinite;
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-idle .presence-ring {
-  animation: abstract-ring-idle 4.8s ease-in-out infinite;
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-idle .presence-line {
-  animation: abstract-line-idle 5s ease-in-out infinite;
-}
-
-/* thinking — faster breath, brighter */
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking .presence-core {
-  animation: abstract-breathe-fast 2.2s ease-in-out infinite;
-  box-shadow:
-    0 0 16px rgba(122, 158, 224, 0.55),
-    0 0 36px rgba(122, 158, 224, 0.28);
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking .presence-ring {
-  animation: abstract-ring-fast 2.6s ease-in-out infinite;
-  border-color: rgba(158, 184, 240, 0.55);
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-thinking::before {
-  opacity: 1;
-  transform: scale(1.06);
-}
-
-/* speaking — intense, responsive */
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-core {
-  animation: abstract-speak-core 1.6s ease-in-out infinite;
-  box-shadow:
-    0 0 20px rgba(158, 184, 240, 0.7),
-    0 0 48px rgba(122, 158, 224, 0.35);
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-ring {
-  animation: abstract-speak-ring 1.9s ease-in-out infinite;
-  border-color: rgba(158, 184, 240, 0.72);
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking .presence-line {
-  animation: abstract-speak-line 1.4s ease-in-out infinite;
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-speaking::before {
-  opacity: 1;
-  transform: scale(1.12);
-}
-
-/* ended — gradual return to idle */
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-ended .presence-core {
-  animation: abstract-fade-ended 2.4s ease-out forwards;
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-ended .presence-ring {
-  animation: abstract-fade-ended 2.4s ease-out forwards;
-}
-body[data-presentation-mode="abstract"] #hugo-presence.presence-state-ended::before {
-  opacity: 0.4;
-  transition: opacity 2.4s ease;
-}
-
-@keyframes abstract-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.88; }
-  50% { transform: scale(1.2); opacity: 1; }
-}
-@keyframes abstract-ring-idle {
-  0%, 100% { transform: scale(1); opacity: 0.5; }
-  50% { transform: scale(1.05); opacity: 0.75; }
-}
-@keyframes abstract-line-idle {
-  0%, 100% { opacity: 0.4; transform: scaleX(0.75); }
-  50% { opacity: 0.7; transform: scaleX(0.95); }
-}
-@keyframes abstract-breathe-fast {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.28); }
-}
-@keyframes abstract-ring-fast {
-  0%, 100% { transform: scale(1); opacity: 0.65; }
-  50% { transform: scale(1.1); opacity: 0.95; }
-}
-@keyframes abstract-speak-core {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.42); }
-}
-@keyframes abstract-speak-ring {
-  0%, 100% { transform: scale(1); opacity: 0.75; }
-  50% { transform: scale(1.14); opacity: 1; }
-}
-@keyframes abstract-speak-line {
-  0%, 100% { opacity: 0.55; transform: scaleX(0.8); }
-  50% { opacity: 1; transform: scaleX(1.05); }
-}
-@keyframes abstract-fade-ended {
-  0% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0.7; transform: scale(0.95); }
-}
-
-/* Document flow — visual hierarchy via order only. */
 body[data-presentation-mode="abstract"] #brief-panel {
   display: flex;
   flex-direction: column;
@@ -1077,17 +1214,17 @@ body[data-presentation-mode="abstract"] #chapter-action { order: 3; }
 body[data-presentation-mode="abstract"] #chapter-watch { order: 4; }
 body[data-presentation-mode="abstract"] .voice-row { order: 0; }
 
-/* Chapter focus — full white when active; secondary still readable. */
+/* Chapter focus */
 body[data-presentation-mode="abstract"] .chapter {
-  transition: opacity 0.6s ease, color 0.6s ease;
+  transition: opacity 0.55s ease, color 0.55s ease;
 }
 body[data-presentation-mode="abstract"] .chapter.revealed:not(.chapter-focus) {
-  opacity: 0.48;
+  opacity: 0.5;
   color: var(--abstract-text-dim);
 }
 body[data-presentation-mode="abstract"] .chapter.revealed:not(.chapter-focus) .headline,
 body[data-presentation-mode="abstract"] .chapter.revealed:not(.chapter-focus) .action-text {
-  color: #c8ccd8;
+  color: #a0a5b5;
 }
 body[data-presentation-mode="abstract"] .chapter.revealed:not(.chapter-focus) .why-it-matters,
 body[data-presentation-mode="abstract"] .chapter.revealed:not(.chapter-focus) .story-fact,
@@ -1104,219 +1241,280 @@ body[data-presentation-mode="abstract"] .chapter.chapter-focus .headline {
   color: var(--abstract-text-focus);
 }
 body[data-presentation-mode="abstract"] .chapter.chapter-focus .why-it-matters {
-  color: #dce0ea;
+  color: #e2e6f0;
 }
 body[data-presentation-mode="abstract"].briefing-complete .chapter.revealed,
 body[data-presentation-mode="abstract"].report-expanded .chapter.revealed {
   opacity: 1;
   color: var(--abstract-text-focus);
 }
-body[data-presentation-mode="abstract"].briefing-complete .chapter.revealed .headline,
-body[data-presentation-mode="abstract"].report-expanded .chapter.revealed .headline {
+
+/* Document typography â€” reference hierarchy */
+body[data-presentation-mode="abstract"] .section-label,
+body[data-presentation-mode="abstract"] .panel-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--abstract-cyan-dim);
+  margin-bottom: 12px;
+}
+body[data-presentation-mode="abstract"] .headline {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.38;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
   color: var(--abstract-text-focus);
 }
-body[data-presentation-mode="abstract"].briefing-complete .chapter.revealed .why-it-matters,
-body[data-presentation-mode="abstract"].report-expanded .chapter.revealed .why-it-matters {
-  color: #dce0ea;
-}
-
-/* Typography — protagonist document. */
-body[data-presentation-mode="abstract"] .headline {
-  font-size: 1.5rem;
-  font-weight: 650;
-  line-height: 1.28;
-  letter-spacing: -0.018em;
-  margin-bottom: 14px;
-}
 body[data-presentation-mode="abstract"] .why-it-matters {
-  font-size: 1.04rem;
-  line-height: 1.66;
+  font-size: 0.88rem;
+  line-height: 1.62;
+  color: #c8ccd8;
   margin-bottom: 0;
-  color: #dce0ea;
 }
 body[data-presentation-mode="abstract"] .brief-section {
-  margin-top: 32px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(0, 210, 255, 0.07);
 }
-body[data-presentation-mode="abstract"] .section-label {
-  margin-bottom: 14px;
-  color: var(--abstract-text-dim);
+body[data-presentation-mode="abstract"] #chapter-brief {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
 }
 body[data-presentation-mode="abstract"] .action-card {
-  background: rgba(122, 158, 224, 0.09);
-  border-left-color: rgba(122, 158, 224, 0.6);
-  box-shadow: none;
+  background: rgba(0, 180, 255, 0.05);
+  border: 1px solid rgba(0, 210, 255, 0.1);
+  border-left: 2px solid rgba(0, 220, 255, 0.45);
+  border-radius: 8px;
+  padding: 16px 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 body[data-presentation-mode="abstract"] .story {
-  border-left-color: rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgba(0, 210, 255, 0.15);
+  padding-left: 14px;
+  margin-bottom: 16px;
+}
+
+/* Voice row + CTA inside document */
+body[data-presentation-mode="abstract"] .voice-row {
   margin-bottom: 20px;
+  gap: 8px;
+}
+body[data-presentation-mode="abstract"] .btn-primary {
+  background: rgba(0, 200, 255, 0.12);
+  border-color: rgba(0, 220, 255, 0.35);
+  color: var(--abstract-cyan);
+  box-shadow: 0 0 20px rgba(0, 200, 255, 0.08);
+}
+body[data-presentation-mode="abstract"] .welcome-note {
+  font-size: 0.84rem;
+  color: var(--abstract-text-secondary);
 }
 
-/* Section rhythm — one document. */
-body[data-presentation-mode="abstract"] #questions-panel:not(.hidden),
-body[data-presentation-mode="abstract"] #market-panel:not(.hidden) {
-  margin-top: 32px;
-  padding-top: 0;
-  border-top: none;
-}
-body[data-presentation-mode="abstract"] #execution-panel:not(.hidden) {
-  margin-top: 28px;
-  padding-top: 0;
-  border-top: none;
-}
-body[data-presentation-mode="abstract"] #answer-panel.conversation-open {
-  margin-top: 32px;
-  padding-top: 0;
-  border-top: none;
-}
-
-/* "Conversación iniciada" → discrete live indicator, not a dead button. */
 body[data-presentation-mode="abstract"][data-hugo-conversation="idle"] #voice-btn:disabled,
 body[data-presentation-mode="abstract"][data-hugo-conversation="briefing"] #voice-btn:disabled {
   align-self: flex-start;
   background: none;
   border: none;
   box-shadow: none;
-  padding: 2px 0 0;
-  margin-top: 2px;
-  font-size: 0.68rem;
+  padding: 2px 0;
+  font-size: 0.62rem;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--abstract-text-dim);
   cursor: default;
-  opacity: 1;
 }
 body[data-presentation-mode="abstract"][data-hugo-conversation="idle"] #voice-btn:disabled::before {
   content: "";
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 6px; height: 6px;
   border-radius: 50%;
-  background: #6ecf96;
+  background: #00d4f0;
   margin-right: 8px;
   vertical-align: middle;
-  box-shadow: 0 0 10px rgba(110, 207, 150, 0.55);
-  animation: abstract-live-dot 2.4s ease-in-out infinite;
+  box-shadow: 0 0 10px rgba(0, 212, 240, 0.6);
+  animation: m24-live-dot 2.4s ease-in-out infinite;
 }
-@keyframes abstract-live-dot {
-  0%, 100% { opacity: 0.65; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.1); }
-}
-
-body[data-presentation-mode="abstract"] .voice-row {
-  margin-bottom: 18px;
-  gap: 8px;
+@keyframes m24-live-dot {
+  0%, 100% { opacity: 0.6; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
 }
 
+/* Audit report link — bottom center like reference */
 body[data-presentation-mode="abstract"] .report-expand-link {
-  align-self: flex-start;
-  margin-top: 2px;
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 13;
+  display: block;
+  text-align: center;
+  margin: 0;
   padding: 0;
   border: none;
   background: none;
-  font: inherit;
-  font-size: 0.8rem;
-  color: var(--abstract-text-dim);
+  font-size: 0;
+  color: transparent;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  transition: color 0.2s ease;
   pointer-events: auto;
 }
-body[data-presentation-mode="abstract"] .report-expand-link:hover {
-  color: var(--abstract-text-secondary);
+body[data-presentation-mode="abstract"] .report-expand-link::before {
+  content: "AUDIT REPORT";
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(0, 200, 255, 0.5);
+  transition: color 0.2s ease;
+}
+body[data-presentation-mode="abstract"] .report-expand-link::after {
+  content: " â†’";
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: rgba(0, 200, 255, 0.5);
+}
+body[data-presentation-mode="abstract"] .report-expand-link:hover::before,
+body[data-presentation-mode="abstract"] .report-expand-link:hover::after {
+  color: rgba(0, 220, 255, 0.8);
 }
 
-/* Input — fixed, blurred, no content overlap. */
+/* ---- Input â€” pill console from reference ---- */
 body[data-presentation-mode="abstract"] #input-layer {
-  left: 0;
-  right: 0;
-  padding: 28px 0 20px;
+  left: 0; right: 0;
+  padding: 32px 24px 24px;
   background: linear-gradient(
     to top,
-    rgba(4, 5, 10, 0.96) 0%,
-    rgba(4, 5, 10, 0.72) 42%,
-    rgba(4, 5, 10, 0.28) 72%,
+    rgba(2, 4, 8, 0.98) 0%,
+    rgba(2, 4, 8, 0.75) 38%,
+    rgba(2, 4, 8, 0.25) 68%,
     transparent 100%
   );
+  z-index: 11;
 }
 body[data-presentation-mode="abstract"] #input-wrap {
-  width: min(var(--abstract-measure), 92vw);
-  background: rgba(12, 14, 22, 0.62);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  border-color: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 -12px 48px -18px rgba(0, 0, 0, 0.65);
+  width: min(720px, 88vw);
+  max-width: 720px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 220, 255, 0.32);
+  background: rgba(6, 10, 18, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow:
+    0 0 28px rgba(0, 200, 255, 0.1),
+    inset 0 0 24px rgba(0, 200, 255, 0.03);
+  padding: 6px 8px 6px 26px;
+}
+body[data-presentation-mode="abstract"] #question-input {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--abstract-text-focus);
+}
+body[data-presentation-mode="abstract"] #question-input::placeholder {
+  color: rgba(138, 146, 164, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 body[data-presentation-mode="abstract"] #input-error {
-  width: min(var(--abstract-measure), 92vw);
+  width: min(720px, 88vw);
 }
 body[data-presentation-mode="abstract"] #send-btn {
-  background: var(--abstract-accent);
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0;
+  background: linear-gradient(135deg, #00d8f5 0%, #0099cc 100%);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.4);
+  flex-shrink: 0;
+}
+body[data-presentation-mode="abstract"] #send-btn::after {
+  content: "â†’";
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1;
 }
 body[data-presentation-mode="abstract"] #send-btn:hover {
-  background: #6890d4;
+  background: linear-gradient(135deg, #00e8ff 0%, #00a8dd 100%);
+  box-shadow: 0 0 24px rgba(0, 220, 255, 0.5);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body[data-presentation-mode="abstract"] #hugo-presence .presence-core,
-  body[data-presentation-mode="abstract"] #hugo-presence .presence-ring,
-  body[data-presentation-mode="abstract"] #hugo-presence .presence-line,
+  body[data-presentation-mode="abstract"] #hugo-presence .presence-orb,
+  body[data-presentation-mode="abstract"] #hugo-presence .presence-glass,
+  body[data-presentation-mode="abstract"] #hugo-presence .presence-orb::before,
+  body[data-presentation-mode="abstract"] .presence-waveform span,
   body[data-presentation-mode="abstract"][data-hugo-conversation="idle"] #voice-btn:disabled::before {
     animation: none !important;
   }
-  body[data-presentation-mode="abstract"] .chapter {
-    transition: none;
-  }
+  body[data-presentation-mode="abstract"] .chapter { transition: none; }
 }
 
 @media (min-width: 769px) {
   body[data-presentation-mode="abstract"] {
-    --abstract-input-clearance: 208px;
+    --abstract-pulse-size: 240px;
+    --abstract-input-clearance: 232px;
   }
   body[data-presentation-mode="abstract"] #intelligence-layer {
-    padding: 44px 40px var(--abstract-input-clearance);
+    padding: 72px 48px var(--abstract-input-clearance) 42%;
   }
   body[data-presentation-mode="abstract"] .headline {
-    font-size: 1.64rem;
-  }
-  body[data-presentation-mode="abstract"] .presence-orb {
-    width: 76px;
-    height: 76px;
+    font-size: 1rem;
   }
 }
 
 @media (min-width: 1440px) {
   body[data-presentation-mode="abstract"] {
-    --abstract-measure: 720px;
-    --abstract-input-clearance: 216px;
+    --abstract-pulse-size: 260px;
+    --abstract-input-clearance: 240px;
   }
   body[data-presentation-mode="abstract"] #intelligence-layer {
-    padding: 48px 48px var(--abstract-input-clearance);
+    padding: 76px 56px var(--abstract-input-clearance) 40%;
   }
-  body[data-presentation-mode="abstract"] .headline {
-    font-size: 1.74rem;
-  }
-  body[data-presentation-mode="abstract"] .presence-orb {
-    width: 80px;
-    height: 80px;
+  body[data-presentation-mode="abstract"] #hugo-presence {
+    width: 40%;
   }
 }
 
 @media (max-width: 768px) {
   body[data-presentation-mode="abstract"] {
-    --abstract-input-clearance: 168px;
+    --abstract-pulse-size: 160px;
+    --abstract-input-clearance: 180px;
   }
   body[data-presentation-mode="abstract"] #intelligence-layer {
-    top: 0;
-    bottom: 0;
-    padding: 24px 18px var(--abstract-input-clearance);
+    padding: 56px 18px var(--abstract-input-clearance);
+    padding-top: 280px;
   }
-  body[data-presentation-mode="abstract"] #hugo-header .header-left::after {
-    font-size: 1.28rem;
+  body[data-presentation-mode="abstract"] #hugo-presence {
+    position: fixed;
+    left: 0; right: 0;
+    width: 100%;
+    top: 56px;
+    transform: none;
+    height: 220px;
   }
-  body[data-presentation-mode="abstract"] .presence-orb {
-    width: 64px;
-    height: 64px;
+  body[data-presentation-mode="abstract"] .presence-title {
+    font-size: 1.1rem;
+  }
+  body[data-presentation-mode="abstract"] .presence-subtitle {
+    margin-bottom: 16px;
+    font-size: 0.76rem;
+  }
+  body[data-presentation-mode="abstract"] .presence-pedestal,
+  body[data-presentation-mode="abstract"] .presence-reflection {
+    display: none;
+  }
+  body[data-presentation-mode="abstract"] #hugo-header {
+    padding: 16px 20px;
+  }
+  body[data-presentation-mode="abstract"] #left-col {
+    padding: 20px 18px;
   }
 }
