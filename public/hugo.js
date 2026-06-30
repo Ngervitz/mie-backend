@@ -315,15 +315,38 @@
     room: null,
     connectPromise: null,
     sessionId: null,
+    // MIE-20B: LITE session control WebSocket URL ("ws_url" from /sessions/start).
+    // Per the official schema this is "Custom Mode only"; in the ElevenLabs
+    // Connector path it is normally absent (LiveAvatar's bridge owns that WS).
+    wsUrl: null,
+    // MIE-21: LITE sessions expire by design after max_session_duration seconds
+    // (connector mode → 300). We renew the session shortly before that.
+    maxSessionDuration: 300,
+    renewing: false,
   };
   // Distinguishes an intentional teardown from an unexpected SDK disconnect.
   var avatarDisposing = false;
 
-  // MIE-20: keep-alive loop state. Single interval; stops on dispose/disconnect.
+  // MIE-20: HTTP keep-alive loop state. Single interval; stops on dispose/disconnect.
   var avatarKeepAliveTimerId = null;
   var avatarKeepAliveFailures = 0;
   var AVATAR_KEEPALIVE_MS = 45000;
   var AVATAR_KEEPALIVE_MAX_FAILURES = 3;
+
+  // MIE-20B: native LITE keep-alive over the documented session control
+  // WebSocket. Official protocol (LITE Events): send the command event
+  //   { "type": "session.keep_alive", "event_id": "<unique>" }
+  // The docs give no numeric cadence ("send periodically"); spec default 30s.
+  var avatarNativeKaSocket = null;
+  var avatarNativeKaTimerId = null;
+  var avatarNativeKaStarted = false;
+  var AVATAR_NATIVE_KA_MS = 30000;
+
+  // MIE-21: graceful renewal. Exactly one renewal timer; fires shortly before the
+  // session's documented hard expiry, disposes the room and reconnects a fresh one.
+  var avatarRenewalTimerId = null;
+  var DEFAULT_MAX_SESSION_DURATION = 300;
+  var RENEWAL_LEAD_SECONDS = 30;
 
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
@@ -670,6 +693,10 @@
     try {
       // MIE-20: stop keep-alive whenever the room is torn down.
       stopAvatarKeepAlive();
+      // MIE-20B: stop the native LITE control-socket keep-alive too.
+      stopNativeKeepAlive();
+      // MIE-21: never leave a renewal timer pointing at a disposed room.
+      clearRenewalTimer();
       var room = avatarLifecycle.room || window.__hugoLiveKitRoom;
       avatarLifecycle.room = null;
       window.__hugoLiveKitRoom = null;
@@ -755,11 +782,242 @@
     }
   }
 
+  // MIE-20B: unique event_id per transmission (never reused).
+  function avatarEventId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+      }
+    } catch (err) {
+      // fall through to fallback
+    }
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  // MIE-20B: stop the native LITE keep-alive (timer + control socket). Never throws.
+  function stopNativeKeepAlive() {
+    try {
+      if (avatarNativeKaTimerId) {
+        clearInterval(avatarNativeKaTimerId);
+        avatarNativeKaTimerId = null;
+      }
+      if (avatarNativeKaSocket) {
+        try {
+          avatarNativeKaSocket.onopen = null;
+          avatarNativeKaSocket.onmessage = null;
+          avatarNativeKaSocket.onerror = null;
+          avatarNativeKaSocket.onclose = null;
+          avatarNativeKaSocket.close();
+        } catch (err) {
+          // never throw
+        }
+        avatarNativeKaSocket = null;
+      }
+      if (avatarNativeKaStarted) {
+        avatarNativeKaStarted = false;
+        avatarLog('native keep-alive stopped');
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-20B: send one documented session.keep_alive command event (never throws).
+  function sendNativeKeepAlive() {
+    try {
+      var socket = avatarNativeKaSocket;
+      if (!socket || socket.readyState !== 1 /* OPEN */) {
+        return;
+      }
+      // Exact documented payload — no extra fields. Fresh event_id each send.
+      var payload = { type: 'session.keep_alive', event_id: avatarEventId() };
+      socket.send(JSON.stringify(payload));
+      avatarLog('native keep-alive sent');
+    } catch (err) {
+      avatarLog('native keep-alive failed');
+    }
+  }
+
+  // MIE-20B: begin the single 30s native keep-alive loop once the control socket
+  // is ready. Called from beginNativeKeepAlive after onopen / connected state.
+  function runNativeKeepAlive() {
+    if (avatarNativeKaTimerId) return; // exactly one timer
+    avatarNativeKaStarted = true;
+    avatarLog('native keep-alive started');
+    sendNativeKeepAlive();
+    avatarNativeKaTimerId = setInterval(function () {
+      try {
+        sendNativeKeepAlive();
+      } catch (err) {
+        // never throw
+      }
+    }, AVATAR_NATIVE_KA_MS);
+  }
+
+  // MIE-20B: open the documented LITE control WebSocket (ws_url) and start the
+  // native keep-alive. Guarded: only when ws_url is present (Custom Mode). In the
+  // ElevenLabs Connector path ws_url is absent and LiveAvatar's bridge owns
+  // keep-alive — we log and no-op, leaving the HTTP keep-alive untouched.
+  function startNativeKeepAlive() {
+    try {
+      if (avatarNativeKaSocket || avatarNativeKaTimerId) {
+        avatarLog('native keep-alive already running');
+        return;
+      }
+      var wsUrl = avatarLifecycle.wsUrl;
+      if (!wsUrl || typeof WebSocket === 'undefined') {
+        avatarLog('native keep-alive unavailable (no ws_url; connector-managed)');
+        return;
+      }
+
+      var socket = new WebSocket(wsUrl);
+      avatarNativeKaSocket = socket;
+
+      // Defensive: if no session.state_updated(connected) arrives shortly after
+      // open, begin anyway (keep_alive is benign). Primary path is the documented
+      // "wait for connected" signal below.
+      var graceTimerId = null;
+
+      socket.onopen = function () {
+        avatarLog('native keep-alive socket open');
+        graceTimerId = setTimeout(function () {
+          if (avatarNativeKaSocket === socket) runNativeKeepAlive();
+        }, 2500);
+      };
+
+      socket.onmessage = function (evt) {
+        try {
+          var msg = JSON.parse(evt.data);
+          if (msg && msg.type === 'session.state_updated') {
+            // Documented server event. Wait for "connected" before commands.
+            if (msg.state === 'connected') {
+              if (graceTimerId) { clearTimeout(graceTimerId); graceTimerId = null; }
+              if (avatarNativeKaSocket === socket) runNativeKeepAlive();
+            } else if (msg.state === 'closed' || msg.state === 'closing') {
+              stopNativeKeepAlive();
+            }
+          }
+        } catch (err) {
+          // ignore non-JSON / unrelated frames
+        }
+      };
+
+      socket.onerror = function () {
+        avatarLog('native keep-alive failed');
+      };
+
+      socket.onclose = function () {
+        if (graceTimerId) { clearTimeout(graceTimerId); graceTimerId = null; }
+        // Only tear down our own loop if this is still the active socket.
+        if (avatarNativeKaSocket === socket) {
+          stopNativeKeepAlive();
+        }
+      };
+    } catch (err) {
+      avatarLog('native keep-alive failed');
+      // never throw; leave HTTP keep-alive as the safety net.
+    }
+  }
+
+  // MIE-21: update ONLY the existing CTA status element (#voice-status).
+  function setRenewalStatus(text) {
+    try {
+      var status = document.getElementById('voice-status');
+      if (status) status.textContent = text || '';
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-21: clear the single renewal timer (idempotent, never throws).
+  function clearRenewalTimer() {
+    try {
+      if (avatarRenewalTimerId) {
+        clearTimeout(avatarRenewalTimerId);
+        avatarRenewalTimerId = null;
+        avatarLog('renewal timer cleared');
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-21: schedule exactly one renewal, with lead time before hard expiry.
+  // 300s → ~270s; sessions <= 60s → 80% of duration. Always replaces any prior.
+  function scheduleAvatarRenewal() {
+    try {
+      clearRenewalTimer();
+      var duration = avatarLifecycle.maxSessionDuration;
+      if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0) {
+        duration = DEFAULT_MAX_SESSION_DURATION;
+      }
+      var delaySec = duration > 60 ? (duration - RENEWAL_LEAD_SECONDS) : (duration * 0.8);
+      if (delaySec < 1) delaySec = 1;
+      avatarRenewalTimerId = setTimeout(function () {
+        renewAvatarSession();
+      }, delaySec * 1000);
+      avatarLog('renewal scheduled', { inSeconds: Math.round(delaySec) });
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-21: controlled single-room renewal. Dispose the current room first, then
+  // request a brand-new session and reconnect through the existing init path
+  // (which restarts keep-alives + schedules the next renewal). Never two rooms
+  // at once; never resends the briefing; never auto-retries on failure.
+  function renewAvatarSession() {
+    try {
+      if (avatarLifecycle.renewing) {
+        avatarLog('renewal already in progress; ignoring');
+        return;
+      }
+      avatarLog('renewing session');
+      avatarLifecycle.renewing = true;
+      setRenewalStatus('Renovando sesión de Hugo...');
+
+      // Stop keep-alives + renewal timer, then dispose via the existing path.
+      // cleanupAvatarLifecycle disposes the room and clears room/promise/
+      // sessionId/wsUrl; the renewing flag suppresses the native-disconnect path.
+      stopAvatarKeepAlive();
+      stopNativeKeepAlive();
+      clearRenewalTimer();
+      cleanupAvatarLifecycle('disconnected');
+
+      // Fresh session + reconnect using the existing connection path. This mints
+      // brand-new LiveKit credentials (no reuse) and re-attaches tracks via the
+      // existing handleAvatarTrack() inside initAvatar().
+      ensureAvatarConnected()
+        .then(function () {
+          avatarLifecycle.renewing = false;
+          setRenewalStatus('');
+          avatarLog('renewal connected');
+          // The next renewal is scheduled by initAvatar's connect handler.
+        })
+        .catch(function () {
+          // Existing failure path already disposed the room + showed the
+          // fallback iframe. Clear renewal state, permit a manual CTA retry,
+          // and NEVER auto-retry / loop.
+          avatarLifecycle.renewing = false;
+          clearRenewalTimer();
+          avatarLog('renewal failed');
+          window.__hugoBriefingDispatched = false;
+          setRenewalStatus('');
+          setHugoConversationState('fallback');
+        });
+    } catch (err) {
+      avatarLifecycle.renewing = false;
+      clearRenewalTimer();
+      avatarLog('renewal failed');
+    }
+  }
+
   // MIE-18B: clear stale promise/session and dispose any unhealthy room.
   function cleanupAvatarLifecycle(targetState) {
     try {
       avatarLifecycle.connectPromise = null;
       avatarLifecycle.sessionId = null;
+      avatarLifecycle.wsUrl = null;
       disposeAvatarRoom();
       setLifecycleState(targetState || 'failed');
     } catch (err) {
@@ -973,6 +1231,14 @@
           });
           // Track the active session id (never logged as a secret elsewhere).
           avatarLifecycle.sessionId = (session && session.session_id) || null;
+          // MIE-20B: capture the documented LITE control WebSocket URL (if any).
+          // Absent in the ElevenLabs Connector path (ws_url is "Custom Mode only").
+          avatarLifecycle.wsUrl = (session && session.ws_url) || null;
+          // MIE-21: store max_session_duration to drive renewal. Default 300 if
+          // missing / invalid / <= 0.
+          var maxDur = session && session.max_session_duration;
+          avatarLifecycle.maxSessionDuration = (typeof maxDur === 'number'
+            && isFinite(maxDur) && maxDur > 0) ? maxDur : DEFAULT_MAX_SESSION_DURATION;
 
           // UMD global name varies by build; accept both spellings.
           var LiveKit = window.LivekitClient || window.LiveKitClient;
@@ -1009,6 +1275,9 @@
             if (RoomEvent.Disconnected) {
               room.on(RoomEvent.Disconnected, function (reason) {
                 if (avatarDisposing) return;
+                // MIE-21: during a controlled renewal we orchestrate teardown
+                // ourselves; ignore the old room's native disconnect here.
+                if (avatarLifecycle.renewing) return;
                 // Ignore stale events from a room we've already replaced.
                 if (avatarLifecycle.room && avatarLifecycle.room !== room) return;
                 avatarLog('native room disconnected', { reason: reason == null ? null : String(reason) });
@@ -1079,6 +1348,11 @@
               startAuditSnapshots();
               // MIE-20: keep the LiveAvatar session alive while connected.
               startAvatarKeepAlive();
+              // MIE-20B: official native LITE keep-alive over the session control
+              // WebSocket (guarded on ws_url; no-op + log in connector mode).
+              startNativeKeepAlive();
+              // MIE-21: schedule the single renewal before this session expires.
+              scheduleAvatarRenewal();
               // Only advance to 'ready' if the CTA flow hasn't moved further.
               // The avatar is connected but SILENT: it never speaks until the
               // user clicks the CTA. Make the CTA active and clearly waiting.
@@ -1167,6 +1441,14 @@
         hasRoom: !!avatarLifecycle.room,
         hasConnectPromise: !!avatarLifecycle.connectPromise,
         hasSessionId: !!avatarLifecycle.sessionId,
+        hasWsUrl: !!avatarLifecycle.wsUrl,
+        maxSessionDuration: avatarLifecycle.maxSessionDuration,
+        renewing: avatarLifecycle.renewing,
+        renewalTimerActive: !!avatarRenewalTimerId,
+        nativeKeepAlive: {
+          socketOpen: !!(avatarNativeKaSocket && avatarNativeKaSocket.readyState === 1),
+          timerActive: !!avatarNativeKaTimerId,
+        },
       },
       audioElement: audioElState(document.getElementById('avatar-audio')),
       videoElement: videoElState(document.getElementById('avatar-video')),
@@ -1195,6 +1477,12 @@
   // MIE-20: stop the keep-alive loop when the page goes away (no leaks).
   window.addEventListener('pagehide', stopAvatarKeepAlive);
   window.addEventListener('beforeunload', stopAvatarKeepAlive);
+  // MIE-20B: also tear down the native LITE keep-alive socket on unload.
+  window.addEventListener('pagehide', stopNativeKeepAlive);
+  window.addEventListener('beforeunload', stopNativeKeepAlive);
+  // MIE-21: clear the renewal timer on unload (no leaks).
+  window.addEventListener('pagehide', clearRenewalTimer);
+  window.addEventListener('beforeunload', clearRenewalTimer);
 
   load();
 
