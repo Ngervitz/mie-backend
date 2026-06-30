@@ -1,33 +1,41 @@
 /* ============================================================================
-   Hugo — Executive Intelligence Dashboard
-   MIE-22 Visual Pass (CSS ONLY — no DOM, IDs, classes, or behavior changed).
-   Design language: Bloomberg clarity · Apple whitespace · Notion typography ·
-   Linear restraint. Hierarchy through type and space, not color or borders.
+   Hugo — Executive Workspace
+   MIE-22A Workspace Redesign (CSS ONLY — no DOM/ID/class/behavior changes).
+
+   Concept: not a SaaS dashboard. A permanent executive briefing room.
+   - LEFT column  → the avatar (Hugo, the presenter). Stable, refined, never
+     dominant.
+   - RIGHT column → today's intelligence as ONE continuous editorial document
+     (masthead → brief → recommended action → top stories → watch tomorrow →
+     supporting information), scrolling naturally.
+   - No application chrome: the top bar becomes the report's editorial masthead;
+     the bottom bar becomes a floating "desk console" for the question input.
+   - Hierarchy comes from typography and whitespace, not borders or color. The
+     report never overlaps the avatar.
    ============================================================================ */
 
 :root {
-  /* Type colors — calm, high-contrast, identity preserved. */
   --text: #f4f6fa;
   --text-strong: #ffffff;
   --text-muted: #aab3c2;
   --text-faint: #79828f;
 
-  /* Surfaces — lighter glass, fewer visible edges. */
-  --panel-bg: rgba(16, 20, 28, 0.55);
-  --panel-bg-solid: rgba(9, 11, 18, 0.80);
   --panel-border: rgba(255, 255, 255, 0.055);
   --panel-border-soft: rgba(255, 255, 255, 0.04);
   --panel-radius: 18px;
   --blur: blur(16px);
 
-  /* Depth — soft, executive, never decorative. */
   --shadow-soft: 0 20px 55px -28px rgba(0, 0, 0, 0.75);
   --shadow-frame: 0 34px 80px -32px rgba(0, 0, 0, 0.7);
 
   --accent: #3b82f6;
   --accent-soft: rgba(59, 130, 246, 0.10);
 
-  /* Attention / confidence — branding preserved verbatim. */
+  /* Width of the avatar (presenter) column on desktop. */
+  --avatar-col: 39%;
+  /* Comfortable reading width for the report document. */
+  --report-measure: 760px;
+
   --att-normal: #8a93a3;
   --att-interesting: #3b82f6;
   --att-high: #f59e0b;
@@ -46,7 +54,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #07090d;
+  background: #050508;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -76,11 +84,10 @@ html, body {
 #background-layer {
   z-index: 1;
   pointer-events: none;
-  background:
-    radial-gradient(120% 80% at 50% 0%, #141a26 0%, #0b0f17 45%, #07090d 100%);
+  background: radial-gradient(120% 90% at 30% 0%, #0c0e16 0%, #07080f 52%, #050508 100%);
 }
 
-/* ---------- Avatar Layer (visual only) ---------- */
+/* ---------- Avatar (the presenter) ---------- */
 #avatar-layer {
   z-index: 2;
   pointer-events: none;
@@ -89,15 +96,18 @@ html, body {
   justify-content: center;
 }
 
+/* A refined executive frame. The inline object-fit:cover on the <video> is
+   untouched, so the picture is never stretched or re-cropped — only the
+   surrounding container is styled. */
 #avatar-container {
-  width: clamp(320px, 34vw, 720px);
+  width: clamp(300px, 30vw, 480px);
   aspect-ratio: 16 / 9;
-  border-radius: 20px;
+  height: auto;
+  border-radius: 22px;
   overflow: hidden;
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-frame);
 }
-
 #avatar-container iframe {
   display: block;
   width: 100%;
@@ -105,88 +115,78 @@ html, body {
   border: 0;
 }
 
-/* ---------- Intelligence Layer ---------- */
+/* ---------- Report (the document) ---------- */
 #intelligence-layer {
   z-index: 3;
-  pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: auto;
 }
 
-/* Header — quiet overlay, type-led wordmark. */
+/* Editorial masthead — replaces the old application header. Hugo's identity,
+   today's date, and the attention/confidence indicators introduce the briefing
+   like a document header, not software navigation. */
 #hugo-header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
+  position: static;
+  height: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 26px;
-  background: rgba(8, 10, 14, 0.5);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
+  gap: 16px;
+  padding: 0 0 20px;
+  margin: 0 0 30px;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
   border-bottom: 1px solid var(--panel-border-soft);
   pointer-events: auto;
-  z-index: 5;
 }
-
 #hugo-header .header-left {
   font-weight: 700;
-  letter-spacing: 0.26em;
-  font-size: 0.92rem;
+  letter-spacing: 0.3em;
+  font-size: 1rem;
   color: var(--text-strong);
 }
-
 #hugo-header .header-center {
+  margin-left: auto;
   font-size: 0.82rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
-
 #hugo-header .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* Columns */
-#left-col {
-  position: absolute;
-  top: 76px;
-  left: 24px;
-  width: 420px;
-  bottom: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  overflow-y: auto;
-  pointer-events: none;
-  padding-right: 2px;
-}
-
+/* All report containers flow as one document (no absolute positioning, no
+   floating cards). Positioning differs only per breakpoint on the columns. */
+#left-col,
+#brief-panel,
+#questions-panel,
 #market-panel {
-  position: absolute;
-  top: 76px;
-  right: 24px;
-  width: 300px;
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-/* ---------- Panels (glass) ---------- */
-.panel {
-  background: var(--panel-bg);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--panel-radius);
-  padding: 24px;
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  inset: auto;
+  display: block;
   pointer-events: auto;
 }
 
-#brief-panel { max-height: 60vh; overflow-y: auto; }
+/* Cards dissolve into the document: no surfaces, no borders — whitespace and
+   type carry the hierarchy. */
+.panel {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: auto;
+}
 
 .panel .panel-title {
   font-size: 0.68rem;
@@ -197,12 +197,12 @@ html, body {
   margin: 0 0 16px;
 }
 
-/* Brief content */
+/* Start-conversation control sits at the head of the report. */
 .voice-row {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 22px;
+  margin-bottom: 26px;
 }
 
 .btn {
@@ -218,7 +218,6 @@ html, body {
   transition: background 0.18s ease, border-color 0.18s ease;
   pointer-events: auto;
 }
-
 .btn:hover { background: rgba(255, 255, 255, 0.11); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -244,7 +243,6 @@ audio { width: 100%; margin-top: 4px; }
   pointer-events: auto;
 }
 .transcript-toggle:hover { color: var(--text); }
-
 .transcript-body {
   margin-top: 8px;
   font-size: 0.86rem;
@@ -253,25 +251,24 @@ audio { width: 100%; margin-top: 4px; }
   white-space: pre-wrap;
 }
 
-/* Hero headline — the Executive Brief dominates through type and space. */
+/* Executive Brief — the lead of the document. */
 .headline {
-  font-size: 1.62rem;
+  font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.22;
   letter-spacing: -0.012em;
   color: var(--text-strong);
   margin: 0 0 14px;
 }
-
 .why-it-matters {
-  font-size: 1rem;
+  font-size: 1.02rem;
   line-height: 1.62;
   color: var(--text-muted);
-  margin: 0 0 24px;
-  max-width: 60ch;
+  margin: 0 0 26px;
+  max-width: 62ch;
 }
 
-.brief-section { margin-top: 28px; }
+.brief-section { margin-top: 30px; }
 .brief-section:first-of-type { margin-top: 0; }
 
 .section-label {
@@ -283,11 +280,12 @@ audio { width: 100%; margin-top: 4px; }
   margin: 0 0 14px;
 }
 
-/* Top Stories — separation by rhythm, not heavy rules. */
+/* Top Stories — separated by rhythm, a single hairline lead. */
 .story {
   padding-left: 14px;
   border-left: 1px solid rgba(255, 255, 255, 0.07);
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+  max-width: 62ch;
 }
 .story:last-child { margin-bottom: 0; }
 .story .story-entity {
@@ -311,14 +309,15 @@ audio { width: 100%; margin-top: 4px; }
   color: var(--text-muted);
 }
 
-/* Recommended Action — draws the eye through elevation + type, not loud color. */
+/* Recommended Action — draws the eye through elevation + type, calm color. */
 .action-card {
   position: relative;
   background: var(--accent-soft);
   border: 1px solid transparent;
   border-left: 2px solid rgba(59, 130, 246, 0.7);
   border-radius: 12px;
-  padding: 18px 18px 18px 20px;
+  padding: 18px 20px;
+  max-width: 62ch;
   box-shadow: var(--shadow-soft);
 }
 .action-card .action-priority {
@@ -343,13 +342,12 @@ audio { width: 100%; margin-top: 4px; }
   color: var(--text-muted);
 }
 
-/* Watch Tomorrow — clearly secondary: lighter, quieter, more compact. */
+/* Watch Tomorrow — clearly secondary: lighter, quieter, compact. */
 .watch-item { margin-bottom: 13px; }
 .watch-item:last-child { margin-bottom: 0; }
 .watch-item .watch-entity {
   font-size: 0.78rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
   color: var(--text-muted);
 }
 .watch-item .watch-signal {
@@ -363,7 +361,7 @@ audio { width: 100%; margin-top: 4px; }
   margin-top: 3px;
 }
 
-/* Market / Supporting Information — quiet reference, numbers stand out. */
+/* Supporting Information (Mercado) — a report section, not a floating widget. */
 .market-row {
   display: flex;
   align-items: center;
@@ -372,6 +370,7 @@ audio { width: 100%; margin-top: 4px; }
   padding: 10px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.045);
   font-size: 0.88rem;
+  max-width: 62ch;
 }
 .market-row:last-child { border-bottom: none; }
 .market-row .market-entity { color: var(--text-muted); }
@@ -382,7 +381,7 @@ audio { width: 100%; margin-top: 4px; }
 }
 
 /* Suggested / next questions */
-.q-list { display: flex; flex-direction: column; gap: 10px; }
+.q-list { display: flex; flex-direction: column; gap: 10px; max-width: 62ch; }
 .q-btn {
   font: inherit;
   font-size: 0.88rem;
@@ -399,18 +398,21 @@ audio { width: 100%; margin-top: 4px; }
 }
 .q-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); }
 
-/* Answer panel — floats above the input, separate from the Executive Brief column. */
+/* Answer to a question — a transient response surface attached to the console,
+   confined to the report side (never over the avatar). */
 #answer-panel {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 104px;
-  margin: 0 auto;
-  width: min(700px, 92vw);
-  max-height: 40vh;
+  position: static;
+  width: auto;
+  max-height: none;
   overflow-y: auto;
-  z-index: 5;
+  background: rgba(16, 20, 28, 0.66);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 20px 22px;
   box-shadow: var(--shadow-soft);
+  pointer-events: auto;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.35s ease, transform 0.35s ease;
@@ -452,7 +454,7 @@ audio { width: 100%; margin-top: 4px; }
   pointer-events: none;
 }
 
-/* ---------- Input Layer ---------- */
+/* ---------- Input — the executive desk console ---------- */
 #input-layer {
   position: fixed;
   left: 0;
@@ -468,16 +470,17 @@ audio { width: 100%; margin-top: 4px; }
 }
 
 #input-wrap {
-  width: min(700px, 92vw);
+  width: min(640px, 92vw);
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: var(--panel-bg);
+  background: rgba(14, 18, 26, 0.62);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
   padding: 8px 8px 8px 16px;
+  box-shadow: var(--shadow-soft);
   pointer-events: auto;
 }
 
@@ -513,7 +516,7 @@ audio { width: 100%; margin-top: 4px; }
 #send-btn:disabled { opacity: 0.6; cursor: default; }
 
 #input-error {
-  width: min(700px, 92vw);
+  width: min(640px, 92vw);
   min-height: 16px;
   font-size: 0.82rem;
   color: #fda4a4;
@@ -542,175 +545,133 @@ audio { width: 100%; margin-top: 4px; }
 .hidden { display: none !important; }
 
 /* ---------- Scrollbars — thin, unobtrusive ---------- */
-#left-col::-webkit-scrollbar,
-#brief-panel::-webkit-scrollbar,
-#market-panel::-webkit-scrollbar,
-#answer-panel::-webkit-scrollbar,
-#intelligence-layer::-webkit-scrollbar { width: 7px; }
-#left-col::-webkit-scrollbar-thumb,
-#brief-panel::-webkit-scrollbar-thumb,
-#market-panel::-webkit-scrollbar-thumb,
-#answer-panel::-webkit-scrollbar-thumb,
-#intelligence-layer::-webkit-scrollbar-thumb {
+#intelligence-layer::-webkit-scrollbar,
+#answer-panel::-webkit-scrollbar { width: 7px; }
+#intelligence-layer::-webkit-scrollbar-thumb,
+#answer-panel::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
 }
-#left-col::-webkit-scrollbar-thumb:hover,
-#brief-panel::-webkit-scrollbar-thumb:hover,
-#market-panel::-webkit-scrollbar-thumb:hover,
+#intelligence-layer::-webkit-scrollbar-thumb:hover,
 #answer-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
 
-/* ---------- Mobile (must not regress) ---------- */
+/* ============================================================================
+   DESKTOP — two-column workspace (priority experience)
+   ============================================================================ */
+@media (min-width: 769px) {
+  /* Avatar occupies the LEFT column only, vertically centered, never dominant. */
+  #avatar-layer {
+    right: calc(100% - var(--avatar-col));
+    bottom: 0;
+  }
+  #avatar-container {
+    width: min(28vw, 460px);
+  }
+
+  /* Report = the RIGHT column: one continuous, naturally scrolling document. */
+  #intelligence-layer {
+    left: var(--avatar-col);
+    right: 0;
+    top: 0;
+    bottom: 0;
+    padding: 56px 56px 156px;
+  }
+
+  /* Center the document to a comfortable reading measure within the column. */
+  #hugo-header,
+  #left-col,
+  #market-panel {
+    max-width: var(--report-measure);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .headline { font-size: 1.72rem; }
+
+  /* Quiet section breaks (whitespace + hairline) merge the parts into one
+     report: suggested questions, then Supporting Information. */
+  #questions-panel:not(.hidden),
+  #market-panel:not(.hidden) {
+    margin-top: 30px;
+    padding-top: 26px;
+    border-top: 1px solid var(--panel-border-soft);
+  }
+
+  /* The desk console floats in the report side, above the office — not a
+     full-width footer bar. Office background stays visible behind it. */
+  #input-layer {
+    left: var(--avatar-col);
+    right: 0;
+    bottom: 0;
+    padding: 0 0 26px;
+  }
+  #input-wrap,
+  #input-error { width: min(560px, 82%); }
+
+  /* Answer floats above the console within the report column (never over the
+     avatar). */
+  #answer-panel {
+    position: fixed;
+    left: var(--avatar-col);
+    right: 0;
+    bottom: 100px;
+    margin: 0 auto;
+    width: min(560px, 82%);
+    max-height: 42vh;
+  }
+}
+
+/* Wide desktop — a touch more room for the lead. */
+@media (min-width: 1440px) {
+  :root { --avatar-col: 38%; }
+  #intelligence-layer { padding: 64px 72px 160px; }
+  .headline { font-size: 1.85rem; }
+}
+
+/* ============================================================================
+   MOBILE — stacked (must not regress): avatar band on top, report scrolls below
+   ============================================================================ */
 @media (max-width: 768px) {
   #avatar-layer {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    height: calc(34vh + 24px);
     align-items: flex-start;
     justify-content: center;
   }
   #avatar-container {
-    width: min(96vw, calc(38vh * 16 / 9));
-    height: 38vh;
+    width: min(92vw, calc(34vh * 16 / 9));
+    height: 34vh;
     aspect-ratio: auto;
-    margin-top: 60px;
+    margin-top: 16px;
     border-radius: 18px;
   }
 
-  /* Intelligence layer becomes an independent scroll region below the avatar. */
   #intelligence-layer {
-    position: absolute;
-    top: calc(38vh + 60px);
+    top: calc(34vh + 28px);
     left: 0;
     right: 0;
-    bottom: 92px;
-    overflow-y: auto;
-    pointer-events: auto;
-    padding: 16px;
+    bottom: 84px;
+    padding: 0 18px 20px;
   }
 
-  #left-col,
-  #market-panel,
-  #answer-panel {
-    position: static;
-    width: auto;
-    max-height: none;
-    bottom: auto;
-    overflow: visible;
-    pointer-events: auto;
-    transform: none;
-  }
-  #left-col { margin-bottom: 16px; gap: 16px; }
-  #answer-panel { margin: 0 0 16px; box-shadow: none; }
-  #brief-panel { max-height: none; overflow: visible; }
+  #hugo-header { margin-bottom: 22px; }
+  .headline { font-size: 1.42rem; }
 
-  .headline { font-size: 1.45rem; }
-  .panel { padding: 20px; }
-
-  #hugo-header { height: 56px; padding: 0 18px; }
-}
-
-/* ---------- Desktop scene composition (MIE-14B base + MIE-22 polish) ---------- */
-@media (min-width: 768px) {
-  /* Calm, deep backdrop. */
-  body { background: #050508; }
-  #scene { background: #050508; }
-  #background-layer {
-    background: radial-gradient(120% 90% at 50% 0%, #0c0e16 0%, #07080f 52%, #050508 100%);
-  }
-
-  /* Avatar = a framed "screen" in Hugo's office, inset from every edge with a
-     soft shadow and rounded corners. The <video> keeps its inline object-fit:
-     cover, so the picture is never stretched, cropped differently, or distorted
-     — only the surrounding container is styled. */
-  #avatar-container {
-    position: fixed;
-    top: 80px;
-    left: 28px;
-    right: 28px;
-    bottom: 104px;
-    width: auto;
-    height: auto;
-    max-width: none;
-    aspect-ratio: auto;
-    border-radius: 24px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: var(--shadow-frame);
-  }
-  #avatar-container iframe {
-    width: 100%;
-    height: 100%;
-    border: 0;
-  }
-
-  /* Executive Brief — the hero. A single light glass frame; inner cards are
-     transparent so the column reads as one composed report, not stacked widgets. */
-  #left-col {
-    position: fixed;
-    top: 84px;
-    left: 32px;
-    bottom: auto;
-    width: 420px;
-    max-height: calc(100vh - 236px);
-    overflow-y: auto;
-    pointer-events: auto;
-    gap: 0;
-    background: var(--panel-bg-solid);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--panel-border);
-    border-radius: 20px;
-    padding: 30px 28px;
-    box-shadow: var(--shadow-frame);
-  }
-  #left-col .panel {
-    background: transparent;
-    border: none;
-    padding: 0;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  /* Suggested questions sit under the brief with a quiet divider of whitespace. */
-  #questions-panel:not(.hidden) {
+  /* Report parts flow in order; quiet breaks before questions / supporting info. */
+  #questions-panel:not(.hidden),
+  #market-panel:not(.hidden) {
     margin-top: 26px;
-    padding-top: 24px;
+    padding-top: 22px;
     border-top: 1px solid var(--panel-border-soft);
   }
-  #brief-panel { max-height: none; overflow: visible; }
+  #left-col { margin-bottom: 0; }
 
-  .headline { font-size: 1.72rem; }
+  /* Answer flows inline at the foot of the report on mobile. */
+  #answer-panel { margin: 26px 0 0; }
 
-  /* Supporting Information — same glass family, visually lighter / secondary. */
-  #market-panel {
-    position: fixed;
-    top: 104px;
-    right: 32px;
-    width: 272px;
-    max-height: calc(100vh - 256px);
-    overflow-y: auto;
-    background: var(--panel-bg-solid);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--panel-border);
-    border-radius: 20px;
-    padding: 24px 22px;
-    box-shadow: var(--shadow-frame);
-  }
-
-  /* Input floats over the office — not bolted to a footer. */
-  #input-layer { bottom: 22px; padding: 0; }
-  #input-wrap {
-    width: 64vw;
-    max-width: 820px;
-    box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.6);
-  }
-  #input-error { width: 64vw; max-width: 820px; }
-
-  /* Header — lightweight overlay above all layers. */
-  #hugo-header { z-index: 20; }
-}
-
-/* ---------- Wide desktop — let the brief breathe a touch more ---------- */
-@media (min-width: 1440px) {
-  #left-col { width: 460px; padding: 34px 32px; }
-  .headline { font-size: 1.82rem; }
-  #market-panel { width: 300px; }
+  #input-layer { padding: 12px 16px 16px; }
+  #input-wrap, #input-error { width: min(680px, 94vw); }
 }
