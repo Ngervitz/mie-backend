@@ -3,7 +3,7 @@ const { runHugo } = require('../services/hugo-brain');
 const { generateVoiceBrief } = require('../services/hugo-voice');
 const { askHugo } = require('../services/hugo-ask');
 const { handleOpenAiChatCompletion, streamOpenAiChatCompletion } = require('../services/hugo-openai');
-const { startAvatarSession } = require('../services/hugo-avatar');
+const { startAvatarSession, keepAliveAvatarSession } = require('../services/hugo-avatar');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
 const { isValidDateOnly, todayUtc } = require('./reports');
 const logger = require('../lib/logger');
@@ -219,6 +219,25 @@ router.post('/avatar/session', async (req, res) => {
         code: 'internal_error',
       },
     });
+  }
+});
+
+// MIE-20: keep-alive proxy. The frontend calls this every ~45s with the active
+// session_id; the backend forwards to LiveAvatar with the server-side API key.
+// Never exposes secrets; returns clean JSON only.
+router.post('/avatar/keepalive', async (req, res) => {
+  const raw = req.body && req.body.session_id;
+  const sessionId = typeof raw === 'string' ? raw.trim() : '';
+  if (!sessionId) {
+    return res.status(400).json({ error: 'session_id is required' });
+  }
+
+  try {
+    await keepAliveAvatarSession(sessionId);
+    return res.json({ ok: true });
+  } catch (err) {
+    const status = err && typeof err.status === 'number' ? err.status : 502;
+    return res.status(status).json({ error: 'LiveAvatar keep-alive failed', status });
   }
 });
 

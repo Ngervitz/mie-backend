@@ -319,6 +319,12 @@
   // Distinguishes an intentional teardown from an unexpected SDK disconnect.
   var avatarDisposing = false;
 
+  // MIE-20: keep-alive loop state. Single interval; stops on dispose/disconnect.
+  var avatarKeepAliveTimerId = null;
+  var avatarKeepAliveFailures = 0;
+  var AVATAR_KEEPALIVE_MS = 45000;
+  var AVATAR_KEEPALIVE_MAX_FAILURES = 3;
+
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
     var video = document.getElementById('avatar-video');
@@ -662,6 +668,8 @@
   // via avatarDisposing so intentional teardown is not treated as a failure.
   function disposeAvatarRoom() {
     try {
+      // MIE-20: stop keep-alive whenever the room is torn down.
+      stopAvatarKeepAlive();
       var room = avatarLifecycle.room || window.__hugoLiveKitRoom;
       avatarLifecycle.room = null;
       window.__hugoLiveKitRoom = null;
@@ -680,6 +688,69 @@
       }
     } catch (err) {
       avatarDisposing = false;
+      // never throw
+    }
+  }
+
+  // MIE-20: stop the keep-alive loop (idempotent, never throws).
+  function stopAvatarKeepAlive() {
+    try {
+      if (avatarKeepAliveTimerId) {
+        clearInterval(avatarKeepAliveTimerId);
+        avatarKeepAliveTimerId = null;
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-20: send one keep-alive tick to our backend proxy (never throws).
+  function sendAvatarKeepAlive() {
+    var sid = avatarLifecycle.sessionId;
+    if (!sid) {
+      stopAvatarKeepAlive();
+      return;
+    }
+    avatarLog('keep-alive sent');
+    fetch('/hugo/avatar/keepalive', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: sid }),
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('keepalive_failed');
+        avatarKeepAliveFailures = 0;
+        avatarLog('keep-alive ok');
+      })
+      .catch(function (err) {
+        avatarKeepAliveFailures += 1;
+        avatarLog('keep-alive failed', { consecutive: avatarKeepAliveFailures });
+        if (avatarKeepAliveFailures >= AVATAR_KEEPALIVE_MAX_FAILURES) {
+          console.warn('[Hugo Avatar] keep-alive stopped after '
+            + AVATAR_KEEPALIVE_MAX_FAILURES + ' consecutive failures');
+          stopAvatarKeepAlive();
+        }
+      });
+  }
+
+  // MIE-20: start the single keep-alive interval after a connected session.
+  function startAvatarKeepAlive() {
+    try {
+      if (avatarKeepAliveTimerId) {
+        avatarLog('keep-alive already running');
+        return;
+      }
+      if (!avatarLifecycle.sessionId) return;
+      avatarKeepAliveFailures = 0;
+      avatarKeepAliveTimerId = setInterval(function () {
+        try {
+          sendAvatarKeepAlive();
+        } catch (err) {
+          // never throw
+        }
+      }, AVATAR_KEEPALIVE_MS);
+      avatarLog('keep-alive started');
+    } catch (err) {
       // never throw
     }
   }
@@ -1006,6 +1077,8 @@
               // started by RoomEvent.Connected when that event is emitted).
               lkLog('connect resolved');
               startAuditSnapshots();
+              // MIE-20: keep the LiveAvatar session alive while connected.
+              startAvatarKeepAlive();
               // Only advance to 'ready' if the CTA flow hasn't moved further.
               // The avatar is connected but SILENT: it never speaks until the
               // user clicks the CTA. Make the CTA active and clearly waiting.
@@ -1118,6 +1191,10 @@
       submitQuestion();
     }
   });
+
+  // MIE-20: stop the keep-alive loop when the page goes away (no leaks).
+  window.addEventListener('pagehide', stopAvatarKeepAlive);
+  window.addEventListener('beforeunload', stopAvatarKeepAlive);
 
   load();
 

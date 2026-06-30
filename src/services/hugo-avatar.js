@@ -164,4 +164,38 @@ async function startAvatarSession() {
   }
 }
 
-module.exports = { startAvatarSession, AvatarError };
+// MIE-20: periodic keep-alive proxy. Keeps a LiveAvatar LITE session alive so
+// the avatar does not time out after a few minutes. API key stays server-side.
+async function keepAliveAvatarSession(sessionId) {
+  const startedMs = Date.now();
+  logger.info('Hugo avatar keep-alive started', { hasSessionId: !!sessionId });
+
+  const apiKey = process.env.LIVEAVATAR_API_KEY;
+  if (!apiKey) {
+    logger.error('Hugo avatar keep-alive failed', { durationMs: Date.now() - startedMs, status: 500 });
+    throw new AvatarError(500, errBody(500, 'config', 'LiveAvatar keep-alive failed', 'missing_config'));
+  }
+
+  let res;
+  try {
+    res = await fetch(`${LIVEAVATAR_BASE}/sessions/keep-alive`, {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch (err) {
+    logger.error('Hugo avatar keep-alive failed', { durationMs: Date.now() - startedMs, status: 502 });
+    throw new AvatarError(502, errBody(502, 'liveavatar', 'LiveAvatar keep-alive failed', 'provider_unreachable'));
+  }
+
+  if (!res.ok) {
+    const status = res.status >= 400 ? res.status : 502;
+    logger.error('Hugo avatar keep-alive failed', { durationMs: Date.now() - startedMs, status });
+    throw new AvatarError(status, errBody(status, 'liveavatar', 'LiveAvatar keep-alive failed'));
+  }
+
+  logger.info('Hugo avatar keep-alive completed', { durationMs: Date.now() - startedMs, status: res.status });
+  return { ok: true };
+}
+
+module.exports = { startAvatarSession, keepAliveAvatarSession, AvatarError };
