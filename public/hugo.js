@@ -548,25 +548,6 @@
     for (var si = 0; si < states.length; si++) {
       hugoPresence.classList.toggle('presence-state-' + states[si], pulseState === states[si]);
     }
-
-    // MIE-24: pulse labels (presentation only — matches reference UI).
-    var subtitle = document.getElementById('presence-subtitle');
-    var statusEl = document.getElementById('presence-status');
-    var subtitleText = 'Hugo está listo';
-    var statusText = '';
-    if (pulseState === 'thinking') {
-      subtitleText = 'Hugo is analyzing';
-      statusText = 'Thinking...';
-    } else if (pulseState === 'speaking') {
-      subtitleText = 'Hugo is speaking';
-      statusText = 'Speaking...';
-    } else if (pulseState === 'ended') {
-      subtitleText = 'Session ended';
-    } else if (avatarConversationActive) {
-      subtitleText = 'Hugo is listening';
-    }
-    if (subtitle) subtitle.textContent = subtitleText;
-    if (statusEl) statusEl.textContent = statusText;
   }
 
   function wireAbstractAudioPresence(audioEl) {
@@ -2012,7 +1993,7 @@
               });
             }
 
-            // MIE-23 / MIE-24: LiveKit speaking signal — abstract presence + idle reset.
+            // MIE-23: LiveKit speaking signal — abstract presence + idle reset.
             if (RoomEvent.ActiveSpeakersChanged) {
               room.on(RoomEvent.ActiveSpeakersChanged, function (speakers) {
                 try {
