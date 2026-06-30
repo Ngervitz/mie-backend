@@ -232,6 +232,8 @@
     if (!question) return;
 
     setAsking(true);
+    // MIE-17C: sending a message is real conversation activity.
+    resetAvatarIdleTimer('user_message');
 
     fetch('/hugo/ask', {
       method: 'POST',
@@ -248,6 +250,8 @@
           return;
         }
         renderAnswer(result.body);
+        // MIE-17C: Hugo finished responding — real conversation activity.
+        resetAvatarIdleTimer('hugo_response');
         history.push({ question: question, answer: result.body.answer || '' });
         if (history.length > 3) history = history.slice(-3);
         input.value = '';
@@ -356,6 +360,15 @@
   //   visibilitychange together fire the stop flow at most once per session.
   var avatarConversationActive = false;
   var avatarStopExecuted = false;
+
+  // MIE-17C: idle timeout. After 45s without REAL conversation activity the
+  // session is stopped (credits → 0) and the CTA returns. State is page-session
+  // scoped: hasDeliveredInitialBrief only resets on a full page reload, so a
+  // reconnect after idle never replays the Executive Brief / greeting.
+  var hasDeliveredInitialBrief = false;
+  var avatarIdleTimeoutId = null;
+  var lastAvatarIdleResetAt = 0;
+  var AVATAR_IDLE_MS = 45 * 1000;
 
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
@@ -620,6 +633,8 @@
         topic: 'agent-control',
       });
       avatarLog('payload published');
+      // MIE-17C: a successful agent interaction is real conversation activity.
+      resetAvatarIdleTimer('agent_message');
 
       if (result && typeof result.then === 'function') {
         result
@@ -1070,6 +1085,51 @@
     }
   }
 
+  // MIE-17C: clear the single idle timer (idempotent, never throws).
+  function clearAvatarIdleTimer() {
+    try {
+      if (avatarIdleTimeoutId) {
+        clearTimeout(avatarIdleTimeoutId);
+        avatarIdleTimeoutId = null;
+      }
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  // MIE-17C: (re)start the 45s idle timer on REAL conversation activity only.
+  // Debounced to 1s so WebRTC/audio/video event bursts cannot recreate it dozens
+  // of times per second. Only one timer ever exists; only while a conversation
+  // is active. On expiry it synchronously clears its own reference, THEN runs the
+  // existing centralized stop flow.
+  function resetAvatarIdleTimer(reason) {
+    try {
+      // Only meaningful while a LiveAvatar conversation is active.
+      if (!avatarConversationActive) return;
+
+      // Debounce timer recreation (event bursts).
+      var now = Date.now();
+      if (now - lastAvatarIdleResetAt < 1000) return;
+      lastAvatarIdleResetAt = now;
+
+      if (avatarIdleTimeoutId) {
+        clearTimeout(avatarIdleTimeoutId);
+        avatarIdleTimeoutId = null;
+      }
+      avatarIdleTimeoutId = setTimeout(function () {
+        // Synchronously clear our own reference BEFORE the async stop runs, so no
+        // timer reference survives while the stop flow is in flight.
+        clearTimeout(avatarIdleTimeoutId);
+        avatarIdleTimeoutId = null;
+        avatarLog('idle timeout reached (45s of conversation inactivity)');
+        executeAvatarStopFlow('idle_timeout');
+      }, AVATAR_IDLE_MS);
+      avatarLog('idle timer reset', { reason: reason || 'unknown' });
+    } catch (err) {
+      // never throw
+    }
+  }
+
   // MIE-17B: the ONE centralized stop path. Idempotent (runs at most once per
   // session via avatarStopExecuted), tears down EVERYTHING, and is safe to call
   // from pagehide / beforeunload / visibilitychange or a normal end-of-conversation.
@@ -1099,6 +1159,8 @@
       stopAvatarKeepAlive();
       stopNativeKeepAlive();
       clearRenewalTimer();
+      // MIE-17C: the idle timer must never survive a stop.
+      clearAvatarIdleTimer();
 
       // 3) Disconnect LiveKit + reset all room/session references via the existing
       //    cleanup path. avatarStopExecuted guards the native Disconnected handler
@@ -1107,6 +1169,10 @@
 
       // 4) Reset conversation flags so a fresh CTA can start a new session later.
       window.__hugoBriefingDispatched = false;
+      // MIE-17C: return the CTA to its initial enabled label ("Iniciar
+      // conversación con Hugo"). Note: hasDeliveredInitialBrief is intentionally
+      // NOT reset here — it is page-session scoped.
+      setHugoConversationState('ready');
       avatarLog('stop flow complete');
     } catch (err) {
       // never throw — must not block the browser during unload.
@@ -1192,6 +1258,10 @@
     avatarStopExecuted = false;
     avatarLog('conversation active');
 
+    // MIE-17C: clicking the CTA is real conversation activity — (re)start the
+    // idle timer. This also covers the explicit reconnect-after-idle case.
+    resetAvatarIdleTimer('cta');
+
     // 2) The click is the official audio-unlock gesture (no autoplay hacks).
     window.__hugoAudioUnlocked = true;
     avatarLog('audio unlock attempted');
@@ -1214,20 +1284,38 @@
     ensureAvatarConnected()
       .then(function () {
         avatarLog('avatar connected');
-        setHugoConversationState('briefing');
-        avatarLog('briefing requested');
-        var briefingText = 'Comenzá el briefing competitivo de hoy para Nicolás.\n'
-          + 'Sé breve, preciso y hablá como Hugo.';
-        sendUserMessageToAgent(briefingText);
-        avatarLog('briefing sent');
-        // Speaking-completion sync with LiveKit is a future sprint; transition
-        // to the idle conversational state immediately without blocking the UI.
-        setHugoConversationState('idle');
+        if (!hasDeliveredInitialBrief) {
+          // FIRST RUN (this page session): deliver the initial brief exactly as
+          // before, then latch hasDeliveredInitialBrief so it never replays.
+          setHugoConversationState('briefing');
+          avatarLog('briefing requested');
+          var briefingText = 'Comenzá el briefing competitivo de hoy para Nicolás.\n'
+            + 'Sé breve, preciso y hablá como Hugo.';
+          sendUserMessageToAgent(briefingText);
+          avatarLog('briefing sent');
+          hasDeliveredInitialBrief = true;
+          // Speaking-completion sync with LiveKit is a future sprint; transition
+          // to the idle conversational state immediately without blocking the UI.
+          setHugoConversationState('idle');
+        } else {
+          // RECONNECT AFTER IDLE: cost-free, visual-only. Never re-send the
+          // Executive Brief / greeting, never enter the 'briefing' state, never
+          // call the LLM or ElevenLabs, never generate local speech. The input is
+          // immediately usable (it never depended on avatar state).
+          avatarLog('reconnect after idle; skipping initial brief');
+          setHugoConversationState('idle');
+          setRenewalStatus('Te escucho.');
+        }
+        // Connection is real conversation activity; (re)arm the idle timer.
+        resetAvatarIdleTimer('connected');
       })
       .catch(function (err) {
         avatarLog('briefing failed', err);
-        // Release the mutex so the user can retry manually.
+        // Release the mutex so the user can retry manually, and ensure no idle
+        // timer keeps running for a session that never connected.
         window.__hugoBriefingDispatched = false;
+        avatarConversationActive = false;
+        clearAvatarIdleTimer();
         setHugoConversationState('error');
       });
   }
@@ -1237,6 +1325,9 @@
 
     avatarLog('handleAvatarTrack called', { kind: track && track.kind });
     avatarLog('detected track.kind:', track.kind);
+    // MIE-17C: a remote track being subscribed is real conversation activity
+    // (debounced, so video+audio bursts won't recreate the timer repeatedly).
+    resetAvatarIdleTimer('track_subscribed');
 
     if (track.kind === 'video') {
       avatarLog('treating track as VIDEO');
@@ -1566,6 +1657,8 @@
         renewalTimerActive: !!avatarRenewalTimerId,
         conversationActive: avatarConversationActive,
         stopExecuted: avatarStopExecuted,
+        hasDeliveredInitialBrief: hasDeliveredInitialBrief,
+        idleTimerActive: !!avatarIdleTimeoutId,
         nativeKeepAlive: {
           socketOpen: !!(avatarNativeKaSocket && avatarNativeKaSocket.readyState === 1),
           timerActive: !!avatarNativeKaTimerId,
