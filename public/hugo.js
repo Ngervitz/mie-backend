@@ -1621,7 +1621,9 @@
 
     var silentForMs = Date.now() - lastAvatarActivityAt;
     if (silentForMs < AVATAR_IDLE_MS) {
-      armAvatarIdleTimer();
+      var remaining = AVATAR_IDLE_MS - silentForMs;
+      avatarIdleScheduledForAt = lastAvatarActivityAt + AVATAR_IDLE_MS;
+      avatarIdleTimeoutId = setTimeout(onAvatarIdleCheck, Math.max(1, remaining));
       return;
     }
 
