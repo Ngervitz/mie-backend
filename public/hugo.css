@@ -270,6 +270,9 @@ html, body {
 
 .voice-status { font-size: 0.82rem; color: var(--text-muted); letter-spacing: 0.01em; }
 
+.talk-voice-btn { margin-top: 10px; }
+.talk-voice-status { margin-top: 6px; }
+
 /* Secondary â€” reveal full report without starting conversation (MIE-23). */
 .report-expand-link {
   align-self: flex-start;

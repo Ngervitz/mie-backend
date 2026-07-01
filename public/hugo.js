@@ -354,7 +354,10 @@
         '<div class="voice-status" id="voice-status"></div>' +
         '<div class="welcome-note" id="welcome-note">Hugo tiene listo el briefing competitivo de hoy. Cuando quieras, iniciá la reunión y te lo presenta.</div>' +
         '<button type="button" class="report-expand-link" id="report-expand-link">Ver informe completo</button>' +
-        '<div id="voice-area"></div>' +
+        '<div id="voice-area">' +
+          '<button type="button" class="btn talk-voice-btn hidden" id="talk-voice-btn">Hablar con Hugo</button>' +
+          '<div class="voice-status talk-voice-status hidden" id="talk-voice-status"></div>' +
+        '</div>' +
       '</div>';
 
     // Chapter 1 — Executive Brief (the lead of the document).
@@ -412,6 +415,8 @@
     // It no longer calls /hugo/voice; it starts the ElevenLabs Agent flow.
     var voiceBtn = document.getElementById('voice-btn');
     if (voiceBtn) voiceBtn.addEventListener('click', startConversation);
+    var talkVoiceBtn = document.getElementById('talk-voice-btn');
+    if (talkVoiceBtn) talkVoiceBtn.addEventListener('click', activateMicrophonePipeline);
     var expandLink = document.getElementById('report-expand-link');
     if (expandLink) expandLink.addEventListener('click', revealFullReport);
     // Sync the freshly rendered button with the current state.
@@ -1022,6 +1027,233 @@
   var AVATAR_IDLE_ARM_THROTTLE_MS = 1500;
   var AVATAR_IDLE_LOG_THROTTLE_MS = 2000;
 
+  // MIE-27B: voice entry v1 — single local microphone track (no republish/renewal).
+  var microphoneActive = false;
+  var microphoneActivating = false;
+  var hugoLocalMicrophoneTrack = null;
+  var hugoLocalMicrophoneStream = null;
+  var LOCAL_PARTICIPANT_TIMEOUT_MS = 10000;
+
+  function voicePipelineLog(msg, extra) {
+    voiceLog(msg, extra);
+  }
+
+  function stopMediaStream(stream) {
+    if (!stream || typeof stream.getTracks !== 'function') return;
+    try {
+      stream.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (e) { /* noop */ }
+      });
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function resetMicrophoneResources() {
+    try {
+      if (hugoLocalMicrophoneTrack && typeof hugoLocalMicrophoneTrack.stop === 'function') {
+        hugoLocalMicrophoneTrack.stop();
+      }
+    } catch (err) {
+      // never throw
+    }
+    hugoLocalMicrophoneTrack = null;
+    stopMediaStream(hugoLocalMicrophoneStream);
+    hugoLocalMicrophoneStream = null;
+    microphoneActive = false;
+    microphoneActivating = false;
+  }
+
+  function setTalkVoiceButtonState(state, errorMsg) {
+    try {
+      var btn = document.getElementById('talk-voice-btn');
+      var status = document.getElementById('talk-voice-status');
+      if (!btn) return;
+
+      if (state === 'hidden') {
+        btn.classList.add('hidden');
+        if (status) {
+          status.classList.add('hidden');
+          status.textContent = '';
+        }
+        return;
+      }
+
+      btn.classList.remove('hidden');
+      if (status) status.classList.remove('hidden');
+
+      if (state === 'ready') {
+        btn.disabled = false;
+        btn.textContent = 'Hablar con Hugo';
+      } else if (state === 'activating') {
+        btn.disabled = true;
+        btn.textContent = 'Activando micrófono...';
+      } else if (state === 'active') {
+        btn.disabled = true;
+        btn.textContent = 'Micrófono activo';
+      }
+
+      if (status) status.textContent = errorMsg || '';
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function syncTalkVoiceButtonVisibility() {
+    var show = avatarConversationActive
+      && (hugoConversationState === 'idle'
+        || hugoConversationState === 'thinking'
+        || hugoConversationState === 'speaking');
+    if (!show) {
+      setTalkVoiceButtonState('hidden');
+      return;
+    }
+    if (microphoneActive) setTalkVoiceButtonState('active');
+    else if (microphoneActivating) setTalkVoiceButtonState('activating');
+    else setTalkVoiceButtonState('ready');
+  }
+
+  function waitForLocalParticipant(room, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var startedAt = Date.now();
+      function check() {
+        var lp = room && room.localParticipant;
+        if (lp) {
+          resolve(lp);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error('localParticipant timeout'));
+          return;
+        }
+        setTimeout(check, 100);
+      }
+      check();
+    });
+  }
+
+  function createLocalMicrophoneTrackFromStream(stream) {
+    var mediaTrack = stream && stream.getAudioTracks && stream.getAudioTracks()[0];
+    if (!mediaTrack) return Promise.reject(new Error('no_audio_track'));
+
+    var LiveKit = window.LivekitClient || window.LiveKitClient;
+    if (!LiveKit) return Promise.reject(new Error('livekit_sdk_unavailable'));
+
+    if (LiveKit.LocalAudioTrack) {
+      try {
+        return Promise.resolve(new LiveKit.LocalAudioTrack(mediaTrack, undefined, true));
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    if (typeof LiveKit.createLocalAudioTrack === 'function') {
+      var settings = typeof mediaTrack.getSettings === 'function'
+        ? mediaTrack.getSettings() : {};
+      var deviceId = settings && settings.deviceId;
+      stopMediaStream(stream);
+      hugoLocalMicrophoneStream = null;
+      if (deviceId) return LiveKit.createLocalAudioTrack({ deviceId: deviceId });
+      return LiveKit.createLocalAudioTrack();
+    }
+    return Promise.reject(new Error('LocalAudioTrack creation failed'));
+  }
+
+  function activateMicrophonePipeline() {
+    voicePipelineLog('microphone activation requested');
+
+    if (microphoneActive) {
+      voicePipelineLog('microphone already active');
+      return;
+    }
+    if (microphoneActivating) return;
+
+    if (!isRoomConnected()) {
+      voicePipelineLog('session unavailable', { reason: 'room not connected' });
+      setTalkVoiceButtonState('ready', 'No hay sesión activa con Hugo.');
+      return;
+    }
+
+    if (hugoLocalMicrophoneTrack) {
+      voicePipelineLog('microphone track already exists');
+      return;
+    }
+
+    var gUM = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    if (typeof gUM !== 'function') {
+      voicePipelineLog('getUserMedia failed', { reason: 'API unavailable' });
+      setTalkVoiceButtonState('ready', 'El navegador no admite micrófono.');
+      return;
+    }
+
+    microphoneActivating = true;
+    setTalkVoiceButtonState('activating');
+    voicePipelineLog('requesting browser microphone');
+
+    var room = window.__hugoLiveKitRoom;
+    var capturedStream = null;
+
+    gUM.call(navigator.mediaDevices, { audio: true })
+      .then(function (stream) {
+        capturedStream = stream;
+        hugoLocalMicrophoneStream = stream;
+        voicePipelineLog('microphone permission granted');
+        return createLocalMicrophoneTrackFromStream(stream);
+      })
+      .then(function (localTrack) {
+        if (!localTrack) throw new Error('LocalAudioTrack creation failed');
+        hugoLocalMicrophoneTrack = localTrack;
+        voicePipelineLog('LocalAudioTrack created');
+        voicePipelineLog('waiting for localParticipant');
+        return waitForLocalParticipant(room, LOCAL_PARTICIPANT_TIMEOUT_MS)
+          .then(function (lp) {
+            voicePipelineLog('localParticipant available');
+            voicePipelineLog('publishing microphone');
+            var LiveKit = window.LivekitClient || window.LiveKitClient;
+            var publishOptions = {};
+            if (LiveKit && LiveKit.Track && LiveKit.Track.Source
+              && LiveKit.Track.Source.Microphone !== undefined) {
+              publishOptions.source = LiveKit.Track.Source.Microphone;
+            }
+            return lp.publishTrack(localTrack, publishOptions);
+          });
+      })
+      .then(function () {
+        var micPub = findLocalMicrophonePublication(room);
+        if (!micPub) throw new Error('publish failed');
+        voicePipelineLog('microphone published', {
+          trackSid: micPub.trackSid || null,
+        });
+        microphoneActive = true;
+        microphoneActivating = false;
+        setTalkVoiceButtonState('active');
+        voicePipelineLog('microphone active');
+      })
+      .catch(function (err) {
+        microphoneActivating = false;
+        var msg = err && err.message ? err.message : String(err);
+        var errName = err && err.name ? err.name : '';
+
+        if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+          voicePipelineLog('permission denied', { message: msg });
+          setTalkVoiceButtonState('ready', 'Permiso de micrófono denegado.');
+        } else if (msg.indexOf('localParticipant timeout') !== -1) {
+          voicePipelineLog('localParticipant timeout');
+          setTalkVoiceButtonState('ready', 'No se pudo conectar el micrófono a la sesión.');
+        } else if (msg.indexOf('LocalAudioTrack') !== -1 || msg === 'no_audio_track') {
+          voicePipelineLog('LocalAudioTrack creation failed', { message: msg });
+          setTalkVoiceButtonState('ready', 'No se pudo inicializar el micrófono.');
+        } else if (msg.indexOf('publish failed') !== -1) {
+          voicePipelineLog('publish failed', { message: msg });
+          setTalkVoiceButtonState('ready', 'No se pudo publicar el micrófono.');
+        } else {
+          voicePipelineLog('publish failed', { message: msg });
+          setTalkVoiceButtonState('ready', 'No se pudo activar el micrófono.');
+        }
+        resetMicrophoneResources();
+        if (capturedStream) stopMediaStream(capturedStream);
+      });
+  }
+
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
     var video = document.getElementById('avatar-video');
@@ -1344,6 +1576,7 @@
         document.body.setAttribute('data-hugo-conversation', state);
       }
       syncAbstractPresence();
+      syncTalkVoiceButtonVisibility();
     } catch (err) {
       // State updates must never break the page.
     }
@@ -1861,6 +2094,9 @@
       //    cleanup path. avatarStopExecuted guards the native Disconnected handler
       //    so this intentional teardown is not treated as an error.
       cleanupAvatarLifecycle('disconnected');
+
+      // MIE-27B: release local microphone state (room teardown drops publication).
+      resetMicrophoneResources();
 
       // 4) Reset conversation flags so a fresh CTA can start a new session later.
       window.__hugoBriefingDispatched = false;
