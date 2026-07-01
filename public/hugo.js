@@ -77,6 +77,129 @@
     }
   }
 
+  // MIE-26: microphone pipeline diagnostic — logging only, no publish/fix behavior.
+  function voiceLog(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[Hugo Voice]', msg, extra);
+      else console.log('[Hugo Voice]', msg);
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function findLocalMicrophonePublication(room) {
+    var lp = room && room.localParticipant;
+    if (!lp) return null;
+    try {
+      var pubs = lp.audioTrackPublications;
+      if (pubs && typeof pubs.forEach === 'function') {
+        var found = null;
+        pubs.forEach(function (pub) {
+          if (found || !pub) return;
+          var source = pub.source;
+          if (source === 'microphone' || source === 1) found = pub;
+        });
+        if (found) return found;
+      }
+      var allPubs = lp.trackPublications;
+      if (allPubs && typeof allPubs.forEach === 'function') {
+        var foundAll = null;
+        allPubs.forEach(function (pub) {
+          if (foundAll || !pub) return;
+          if (pub.kind === 'audio' && (pub.source === 'microphone' || pub.source === 1)) {
+            foundAll = pub;
+          }
+        });
+        return foundAll;
+      }
+    } catch (err) {
+      voiceLog('microphone publication inspect failed', {
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+    return null;
+  }
+
+  function runMicrophonePipelineChecks(context) {
+    voiceLog('pipeline check', { context: context || 'unknown' });
+
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      voiceLog('getUserMedia API available');
+    } else {
+      voiceLog('getUserMedia failed', { reason: 'API unavailable' });
+    }
+    voiceLog('getUserMedia not invoked by Hugo');
+
+    var LiveKit = window.LivekitClient || window.LiveKitClient;
+    if (LiveKit && typeof LiveKit.createLocalAudioTrack === 'function') {
+      voiceLog('LocalAudioTrack SDK API available');
+    } else {
+      voiceLog('LocalAudioTrack creation failed', { reason: 'SDK API unavailable' });
+    }
+    voiceLog('LocalAudioTrack not created by Hugo');
+
+    var room = window.__hugoLiveKitRoom;
+    var lp = room && room.localParticipant;
+    if (!lp) voiceLog('localParticipant is null');
+    else voiceLog('localParticipant available');
+
+    voiceLog('publishMicrophone not invoked by Hugo');
+
+    var micPub = findLocalMicrophonePublication(room);
+    if (context === 'after_renewal') {
+      if (micPub) voiceLog('microphone track still published');
+      else voiceLog('microphone track missing after renewal');
+    } else if (micPub) {
+      voiceLog('microphone published', {
+        trackSid: micPub.trackSid || null,
+        muted: typeof micPub.isMuted === 'boolean' ? micPub.isMuted : null,
+      });
+    } else {
+      voiceLog('publish failed', { reason: 'no local microphone publication found' });
+    }
+
+    try {
+      var audioEl = document.getElementById('avatar-audio');
+      voiceLog('ElevenLabs inbound audio element', {
+        hasSrcObject: !!(audioEl && audioEl.srcObject),
+        paused: audioEl ? audioEl.paused : null,
+        muted: audioEl ? audioEl.muted : null,
+      });
+      voiceLog('ElevenLabs user audio receipt cannot be verified from client');
+    } catch (err) {
+      voiceLog('ElevenLabs inbound audio inspect failed', {
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+
+  function diagnoseMicrophonePipeline(context) {
+    try {
+      if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+        navigator.permissions.query({ name: 'microphone' })
+          .then(function (result) {
+            if (result && result.state === 'granted') voiceLog('microphone permission granted');
+            else if (result && result.state === 'denied') voiceLog('microphone permission denied');
+            else voiceLog('microphone permission state', { state: result && result.state });
+            runMicrophonePipelineChecks(context);
+          })
+          .catch(function (err) {
+            voiceLog('microphone permission query failed', {
+              message: err && err.message ? err.message : String(err),
+            });
+            runMicrophonePipelineChecks(context);
+          });
+      } else {
+        voiceLog('microphone permission query unavailable');
+        runMicrophonePipelineChecks(context);
+      }
+    } catch (err) {
+      voiceLog('diagnostic failed', {
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+
   function applyPresentationMode() {
     try {
       if (isAbstractMode) {
@@ -1499,6 +1622,7 @@
         return;
       }
       avatarLog('renewing session');
+      voiceLog('renewal started');
       avatarLifecycle.renewing = true;
       setRenewalStatus('Renovando sesión de Hugo...');
 
@@ -1532,6 +1656,8 @@
           }
           setRenewalStatus('');
           avatarLog('renewal connected');
+          voiceLog('renewal finished');
+          diagnoseMicrophonePipeline('after_renewal');
           // The next renewal is scheduled by initAvatar's connect handler.
         })
         .catch(function () {
@@ -1840,6 +1966,7 @@
           // Speaking-completion sync with LiveKit is a future sprint; transition
           // to the idle conversational state immediately without blocking the UI.
           setHugoConversationState('idle');
+          diagnoseMicrophonePipeline('conversation_idle');
         } else {
           // RECONNECT AFTER IDLE: cost-free, visual-only. Never re-send the
           // Executive Brief / greeting, never enter the 'briefing' state, never
@@ -1848,6 +1975,7 @@
           avatarLog('reconnect after idle; skipping initial brief');
           setHugoConversationState('idle');
           setRenewalStatus('Te escucho.');
+          diagnoseMicrophonePipeline('conversation_idle_reconnect');
         }
         // Connection is real conversation activity; (re)arm the idle timer.
         resetAvatarIdleTimer('connected');
@@ -2133,6 +2261,7 @@
                 startNativeKeepAlive();
                 // MIE-21: schedule the single renewal before this session expires.
                 scheduleAvatarRenewal();
+                diagnoseMicrophonePipeline('after_connect');
               } else {
                 avatarLog('connected without active conversation; no keep-alive/renewal');
               }
@@ -2278,6 +2407,7 @@
   // (e.g. on each spoken section) without changing any other UX.
   window.__hugoRevealNextChapter = revealNextChapter;
   window.__hugoPresentationMode = PRESENTATION_MODE;
+  window.__hugoVoiceDiagnose = diagnoseMicrophonePipeline;
 
   load();
 
