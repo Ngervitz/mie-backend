@@ -106,7 +106,7 @@ function truncateTranscript(text) {
 // Expensive path: runs the full Hugo Claude -> GPT pipeline to obtain
 // outputs.voice.script for the requested date.
 async function loadVoiceScript(date) {
-  const result = await runHugo({ date });
+  const result = await runHugo({ date, joinIfActive: true });
   const voice = result && result.outputs && result.outputs.voice ? result.outputs.voice : {};
   return voice.script;
 }

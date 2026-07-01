@@ -18,7 +18,7 @@ async function dailySync(entityId) {
   logger.info('Generating Daily Knowledge...');
   const hugoStartedMs = Date.now();
   try {
-    await runHugo({});
+    await runHugo({ joinIfActive: true });
     logger.info('Daily Knowledge generated successfully.', {
       durationMs: Date.now() - hugoStartedMs,
     });

@@ -27,7 +27,12 @@ router.post('/run', async (req, res) => {
   } catch (err) {
     // HugoError carries a safe status + body (no secrets, no stack traces).
     if (err && typeof err.status === 'number' && err.body) {
-      logger.error('Hugo run failed', { status: err.status, error: err.body.error });
+      logger.error('Hugo run failed', {
+        status: err.status,
+        error: err.body.error,
+        detail: err.body.detail,
+        diagnostics: err.body.diagnostics,
+      });
       return res.status(err.status).json(err.body);
     }
 

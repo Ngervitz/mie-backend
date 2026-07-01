@@ -1,8 +1,11 @@
-const { buildHugoContext } = require('../routes/reports');
+const { buildHugoContext, todayUtc } = require('../routes/reports');
 const { saveDailyKnowledge } = require('./daily-knowledge');
 const logger = require('../lib/logger');
 
 const DAILY_KNOWLEDGE_VERSION = 1;
+
+// MIE-25: one in-flight Claude+GPT run per date (prevents concurrent 429s).
+const activeHugoRuns = new Map();
 
 const MODEL_ARCHITECT = 'claude-sonnet-4-6';
 const MODEL_AUDITOR = 'gpt-4o';
@@ -34,6 +37,152 @@ class HugoError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+const GPT_PIPELINE_STEP = 'gpt_auditor';
+const GPT_PROVIDER = 'openai';
+
+function isNonProduction() {
+  return (process.env.NODE_ENV || 'development') !== 'production';
+}
+
+function summarizeStack(err) {
+  if (!err || !err.stack) return undefined;
+  return String(err.stack)
+    .split('\n')
+    .slice(0, 5)
+    .map((line) => line.trim())
+    .join(' | ');
+}
+
+function truncateForLog(value, maxLen) {
+  const text = String(value == null ? '' : value);
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}…`;
+}
+
+function pickSafeResponseHeaders(headers) {
+  const out = {};
+  if (!headers || typeof headers.forEach !== 'function') return out;
+
+  headers.forEach((value, key) => {
+    const lower = String(key).toLowerCase();
+    if (lower === 'authorization' || lower.includes('api-key') || lower.includes('secret')) {
+      return;
+    }
+    if (
+      lower === 'retry-after'
+      || lower === 'x-request-id'
+      || lower.startsWith('x-ratelimit-')
+      || lower.startsWith('openai-')
+    ) {
+      out[lower] = value;
+    }
+  });
+
+  return out;
+}
+
+async function readOpenAiErrorBody(response) {
+  try {
+    const raw = await response.text();
+    if (!raw) return { raw: '<empty body>', parsed: null };
+    try {
+      return { raw: truncateForLog(raw, 2000), parsed: JSON.parse(raw) };
+    } catch (parseErr) {
+      return { raw: truncateForLog(raw, 2000), parsed: null };
+    }
+  } catch (err) {
+    return { raw: '<unreadable body>', parsed: null };
+  }
+}
+
+function extractOpenAiErrorFields(parsed) {
+  const providerError = parsed && parsed.error && typeof parsed.error === 'object'
+    ? parsed.error
+    : null;
+  if (!providerError) return {};
+
+  return {
+    providerMessage: typeof providerError.message === 'string' ? providerError.message : undefined,
+    providerType: typeof providerError.type === 'string' ? providerError.type : undefined,
+    providerCode: typeof providerError.code === 'string' ? providerError.code : undefined,
+    providerParam: typeof providerError.param === 'string' ? providerError.param : undefined,
+  };
+}
+
+function buildGptFailureDetail({ httpStatus, providerMessage }) {
+  if (httpStatus && providerMessage) {
+    return `HTTP ${httpStatus}: ${providerMessage}`;
+  }
+  if (httpStatus) return `HTTP ${httpStatus}`;
+  return 'Network request failed';
+}
+
+function logGptProviderFailure(meta) {
+  logger.error('GPT provider request failed', meta);
+}
+
+async function failGptRequest({ phase, response, networkErr }) {
+  const httpStatus = response ? response.status : undefined;
+  const headers = response ? pickSafeResponseHeaders(response.headers) : {};
+  let providerFields = {};
+  let responseBodyPreview;
+
+  if (response && !response.ok) {
+    const body = await readOpenAiErrorBody(response);
+    responseBodyPreview = body.raw;
+    providerFields = extractOpenAiErrorFields(body.parsed);
+  }
+
+  const logMeta = {
+    step: GPT_PIPELINE_STEP,
+    provider: GPT_PROVIDER,
+    model: MODEL_AUDITOR,
+    phase,
+    httpStatus: httpStatus ?? null,
+    providerMessage: providerFields.providerMessage,
+    providerType: providerFields.providerType,
+    providerCode: providerFields.providerCode,
+    providerParam: providerFields.providerParam,
+    requestId: headers['x-request-id'],
+    retryAfter: headers['retry-after'],
+    headers: Object.keys(headers).length ? headers : undefined,
+    responseBodyPreview,
+    networkMessage: networkErr && networkErr.message ? networkErr.message : undefined,
+    stackSummary: networkErr ? summarizeStack(networkErr) : undefined,
+  };
+
+  logGptProviderFailure(logMeta);
+
+  const responseBody = {
+    error: 'GPT API error',
+    detail: buildGptFailureDetail({
+      httpStatus,
+      providerMessage: providerFields.providerMessage,
+    }),
+  };
+
+  if (isNonProduction()) {
+    responseBody.diagnostics = {
+      step: GPT_PIPELINE_STEP,
+      provider: GPT_PROVIDER,
+      model: MODEL_AUDITOR,
+      phase,
+      httpStatus: httpStatus ?? null,
+      message: providerFields.providerMessage,
+      type: providerFields.providerType,
+      code: providerFields.providerCode,
+      param: providerFields.providerParam,
+      requestId: headers['x-request-id'],
+      retryAfter: headers['retry-after'],
+      headers: Object.keys(headers).length ? headers : undefined,
+      networkMessage: networkErr && networkErr.message ? networkErr.message : undefined,
+      stackSummary: networkErr ? summarizeStack(networkErr) : undefined,
+    };
+  }
+
+  throw new HugoError(502, responseBody);
 }
 
 const CLAUDE_SYSTEM_PROMPT = `Sos Hugo, Director de Inteligencia Competitiva de Credizona Uruguay.
@@ -473,11 +622,11 @@ async function callGpt(claudeAnalysis, hugoContext) {
       }),
     });
   } catch (err) {
-    throw new HugoError(502, { error: 'GPT API error', detail: 'Network request failed' });
+    await failGptRequest({ phase: 'network', networkErr: err });
   }
 
   if (!response.ok) {
-    throw new HugoError(502, { error: 'GPT API error', detail: `HTTP ${response.status}` });
+    await failGptRequest({ phase: 'http_response', response });
   }
 
   let data;
@@ -517,10 +666,18 @@ async function callGpt(claudeAnalysis, hugoContext) {
   };
 }
 
-async function runHugo({ date } = {}) {
-  const startedMs = Date.now();
+function normalizeRunDate(date) {
+  if (date !== undefined && date !== null && date !== '') {
+    return String(date);
+  }
+  return todayUtc();
+}
 
-  logger.info('Hugo run started', { date: date || 'today-utc' });
+async function executeRunHugo({ date } = {}) {
+  const startedMs = Date.now();
+  const runDate = normalizeRunDate(date);
+
+  logger.info('Hugo run started', { date: runDate });
 
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENAI_API_KEY) {
     throw new HugoError(500, { error: 'Missing required Hugo environment variables' });
@@ -663,6 +820,44 @@ async function runHugo({ date } = {}) {
   }
 
   return response;
+}
+
+// MIE-25: mutex wrapper — at most one executeRunHugo per date at a time.
+// joinIfActive: internal callers (voice cache miss, dailySync) await the active run.
+async function runHugo({ date, joinIfActive = false } = {}) {
+  const runDate = normalizeRunDate(date);
+
+  const existing = activeHugoRuns.get(runDate);
+  if (existing) {
+    if (joinIfActive) {
+      logger.info('Hugo run joined existing', { date: runDate });
+      return existing;
+    }
+    logger.info('Hugo run rejected (already in progress)', { date: runDate });
+    throw new HugoError(409, {
+      error: 'Hugo run already in progress',
+      date: runDate,
+    });
+  }
+
+  let resolveRun;
+  let rejectRun;
+  const runGate = new Promise((resolve, reject) => {
+    resolveRun = resolve;
+    rejectRun = reject;
+  });
+  activeHugoRuns.set(runDate, runGate);
+
+  try {
+    const result = await executeRunHugo({ date: runDate });
+    resolveRun(result);
+    return result;
+  } catch (err) {
+    rejectRun(err);
+    throw err;
+  } finally {
+    activeHugoRuns.delete(runDate);
+  }
 }
 
 module.exports = { runHugo, HugoError };
