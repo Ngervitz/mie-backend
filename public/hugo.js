@@ -77,13 +77,69 @@
     }
   }
 
-  // MIE-26: microphone pipeline diagnostic — logging only, no publish/fix behavior.
+  // MIE-26 / MIE-26A: microphone pipeline diagnostic — logging only.
   function voiceLog(msg, extra) {
     try {
-      if (extra !== undefined) console.log('[Hugo Voice]', msg, extra);
-      else console.log('[Hugo Voice]', msg);
+      var prefix = '[Hugo Voice]';
+      if (extra !== undefined) console.log(prefix, msg, extra);
+      else console.log(prefix, msg);
+    } catch (err1) {
+      try {
+        console.warn('[Hugo Voice] log failed', msg, extra, err1);
+      } catch (err2) {
+        // never throw
+      }
+    }
+  }
+
+  function logMicrophonePermissionState(done) {
+    var settled = false;
+    function settle() {
+      if (settled) return;
+      settled = true;
+      if (typeof done === 'function') done();
+    }
+
+    try {
+      if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+        voiceLog('microphone permission query unavailable');
+        settle();
+        return;
+      }
+
+      // MIE-26A: permissions.query can hang in some browsers/contexts — never block logs.
+      setTimeout(function () {
+        if (!settled) {
+          voiceLog('microphone permission query timed out');
+          settle();
+        }
+      }, 2500);
+
+      var permPromise = navigator.permissions.query({ name: 'microphone' });
+      if (!permPromise || typeof permPromise.then !== 'function') {
+        voiceLog('microphone permission query failed', { reason: 'no promise returned' });
+        settle();
+        return;
+      }
+
+      permPromise
+        .then(function (result) {
+          if (result && result.state === 'granted') voiceLog('microphone permission granted');
+          else if (result && result.state === 'denied') voiceLog('microphone permission denied');
+          else voiceLog('microphone permission state', { state: result && result.state });
+          settle();
+        })
+        .catch(function (err) {
+          voiceLog('microphone permission query failed', {
+            message: err && err.message ? err.message : String(err),
+          });
+          settle();
+        });
     } catch (err) {
-      // never throw
+      voiceLog('microphone permission query failed', {
+        message: err && err.message ? err.message : String(err),
+      });
+      settle();
     }
   }
 
@@ -174,29 +230,30 @@
   }
 
   function diagnoseMicrophonePipeline(context) {
+    voiceLog('diagnostic started', { context: context || 'unknown' });
     try {
-      if (navigator.permissions && typeof navigator.permissions.query === 'function') {
-        navigator.permissions.query({ name: 'microphone' })
-          .then(function (result) {
-            if (result && result.state === 'granted') voiceLog('microphone permission granted');
-            else if (result && result.state === 'denied') voiceLog('microphone permission denied');
-            else voiceLog('microphone permission state', { state: result && result.state });
-            runMicrophonePipelineChecks(context);
-          })
-          .catch(function (err) {
-            voiceLog('microphone permission query failed', {
-              message: err && err.message ? err.message : String(err),
-            });
-            runMicrophonePipelineChecks(context);
+      logMicrophonePermissionState(function () {
+        try {
+          runMicrophonePipelineChecks(context);
+          voiceLog('diagnostic complete', { context: context || 'unknown' });
+        } catch (err) {
+          voiceLog('diagnostic pipeline failed', {
+            message: err && err.message ? err.message : String(err),
           });
-      } else {
-        voiceLog('microphone permission query unavailable');
-        runMicrophonePipelineChecks(context);
-      }
+        }
+      });
     } catch (err) {
       voiceLog('diagnostic failed', {
         message: err && err.message ? err.message : String(err),
       });
+      try {
+        runMicrophonePipelineChecks(context);
+        voiceLog('diagnostic complete', { context: context || 'unknown', afterError: true });
+      } catch (err2) {
+        voiceLog('diagnostic pipeline failed', {
+          message: err2 && err2.message ? err2.message : String(err2),
+        });
+      }
     }
   }
 
