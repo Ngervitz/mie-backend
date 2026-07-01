@@ -230,30 +230,8 @@
   }
 
   function diagnoseMicrophonePipeline(context) {
-    voiceLog('diagnostic started', { context: context || 'unknown' });
-    try {
-      logMicrophonePermissionState(function () {
-        try {
-          runMicrophonePipelineChecks(context);
-          voiceLog('diagnostic complete', { context: context || 'unknown' });
-        } catch (err) {
-          voiceLog('diagnostic pipeline failed', {
-            message: err && err.message ? err.message : String(err),
-          });
-        }
-      });
-    } catch (err) {
-      voiceLog('diagnostic failed', {
-        message: err && err.message ? err.message : String(err),
-      });
-      try {
-        runMicrophonePipelineChecks(context);
-        voiceLog('diagnostic complete', { context: context || 'unknown', afterError: true });
-      } catch (err2) {
-        voiceLog('diagnostic pipeline failed', {
-          message: err2 && err2.message ? err2.message : String(err2),
-        });
-      }
+    if (typeof window.__hugoVoiceDiagnose === 'function') {
+      window.__hugoVoiceDiagnose(context);
     }
   }
 
@@ -2464,7 +2442,174 @@
   // (e.g. on each spoken section) without changing any other UX.
   window.__hugoRevealNextChapter = revealNextChapter;
   window.__hugoPresentationMode = PRESENTATION_MODE;
-  window.__hugoVoiceDiagnose = diagnoseMicrophonePipeline;
+
+  // MIE-26B: global diagnostic with guaranteed console logging (not closure voiceLog).
+  window.__hugoVoiceDiagnose = function (context) {
+    function logVoiceDiagnostic(message, payload) {
+      try {
+        console.log('[Hugo Voice]', message, payload || '');
+      } catch (err) {
+        try {
+          console.warn('[Hugo Voice]', message, payload || '');
+        } catch (_) {}
+      }
+    }
+
+    var ctx = context || 'unknown';
+    logVoiceDiagnostic('diagnostic started', { context: ctx });
+
+    function findMicPublication(room) {
+      var lp = room && room.localParticipant;
+      if (!lp) return null;
+      try {
+        var pubs = lp.audioTrackPublications;
+        if (pubs && typeof pubs.forEach === 'function') {
+          var found = null;
+          pubs.forEach(function (pub) {
+            if (found || !pub) return;
+            var source = pub.source;
+            if (source === 'microphone' || source === 1) found = pub;
+          });
+          if (found) return found;
+        }
+        var allPubs = lp.trackPublications;
+        if (allPubs && typeof allPubs.forEach === 'function') {
+          var foundAll = null;
+          allPubs.forEach(function (pub) {
+            if (foundAll || !pub) return;
+            if (pub.kind === 'audio' && (pub.source === 'microphone' || pub.source === 1)) {
+              foundAll = pub;
+            }
+          });
+          return foundAll;
+        }
+      } catch (err) {
+        logVoiceDiagnostic('microphone publication inspect failed', {
+          message: err && err.message ? err.message : String(err),
+        });
+      }
+      return null;
+    }
+
+    function runPipelineChecks() {
+      logVoiceDiagnostic('pipeline check', { context: ctx });
+
+      if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+        logVoiceDiagnostic('getUserMedia API available');
+      } else {
+        logVoiceDiagnostic('getUserMedia failed', { reason: 'API unavailable' });
+      }
+      logVoiceDiagnostic('getUserMedia not invoked by Hugo');
+
+      var LiveKit = window.LivekitClient || window.LiveKitClient;
+      if (LiveKit && typeof LiveKit.createLocalAudioTrack === 'function') {
+        logVoiceDiagnostic('LocalAudioTrack SDK API available');
+      } else {
+        logVoiceDiagnostic('LocalAudioTrack creation failed', { reason: 'SDK API unavailable' });
+      }
+      logVoiceDiagnostic('LocalAudioTrack not created by Hugo');
+
+      var room = window.__hugoLiveKitRoom;
+      var lp = room && room.localParticipant;
+      if (!lp) logVoiceDiagnostic('localParticipant is null');
+      else logVoiceDiagnostic('localParticipant available');
+
+      logVoiceDiagnostic('publishMicrophone not invoked by Hugo');
+
+      var micPub = findMicPublication(room);
+      if (ctx === 'after_renewal') {
+        if (micPub) logVoiceDiagnostic('microphone track still published');
+        else logVoiceDiagnostic('microphone track missing after renewal');
+      } else if (micPub) {
+        logVoiceDiagnostic('microphone published', {
+          trackSid: micPub.trackSid || null,
+          muted: typeof micPub.isMuted === 'boolean' ? micPub.isMuted : null,
+        });
+      } else {
+        logVoiceDiagnostic('publish failed', { reason: 'no local microphone publication found' });
+      }
+
+      try {
+        var audioEl = document.getElementById('avatar-audio');
+        logVoiceDiagnostic('ElevenLabs inbound audio element', {
+          hasSrcObject: !!(audioEl && audioEl.srcObject),
+          paused: audioEl ? audioEl.paused : null,
+          muted: audioEl ? audioEl.muted : null,
+        });
+        logVoiceDiagnostic('ElevenLabs user audio receipt cannot be verified from client');
+      } catch (err) {
+        logVoiceDiagnostic('ElevenLabs inbound audio inspect failed', {
+          message: err && err.message ? err.message : String(err),
+        });
+      }
+    }
+
+    function finishPipeline() {
+      try {
+        runPipelineChecks();
+        logVoiceDiagnostic('diagnostic complete', { context: ctx });
+      } catch (err) {
+        logVoiceDiagnostic('diagnostic pipeline failed', {
+          message: err && err.message ? err.message : String(err),
+        });
+      }
+    }
+
+    try {
+      var permSettled = false;
+      function settlePermission() {
+        if (permSettled) return;
+        permSettled = true;
+        finishPipeline();
+      }
+
+      if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+        logVoiceDiagnostic('microphone permission query unavailable');
+        settlePermission();
+        return;
+      }
+
+      setTimeout(function () {
+        if (!permSettled) {
+          logVoiceDiagnostic('microphone permission query timed out');
+          settlePermission();
+        }
+      }, 2500);
+
+      var permPromise = navigator.permissions.query({ name: 'microphone' });
+      if (!permPromise || typeof permPromise.then !== 'function') {
+        logVoiceDiagnostic('microphone permission query failed', { reason: 'no promise returned' });
+        settlePermission();
+        return;
+      }
+
+      permPromise
+        .then(function (result) {
+          if (result && result.state === 'granted') logVoiceDiagnostic('microphone permission granted');
+          else if (result && result.state === 'denied') logVoiceDiagnostic('microphone permission denied');
+          else logVoiceDiagnostic('microphone permission state', { state: result && result.state });
+          settlePermission();
+        })
+        .catch(function (err) {
+          logVoiceDiagnostic('microphone permission query failed', {
+            message: err && err.message ? err.message : String(err),
+          });
+          settlePermission();
+        });
+    } catch (err) {
+      logVoiceDiagnostic('diagnostic failed', {
+        message: err && err.message ? err.message : String(err),
+      });
+      try {
+        runPipelineChecks();
+        logVoiceDiagnostic('diagnostic complete', { context: ctx, afterError: true });
+      } catch (err2) {
+        logVoiceDiagnostic('diagnostic pipeline failed', {
+          message: err2 && err2.message ? err2.message : String(err2),
+        });
+      }
+    }
+  };
 
   load();
 
