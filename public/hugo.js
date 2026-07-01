@@ -50,6 +50,33 @@
     }
   }
 
+  function idleLog(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[HUGO idle]', msg, extra);
+      else console.log('[HUGO idle]', msg);
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function roomLog(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[HUGO room]', msg, extra);
+      else console.log('[HUGO room]', msg);
+    } catch (err) {
+      // never throw
+    }
+  }
+
+  function videoLog(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[HUGO video]', msg, extra);
+      else console.log('[HUGO video]', msg);
+    } catch (err) {
+      // never throw
+    }
+  }
+
   function applyPresentationMode() {
     try {
       if (isAbstractMode) {
@@ -560,13 +587,42 @@
     audioEl.__hugoLifecycleWired = true;
     function onAudioActivity(evt) {
       if (isAbstractMode) syncAbstractPresence();
-      if (avatarConversationActive && (evt === 'play' || evt === 'playing')) {
+      if (!avatarConversationActive) return;
+      if (evt === 'play' || evt === 'playing') {
         resetAvatarIdleTimer('remote_audio');
+        return;
+      }
+      // timeupdate: extend activity while audio plays; arm/log throttled inside reset.
+      if (evt === 'timeupdate' && !audioEl.paused && !audioEl.muted) {
+        resetAvatarIdleTimer('remote_audio_progress');
       }
     }
-    ['play', 'playing', 'pause', 'ended', 'volumechange'].forEach(function (evt) {
+    ['play', 'playing', 'timeupdate', 'pause', 'ended', 'volumechange'].forEach(function (evt) {
       audioEl.addEventListener(evt, function () { onAudioActivity(evt); });
     });
+  }
+
+  // Video lifecycle: never stop the room on pause/ended — only log + idle reset on play.
+  function wireAvatarVideoLifecycle(videoEl) {
+    if (!videoEl || videoEl.__hugoVideoLifecycleWired) return;
+    videoEl.__hugoVideoLifecycleWired = true;
+    function onVideoEvent(evt) {
+      if (avatarConversationActive && (evt === 'play' || evt === 'playing')) {
+        resetAvatarIdleTimer('remote_video');
+      }
+      if (evt === 'pause' || evt === 'ended' || evt === 'stalled'
+        || evt === 'suspend' || evt === 'emptied' || evt === 'error') {
+        videoLog(evt, {
+          paused: videoEl.paused,
+          readyState: videoEl.readyState,
+          hasSrcObject: !!videoEl.srcObject,
+        });
+      }
+    }
+    ['play', 'playing', 'pause', 'ended', 'stalled', 'suspend', 'emptied', 'error']
+      .forEach(function (evt) {
+        videoEl.addEventListener(evt, function () { onVideoEvent(evt); });
+      });
   }
 
   // ---------- Ask ----------
@@ -800,8 +856,13 @@
   // reconnect after idle never replays the Executive Brief / greeting.
   var hasDeliveredInitialBrief = false;
   var avatarIdleTimeoutId = null;
-  var lastAvatarIdleResetAt = 0;
+  var lastAvatarActivityAt = 0;
+  var lastAvatarIdleArmAt = 0;
+  var lastAvatarIdleLogAt = 0;
+  var avatarIdleScheduledForAt = 0;
   var AVATAR_IDLE_MS = 45 * 1000;
+  var AVATAR_IDLE_ARM_THROTTLE_MS = 1500;
+  var AVATAR_IDLE_LOG_THROTTLE_MS = 2000;
 
   function showAvatarLoading() {
     var status = document.getElementById('avatar-status');
@@ -960,6 +1021,9 @@
       }
       if (E.Disconnected) {
         room.on(E.Disconnected, function (reason) {
+          roomLog('disconnected reason=' + (reason == null ? 'unknown' : String(reason)), {
+            intentional: !!avatarDisposing,
+          });
           lkLog('RoomEvent.Disconnected', {
             reason: reason == null ? null : String(reason),
             intentional: !!avatarDisposing,
@@ -1530,40 +1594,67 @@
         clearTimeout(avatarIdleTimeoutId);
         avatarIdleTimeoutId = null;
       }
+      avatarIdleScheduledForAt = 0;
     } catch (err) {
       // never throw
     }
   }
 
-  // MIE-17C: (re)start the 45s idle timer on REAL conversation activity only.
-  // Debounced to 1s so WebRTC/audio/video event bursts cannot recreate it dozens
-  // of times per second. Only one timer ever exists; only while a conversation
-  // is active. On expiry it synchronously clears its own reference, THEN runs the
-  // existing centralized stop flow.
+  function armAvatarIdleTimer() {
+    var now = Date.now();
+    lastAvatarIdleArmAt = now;
+    avatarIdleScheduledForAt = lastAvatarActivityAt + AVATAR_IDLE_MS;
+    var delay = Math.max(1, avatarIdleScheduledForAt - now);
+
+    if (avatarIdleTimeoutId) {
+      clearTimeout(avatarIdleTimeoutId);
+      avatarIdleTimeoutId = null;
+    }
+
+    avatarIdleTimeoutId = setTimeout(onAvatarIdleCheck, delay);
+  }
+
+  function onAvatarIdleCheck() {
+    avatarIdleTimeoutId = null;
+    avatarIdleScheduledForAt = 0;
+    if (!avatarConversationActive) return;
+
+    var silentForMs = Date.now() - lastAvatarActivityAt;
+    if (silentForMs < AVATAR_IDLE_MS) {
+      armAvatarIdleTimer();
+      return;
+    }
+
+    idleLog('fired', { silentForMs: silentForMs });
+    avatarLog('idle timeout reached (45s of conversation inactivity)');
+    executeAvatarStopFlow('idle_timeout');
+  }
+
+  function shouldRearmAvatarIdleTimer(now) {
+    if (!avatarIdleTimeoutId) return true;
+    if (now - lastAvatarIdleArmAt >= AVATAR_IDLE_ARM_THROTTLE_MS) return true;
+    var newFireAt = lastAvatarActivityAt + AVATAR_IDLE_MS;
+    if (newFireAt > avatarIdleScheduledForAt + 500) return true;
+    return false;
+  }
+
+  // MIE-17C: record conversation activity and (throttled) re-arm the idle timer.
+  // lastAvatarActivityAt is ALWAYS updated; arm + logs are throttled separately.
   function resetAvatarIdleTimer(reason) {
     try {
-      // Only meaningful while a LiveAvatar conversation is active.
       if (!avatarConversationActive) return;
 
-      // Debounce timer recreation (event bursts).
       var now = Date.now();
-      if (now - lastAvatarIdleResetAt < 1000) return;
-      lastAvatarIdleResetAt = now;
+      lastAvatarActivityAt = now;
 
-      if (avatarIdleTimeoutId) {
-        clearTimeout(avatarIdleTimeoutId);
-        avatarIdleTimeoutId = null;
+      if (!shouldRearmAvatarIdleTimer(now)) return;
+
+      if (now - lastAvatarIdleLogAt >= AVATAR_IDLE_LOG_THROTTLE_MS) {
+        lastAvatarIdleLogAt = now;
+        idleLog('reset reason=' + (reason || 'unknown'));
       }
-      avatarIdleTimeoutId = setTimeout(function () {
-        // Synchronously clear our own reference BEFORE the async stop runs, so no
-        // timer reference survives while the stop flow is in flight.
-        clearTimeout(avatarIdleTimeoutId);
-        avatarIdleTimeoutId = null;
-        avatarLog('idle timeout reached (45s of conversation inactivity)');
-        executeAvatarStopFlow('idle_timeout');
-      }, AVATAR_IDLE_MS);
-      lifecycleLog('idle reset', { reason: reason || 'unknown' });
-      avatarLog('idle timer reset', { reason: reason || 'unknown' });
+
+      armAvatarIdleTimer();
     } catch (err) {
       // never throw
     }
@@ -1791,6 +1882,7 @@
       videoEl.style.display = 'block';
       avatarVideoLive = true;
       showAvatarLive();
+      wireAvatarVideoLifecycle(videoEl);
       // First video track is live; the timeout must never fire afterwards.
       clearTimeout(avatarFallbackTimerId);
       avatarLog('fallback timer cancelled (video went live)');
@@ -1932,14 +2024,10 @@
             if (RoomEvent.Disconnected) {
               room.on(RoomEvent.Disconnected, function (reason) {
                 if (avatarDisposing) return;
-                // MIE-17B: during an intentional stop we orchestrate teardown
-                // ourselves; do not show fallback or reset state from here.
                 if (avatarStopExecuted) return;
-                // MIE-21: during a controlled renewal we orchestrate teardown
-                // ourselves; ignore the old room's native disconnect here.
                 if (avatarLifecycle.renewing) return;
-                // Ignore stale events from a room we've already replaced.
                 if (avatarLifecycle.room && avatarLifecycle.room !== room) return;
+                roomLog('disconnected reason=' + (reason == null ? 'unknown' : String(reason)));
                 avatarLog('native room disconnected', { reason: reason == null ? null : String(reason) });
                 cleanupAvatarLifecycle('disconnected');
                 showAvatarFallback();
@@ -1993,7 +2081,7 @@
               });
             }
 
-            // MIE-23: LiveKit speaking signal — abstract presence + idle reset.
+            // LiveKit speaking signal — abstract presence + idle reset (all modes).
             if (RoomEvent.ActiveSpeakersChanged) {
               room.on(RoomEvent.ActiveSpeakersChanged, function (speakers) {
                 try {
@@ -2007,7 +2095,7 @@
                       }
                     }
                   }
-                  if (abstractRemoteSpeaking && avatarConversationActive) {
+                  if (avatarConversationActive) {
                     resetAvatarIdleTimer('livekit_speaker');
                   }
                   if (isAbstractMode) syncAbstractPresence();
