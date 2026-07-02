@@ -416,7 +416,7 @@
     var voiceBtn = document.getElementById('voice-btn');
     if (voiceBtn) voiceBtn.addEventListener('click', startConversation);
     var talkVoiceBtn = document.getElementById('talk-voice-btn');
-    if (talkVoiceBtn) talkVoiceBtn.addEventListener('click', activateMicrophonePipeline);
+    if (talkVoiceBtn) talkVoiceBtn.addEventListener('click', onTalkVoiceButtonClick);
     var expandLink = document.getElementById('report-expand-link');
     if (expandLink) expandLink.addEventListener('click', revealFullReport);
     // Sync the freshly rendered button with the current state.
@@ -1018,6 +1018,7 @@
   // scoped: hasDeliveredInitialBrief only resets on a full page reload, so a
   // reconnect after idle never replays the Executive Brief / greeting.
   var hasDeliveredInitialBrief = false;
+  var lastAvatarStopReason = '';
   var avatarIdleTimeoutId = null;
   var lastAvatarActivityAt = 0;
   var lastAvatarIdleArmAt = 0;
@@ -1050,6 +1051,23 @@
   }
 
   function resetMicrophoneResources() {
+    var hadMic = microphoneActive || !!hugoLocalMicrophoneTrack;
+    try {
+      var room = window.__hugoLiveKitRoom;
+      var lp = room && room.localParticipant;
+      if (lp && hugoLocalMicrophoneTrack && typeof lp.unpublishTrack === 'function') {
+        try {
+          var unpublishResult = lp.unpublishTrack(hugoLocalMicrophoneTrack);
+          if (unpublishResult && typeof unpublishResult.catch === 'function') {
+            unpublishResult.catch(function () { /* noop */ });
+          }
+        } catch (unpubErr) {
+          // never throw
+        }
+      }
+    } catch (err) {
+      // never throw
+    }
     try {
       if (hugoLocalMicrophoneTrack && typeof hugoLocalMicrophoneTrack.stop === 'function') {
         hugoLocalMicrophoneTrack.stop();
@@ -1062,6 +1080,7 @@
     hugoLocalMicrophoneStream = null;
     microphoneActive = false;
     microphoneActivating = false;
+    if (hadMic) voicePipelineLog('microphone stopped');
   }
 
   function setTalkVoiceButtonState(state, errorMsg) {
@@ -1089,8 +1108,8 @@
         btn.disabled = true;
         btn.textContent = 'Activando micrófono...';
       } else if (state === 'active') {
-        btn.disabled = true;
-        btn.textContent = 'Micrófono activo';
+        btn.disabled = false;
+        btn.textContent = 'Terminar conversación';
       }
 
       if (status) status.textContent = errorMsg || '';
@@ -1156,6 +1175,27 @@
       return LiveKit.createLocalAudioTrack();
     }
     return Promise.reject(new Error('LocalAudioTrack creation failed'));
+  }
+
+  function onTalkVoiceButtonClick() {
+    if (microphoneActive) {
+      voicePipelineLog('conversation terminated by user');
+      executeAvatarStopFlow('user_toggle');
+      return;
+    }
+    activateMicrophonePipeline();
+  }
+
+  function dispatchExecutiveBriefOnce() {
+    if (hasDeliveredInitialBrief) {
+      voicePipelineLog('brief replay prevented');
+      return false;
+    }
+    hasDeliveredInitialBrief = true;
+    var briefingText = 'Comenzá el briefing competitivo de hoy para Nicolás.\n'
+      + 'Sé breve, preciso y hablá como Hugo.';
+    sendUserMessageToAgent(briefingText);
+    return true;
   }
 
   function activateMicrophonePipeline() {
@@ -2071,6 +2111,7 @@
       }
       avatarStopExecuted = true;
       avatarConversationActive = false;
+      lastAvatarStopReason = reason || 'manual';
       lifecycleLog('stopped: reason=' + (reason || 'manual'));
       syncAbstractPresence();
       var sessionId = avatarLifecycle.sessionId;
@@ -2181,6 +2222,10 @@
       avatarLog('briefing already dispatched; ignoring duplicate click');
       return;
     }
+    if (lastAvatarStopReason === 'user_toggle') {
+      hasDeliveredInitialBrief = false;
+    }
+    lastAvatarStopReason = '';
     window.__hugoBriefingDispatched = true;
     avatarLog('briefing dispatch locked');
 
@@ -2226,11 +2271,11 @@
           // before, then latch hasDeliveredInitialBrief so it never replays.
           setHugoConversationState('briefing');
           avatarLog('briefing requested');
-          var briefingText = 'Comenzá el briefing competitivo de hoy para Nicolás.\n'
-            + 'Sé breve, preciso y hablá como Hugo.';
-          sendUserMessageToAgent(briefingText);
-          avatarLog('briefing sent');
-          hasDeliveredInitialBrief = true;
+          if (dispatchExecutiveBriefOnce()) {
+            avatarLog('briefing sent');
+          } else {
+            avatarLog('briefing skipped (already delivered)');
+          }
           // MIE-22B: Hugo is now presenting — begin revealing the report chapter
           // by chapter (deterministic v1 trigger; idempotent).
           startBriefingReveal();
