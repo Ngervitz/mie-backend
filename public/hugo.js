@@ -2131,13 +2131,16 @@
       // MIE-17C: the idle timer must never survive a stop.
       clearAvatarIdleTimer();
 
+      // MIE-27D: unpublish mic while room/localParticipant still exist; stop audit
+      // snapshots; clear renewal-in-progress before disconnect.
+      resetMicrophoneResources();
+      stopAuditSnapshots();
+      avatarLifecycle.renewing = false;
+
       // 3) Disconnect LiveKit + reset all room/session references via the existing
       //    cleanup path. avatarStopExecuted guards the native Disconnected handler
       //    so this intentional teardown is not treated as an error.
       cleanupAvatarLifecycle('disconnected');
-
-      // MIE-27B: release local microphone state (room teardown drops publication).
-      resetMicrophoneResources();
 
       // 4) Reset conversation flags so a fresh CTA can start a new session later.
       window.__hugoBriefingDispatched = false;
