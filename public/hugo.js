@@ -2098,7 +2098,7 @@
 
   // MIE-17B: the ONE centralized stop path. Idempotent (runs at most once per
   // session via avatarStopExecuted), tears down EVERYTHING, and is safe to call
-  // from pagehide / beforeunload / visibilitychange or a normal end-of-conversation.
+  // from pagehide / beforeunload or a normal end-of-conversation.
   function executeAvatarStopFlow(reason) {
     try {
       if (avatarStopExecuted) {
@@ -2252,14 +2252,7 @@
     avatarLog('audio unlock attempted');
     var audioEl = document.getElementById('avatar-audio');
     if (audioEl && audioEl.srcObject) {
-      var unlockPromise = audioEl.play();
-      if (unlockPromise && typeof unlockPromise.then === 'function') {
-        unlockPromise
-          .then(function () { avatarLog('audio unlock success'); })
-          .catch(function (err) { avatarLog('audio unlock failure', err); });
-      } else {
-        avatarLog('audio unlock success');
-      }
+      audioEl.play().catch(function () {});
     } else {
       avatarLog('audio unlock: no audio track attached yet');
     }
@@ -2378,22 +2371,27 @@
         // never throw
       }
 
-      var playPromise = audioEl.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise
-          .then(function () {
-            avatarLog('audioEl.play() succeeded; element state:', audioElState(audioEl));
-            lkLog('audio play success', { currentTime: audioEl.currentTime });
-            syncAbstractPresence();
-          })
-          .catch(function (err) {
-            avatarLog('audioEl.play() failed (autoplay likely blocked until user interaction)', err);
-            console.warn('Avatar audio autoplay blocked until user interaction.', err);
-            lkLog('audio play failed', { paused: audioEl.paused });
-            syncAbstractPresence();
-          });
+      if (window.__hugoAudioUnlocked) {
+        var playPromise = audioEl.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise
+            .then(function () {
+              avatarLog('audioEl.play() succeeded; element state:', audioElState(audioEl));
+              lkLog('audio play success', { currentTime: audioEl.currentTime });
+              syncAbstractPresence();
+            })
+            .catch(function (err) {
+              avatarLog('audioEl.play() failed (autoplay likely blocked until user interaction)', err);
+              console.warn('Avatar audio autoplay blocked until user interaction.', err);
+              lkLog('audio play failed', { paused: audioEl.paused });
+              syncAbstractPresence();
+            });
+        } else {
+          avatarLog('audioEl.play() returned no promise; element state:', audioElState(audioEl));
+        }
       } else {
-        avatarLog('audioEl.play() returned no promise; element state:', audioElState(audioEl));
+        avatarLog('audioEl.play() deferred until user gesture unlock');
+        syncAbstractPresence();
       }
     }
   }
@@ -2712,14 +2710,9 @@
   // MIE-17B: ONE centralized, idempotent stop path for every teardown trigger.
   // executeAvatarStopFlow() stops the backend session, disconnects LiveKit, and
   // clears all timers — running at most once per session, so pagehide +
-  // beforeunload + visibilitychange can never fire three simultaneous stops.
+  // beforeunload can never fire duplicate stops.
   window.addEventListener('pagehide', function () { executeAvatarStopFlow('pagehide'); });
   window.addEventListener('beforeunload', function () { executeAvatarStopFlow('beforeunload'); });
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') {
-      executeAvatarStopFlow('visibilitychange');
-    }
-  });
 
   // MIE-22B: public seam for the reveal sequence. v1 advances chapters on a
   // timer; a future version can drive this from real avatar speech events
