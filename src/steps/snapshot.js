@@ -1,6 +1,8 @@
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 
+const VALID_STATUSES = new Set(['success', 'empty_confirmed', 'empty_unconfirmed']);
+
 function toSnapshotDate(collectedAt) {
   if (!collectedAt) {
     throw new Error('collectedAt is required');
@@ -15,14 +17,25 @@ function toSnapshotDate(collectedAt) {
   return date.toISOString().split('T')[0];
 }
 
-async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
+function resolveSnapshotStatus({ adsFound, status }) {
+  if (status) {
+    if (!VALID_STATUSES.has(status)) {
+      throw new Error(`Invalid snapshot status: ${status}`);
+    }
+    return status;
+  }
+
+  return adsFound > 0 ? 'success' : 'empty_confirmed';
+}
+
+async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId, status }) {
   if (!entityId) {
     throw new Error('entityId is required');
   }
 
   const adsArray = Array.isArray(ads) ? ads : [];
   const adsFound = adsArray.length;
-  const status = adsFound > 0 ? 'success' : 'empty';
+  const resolvedStatus = resolveSnapshotStatus({ adsFound, status });
   const snapshotDate = toSnapshotDate(collectedAt);
 
   const row = {
@@ -30,7 +43,7 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
     snapshot_date: snapshotDate,
     raw_json: adsArray,
     ads_found: adsFound,
-    status,
+    status: resolvedStatus,
     apify_run_id: apifyRunId ?? null,
   };
 
@@ -71,6 +84,7 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
   logger.info('Snapshot saved', {
     entityId,
     adsFound,
+    status: resolvedStatus,
     snapshotId: data.id,
     snapshotsInserted: 1,
   });
@@ -79,8 +93,8 @@ async function saveSnapshot({ entityId, ads, collectedAt, apifyRunId }) {
     snapshotId: data.id,
     snapshotsInserted: 1,
     adsFound,
-    status,
+    status: resolvedStatus,
   };
 }
 
-module.exports = { saveSnapshot };
+module.exports = { saveSnapshot, VALID_STATUSES };

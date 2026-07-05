@@ -1,5 +1,6 @@
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
+const { isMarketExitConfirmed, normalizeSnapshotStatus } = require('./market-exit');
 
 function getAdArchiveId(item) {
   if (!item || typeof item !== 'object') {
@@ -19,6 +20,18 @@ function getAdArchiveId(item) {
   }
 
   return normalizedId;
+}
+
+function emptyReconcileResult(snapshotId, extra = {}) {
+  return {
+    snapshotId,
+    new: [],
+    reactivated: [],
+    persistent: [],
+    disappeared: [],
+    skipped: true,
+    ...extra,
+  };
 }
 
 async function loadSnapshot(entityId, snapshotId) {
@@ -62,6 +75,41 @@ async function reconcileEntity({ entityId, snapshotId }) {
   }
 
   const snapshot = await loadSnapshot(entityId, snapshotId);
+  const normalizedStatus = normalizeSnapshotStatus(snapshot.status);
+
+  if (normalizedStatus === 'empty_unconfirmed') {
+    logger.info('Empty result unconfirmed. Reconciliation skipped.', {
+      entityId,
+      snapshotId: snapshot.id,
+      status: snapshot.status,
+    });
+
+    return emptyReconcileResult(snapshot.id, {
+      reason: 'empty_unconfirmed',
+    });
+  }
+
+  if (normalizedStatus === 'empty_confirmed') {
+    const marketExitConfirmed = await isMarketExitConfirmed(entityId, snapshot);
+
+    if (!marketExitConfirmed) {
+      logger.info('Empty result awaiting market exit confirmation. Reconciliation skipped.', {
+        entityId,
+        snapshotId: snapshot.id,
+        status: snapshot.status,
+      });
+
+      return emptyReconcileResult(snapshot.id, {
+        reason: 'empty_awaiting_confirmation',
+      });
+    }
+
+    logger.info('Market exit confirmed. Reconciliation proceeding.', {
+      entityId,
+      snapshotId: snapshot.id,
+    });
+  }
+
   const rawJson = Array.isArray(snapshot.raw_json) ? snapshot.raw_json : [];
 
   const apifyIdsToday = new Set();
@@ -131,6 +179,7 @@ async function reconcileEntity({ entityId, snapshotId }) {
   logger.info('Entity reconcile completed', {
     entityId,
     snapshotId: snapshot.id,
+    status: snapshot.status,
     new: newIds.length,
     reactivated: reactivatedIds.length,
     persistent: persistentIds.length,
@@ -143,6 +192,7 @@ async function reconcileEntity({ entityId, snapshotId }) {
     reactivated: reactivatedIds,
     persistent: persistentIds,
     disappeared: disappearedIds,
+    skipped: false,
   };
 }
 

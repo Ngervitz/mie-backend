@@ -1,5 +1,5 @@
 const supabase = require('../clients/supabase');
-const { buildApifyInput, runActor } = require('../clients/apify');
+const { buildApifyInput, runActorWithRetry } = require('../clients/apify');
 const { saveSnapshot } = require('./snapshot');
 const { reconcileEntity } = require('./reconcile');
 const { upsertAds } = require('./upsert');
@@ -14,6 +14,82 @@ function toReconcileCounts(reconcileResult) {
     reactivated: reconcileResult.reactivated.length,
     persistent: reconcileResult.persistent.length,
     disappeared: reconcileResult.disappeared.length,
+  };
+}
+
+function createApifyMetrics() {
+  return {
+    retriesExecuted: 0,
+    retriesSucceeded: 0,
+    retriesFailed: 0,
+    runsWithRetry: 0,
+  };
+}
+
+function mergeApifyMetrics(total, partial) {
+  if (!partial) {
+    return;
+  }
+
+  total.retriesExecuted += partial.retriesExecuted || 0;
+  total.retriesSucceeded += partial.retriesSucceeded || 0;
+  total.retriesFailed += partial.retriesFailed || 0;
+  if ((partial.retriesExecuted || 0) > 0) {
+    total.runsWithRetry += 1;
+  }
+}
+
+async function persistActorAttempts({ entityId, attempts, finalStatus }) {
+  const snapshots = [];
+  let pipelineSnapshotId = null;
+  let pipelineStatus = finalStatus;
+
+  if (attempts.length === 2) {
+    const first = attempts[0];
+    const firstCollectedAt = new Date().toISOString();
+    const firstSnapshot = await saveSnapshot({
+      entityId,
+      ads: [],
+      collectedAt: firstCollectedAt,
+      apifyRunId: first.apifyRunId,
+      status: 'empty_unconfirmed',
+    });
+    snapshots.push(firstSnapshot);
+
+    const second = attempts[1];
+    const secondCollectedAt = new Date().toISOString();
+    const secondStatus = second.adsFound > 0 ? 'success' : 'empty_unconfirmed';
+    const secondSnapshot = await saveSnapshot({
+      entityId,
+      ads: second.items,
+      collectedAt: secondCollectedAt,
+      apifyRunId: second.apifyRunId,
+      status: secondStatus,
+    });
+    snapshots.push(secondSnapshot);
+
+    pipelineSnapshotId = secondSnapshot.snapshotId;
+    pipelineStatus = secondStatus;
+  } else {
+    const attempt = attempts[0];
+    const collectedAt = new Date().toISOString();
+    const snapshot = await saveSnapshot({
+      entityId,
+      ads: attempt.items,
+      collectedAt,
+      apifyRunId: attempt.apifyRunId,
+      status: finalStatus,
+    });
+    snapshots.push(snapshot);
+    pipelineSnapshotId = snapshot.snapshotId;
+    pipelineStatus = snapshot.status;
+  }
+
+  return {
+    snapshots,
+    pipelineSnapshotId,
+    pipelineStatus,
+    snapshotsInserted: snapshots.reduce((sum, s) => sum + (s.snapshotsInserted || 0), 0),
   };
 }
 
@@ -43,6 +119,7 @@ async function collect(entityId) {
   let totalAdsCollected = 0;
   let totalSnapshotsInserted = 0;
   let totalReconciledEntities = 0;
+  const apifyMetrics = createApifyMetrics();
 
   for (const entity of entities) {
     const entityId = entity.id;
@@ -59,8 +136,10 @@ async function collect(entityId) {
     }
 
     try {
-      const { items, apifyRunId } = await runActor(buildApifyInput(url));
-      const ads = Array.isArray(items) ? items : [];
+      const actorResult = await runActorWithRetry(buildApifyInput(url));
+      mergeApifyMetrics(apifyMetrics, actorResult.metrics);
+
+      const ads = Array.isArray(actorResult.items) ? actorResult.items : [];
       const adsCount = ads.length;
       const collectedAt = new Date().toISOString();
 
@@ -70,16 +149,19 @@ async function collect(entityId) {
         entityId,
         entityName,
         adsCount,
+        actorStatus: actorResult.status,
+        retried: actorResult.retried,
+        attempts: actorResult.attempts.length,
       });
 
       try {
-        const { snapshotId, snapshotsInserted } = await saveSnapshot({
+        const persistence = await persistActorAttempts({
           entityId,
-          ads,
-          collectedAt,
-          apifyRunId,
+          attempts: actorResult.attempts,
+          finalStatus: actorResult.status,
         });
 
+        const { pipelineSnapshotId: snapshotId, pipelineStatus, snapshotsInserted } = persistence;
         totalSnapshotsInserted += snapshotsInserted;
 
         logger.info('Entity snapshot completed', {
@@ -88,12 +170,48 @@ async function collect(entityId) {
           adsCount,
           snapshotsInserted,
           snapshotId,
+          status: pipelineStatus,
         });
+
+        if (pipelineStatus === 'empty_unconfirmed') {
+          successfulEntities += 1;
+          results.push({
+            entityId,
+            entityName,
+            adsCount,
+            snapshotsInserted,
+            snapshotId,
+            status: pipelineStatus,
+            pipelineSkipped: true,
+            skipReason: 'empty_unconfirmed',
+            apifyAttempts: actorResult.attempts,
+            collectedAt,
+          });
+          continue;
+        }
 
         try {
           const reconcileResult = await reconcileEntity({ entityId, snapshotId });
-          const reconciled = toReconcileCounts(reconcileResult);
 
+          if (reconcileResult.skipped) {
+            successfulEntities += 1;
+            results.push({
+              entityId,
+              entityName,
+              adsCount,
+              snapshotsInserted,
+              snapshotId,
+              status: pipelineStatus,
+              pipelineSkipped: true,
+              skipReason: reconcileResult.reason,
+              reconciled: toReconcileCounts(reconcileResult),
+              apifyAttempts: actorResult.attempts,
+              collectedAt,
+            });
+            continue;
+          }
+
+          const reconciled = toReconcileCounts(reconcileResult);
           totalReconciledEntities += 1;
 
           logger.info('Entity reconcile finished', {
@@ -151,6 +269,7 @@ async function collect(entityId) {
                     entityName,
                     adsCount,
                     snapshotsInserted,
+                    status: pipelineStatus,
                     reconciled,
                     upserted,
                     deactivated,
@@ -236,6 +355,10 @@ async function collect(entityId) {
     }
   }
 
+  const retryRatePercent = apifyMetrics.runsWithRetry > 0
+    ? Math.round((apifyMetrics.runsWithRetry / entities.length) * 10000) / 100
+    : 0;
+
   const summary = {
     status: 'events_complete',
     successfulEntities,
@@ -243,6 +366,11 @@ async function collect(entityId) {
     totalAdsCollected,
     totalSnapshotsInserted,
     totalReconciledEntities,
+    apifyRetryMetrics: {
+      ...apifyMetrics,
+      retryRatePercent,
+      estimatedExtraRuns: apifyMetrics.retriesExecuted,
+    },
     results,
   };
 
@@ -253,6 +381,7 @@ async function collect(entityId) {
     totalAdsCollected,
     totalSnapshotsInserted,
     totalReconciledEntities,
+    apifyRetryMetrics: summary.apifyRetryMetrics,
   });
 
   return summary;

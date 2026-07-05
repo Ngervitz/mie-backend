@@ -1,6 +1,10 @@
 const express = require('express');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
+const {
+  isMarketExitConfirmed,
+  normalizeSnapshotStatus,
+} = require('../steps/market-exit');
 
 const router = express.Router();
 
@@ -237,10 +241,22 @@ async function buildHugoContext({ date: inputDate } = {}) {
       throw new Error(`Failed to fetch monitored_entities: ${entitiesError.message}`);
     }
 
+    // --- Query 5: latest snapshot per entity for the selected date.
+    const { data: snapshotRows, error: snapshotsError } = await supabase
+      .from('ad_snapshots')
+      .select('entity_id, status, ads_found, snapshot_date, created_at')
+      .eq('snapshot_date', date)
+      .order('created_at', { ascending: false });
+
+    if (snapshotsError) {
+      throw new Error(`Failed to fetch ad_snapshots: ${snapshotsError.message}`);
+    }
+
     const todayEvents = todayRows || [];
     const windowEvents = windowRows || [];
     const activeAds = activeAdRows || [];
     const entities = entityRows || [];
+    const snapshotsForDate = snapshotRows || [];
 
     const limitations = [];
 
@@ -258,6 +274,56 @@ async function buildHugoContext({ date: inputDate } = {}) {
     }
 
     const nameFor = (entityId) => entityNameMap.get(entityId) ?? null;
+
+    // Latest snapshot per entity for the selected date (rows ordered created_at DESC).
+    const latestSnapshotByEntity = new Map();
+    for (const row of snapshotsForDate) {
+      if (!row.entity_id || latestSnapshotByEntity.has(row.entity_id)) {
+        continue;
+      }
+      latestSnapshotByEntity.set(row.entity_id, row);
+    }
+
+    const captureByEntity = [];
+    const unconfirmedEntities = [];
+    const awaitingConfirmationEntities = [];
+
+    for (const entity of entities) {
+      const latest = latestSnapshotByEntity.get(entity.id);
+      if (!latest) {
+        continue;
+      }
+
+      const normalized = latest.status;
+      let marketExitConfirmed = false;
+
+      if (normalized === 'empty_confirmed') {
+        marketExitConfirmed = await isMarketExitConfirmed(entity.id, latest);
+      }
+
+      const entry = {
+        entityId: entity.id,
+        entityName: entity.name ?? null,
+        isStrategic: isStrategicName(entity.name),
+        latestCaptureStatus: normalized,
+        adsFound: latest.ads_found,
+        marketExitConfirmed,
+      };
+      captureByEntity.push(entry);
+
+      if (normalized === 'empty_unconfirmed') {
+        unconfirmedEntities.push(entity.name);
+      } else if (normalized === 'empty_confirmed' && !marketExitConfirmed) {
+        awaitingConfirmationEntities.push(entity.name);
+      }
+    }
+
+    const captureStatus = {
+      byEntity: captureByEntity,
+      unconfirmedEntities,
+      awaitingConfirmationEntities,
+      suppressMarketExitNarrative: unconfirmedEntities.length > 0 || awaitingConfirmationEntities.length > 0,
+    };
 
     // --- Active ads tally by entity.
     const activeAdsMap = new Map();
@@ -425,6 +491,18 @@ async function buildHugoContext({ date: inputDate } = {}) {
     if (total === 0) {
       attentionLevel = 'normal';
       attentionReason = 'No events detected for the selected date.';
+
+      const hasUnconfirmedEmptyCaptureOnQuietDay = captureByEntity.some(
+        (entry) => entry.isStrategic && (
+          entry.latestCaptureStatus === 'empty'
+          || entry.latestCaptureStatus === 'empty_unconfirmed'
+          || (entry.latestCaptureStatus === 'empty_confirmed' && !entry.marketExitConfirmed)
+        ),
+      );
+
+      if (hasUnconfirmedEmptyCaptureOnQuietDay) {
+        attentionReason = `${attentionReason} Capture guard: empty result not confirmed for market exit.`;
+      }
     } else {
       let rank = 0;
       if (strategicActiveCount >= 1) rank = Math.max(rank, 1);
@@ -444,6 +522,23 @@ async function buildHugoContext({ date: inputDate } = {}) {
       }
 
       attentionLevel = ATTENTION_RANK[rank];
+
+      const hasUnconfirmedEmptyCapture = captureByEntity.some(
+        (entry) => entry.isStrategic && (
+          entry.latestCaptureStatus === 'empty'
+          || entry.latestCaptureStatus === 'empty_unconfirmed'
+          || (entry.latestCaptureStatus === 'empty_confirmed' && !entry.marketExitConfirmed)
+        ),
+      );
+
+      if (hasUnconfirmedEmptyCapture) {
+        if (total === 0) {
+          rank = 0;
+        } else if (rank >= 1) {
+          rank = 1;
+        }
+        attentionLevel = ATTENTION_RANK[rank];
+      }
 
       if (attentionLevel === 'strategic_movement') {
         if (strategicActiveCount >= 3) {
@@ -466,6 +561,10 @@ async function buildHugoContext({ date: inputDate } = {}) {
       } else {
         attentionReason = `Activity detected with ${total} total events.`;
       }
+
+      if (hasUnconfirmedEmptyCapture && attentionLevel !== 'strategic_movement') {
+        attentionReason = `${attentionReason} Capture guard: empty result not confirmed for market exit.`;
+      }
     }
 
     const signals = {
@@ -476,6 +575,11 @@ async function buildHugoContext({ date: inputDate } = {}) {
       quietStrategicEntities,
       entitiesWithNewAdsToday,
       entitiesWithCopyChangesToday,
+      captureGuard: {
+        suppressMarketExitNarrative: captureStatus.suppressMarketExitNarrative,
+        unconfirmedEntities: captureStatus.unconfirmedEntities,
+        awaitingConfirmationEntities: captureStatus.awaitingConfirmationEntities,
+      },
     };
 
     // --- Limitations.
@@ -505,6 +609,7 @@ async function buildHugoContext({ date: inputDate } = {}) {
       today,
       history,
       signals,
+      captureStatus,
       activeAds: { byEntity: activeAdsByEntity },
       limitations,
       meta,

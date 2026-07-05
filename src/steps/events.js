@@ -67,6 +67,14 @@ async function insertEvents({
     throw new Error('collectedAt is required');
   }
 
+  if (reconcileResult?.skipped) {
+    logger.info('Entity events skipped', {
+      entityId,
+      reason: reconcileResult.reason || 'reconcile_skipped',
+    });
+    return { inserted: 0, byType: {}, skipped: true, reason: reconcileResult.reason };
+  }
+
   const detectedAt = toDateOnly(collectedAt);
   const newIds = reconcileResult?.new || [];
   const reactivatedIds = reconcileResult?.reactivated || [];

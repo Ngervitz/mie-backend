@@ -262,6 +262,16 @@ REGLAS DE INTELIGENCIA
 5. Si un competidor estratégico desactiva muchos anuncios sin reemplazarlos, es una señal. Si los reemplaza con anuncios nuevos, interpretalo como rotación.
 6. Nunca omitas información relevante del contexto (activeAds, newAds, pausedAds, competidores estratégicos activos): debe reflejarse en topStories, supportingData.marketInventory o supportingData.hypotheses.
 
+GUARDRAIL — CAPTURA VACÍA NO CONFIRMADA
+
+Si hugoContext.captureStatus.suppressMarketExitNarrative es true, o si una entidad en captureStatus.byEntity tiene latestCaptureStatus = empty_unconfirmed, o empty_confirmed con marketExitConfirmed = false:
+
+NUNCA afirmes que un competidor: salió del mercado, eliminó toda su pauta, abandonó la competencia, dejó de competir, abrió ventana estratégica, ni menor presión competitiva por salida del mercado.
+
+Texto permitido cuando corresponda: "La última captura devolvió cero anuncios, pero la señal requiere confirmación antes de interpretarla como una salida real del mercado."
+
+Nunca eleves brief.attention a STRATEGIC por esta situación. Copiá el attentionLevel del backend sin elevarlo.
+
 TRAZABILIDAD Y RAZONAMIENTO
 
 Hugo razona exactamente así: Observación -> Evidencia -> Interpretación -> Hipótesis. Nunca saltees niveles.
@@ -479,6 +489,95 @@ Devolvé EXCLUSIVAMENTE JSON válido con esta forma:
 auditedBrief debe contener SIEMPRE el objeto completo { brief, supportingData } generado por Hugo, auditado y corregido únicamente si fue necesario. Nunca devuelvas auditedBrief vacío.
 
 Sin markdown. Sin texto antes ni después del JSON.`;
+
+const FORBIDDEN_MARKET_EXIT_PHRASES = [
+  'salió del mercado',
+  'salio del mercado',
+  'eliminó toda su pauta',
+  'elimino toda su pauta',
+  'abandonó la competencia',
+  'abandono la competencia',
+  'dejó de competir',
+  'dejo de competir',
+  'ventana estratégica',
+  'ventana estrategica',
+  'menor presión competitiva',
+  'menor presion competitiva',
+  'dejó de pautar',
+  'dejo de pautar',
+  'sin pauta publicitaria',
+];
+
+const EMPTY_CAPTURE_ALLOWED_LINE =
+  'La última captura devolvió cero anuncios, pero la señal requiere confirmación antes de interpretarla como una salida real del mercado.';
+
+function containsForbiddenMarketExitPhrase(text) {
+  if (!text || typeof text !== 'string') {
+    return false;
+  }
+
+  const lower = text.toLowerCase();
+  return FORBIDDEN_MARKET_EXIT_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
+function applyEmptyCaptureGuardrails(hugoContext, finalAnalysis, attentionLevel) {
+  const suppress = hugoContext?.captureStatus?.suppressMarketExitNarrative
+    || hugoContext?.signals?.captureGuard?.suppressMarketExitNarrative;
+
+  if (!suppress) {
+    return { analysis: finalAnalysis, attentionLevel };
+  }
+
+  let cappedAttention = attentionLevel;
+
+  if (attentionLevel === 'strategic_movement' || attentionLevel === 'high_activity') {
+    cappedAttention = 'interesting';
+  }
+
+  const totalEvents = hugoContext?.today?.totalEvents ?? 0;
+  if (totalEvents === 0) {
+    cappedAttention = 'normal';
+  }
+
+  const analysis = { ...finalAnalysis };
+  const brief = { ...(analysis.brief || {}) };
+
+  if (brief.attention === 'STRATEGIC' || brief.attention === 'HIGH') {
+    brief.attention = totalEvents === 0 ? 'NORMAL' : 'INTERESTING';
+  }
+
+  if (containsForbiddenMarketExitPhrase(brief.headline)) {
+    brief.headline = EMPTY_CAPTURE_ALLOWED_LINE;
+  }
+
+  if (containsForbiddenMarketExitPhrase(brief.whyItMatters)) {
+    brief.whyItMatters = EMPTY_CAPTURE_ALLOWED_LINE;
+  }
+
+  if (Array.isArray(brief.topStories)) {
+    brief.topStories = brief.topStories.map((story) => {
+      const combined = `${story.fact || ''} ${story.interpretation || ''}`;
+      if (!containsForbiddenMarketExitPhrase(combined)) {
+        return story;
+      }
+
+      return {
+        ...story,
+        interpretation: EMPTY_CAPTURE_ALLOWED_LINE,
+      };
+    });
+  }
+
+  analysis.brief = brief;
+
+  logger.info('Empty capture guardrail applied', {
+    cappedAttention,
+    unconfirmedEntities: hugoContext?.captureStatus?.unconfirmedEntities || [],
+    awaitingConfirmationEntities: hugoContext?.captureStatus?.awaitingConfirmationEntities || [],
+  });
+
+  return { analysis, attentionLevel: cappedAttention };
+}
 
 function buildClaudeUserPrompt(hugoContext) {
   return `Analizá este contexto de mercado y devolvé tu análisis en el JSON estructurado definido en el system prompt.
@@ -769,6 +868,15 @@ async function executeRunHugo({ date } = {}) {
     : (Array.isArray(finalAnalysis.brief.followUpQuestions)
       ? finalAnalysis.brief.followUpQuestions
       : []);
+
+  const guarded = applyEmptyCaptureGuardrails(
+    hugoContext,
+    finalAnalysis,
+    backendAttentionLevel,
+  );
+  const guardedAnalysis = guarded.analysis;
+  const guardedAttentionLevel = guarded.attentionLevel;
+
   const outputs = {
     email: gptOutput.email || {},
     dashboard: gptOutput.dashboard || {},
@@ -779,8 +887,8 @@ async function executeRunHugo({ date } = {}) {
     date: hugoContext.date,
     generatedAt: new Date().toISOString(),
     // attentionLevel is preserved from the backend context, never from the models.
-    attentionLevel: backendAttentionLevel,
-    analysis: finalAnalysis,
+    attentionLevel: guardedAttentionLevel,
+    analysis: guardedAnalysis,
     outputs,
     audit: {
       status: gptOutput.auditStatus || 'not_generated',
