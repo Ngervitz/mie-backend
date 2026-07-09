@@ -21,8 +21,15 @@ const SEVERITY = {
   ad_deactivated: 1,
 };
 
+// At most one row per (entity_id, ad_id, detected_at) for these types (DB partial UNIQUE).
+const DEDUP_EVENT_TYPES = new Set(['new_ad', 'ad_reactivated', 'ad_deactivated']);
+
 function toDateOnly(collectedAt) {
   return collectedAt.split('T')[0];
+}
+
+function eventDedupKey(adId, eventType) {
+  return `${adId}|${eventType}`;
 }
 
 async function loadAdIdMap(entityId, adArchiveIds) {
@@ -49,6 +56,38 @@ async function loadAdIdMap(entityId, adArchiveIds) {
   }
 
   return map;
+}
+
+async function loadExistingDedupKeys(entityId, detectedAt) {
+  const { data, error } = await supabase
+    .from('events')
+    .select('ad_id, event_type')
+    .eq('entity_id', entityId)
+    .eq('detected_at', detectedAt)
+    .in('event_type', [...DEDUP_EVENT_TYPES])
+    .not('ad_id', 'is', null);
+
+  if (error) {
+    throw new Error(`Failed to load existing events for dedup (entity ${entityId}): ${error.message}`);
+  }
+
+  const keys = new Set();
+  for (const row of data || []) {
+    keys.add(eventDedupKey(row.ad_id, row.event_type));
+  }
+
+  return keys;
+}
+
+function logEventOmitted({ entityId, adArchiveId, adId, eventType, detectedAt, reason }) {
+  logger.warn('Event omitted', {
+    entity_id: entityId,
+    ...(adArchiveId !== undefined && { ad_archive_id: adArchiveId }),
+    ...(adId !== undefined && { ad_id: adId }),
+    event_type: eventType,
+    detected_at: detectedAt,
+    reason,
+  });
 }
 
 async function insertEvents({
@@ -98,13 +137,46 @@ async function insertEvents({
   ];
 
   const adIdMap = await loadAdIdMap(entityId, archiveIds);
+  const existingDedupKeys = await loadExistingDedupKeys(entityId, detectedAt);
+  const batchDedupKeys = new Set();
 
   const rows = [];
   const byType = {};
+  let deduplicated = 0;
 
   function pushEvent(eventType, adId, extra = {}) {
     if (!adId) {
       return;
+    }
+
+    if (DEDUP_EVENT_TYPES.has(eventType)) {
+      const key = eventDedupKey(adId, eventType);
+
+      if (batchDedupKeys.has(key)) {
+        deduplicated += 1;
+        logEventOmitted({
+          entityId,
+          adId,
+          eventType,
+          detectedAt,
+          reason: 'duplicate_in_batch',
+        });
+        return;
+      }
+
+      if (existingDedupKeys.has(key)) {
+        deduplicated += 1;
+        logEventOmitted({
+          entityId,
+          adId,
+          eventType,
+          detectedAt,
+          reason: 'already_recorded',
+        });
+        return;
+      }
+
+      batchDedupKeys.add(key);
     }
 
     rows.push({
@@ -122,29 +194,41 @@ async function insertEvents({
     byType[eventType] = (byType[eventType] || 0) + 1;
   }
 
-  // new_ad: one per ad classified as `new` by Reconcile.
   const newAdUuids = new Set();
   for (const archiveId of newIds) {
     const adId = adIdMap.get(String(archiveId));
-    if (adId) {
+    if (!adId) {
+      logEventOmitted({
+        entityId,
+        adArchiveId: String(archiveId),
+        eventType: 'new_ad',
+        detectedAt,
+        reason: 'missing_ad_id',
+      });
+    } else {
       newAdUuids.add(adId);
     }
     pushEvent('new_ad', adId);
   }
 
-  // ad_reactivated: one per ad classified as `reactivated` by Reconcile.
   for (const archiveId of reactivatedIds) {
-    pushEvent('ad_reactivated', adIdMap.get(String(archiveId)));
+    const adId = adIdMap.get(String(archiveId));
+    if (!adId) {
+      logEventOmitted({
+        entityId,
+        adArchiveId: String(archiveId),
+        eventType: 'ad_reactivated',
+        detectedAt,
+        reason: 'missing_ad_id',
+      });
+    }
+    pushEvent('ad_reactivated', adId);
   }
 
-  // ad_deactivated: only for ads actually updated by Deactivate (not skipped).
   for (const archiveId of deactivatedIds) {
     pushEvent('ad_deactivated', adIdMap.get(String(archiveId)));
   }
 
-  // copy_changed: from recordsToVersion, excluding the initial version of new ads.
-  // recordsToVersion already carries ad_id (uuid) and copy_hash; no recompute.
-  // new_value stores the copy_hash only (never the full ad text).
   for (const record of versionRecords) {
     if (record.ad_id && !newAdUuids.has(record.ad_id)) {
       pushEvent('copy_changed', record.ad_id, {
@@ -154,23 +238,50 @@ async function insertEvents({
   }
 
   if (rows.length === 0) {
-    logger.info('Entity events finished', { entityId, inserted: 0 });
-    return { inserted: 0, byType: {} };
+    logger.info('Entity events finished', {
+      entityId,
+      inserted: 0,
+      deduplicated,
+    });
+    return { inserted: 0, byType: {}, deduplicated };
   }
 
-  const { error } = await supabase.from('events').insert(rows);
+  // Row-by-row insert: a single multi-row INSERT aborts the whole batch on any
+  // UNIQUE violation (PostgreSQL). Partial UNIQUE indexes cannot use PostgREST
+  // ignoreDuplicates/onConflict (no WHERE predicate support). Pre-dedup above
+  // handles the common case; per-row 23505 skip handles races / second sync.
+  let inserted = 0;
 
-  if (error) {
-    throw new Error(`Failed to insert events for entity ${entityId}: ${error.message}`);
+  for (const row of rows) {
+    const { error } = await supabase.from('events').insert(row);
+
+    if (error) {
+      if (error.code === '23505') {
+        deduplicated += 1;
+        logger.warn('Event insert conflict (skipped)', {
+          entity_id: row.entity_id,
+          ad_id: row.ad_id,
+          event_type: row.event_type,
+          detected_at: row.detected_at,
+          reason: 'unique_violation',
+        });
+        continue;
+      }
+
+      throw new Error(`Failed to insert events for entity ${entityId}: ${error.message}`);
+    }
+
+    inserted += 1;
   }
 
   logger.info('Entity events finished', {
     entityId,
-    inserted: rows.length,
+    inserted,
+    deduplicated,
     byType,
   });
 
-  return { inserted: rows.length, byType };
+  return { inserted, byType, deduplicated };
 }
 
-module.exports = { insertEvents };
+module.exports = { insertEvents, DEDUP_EVENT_TYPES };

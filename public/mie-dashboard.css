@@ -45,6 +45,44 @@ body {
   padding: 24px 20px 64px;
 }
 
+/* ---------- Dashboard section tabs (outside panel roots) ---------- */
+.dashboard-tabs {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 12px 20px 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-tab {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+}
+
+.dashboard-tab:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.dashboard-tab.active {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: var(--blue-border);
+}
+
+.dashboard-panel.hidden,
+.dashboard-panel[hidden] {
+  display: none !important;
+}
+
 /* ---------- Back navigation to Executive Brief ---------- */
 .brief-backnav {
   max-width: var(--maxw);

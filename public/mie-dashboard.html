@@ -5,14 +5,88 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
   <link rel="stylesheet" href="mie-dashboard.css" />
+  <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
   <nav class="brief-backnav">
     <a href="/hugo-brief.html" class="brief-backnav-link">&larr; Volver al Executive Brief</a>
   </nav>
-  <main class="app" id="app">
+
+  <!-- Tab bar: OUTSIDE both panel roots so neither script's innerHTML can destroy it -->
+  <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
+    <button
+      type="button"
+      class="dashboard-tab active"
+      role="tab"
+      aria-selected="true"
+      data-dashboard-tab="market"
+      id="tab-market">
+      Inteligencia de mercado
+    </button>
+    <button
+      type="button"
+      class="dashboard-tab"
+      role="tab"
+      aria-selected="false"
+      data-dashboard-tab="meta"
+      id="tab-meta">
+      Meta Ads
+    </button>
+  </nav>
+
+  <!-- MIC root: mie-dashboard.js writes ONLY here -->
+  <main
+    class="app dashboard-panel"
+    id="mie-market-root"
+    role="tabpanel"
+    aria-labelledby="tab-market">
     <!-- Rendered by mie-dashboard.js -->
   </main>
+
+  <!-- Meta Ads root: meta-agent.js writes ONLY here; sibling of MIC, not a child -->
+  <div
+    class="dashboard-panel hidden"
+    id="meta-ads-root"
+    role="tabpanel"
+    aria-labelledby="tab-meta"
+    hidden>
+    <!-- Rendered by meta-agent.js -->
+  </div>
+
   <script src="mie-dashboard.js"></script>
+  <script src="meta-agent.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var tabs = document.querySelectorAll('[data-dashboard-tab]');
+      var market = document.getElementById('mie-market-root');
+      var meta = document.getElementById('meta-ads-root');
+      if (!market || !meta || !tabs.length) return;
+
+      function activate(name) {
+        var showMarket = name === 'market';
+        market.classList.toggle('hidden', !showMarket);
+        meta.classList.toggle('hidden', showMarket);
+        if (showMarket) {
+          market.removeAttribute('hidden');
+          meta.setAttribute('hidden', '');
+        } else {
+          meta.removeAttribute('hidden');
+          market.setAttribute('hidden', '');
+        }
+        tabs.forEach(function (btn) {
+          var on = btn.getAttribute('data-dashboard-tab') === name;
+          btn.classList.toggle('active', on);
+          btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+      }
+
+      tabs.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          activate(btn.getAttribute('data-dashboard-tab'));
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

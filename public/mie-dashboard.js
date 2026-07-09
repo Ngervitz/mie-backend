@@ -37,7 +37,9 @@ const state = {
   error: null,
 };
 
-const root = document.getElementById('app');
+// Root is #mie-market-root (sibling of #meta-ads-root and .dashboard-tabs).
+// Never write outside this node — tab bar and Meta Ads panel must survive render().
+const root = document.getElementById('mie-market-root');
 
 /* ----------------------------------------------------------------------------
  * Utilities
@@ -575,6 +577,10 @@ function onActionClick(e) {
  * ------------------------------------------------------------------------- */
 
 function init() {
+  if (!root) {
+    console.error('[mie-dashboard] #mie-market-root not found');
+    return;
+  }
   state.selectedDate = getLocalToday();
   render();
   fetchReport(state.selectedDate);
