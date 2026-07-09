@@ -1,12 +1,37 @@
 /**
  * Meta Ads Agent — vanilla port of metaagent2/src/App.jsx
  * Encapsulated IIFE: no globals collide with mie-dashboard.js.
+ *
+ * Datasource: Supabase REST (own_ad_metrics). No supabase-js in public/.
+ *
+ * CREDENTIALS (not present in frontend today — do NOT invent values):
+ *   Configure EITHER:
+ *   1) Placeholders below (SUPABASE_URL / SUPABASE_ANON_KEY), OR
+ *   2) Before this script loads:
+ *        window.__META_AGENT_DATASOURCE__ = {
+ *          supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
+ *          supabaseAnonKey: 'YOUR_ANON_KEY'
+ *        };
+ *   Backend .env has SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY only —
+ *   SERVICE_ROLE must never be used in the browser. Need a public anon key
+ *   (Dashboard → Project Settings → API → anon public) plus RLS that allows
+ *   read of own_ad_metrics for the configured entity.
+ *
+ * LOOKBACK: METRIC_LOOKBACK_DAYS (default 30). Change that constant to adjust
+ * the analytic window. Aggregation / KPIs / alerts stay in JS (no SQL GROUP BY).
  */
 (function () {
   'use strict';
 
-  var SHEET_URL =
-    'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ1AabqPmRBVR6J8trdM50_F5Nnw4tBFPoT1Fk-9PnLC5iz9T15lnSjNe4J21IW6CIKDXmkbzxmg6PK/pub?gid=0&single=true&output=csv';
+  // --- Datasource config (placeholders — fill or inject via window) ---
+  var SUPABASE_URL = ''; // e.g. https://xxxx.supabase.co
+  var SUPABASE_ANON_KEY = ''; // anon public key only — never service_role
+
+  var OWN_ENTITY_ID = 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df';
+  /** Analytic window for own_ad_metrics.metric_date (gte). Change here. */
+  var METRIC_LOOKBACK_DAYS = 30;
+
+  var CONFIG_ERROR_MSG = 'Falta configuración de datasource.';
 
   var state = {
     data: [],
@@ -14,6 +39,7 @@
     error: null,
     tab: 'campaigns',
     lastUpdate: null,
+    configMissing: false,
   };
 
   var root = null;
@@ -30,27 +56,130 @@
     return isNaN(n) ? null : n;
   }
 
-  function parseCSV(text) {
-    var lines = text.trim().split('\n');
-    if (lines.length < 2) return [];
-    var headers = lines[0].split(',').map(function (h) {
-      return h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()]/g, '');
-    });
-    return lines
-      .slice(1)
-      .map(function (line) {
-        var values = line.split(',');
-        var obj = {};
-        headers.forEach(function (h, i) {
-          obj[h] = (values[i] && values[i].trim()) || '';
-        });
-        return obj;
-      })
-      .filter(function (row) {
-        return Object.values(row).some(function (v) {
-          return v !== '';
-        });
+  function resolveDatasourceConfig() {
+    var injected = typeof window !== 'undefined' ? window.__META_AGENT_DATASOURCE__ : null;
+    var url = '';
+    var anonKey = '';
+    if (injected && typeof injected === 'object') {
+      url = String(injected.supabaseUrl || injected.SUPABASE_URL || '').trim();
+      anonKey = String(injected.supabaseAnonKey || injected.SUPABASE_ANON_KEY || '').trim();
+    }
+    if (!url) url = String(SUPABASE_URL || '').trim();
+    if (!anonKey) anonKey = String(SUPABASE_ANON_KEY || '').trim();
+    return { url: url, anonKey: anonKey };
+  }
+
+  function isDatasourceConfigured(cfg) {
+    return !!(cfg && cfg.url && cfg.anonKey);
+  }
+
+  function toCsvCompatString(value) {
+    if (value === null || value === undefined) return '';
+    return String(value);
+  }
+
+  /**
+   * Map own_ad_metrics row → same string-keyed shape parseCSV() used to emit,
+   * so findVal / buildCampList / KPIs / alerts need no changes.
+   * Derived metrics (cpl, ctr, cpc) computed here from raw columns only.
+   */
+  function mapOwnAdMetricsToLegacyRow(row) {
+    var spendNum = parseFloat(row.spend);
+    var impressionsNum = parseFloat(row.impressions);
+    var clicksNum = parseFloat(row.clicks);
+    var actionsNum = parseFloat(row.actions);
+    var spend = isNaN(spendNum) ? 0 : spendNum;
+    var impressions = isNaN(impressionsNum) ? 0 : impressionsNum;
+    var clicks = isNaN(clicksNum) ? 0 : clicksNum;
+    var actions = isNaN(actionsNum) ? 0 : actionsNum;
+
+    var cpl = actions > 0 ? spend / actions : '';
+    var ctr = impressions > 0 ? (clicks / impressions) * 100 : '';
+    var cpc = clicks > 0 ? spend / clicks : '';
+
+    var name = toCsvCompatString(row.campaign_name);
+    var freq = toCsvCompatString(row.frequency);
+    var spendStr = toCsvCompatString(row.spend);
+    var convStr = toCsvCompatString(row.actions);
+
+    return {
+      campaign_name: name,
+      campana: name,
+      cpl: toCsvCompatString(cpl),
+      ctr: toCsvCompatString(ctr),
+      cpc: toCsvCompatString(cpc),
+      frequency: freq,
+      frecuencia: freq,
+      spend: spendStr,
+      gasto: spendStr,
+      conversions: convStr,
+      conversiones: convStr,
+      metric_date: toCsvCompatString(row.metric_date),
+    };
+  }
+
+  function lookbackStartDateIso() {
+    var d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - METRIC_LOOKBACK_DAYS);
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  /**
+   * Raw rows from Supabase REST (no SQL aggregation). Paginated to avoid
+   * PostgREST default 1000-row cap within the lookback window.
+   */
+  async function fetchOwnAdMetricsRows(cfg) {
+    var since = lookbackStartDateIso();
+    var base =
+      cfg.url.replace(/\/+$/, '') +
+      '/rest/v1/own_ad_metrics' +
+      '?entity_id=eq.' +
+      encodeURIComponent(OWN_ENTITY_ID) +
+      '&metric_date=gte.' +
+      encodeURIComponent(since) +
+      '&select=entity_id,campaign_id,campaign_name,metric_date,spend,impressions,clicks,actions,actions_value,frequency,created_at' +
+      '&order=metric_date.asc';
+
+    var pageSize = 1000;
+    var from = 0;
+    var all = [];
+
+    while (true) {
+      var res = await fetch(base, {
+        method: 'GET',
+        headers: {
+          apikey: cfg.anonKey,
+          Authorization: 'Bearer ' + cfg.anonKey,
+          Accept: 'application/json',
+          Range: from + '-' + (from + pageSize - 1),
+          Prefer: 'count=exact',
+        },
       });
+      if (!res.ok) {
+        var body = '';
+        try {
+          body = await res.text();
+        } catch (ignore) {
+          body = '';
+        }
+        throw new Error('Supabase HTTP ' + res.status + (body ? ': ' + body.slice(0, 200) : ''));
+      }
+      var chunk = await res.json();
+      if (!Array.isArray(chunk)) {
+        throw new Error('Respuesta inesperada de Supabase');
+      }
+      for (var i = 0; i < chunk.length; i++) {
+        all.push(chunk[i]);
+      }
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return all;
   }
 
   function findVal(row) {
@@ -175,8 +304,20 @@
     return (
       '<div class="ma-state">' +
       '<div class="ma-state-title ma-pulse">CARGANDO</div>' +
-      '<div class="ma-state-sub">CONECTANDO CON GOOGLE SHEETS</div>' +
+      '<div class="ma-state-sub">CONECTANDO CON SUPABASE</div>' +
       '<div class="ma-state-hint">Cargando datos de Meta Ads...</div>' +
+      '</div>'
+    );
+  }
+
+  function renderConfigMissing() {
+    return (
+      '<div class="ma-state">' +
+      '<div class="ma-state-icon">⚠️</div>' +
+      '<div class="ma-state-error">' +
+      escapeHtml(CONFIG_ERROR_MSG) +
+      '</div>' +
+      '<div class="ma-state-hint">Configurá SUPABASE_URL y SUPABASE_ANON_KEY en meta-agent.js o window.__META_AGENT_DATASOURCE__</div>' +
       '</div>'
     );
   }
@@ -186,7 +327,7 @@
       '<div class="ma-state">' +
       '<div class="ma-state-icon">⚠️</div>' +
       '<div class="ma-state-error">' +
-      escapeHtml(state.error || 'Error al conectar con Google Sheets') +
+      escapeHtml(state.error || 'Error al conectar con Supabase') +
       '</div>' +
       '<button type="button" class="ma-btn ma-btn-primary" data-ma-action="retry">Reintentar</button>' +
       '</div>'
@@ -560,7 +701,9 @@
     var derived = computeDerived(state.data);
     var html = '<div class="ma-shell">' + renderHeader(derived.alertas);
 
-    if (state.loading) {
+    if (state.configMissing) {
+      html += renderConfigMissing();
+    } else if (state.loading) {
       html += renderLoading();
     } else if (state.error) {
       html += renderError();
@@ -597,19 +740,29 @@
   }
 
   async function loadData() {
+    var cfg = resolveDatasourceConfig();
+    if (!isDatasourceConfigured(cfg)) {
+      state.configMissing = true;
+      state.loading = false;
+      state.error = CONFIG_ERROR_MSG;
+      state.data = [];
+      render();
+      return;
+    }
+
+    state.configMissing = false;
     state.loading = true;
     state.error = null;
     render();
     try {
-      var res = await fetch(SHEET_URL);
-      if (!res.ok) throw new Error('Error al cargar');
-      var text = await res.text();
-      var parsed = parseCSV(text);
+      var rawRows = await fetchOwnAdMetricsRows(cfg);
+      // Normalize types to CSV-compat strings before any business logic.
+      var parsed = rawRows.map(mapOwnAdMetricsToLegacyRow);
       state.data = parsed;
       state.lastUpdate = new Date().toLocaleTimeString('es-AR');
       state.error = null;
     } catch (e) {
-      state.error = 'No se pudo conectar con Google Sheets.';
+      state.error = 'No se pudo conectar con Supabase.';
     }
     state.loading = false;
     render();
@@ -618,6 +771,18 @@
   function init() {
     root = document.getElementById('meta-ads-root');
     if (!root) return;
+
+    var cfg = resolveDatasourceConfig();
+    if (!isDatasourceConfigured(cfg)) {
+      // Controlled interrupt: do not call Supabase; leave MIC tab unaffected.
+      state.configMissing = true;
+      state.loading = false;
+      state.error = CONFIG_ERROR_MSG;
+      state.data = [];
+      render();
+      return;
+    }
+
     loadData();
     if (refreshTimerId) clearInterval(refreshTimerId);
     refreshTimerId = setInterval(loadData, 5 * 60 * 1000);
