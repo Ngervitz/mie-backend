@@ -278,14 +278,10 @@ async function computeEntityMetrics({ entity, executionDate }) {
     });
   }
 
-  // --- reactivated_ads (observed + baseline; no change alerts) ---
+  // --- reactivated_ads (observed only; baseline/delta/change are new_ads-only) ---
   {
     const metricType = METRIC_TYPES.REACTIVATED_ADS;
     const observedValue = countReactivatedInWindow(events, currentWindowStart, currentWindowEnd);
-    const blockValues = validBaselineBlocks.map((b) =>
-      observedForBlock(metricType, ads, events, b.start, b.end));
-    const { baselineMean, baselineStd } = computeBaseline(blockValues);
-    const deltaValue = baselineMean === null ? null : Math.abs(observedValue - baselineMean);
 
     rows.push({
       entity_id: entityId,
@@ -294,12 +290,12 @@ async function computeEntityMetrics({ entity, executionDate }) {
       current_window_end: currentWindowEnd,
       metric_type: metricType,
       observed_value: observedValue,
-      baseline_mean: baselineMean,
-      baseline_std: baselineStd,
-      delta_value: deltaValue,
+      baseline_mean: null,
+      baseline_std: null,
+      delta_value: null,
       days_of_history: daysOfHistory,
       confidence_level: confidenceLevel,
-      change_relevant: coverageValid ? false : null,
+      change_relevant: null,
       change_direction: null,
       alert_emitted: false,
       consecutive_change_days: 0,
@@ -308,7 +304,7 @@ async function computeEntityMetrics({ entity, executionDate }) {
     });
   }
 
-  // --- persistence (point-in-time; no baseline / window semantics for value) ---
+  // --- persistence (point-in-time; no baseline / change) ---
   {
     const metricType = METRIC_TYPES.PERSISTENCE;
     const observedValue = countActiveAds(ads);
@@ -325,7 +321,7 @@ async function computeEntityMetrics({ entity, executionDate }) {
       delta_value: null,
       days_of_history: daysOfHistory,
       confidence_level: confidenceLevel,
-      change_relevant: false,
+      change_relevant: null,
       change_direction: null,
       alert_emitted: false,
       consecutive_change_days: 0,

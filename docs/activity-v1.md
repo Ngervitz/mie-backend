@@ -34,11 +34,11 @@ Migración: `migrations/20260710_activity_metrics.sql`
 
 ## Métricas
 
-| metric_type | Fuente | Ventana |
-|-------------|--------|---------|
-| `new_ads` | `ads.first_seen_at` en `[start, end)` | 7 días semiabierta |
-| `reactivated_ads` | `events` `ad_reactivated` / `detected_at` | misma ventana |
-| `persistence` | `COUNT(ads)` donde `is_active=true` | no aplica |
+| metric_type | Fuente | Ventana | baseline / delta / change |
+|-------------|--------|---------|---------------------------|
+| `new_ads` | `ads.first_seen_at` en `[start, end)` | 7 días semiabierta | **Sí** — único con baseline, delta y change |
+| `reactivated_ads` | `events` `ad_reactivated` / `detected_at` | misma ventana | **null** — solo `observed_value` |
+| `persistence` | `COUNT(ads)` donde `is_active=true` | no aplica | **null** — solo `observed_value` |
 
 New Ads y Reactivated Ads **siempre** se persisten por separado.
 
