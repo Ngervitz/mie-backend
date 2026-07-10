@@ -4,53 +4,54 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/tabler-icons.min.css" />
   <link rel="stylesheet" href="mie-dashboard.css" />
   <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
-  <nav class="brief-backnav">
-    <a href="/hugo-brief.html" class="brief-backnav-link">&larr; Volver al Executive Brief</a>
-  </nav>
+  <div id="mie-dashboard-app">
+    <nav class="brief-backnav">
+      <a href="/hugo-brief.html" class="brief-backnav-link">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i>
+        Volver al executive brief
+      </a>
+    </nav>
 
-  <!-- Tab bar: OUTSIDE both panel roots so neither script's innerHTML can destroy it -->
-  <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
-    <button
-      type="button"
-      class="dashboard-tab active"
-      role="tab"
-      aria-selected="true"
-      data-dashboard-tab="market"
-      id="tab-market">
-      Inteligencia de mercado
-    </button>
-    <button
-      type="button"
-      class="dashboard-tab"
-      role="tab"
-      aria-selected="false"
-      data-dashboard-tab="meta"
-      id="tab-meta">
-      Meta Ads
-    </button>
-  </nav>
+    <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
+      <button
+        type="button"
+        class="dashboard-tab active"
+        role="tab"
+        aria-selected="true"
+        data-dashboard-tab="market"
+        id="tab-market">
+        Inteligencia de mercado
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="meta"
+        id="tab-meta">
+        Meta Ads
+      </button>
+    </nav>
 
-  <!-- MIC root: mie-dashboard.js writes ONLY here -->
-  <main
-    class="app dashboard-panel"
-    id="mie-market-root"
-    role="tabpanel"
-    aria-labelledby="tab-market">
-    <!-- Rendered by mie-dashboard.js -->
-  </main>
+    <main
+      class="app dashboard-panel"
+      id="mie-market-root"
+      role="tabpanel"
+      aria-labelledby="tab-market">
+    </main>
 
-  <!-- Meta Ads root: meta-agent.js writes ONLY here; sibling of MIC, not a child -->
-  <div
-    class="dashboard-panel hidden"
-    id="meta-ads-root"
-    role="tabpanel"
-    aria-labelledby="tab-meta"
-    hidden>
-    <!-- Rendered by meta-agent.js -->
+    <div
+      class="dashboard-panel hidden"
+      id="meta-ads-root"
+      role="tabpanel"
+      aria-labelledby="tab-meta"
+      hidden>
+    </div>
   </div>
 
   <script src="mie-dashboard.js"></script>
@@ -59,7 +60,8 @@
       supabaseUrl: 'https://usezztlmwfgjcidcrrde.supabase.co',
       supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzZXp6dGxtd2ZnamNpZGNycmRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTYzOTQsImV4cCI6MjA5NzI5MjM5NH0.qZMZoXsGmMvsxqxWN6sX8JT3ZpUhKc4vZrbYyJXUiJ0'
     };
-  </script><script src="meta-agent.js"></script>
+  </script>
+  <script src="meta-agent.js"></script>
   <script>
     (function () {
       'use strict';

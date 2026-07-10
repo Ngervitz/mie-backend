@@ -35,6 +35,19 @@ const state = {
   searchTerm: '',
   loading: false,
   error: null,
+  // Additive UI state (intensity gauge + ad modal) — does not alter report contract.
+  gauge: {
+    loading: false,
+    error: null,
+    entities: [],
+  },
+  adModal: {
+    open: false,
+    loading: false,
+    error: null,
+    event: null,
+    detail: null,
+  },
 };
 
 // Root is #mie-market-root (sibling of #meta-ads-root and .dashboard-tabs).
@@ -128,6 +141,526 @@ function setSelectedDate(date) {
   state.selectedEventType = 'all';
   state.searchTerm = '';
   fetchReport(date);
+  loadIntensityGauges(date);
+}
+
+/* ----------------------------------------------------------------------------
+ * Intensity gauge + ad modal (additive only — new helpers / queries)
+ *
+ * Event-type audit (movements):
+ *   Included: new_ad, copy_changed, ad_reactivated, ad_deactivated
+ *   Excluded: none
+ *   Justification: src/steps/events.js only writes these four types; the
+ *   dashboard "Movimientos" KPI counts all of them. Every event row is a
+ *   competitive movement.
+ *
+ * Date grouping: events.detected_at is DATE (YYYY-MM-DD). Group by
+ *   entity_id + detected_at as stored (no extra timezone conversion).
+ *   Calendar navigation reuses getLocalToday() / shiftDate() (local parts).
+ *
+ * events → ad_snapshots lookup:
+ *   events.ad_id → ads.id → ads.snapshot_id → ad_snapshots.id → raw_json[]
+ *   Match item via ads.ad_archive_id ↔ raw item adArchiveId / variants.
+ * ------------------------------------------------------------------------- */
+
+const MOVEMENT_EVENT_TYPES = ['new_ad', 'copy_changed', 'ad_reactivated', 'ad_deactivated'];
+
+function getSupabaseDatasourceConfig() {
+  const injected = typeof window !== 'undefined' ? window.__META_AGENT_DATASOURCE__ : null;
+  if (!injected || typeof injected !== 'object') {
+    return { url: '', anonKey: '' };
+  }
+  return {
+    url: String(injected.supabaseUrl || '').trim(),
+    anonKey: String(injected.supabaseAnonKey || '').trim(),
+  };
+}
+
+async function supabaseRestGet(pathAndQuery) {
+  const cfg = getSupabaseDatasourceConfig();
+  if (!cfg.url || !cfg.anonKey) {
+    throw new Error('Datasource Supabase no configurado');
+  }
+  const base = cfg.url.replace(/\/+$/, '');
+  const url = `${base}/rest/v1/${pathAndQuery.replace(/^\//, '')}`;
+  const pageSize = 1000;
+  let from = 0;
+  const all = [];
+
+  while (true) {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        apikey: cfg.anonKey,
+        Authorization: `Bearer ${cfg.anonKey}`,
+        Accept: 'application/json',
+        Range: `${from}-${from + pageSize - 1}`,
+      },
+    });
+    if (!res.ok) {
+      let body = '';
+      try {
+        body = await res.text();
+      } catch (ignore) {
+        body = '';
+      }
+      throw new Error(`Supabase HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+    }
+    const chunk = await res.json();
+    if (!Array.isArray(chunk)) {
+      throw new Error('Respuesta inesperada de Supabase');
+    }
+    for (let i = 0; i < chunk.length; i += 1) {
+      all.push(chunk[i]);
+    }
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+/** Read-only: competitor entities (is_self = false). */
+async function queryCompetitorEntities() {
+  return supabaseRestGet(
+    'monitored_entities?select=id,name,is_self&is_self=eq.false&order=name.asc',
+  );
+}
+
+/**
+ * Read-only gauge events query.
+ * Grouping expression (client): entity_id + detected_at (DATE column as-is).
+ * Window: [selectedDate - 7, selectedDate] inclusive for today + baseline days.
+ * Baseline uses only [selectedDate - 7, selectedDate - 1] (seven complete days).
+ */
+async function queryEventsForIntensityGauge(selectedDate, entityIds) {
+  if (!Array.isArray(entityIds) || entityIds.length === 0) return [];
+  const rangeStart = shiftDate(selectedDate, -7);
+  const inList = entityIds.map((id) => encodeURIComponent(id)).join(',');
+  const typeList = MOVEMENT_EVENT_TYPES.map((t) => encodeURIComponent(t)).join(',');
+  return supabaseRestGet(
+    `events?select=entity_id,detected_at,event_type` +
+      `&entity_id=in.(${inList})` +
+      `&event_type=in.(${typeList})` +
+      `&detected_at=gte.${encodeURIComponent(rangeStart)}` +
+      `&detected_at=lte.${encodeURIComponent(selectedDate)}` +
+      `&order=detected_at.asc`,
+  );
+}
+
+/**
+ * Read-only: distinct historical calendar days before selectedDate (for N/7).
+ * Same event_type filter; detected_at < selectedDate (complete days only).
+ */
+async function queryHistoricalMovementDays(selectedDate, entityIds) {
+  if (!Array.isArray(entityIds) || entityIds.length === 0) return [];
+  const inList = entityIds.map((id) => encodeURIComponent(id)).join(',');
+  const typeList = MOVEMENT_EVENT_TYPES.map((t) => encodeURIComponent(t)).join(',');
+  return supabaseRestGet(
+    `events?select=entity_id,detected_at` +
+      `&entity_id=in.(${inList})` +
+      `&event_type=in.(${typeList})` +
+      `&detected_at=lt.${encodeURIComponent(selectedDate)}` +
+      `&order=detected_at.asc`,
+  );
+}
+
+function countDailyMovementsByEntityDay(eventRows) {
+  const map = new Map();
+  (eventRows || []).forEach((row) => {
+    const entityId = row.entity_id;
+    const day = row.detected_at;
+    if (!entityId || !day) return;
+    const key = `${entityId}|${day}`;
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return map;
+}
+
+function countDistinctHistoricalDaysByEntity(historyRows) {
+  const sets = new Map();
+  (historyRows || []).forEach((row) => {
+    const entityId = row.entity_id;
+    const day = row.detected_at;
+    if (!entityId || !day) return;
+    if (!sets.has(entityId)) sets.set(entityId, new Set());
+    sets.get(entityId).add(String(day));
+  });
+  const out = new Map();
+  sets.forEach((daySet, entityId) => {
+    out.set(entityId, daySet.size);
+  });
+  return out;
+}
+
+/**
+ * Compare today vs mean of previous 7 complete days (zeros for quiet days).
+ * Never uses fixed thresholds or cross-entity comparison.
+ */
+function calculateEntityIntensity(todayCount, baselineDayCounts) {
+  const days = Array.isArray(baselineDayCounts) ? baselineDayCounts : [];
+  const sum = days.reduce((acc, n) => acc + (Number(n) || 0), 0);
+  const avg = days.length > 0 ? sum / days.length : 0;
+  const today = Number(todayCount) || 0;
+
+  let level = 'normal';
+  let label = 'Normal';
+  if (today < avg) {
+    level = 'below';
+    label = 'Por debajo de lo normal';
+  } else if (today > avg) {
+    level = 'above';
+    label = 'Por encima de lo normal';
+  }
+
+  return {
+    todayCount: today,
+    baselineAverage: avg,
+    level,
+    label,
+  };
+}
+
+function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDate) {
+  const daily = countDailyMovementsByEntityDay(windowRows);
+  const histDays = countDistinctHistoricalDaysByEntity(historyRows);
+  const baselineDates = [];
+  for (let i = 7; i >= 1; i -= 1) {
+    baselineDates.push(shiftDate(selectedDate, -i));
+  }
+
+  return (entities || []).map((entity) => {
+    const entityId = entity.id;
+    const historicalDays = histDays.get(entityId) || 0;
+    const todayCount = daily.get(`${entityId}|${selectedDate}`) || 0;
+
+    if (historicalDays < 7) {
+      return {
+        entityId,
+        entityName: entity.name || '—',
+        mode: 'collecting',
+        historicalDays,
+        intensity: null,
+      };
+    }
+
+    const baselineCounts = baselineDates.map((day) => daily.get(`${entityId}|${day}`) || 0);
+    return {
+      entityId,
+      entityName: entity.name || '—',
+      mode: 'ready',
+      historicalDays,
+      intensity: calculateEntityIntensity(todayCount, baselineCounts),
+    };
+  });
+}
+
+async function loadIntensityGauges(selectedDate) {
+  state.gauge.loading = true;
+  state.gauge.error = null;
+  render();
+
+  try {
+    const entities = await queryCompetitorEntities();
+    const entityIds = entities.map((e) => e.id).filter(Boolean);
+    const [windowRows, historyRows] = await Promise.all([
+      queryEventsForIntensityGauge(selectedDate, entityIds),
+      queryHistoricalMovementDays(selectedDate, entityIds),
+    ]);
+    state.gauge.entities = buildIntensityGaugeModels(
+      entities,
+      windowRows,
+      historyRows,
+      selectedDate,
+    );
+    state.gauge.loading = false;
+    state.gauge.error = null;
+    render();
+  } catch (err) {
+    state.gauge.loading = false;
+    state.gauge.error = err && err.message ? err.message : 'Error al cargar intensidad';
+    state.gauge.entities = [];
+    render();
+  }
+}
+
+function renderIntensityGauges() {
+  let body;
+  if (state.gauge.loading) {
+    const skeletons = new Array(4)
+      .fill('<div class="gauge-card skeleton skeleton-gauge"></div>')
+      .join('');
+    body = `<div class="gauge-grid">${skeletons}</div>`;
+  } else if (state.gauge.error) {
+    body = `<div class="empty-state">No se pudo cargar la intensidad: ${escapeHtml(state.gauge.error)}</div>`;
+  } else if (!state.gauge.entities.length) {
+    body = `<div class="empty-state">Sin entidades monitoreadas.</div>`;
+  } else {
+    body = `<div class="gauge-grid">${state.gauge.entities
+      .map((g) => {
+        if (g.mode === 'collecting') {
+          const n = Math.min(7, g.historicalDays || 0);
+          return `
+            <div class="gauge-card">
+              <div class="gauge-entity">${escapeHtml(g.entityName)}</div>
+              <div class="gauge-fallback">Recopilando histórico (día ${escapeHtml(String(n))}/7)</div>
+            </div>
+          `;
+        }
+        const level = g.intensity ? g.intensity.level : 'normal';
+        const label = g.intensity ? g.intensity.label : 'Normal';
+        return `
+          <div class="gauge-card">
+            <div class="gauge-entity">${escapeHtml(g.entityName)}</div>
+            <div class="gauge-track"><div class="gauge-fill is-${escapeHtml(level)}"></div></div>
+            <div class="gauge-label">${escapeHtml(label)}</div>
+          </div>
+        `;
+      })
+      .join('')}</div>`;
+  }
+
+  return `
+    <section class="section">
+      <h2 class="section-title">
+        <i class="ti ti-activity" aria-hidden="true"></i>
+        Intensidad de mercado
+      </h2>
+      ${body}
+    </section>
+  `;
+}
+
+function getRawAdArchiveId(item) {
+  if (!item || typeof item !== 'object') return null;
+  const id = item.adArchiveId ?? item.adArchiveID ?? item.ad_archive_id ?? item.id;
+  if (id === null || id === undefined || id === '') return null;
+  return String(id);
+}
+
+function extractDistinctCreativeBodies(rawItem) {
+  const bodies = [];
+  const push = (v) => {
+    const s = v === null || v === undefined ? '' : String(v).trim();
+    if (!s) return;
+    if (!bodies.includes(s)) bodies.push(s);
+  };
+  if (!rawItem || typeof rawItem !== 'object') return bodies;
+  if (Array.isArray(rawItem.adCreativeBodies)) {
+    rawItem.adCreativeBodies.forEach(push);
+  } else if (Array.isArray(rawItem.ad_creative_bodies)) {
+    rawItem.ad_creative_bodies.forEach(push);
+  } else if (rawItem.ad_text) {
+    push(rawItem.ad_text);
+  } else if (rawItem.adText) {
+    push(rawItem.adText);
+  } else if (rawItem.body) {
+    push(rawItem.body);
+  }
+  return bodies;
+}
+
+function extractPublisherPlatforms(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return [];
+  const platforms =
+    rawItem.publisherPlatforms ?? rawItem.publisher_platforms ?? rawItem.platforms;
+  if (Array.isArray(platforms)) {
+    return platforms.map((p) => String(p)).filter(Boolean);
+  }
+  if (typeof platforms === 'string' && platforms.trim()) {
+    return [platforms.trim()];
+  }
+  return [];
+}
+
+function extractAdLibraryUrl(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  return (
+    rawItem.adLibraryURL ||
+    rawItem.ad_library_url ||
+    rawItem.adLibraryUrl ||
+    null
+  );
+}
+
+function extractAdStartDate(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  return (
+    rawItem.startDate ||
+    rawItem.start_date ||
+    rawItem.startDateFormatted ||
+    null
+  );
+}
+
+function extractAdStatus(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  return rawItem.adStatus ?? rawItem.ad_status ?? null;
+}
+
+/** Read-only: ads row by primary key (events.ad_id). */
+async function queryAdById(adId) {
+  if (!adId) return null;
+  const rows = await supabaseRestGet(
+    `ads?select=id,entity_id,snapshot_id,ad_archive_id&id=eq.${encodeURIComponent(adId)}&limit=1`,
+  );
+  return rows[0] || null;
+}
+
+/** Read-only: ad_snapshots.raw_json by snapshot id. */
+async function queryAdSnapshotRawJson(snapshotId) {
+  if (!snapshotId) return null;
+  const rows = await supabaseRestGet(
+    `ad_snapshots?select=id,raw_json&id=eq.${encodeURIComponent(snapshotId)}&limit=1`,
+  );
+  return rows[0] || null;
+}
+
+function findRawAdInSnapshot(rawJson, adArchiveId) {
+  const list = Array.isArray(rawJson) ? rawJson : [];
+  const target = String(adArchiveId);
+  for (let i = 0; i < list.length; i += 1) {
+    const found = getRawAdArchiveId(list[i]);
+    if (found && found === target) return list[i];
+  }
+  return null;
+}
+
+function buildAdDetailFromRaw(event, rawItem) {
+  return {
+    entityName: (event && event.entityName) || '—',
+    eventType: (event && event.eventType) || null,
+    eventTypeLabel: formatEventType(event && event.eventType),
+    adStatus: extractAdStatus(rawItem),
+    bodies: extractDistinctCreativeBodies(rawItem),
+    startDate: extractAdStartDate(rawItem),
+    platforms: extractPublisherPlatforms(rawItem),
+    adLibraryURL: extractAdLibraryUrl(rawItem),
+  };
+}
+
+async function loadAdDetailForEvent(event) {
+  state.adModal.open = true;
+  state.adModal.loading = true;
+  state.adModal.error = null;
+  state.adModal.event = event;
+  state.adModal.detail = null;
+  render();
+
+  try {
+    if (!event || !event.adId) {
+      throw new Error('Este evento no tiene ad_id');
+    }
+    const ad = await queryAdById(event.adId);
+    if (!ad) {
+      throw new Error('No se encontró el anuncio en ads');
+    }
+    if (!ad.snapshot_id) {
+      throw new Error('El anuncio no tiene snapshot_id');
+    }
+    const snapshot = await queryAdSnapshotRawJson(ad.snapshot_id);
+    if (!snapshot) {
+      throw new Error('No se encontró el snapshot');
+    }
+    const rawItem = findRawAdInSnapshot(snapshot.raw_json, ad.ad_archive_id);
+    if (!rawItem) {
+      throw new Error('El anuncio no aparece en raw_json del snapshot');
+    }
+    state.adModal.detail = buildAdDetailFromRaw(event, rawItem);
+    state.adModal.loading = false;
+    state.adModal.error = null;
+    render();
+  } catch (err) {
+    state.adModal.loading = false;
+    state.adModal.error = err && err.message ? err.message : 'Error al cargar el anuncio';
+    state.adModal.detail = null;
+    render();
+  }
+}
+
+function closeAdModal() {
+  state.adModal.open = false;
+  state.adModal.loading = false;
+  state.adModal.error = null;
+  state.adModal.event = null;
+  state.adModal.detail = null;
+  render();
+}
+
+function renderAdModal() {
+  if (!state.adModal.open) return '';
+
+  let content;
+  if (state.adModal.loading) {
+    content = `<div class="ad-modal-loading">Cargando detalle del anuncio…</div>`;
+  } else if (state.adModal.error) {
+    content = `<div class="ad-modal-error">${escapeHtml(state.adModal.error)}</div>`;
+  } else if (state.adModal.detail) {
+    const d = state.adModal.detail;
+    const bodiesHtml =
+      d.bodies.length === 0
+        ? `<div class="ad-modal-copy">—</div>`
+        : d.bodies.length === 1
+          ? `<div class="ad-modal-copy">${escapeHtml(d.bodies[0])}</div>`
+          : d.bodies
+              .map(
+                (body, idx) => `
+              <div class="ad-modal-block">
+                <div class="ad-modal-label">Variante ${idx + 1}</div>
+                <div class="ad-modal-copy">${escapeHtml(body)}</div>
+              </div>
+            `,
+              )
+              .join('');
+    const platforms =
+      d.platforms.length > 0 ? d.platforms.join(', ') : '—';
+    const libraryBtn = d.adLibraryURL
+      ? `<a class="btn btn-primary" href="${escapeHtml(d.adLibraryURL)}" target="_blank" rel="noopener noreferrer">
+           <i class="ti ti-external-link" aria-hidden="true"></i>
+           Ver en Facebook Ad Library
+         </a>`
+      : '';
+
+    content = `
+      <div class="ad-modal-meta">
+        <span class="badge evt-${escapeHtml(d.eventType || '')}">${escapeHtml(d.eventTypeLabel)}</span>
+        <span>Estado: ${escapeHtml(d.adStatus || '—')}</span>
+      </div>
+      <div class="ad-modal-block">
+        <div class="ad-modal-label">Copy</div>
+        ${bodiesHtml}
+      </div>
+      <div class="ad-modal-block">
+        <div class="ad-modal-label">Fecha de inicio</div>
+        <div>${escapeHtml(d.startDate || '—')}</div>
+      </div>
+      <div class="ad-modal-block">
+        <div class="ad-modal-label">Plataformas</div>
+        <div>${escapeHtml(platforms)}</div>
+      </div>
+      <div class="ad-modal-actions">${libraryBtn}</div>
+    `;
+  } else {
+    content = `<div class="ad-modal-error">Sin datos</div>`;
+  }
+
+  const title =
+    (state.adModal.detail && state.adModal.detail.entityName) ||
+    (state.adModal.event && state.adModal.event.entityName) ||
+    'Detalle del anuncio';
+
+  return `
+    <div class="ad-modal-backdrop" data-action="close-ad-modal" role="presentation">
+      <div class="ad-modal" role="dialog" aria-modal="true" aria-label="Detalle del anuncio">
+        <div class="ad-modal-header">
+          <h3 class="ad-modal-title">${escapeHtml(title)}</h3>
+          <button type="button" class="ad-modal-close" data-action="close-ad-modal" aria-label="Cerrar">
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+        ${content}
+      </div>
+    </div>
+  `;
 }
 
 /* ----------------------------------------------------------------------------
@@ -373,13 +906,13 @@ function renderEventsTable() {
     body = `<div class="empty-state">No hay eventos que coincidan con los filtros.</div>`;
   } else {
     const rows = filtered
-      .map((event) => {
+      .map((event, idx) => {
         const evtClass = `badge evt-${escapeHtml(event.eventType)}`;
         const newValue = event.newValue === null || event.newValue === undefined || event.newValue === ''
           ? '—'
           : event.newValue;
         return `
-          <tr>
+          <tr class="event-row" data-event-index="${escapeHtml(String(idx))}" tabindex="0" role="button">
             <td>${escapeHtml(event.entityName || '—')}</td>
             <td><span class="${evtClass}">${escapeHtml(formatEventType(event.eventType))}</span></td>
             <td class="num"><span class="sev">${escapeHtml(String(event.severity === null || event.severity === undefined ? '—' : event.severity))}</span></td>
@@ -423,6 +956,7 @@ function renderLoadingSkeleton() {
     ${renderHeader()}
     ${renderStatusLine()}
     <section class="section"><div class="kpi-grid">${kpis}</div></section>
+    ${renderIntensityGauges()}
     <section class="section">
       <h2 class="section-title">Resumen ejecutivo</h2>
       <div class="summary-box">
@@ -459,6 +993,7 @@ function renderContent() {
   if (total === 0) {
     return `
       ${renderKpis()}
+      ${renderIntensityGauges()}
       ${renderExecutiveSummary()}
       <section class="section">
         <div class="empty-state">Sin movimientos registrados para esta fecha.</div>
@@ -468,6 +1003,7 @@ function renderContent() {
 
   return `
     ${renderKpis()}
+    ${renderIntensityGauges()}
     ${renderExecutiveSummary()}
     ${renderEntityActivity()}
     ${renderEventsTable()}
@@ -476,13 +1012,13 @@ function renderContent() {
 
 function render() {
   if (state.loading) {
-    root.innerHTML = renderLoadingSkeleton();
+    root.innerHTML = `${renderLoadingSkeleton()}${renderAdModal()}`;
     bindEvents();
     return;
   }
 
   if (state.error) {
-    root.innerHTML = renderError();
+    root.innerHTML = `${renderError()}${renderAdModal()}`;
     bindEvents();
     return;
   }
@@ -491,6 +1027,7 @@ function render() {
     ${renderHeader()}
     ${renderStatusLine()}
     ${renderContent()}
+    ${renderAdModal()}
   `;
   bindEvents();
 }
@@ -515,6 +1052,32 @@ function bindEvents() {
       render();
     });
   });
+
+  const data = state.reportData;
+  const allEvents = data && Array.isArray(data.events) ? data.events : [];
+  const filteredEvents = applyFilters(allEvents);
+
+  root.querySelectorAll('.event-row').forEach((row) => {
+    const openFromRow = () => {
+      const idx = Number(row.getAttribute('data-event-index'));
+      const event = filteredEvents[idx];
+      if (event) loadAdDetailForEvent(event);
+    };
+    row.addEventListener('click', openFromRow);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openFromRow();
+      }
+    });
+  });
+
+  const modalPanel = root.querySelector('.ad-modal');
+  if (modalPanel) {
+    modalPanel.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  }
 
   const search = root.querySelector('#search-input');
   if (search) {
@@ -560,12 +1123,16 @@ function onActionClick(e) {
       break;
     case 'reload':
       fetchReport(state.selectedDate);
+      loadIntensityGauges(state.selectedDate);
       break;
     case 'clear-filters':
       state.selectedEntityId = null;
       state.selectedEventType = 'all';
       state.searchTerm = '';
       render();
+      break;
+    case 'close-ad-modal':
+      closeAdModal();
       break;
     default:
       break;
@@ -584,6 +1151,7 @@ function init() {
   state.selectedDate = getLocalToday();
   render();
   fetchReport(state.selectedDate);
+  loadIntensityGauges(state.selectedDate);
 }
 
 init();

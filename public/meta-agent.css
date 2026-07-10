@@ -1,37 +1,39 @@
-/* Meta Ads Agent — scoped under #meta-ads-root. Prefixed custom properties. */
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&family=DM+Sans:wght@400;600;700&display=swap');
+/* Meta Ads Agent — scoped under #meta-ads-root.
+   Visual tokens aligned with #mie-dashboard-app (unified dark MIC). */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap');
 
 #meta-ads-root {
-  --meta-agent-bg: #050508;
-  --meta-agent-surface: #0d0d14;
-  --meta-agent-border: #1a1a2e;
-  --meta-agent-border-hover: #2d2d50;
-  --meta-agent-text: #e2e8f0;
-  --meta-agent-muted: #374151;
-  --meta-agent-faint: #4b5563;
-  --meta-agent-dim: #6b7280;
-  --meta-agent-footer: #1f2937;
-  --meta-agent-blue: #3b82f6;
-  --meta-agent-blue-deep: #1d4ed8;
-  --meta-agent-blue-soft: #0f172a;
-  --meta-agent-blue-border: #1e3a8a;
-  --meta-agent-green: #22c55e;
-  --meta-agent-green-soft: #052e16;
-  --meta-agent-green-border: #14532d;
-  --meta-agent-green-text: #4ade80;
-  --meta-agent-amber: #f59e0b;
-  --meta-agent-red: #ef4444;
-  --meta-agent-red-soft: #1c0a0a;
-  --meta-agent-red-border: #7f1d1d;
-  --meta-agent-red-text: #fca5a5;
-  --meta-agent-amber-soft: #1c0911;
-  --meta-agent-amber-border: #78350f;
-  --meta-agent-amber-text: #fcd34d;
-  --meta-agent-purple: #8b5cf6;
-  --meta-agent-spark-track: #1f2937;
+  --meta-agent-bg: #12141a;
+  --meta-agent-surface: #1a1d26;
+  --meta-agent-border: #2a2f3a;
+  --meta-agent-border-hover: #363c4a;
+  --meta-agent-text: #e8eaed;
+  --meta-agent-muted: #9aa3b2;
+  --meta-agent-faint: #6b7380;
+  --meta-agent-dim: #6b7380;
+  --meta-agent-footer: #22262f;
+  --meta-agent-blue: #5b7fad;
+  --meta-agent-blue-deep: #5b7fad;
+  --meta-agent-blue-soft: rgba(91, 127, 173, 0.15);
+  --meta-agent-blue-border: #2a2f3a;
+  --meta-agent-green: #5a9a72;
+  --meta-agent-green-soft: rgba(90, 154, 114, 0.15);
+  --meta-agent-green-border: #2a2f3a;
+  --meta-agent-green-text: #5a9a72;
+  --meta-agent-amber: #b0894a;
+  --meta-agent-red: #a66b6b;
+  --meta-agent-red-soft: rgba(166, 107, 107, 0.15);
+  --meta-agent-red-border: #2a2f3a;
+  --meta-agent-red-text: #a66b6b;
+  --meta-agent-amber-soft: rgba(176, 137, 74, 0.15);
+  --meta-agent-amber-border: #2a2f3a;
+  --meta-agent-amber-text: #b0894a;
+  --meta-agent-purple: #5b7fad;
+  --meta-agent-spark-track: #22262f;
   --meta-agent-maxw: 1200px;
 
-  font-family: 'DM Mono', monospace;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 400;
   background: var(--meta-agent-bg);
   color: var(--meta-agent-text);
   min-height: 70vh;
@@ -75,24 +77,29 @@
 .ma-logo {
   width: 38px;
   height: 38px;
-  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  background: var(--meta-agent-surface);
+  border: 1px solid var(--meta-agent-border);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .ma-brand {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 22px;
-  letter-spacing: 3px;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .ma-brand-sub {
-  font-size: 10px;
+  font-size: 0.78rem;
   color: var(--meta-agent-muted);
-  letter-spacing: 2px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .ma-header-right {
@@ -517,4 +524,48 @@
   .ma-body {
     padding: 16px;
   }
+}
+
+/* ---------- Unified MIC visual language (CSS only; no JS/data changes) ---------- */
+#mie-dashboard-app #meta-ads-root .ma-state-title,
+#mie-dashboard-app #meta-ads-root .ma-mv,
+#mie-dashboard-app #meta-ads-root .ma-brand {
+  font-family: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 500;
+}
+
+#mie-dashboard-app #meta-ads-root .ma-state-title {
+  font-size: 1.5rem;
+  color: var(--meta-agent-text);
+}
+
+#mie-dashboard-app #meta-ads-root .ma-state-sub,
+#mie-dashboard-app #meta-ads-root .ma-kpi-label,
+#mie-dashboard-app #meta-ads-root .ma-live-text,
+#mie-dashboard-app #meta-ads-root .ma-tab {
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 400;
+}
+
+#mie-dashboard-app #meta-ads-root .ma-tab.active {
+  font-weight: 500;
+}
+
+#mie-dashboard-app #meta-ads-root .ma-header {
+  border-bottom-color: var(--meta-agent-border);
+}
+
+#mie-dashboard-app #meta-ads-root .ma-btn {
+  font-family: inherit;
+  font-weight: 500;
+}
+
+#mie-dashboard-app #meta-ads-root .ma-card,
+#mie-dashboard-app #meta-ads-root .ma-row-card {
+  background: var(--meta-agent-surface);
+  border-color: var(--meta-agent-border);
+  box-shadow: none;
 }
