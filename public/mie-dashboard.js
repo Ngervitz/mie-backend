@@ -822,7 +822,7 @@ function renderEntityActivity() {
 
   if (byEntity.length === 0) {
     return `
-      <section class="section">
+      <section class="section" id="entity-activity-section">
         <h2 class="section-title">Actividad de competidores</h2>
         <div class="empty-state">Sin actividad por entidad para esta fecha.</div>
       </section>
@@ -852,10 +852,10 @@ function renderEntityActivity() {
     .join('');
 
   return `
-    <section class="section">
+    <section class="section" id="entity-activity-section">
       <h2 class="section-title">Actividad de competidores</h2>
       <div class="table-wrap">
-        <table>
+        <table data-table="entity-activity">
           <thead>
             <tr>
               <th>Entidad</th>
@@ -925,7 +925,7 @@ function renderEventsTable() {
 
     body = `
       <div class="table-wrap">
-        <table>
+        <table data-table="events-of-day">
           <thead>
             <tr>
               <th>Entidad</th>
@@ -942,7 +942,7 @@ function renderEventsTable() {
   }
 
   return `
-    <section class="section">
+    <section class="section" id="events-of-day-section">
       <h2 class="section-title">Eventos del día</h2>
       ${renderFilters()}
       ${body}
@@ -1041,7 +1041,8 @@ function bindEvents() {
     el.addEventListener('click', onActionClick);
   });
 
-  root.querySelectorAll('.entity-row').forEach((row) => {
+  // Entity aggregate rows: filter only — never open ad modal (no single ad_id).
+  root.querySelectorAll('#entity-activity-section .entity-row').forEach((row) => {
     row.addEventListener('click', () => {
       const entityId = row.getAttribute('data-entity-id');
       if (state.selectedEntityId === entityId) {
@@ -1057,11 +1058,13 @@ function bindEvents() {
   const allEvents = data && Array.isArray(data.events) ? data.events : [];
   const filteredEvents = applyFilters(allEvents);
 
-  root.querySelectorAll('.event-row').forEach((row) => {
+  // Ad detail modal: Eventos del día rows only.
+  root.querySelectorAll('#events-of-day-section .event-row').forEach((row) => {
     const openFromRow = () => {
       const idx = Number(row.getAttribute('data-event-index'));
+      if (!Number.isFinite(idx) || idx < 0) return;
       const event = filteredEvents[idx];
-      if (event) loadAdDetailForEvent(event);
+      if (event && event.adId) loadAdDetailForEvent(event);
     };
     row.addEventListener('click', openFromRow);
     row.addEventListener('keydown', (e) => {
