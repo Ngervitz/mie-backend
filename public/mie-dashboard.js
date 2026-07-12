@@ -413,12 +413,13 @@ function renderIntensityGauges() {
     body = `<div class="gauge-list">${entities
       .map((g, index) => {
         const delay = `${(index * 0.06).toFixed(2)}s`;
+        const fullName = g.entityName || '—';
 
         if (g.mode === 'collecting') {
           const n = Math.min(7, g.historicalDays || 0);
           return `
-            <div class="gauge-row is-fallback" style="--gauge-delay:${delay}">
-              <div class="gauge-row-name">${escapeHtml(g.entityName)}</div>
+            <div class="gauge-row is-fallback" style="--gauge-delay:${delay}" title="${escapeHtml(fullName)}">
+              <div class="gauge-row-name">${escapeHtml(fullName)}</div>
               <div class="gauge-row-track"><div class="gauge-row-fill is-empty"></div></div>
               <div class="gauge-row-status">día ${escapeHtml(String(n))}/7</div>
             </div>
@@ -436,7 +437,10 @@ function renderIntensityGauges() {
 
         let widthPct;
         if (avg <= 0) {
-          widthPct = today <= 0 ? 36 : 92;
+          // Zero vs zero must show an empty bar (matches "0%" label).
+          widthPct = today <= 0 ? 0 : 92;
+        } else if (today <= 0) {
+          widthPct = 0;
         } else {
           widthPct = Math.max(6, Math.min(100, Math.round((today / avg) * 50)));
         }
@@ -455,12 +459,16 @@ function renderIntensityGauges() {
         const pulseDot = isAlert
           ? `<span class="gauge-alert-dot" aria-hidden="true"></span>`
           : '';
+        const alertEmoji = isAlert
+          ? `<span class="gauge-alert-emoji" aria-hidden="true">⚠️</span>`
+          : '';
+        const fillClass = widthPct <= 0 ? 'is-empty' : `is-${escapeHtml(level)}`;
 
         return `
-          <div class="gauge-row${alertClass}" style="--gauge-delay:${delay};--gauge-width:${widthPct}%">
-            <div class="gauge-row-name">${pulseDot}${escapeHtml(g.entityName)}</div>
+          <div class="gauge-row${alertClass}" style="--gauge-delay:${delay};--gauge-width:${widthPct}%" title="${escapeHtml(fullName)}">
+            <div class="gauge-row-name">${pulseDot}${alertEmoji}${escapeHtml(fullName)}</div>
             <div class="gauge-row-track">
-              <div class="gauge-row-fill is-${escapeHtml(level)}"></div>
+              <div class="gauge-row-fill ${fillClass}"></div>
             </div>
             <div class="gauge-row-status">${escapeHtml(pctLabel)}</div>
           </div>
@@ -474,7 +482,7 @@ function renderIntensityGauges() {
       <h2 class="section-title">
         <i class="ti ti-activity" aria-hidden="true"></i>
         Intensidad de mercado
-        <span class="section-emoji" aria-hidden="true">⚡</span>
+        <span class="section-emoji" aria-hidden="true">📊</span>
       </h2>
       ${body}
     </section>
@@ -816,36 +824,42 @@ function renderKpis() {
   const cards = [
     {
       label: 'Movimientos',
+      emoji: '🔥',
       value: stats.totalEvents || 0,
       tone: 'accent',
       icon: 'ti-activity',
     },
     {
       label: 'Anuncios nuevos',
+      emoji: '✨',
       value: stats.newAds || 0,
       tone: 'accent',
       icon: 'ti-plus',
     },
     {
       label: 'Cambios de copy',
+      emoji: '✏️',
       value: stats.copyChanges || 0,
       tone: 'neutral',
       icon: 'ti-edit',
     },
     {
       label: 'Reactivaciones',
+      emoji: '🔁',
       value: stats.reactivations || 0,
       tone: 'success',
       icon: 'ti-refresh',
     },
     {
       label: 'Desactivaciones',
+      emoji: '⛔',
       value: stats.deactivations || 0,
       tone: 'danger',
       icon: 'ti-power',
     },
     {
       label: 'Entidades con movimiento',
+      emoji: '🏢',
       value: stats.activeEntities || 0,
       tone: 'neutral',
       icon: 'ti-building',
@@ -861,6 +875,7 @@ function renderKpis() {
           <div class="kpi-value${valueTone}">${escapeHtml(String(card.value))}</div>
           <div class="kpi-label">
             <i class="ti ${escapeHtml(card.icon)}" aria-hidden="true"></i>
+            <span class="kpi-emoji" aria-hidden="true">${card.emoji}</span>
             ${escapeHtml(card.label)}
           </div>
         </div>

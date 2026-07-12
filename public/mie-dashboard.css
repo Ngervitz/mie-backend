@@ -588,7 +588,7 @@
 #mie-dashboard-app .skeleton-line { height: 14px; margin-bottom: 10px; }
 #mie-dashboard-app .skeleton-line.short { width: 40%; }
 #mie-dashboard-app .skeleton-block { height: 180px; }
-#mie-dashboard-app .skeleton-gauge-row { height: 40px; border-radius: var(--radius-sm); }
+#mie-dashboard-app .skeleton-gauge-row { height: 36px; border-radius: var(--radius-sm); }
 
 #mie-dashboard-app .section-emoji {
   font-size: 0.9rem;
@@ -596,27 +596,34 @@
   margin-left: 2px;
 }
 
+#mie-dashboard-app .kpi-emoji {
+  font-size: 12px;
+  line-height: 1;
+}
+
 /* ---------- Intensity gauges (compact rows) ---------- */
 #mie-dashboard-app .gauge-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 #mie-dashboard-app .gauge-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 40px;
-  height: 40px;
-  padding: 0 8px;
+  gap: 10px;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 0 14px;
   border-radius: var(--radius-sm);
   border-left: 3px solid transparent;
   box-sizing: border-box;
+  background: transparent;
 }
 
 #mie-dashboard-app .gauge-row.is-fallback {
@@ -639,9 +646,9 @@
 }
 
 #mie-dashboard-app .gauge-row-name {
-  flex: 0 0 88px;
-  width: 88px;
-  font-size: 0.82rem;
+  flex: 0 0 168px;
+  width: 168px;
+  font-size: 13px;
   font-weight: var(--font-weight-medium);
   color: var(--text);
   white-space: nowrap;
@@ -649,7 +656,13 @@
   text-overflow: ellipsis;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+}
+
+#mie-dashboard-app .gauge-alert-emoji {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
 }
 
 #mie-dashboard-app .gauge-alert-dot {
@@ -678,7 +691,7 @@
 #mie-dashboard-app .gauge-row-track {
   flex: 1 1 auto;
   min-width: 0;
-  height: 8px;
+  height: 6px;
   background: var(--surface-2);
   border-radius: 4px;
   overflow: hidden;
@@ -717,10 +730,10 @@
 }
 
 #mie-dashboard-app .gauge-row-status {
-  flex: 0 0 52px;
-  width: 52px;
+  flex: 0 0 64px;
+  width: 64px;
   text-align: right;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
