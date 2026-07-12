@@ -290,20 +290,71 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+  border-top-width: 2px;
+}
+
+#mie-dashboard-app .kpi-card.is-accent {
+  border-top-color: var(--accent-info);
+}
+
+#mie-dashboard-app .kpi-card.is-success {
+  border-top-color: var(--accent-success);
+}
+
+#mie-dashboard-app .kpi-card.is-danger {
+  border-top-color: var(--accent-danger);
+}
+
+#mie-dashboard-app .kpi-card.is-neutral {
+  border-top-color: var(--border-strong);
 }
 
 #mie-dashboard-app .kpi-value {
-  font-size: 1.9rem;
+  font-size: 1.95rem;
   font-weight: var(--font-weight-medium);
+  letter-spacing: -0.5px;
   color: var(--text);
   line-height: 1.1;
 }
 
+#mie-dashboard-app .kpi-value.is-success {
+  color: var(--accent-success);
+}
+
+#mie-dashboard-app .kpi-value.is-danger {
+  color: var(--accent-danger);
+}
+
 #mie-dashboard-app .kpi-label {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 0.78rem;
   color: var(--text-muted);
   text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#mie-dashboard-app .kpi-label .ti {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .kpi-card.is-accent .kpi-label .ti {
+  color: var(--accent-info);
+}
+
+#mie-dashboard-app .kpi-card.is-success .kpi-label .ti {
+  color: var(--accent-success);
+}
+
+#mie-dashboard-app .kpi-card.is-danger .kpi-label .ti {
+  color: var(--accent-danger);
+}
+
+#mie-dashboard-app .kpi-card.is-neutral .kpi-label .ti {
+  color: var(--text-faint);
 }
 
 /* ---------- Summary / cards ---------- */
@@ -537,57 +588,141 @@
 #mie-dashboard-app .skeleton-line { height: 14px; margin-bottom: 10px; }
 #mie-dashboard-app .skeleton-line.short { width: 40%; }
 #mie-dashboard-app .skeleton-block { height: 180px; }
-#mie-dashboard-app .skeleton-gauge { height: 88px; }
+#mie-dashboard-app .skeleton-gauge-row { height: 40px; border-radius: var(--radius-sm); }
 
-/* ---------- Intensity gauges ---------- */
-#mie-dashboard-app .gauge-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--gap);
+#mie-dashboard-app .section-emoji {
+  font-size: 0.9rem;
+  line-height: 1;
+  margin-left: 2px;
 }
 
-#mie-dashboard-app .gauge-card {
+/* ---------- Intensity gauges (compact rows) ---------- */
+#mie-dashboard-app .gauge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
-  min-height: 88px;
+  padding: 8px 10px;
 }
 
-#mie-dashboard-app .gauge-entity {
-  font-size: 0.88rem;
+#mie-dashboard-app .gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid transparent;
+  box-sizing: border-box;
+}
+
+#mie-dashboard-app .gauge-row.is-fallback {
+  opacity: 0.4;
+}
+
+#mie-dashboard-app .gauge-row.is-alert-above {
+  background: var(--accent-warn-soft);
+  border-left-color: var(--accent-warn);
+}
+
+#mie-dashboard-app .gauge-row.is-alert-below {
+  background: rgba(107, 115, 128, 0.18);
+  border-left-color: var(--text-faint);
+}
+
+#mie-dashboard-app .gauge-row.is-alert-normal {
+  background: var(--accent-info-soft);
+  border-left-color: var(--accent-info);
+}
+
+#mie-dashboard-app .gauge-row-name {
+  flex: 0 0 88px;
+  width: 88px;
+  font-size: 0.82rem;
   font-weight: var(--font-weight-medium);
   color: var(--text);
-  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-#mie-dashboard-app .gauge-track {
+#mie-dashboard-app .gauge-alert-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  color: var(--accent-warn);
+  animation: gauge-pulse-dot 1.6s ease-in-out infinite;
+}
+
+#mie-dashboard-app .gauge-row.is-alert-below .gauge-alert-dot {
+  color: var(--text-faint);
+}
+
+#mie-dashboard-app .gauge-row.is-alert-normal .gauge-alert-dot {
+  color: var(--accent-info);
+}
+
+@keyframes gauge-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+#mie-dashboard-app .gauge-row-track {
+  flex: 1 1 auto;
+  min-width: 0;
   height: 8px;
   background: var(--surface-2);
   border-radius: 4px;
   overflow: hidden;
-  margin-bottom: 8px;
 }
 
-#mie-dashboard-app .gauge-fill {
+#mie-dashboard-app .gauge-row-fill {
   height: 100%;
   border-radius: 4px;
-  width: 50%;
+  width: 0;
+  background: var(--accent-info);
+  animation: gauge-fill-grow 0.9s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  animation-delay: var(--gauge-delay, 0s);
+}
+
+#mie-dashboard-app .gauge-row-fill.is-above {
+  background: var(--accent-warn);
+}
+
+#mie-dashboard-app .gauge-row-fill.is-below {
   background: var(--text-faint);
 }
 
-#mie-dashboard-app .gauge-fill.is-below { background: var(--accent-info); width: 28%; }
-#mie-dashboard-app .gauge-fill.is-normal { background: var(--accent-success); width: 52%; }
-#mie-dashboard-app .gauge-fill.is-above { background: var(--accent-warn); width: 82%; }
-
-#mie-dashboard-app .gauge-label {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+#mie-dashboard-app .gauge-row-fill.is-normal {
+  background: var(--accent-info);
 }
 
-#mie-dashboard-app .gauge-fallback {
-  font-size: 0.82rem;
+#mie-dashboard-app .gauge-row-fill.is-empty {
+  width: 0;
+  animation: none;
+  background: transparent;
+}
+
+@keyframes gauge-fill-grow {
+  from { width: 0; }
+  to { width: var(--gauge-width, 50%); }
+}
+
+#mie-dashboard-app .gauge-row-status {
+  flex: 0 0 52px;
+  width: 52px;
+  text-align: right;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* ---------- Ad detail modal ---------- */

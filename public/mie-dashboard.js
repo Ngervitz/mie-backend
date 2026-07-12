@@ -386,33 +386,83 @@ async function loadIntensityGauges(selectedDate) {
 function renderIntensityGauges() {
   let body;
   if (state.gauge.loading) {
-    const skeletons = new Array(4)
-      .fill('<div class="gauge-card skeleton skeleton-gauge"></div>')
+    const skeletons = new Array(8)
+      .fill('<div class="gauge-row skeleton skeleton-gauge-row"></div>')
       .join('');
-    body = `<div class="gauge-grid">${skeletons}</div>`;
+    body = `<div class="gauge-list">${skeletons}</div>`;
   } else if (state.gauge.error) {
     body = `<div class="empty-state">No se pudo cargar la intensidad: ${escapeHtml(state.gauge.error)}</div>`;
   } else if (!state.gauge.entities.length) {
     body = `<div class="empty-state">Sin entidades monitoreadas.</div>`;
   } else {
-    body = `<div class="gauge-grid">${state.gauge.entities
-      .map((g) => {
+    const entities = state.gauge.entities;
+    const ranked = entities
+      .filter((g) => g.mode === 'ready' && g.intensity)
+      .map((g) => ({
+        entityId: g.entityId,
+        deviation: Math.abs(
+          (g.intensity.todayCount || 0) - (g.intensity.baselineAverage || 0),
+        ),
+        level: g.intensity.level,
+      }))
+      .filter((g) => g.deviation > 0)
+      .sort((a, b) => b.deviation - a.deviation);
+
+    const alertIds = new Set(ranked.slice(0, 3).map((g) => g.entityId));
+
+    body = `<div class="gauge-list">${entities
+      .map((g, index) => {
+        const delay = `${(index * 0.06).toFixed(2)}s`;
+
         if (g.mode === 'collecting') {
           const n = Math.min(7, g.historicalDays || 0);
           return `
-            <div class="gauge-card">
-              <div class="gauge-entity">${escapeHtml(g.entityName)}</div>
-              <div class="gauge-fallback">Recopilando histórico (día ${escapeHtml(String(n))}/7)</div>
+            <div class="gauge-row is-fallback" style="--gauge-delay:${delay}">
+              <div class="gauge-row-name">${escapeHtml(g.entityName)}</div>
+              <div class="gauge-row-track"><div class="gauge-row-fill is-empty"></div></div>
+              <div class="gauge-row-status">día ${escapeHtml(String(n))}/7</div>
             </div>
           `;
         }
-        const level = g.intensity ? g.intensity.level : 'normal';
-        const label = g.intensity ? g.intensity.label : 'Normal';
+
+        const intensity = g.intensity || {
+          todayCount: 0,
+          baselineAverage: 0,
+          level: 'normal',
+        };
+        const today = Number(intensity.todayCount) || 0;
+        const avg = Number(intensity.baselineAverage) || 0;
+        const level = intensity.level || 'normal';
+
+        let widthPct;
+        if (avg <= 0) {
+          widthPct = today <= 0 ? 36 : 92;
+        } else {
+          widthPct = Math.max(6, Math.min(100, Math.round((today / avg) * 50)));
+        }
+
+        let pctLabel;
+        if (avg <= 0) {
+          pctLabel = today <= 0 ? '0%' : '100%+';
+        } else {
+          pctLabel = `${Math.round((today / avg) * 100)}%`;
+        }
+
+        const isAlert = alertIds.has(g.entityId);
+        const alertClass = isAlert
+          ? ` is-alert is-alert-${escapeHtml(level)}`
+          : '';
+        const pulseDot = isAlert
+          ? `<span class="gauge-alert-dot" aria-hidden="true"></span>`
+          : '';
+
         return `
-          <div class="gauge-card">
-            <div class="gauge-entity">${escapeHtml(g.entityName)}</div>
-            <div class="gauge-track"><div class="gauge-fill is-${escapeHtml(level)}"></div></div>
-            <div class="gauge-label">${escapeHtml(label)}</div>
+          <div class="gauge-row${alertClass}" style="--gauge-delay:${delay};--gauge-width:${widthPct}%">
+            <div class="gauge-row-name">${pulseDot}${escapeHtml(g.entityName)}</div>
+            <div class="gauge-row-track">
+              <div class="gauge-row-fill is-${escapeHtml(level)}"></div>
+            </div>
+            <div class="gauge-row-status">${escapeHtml(pctLabel)}</div>
           </div>
         `;
       })
@@ -424,6 +474,7 @@ function renderIntensityGauges() {
       <h2 class="section-title">
         <i class="ti ti-activity" aria-hidden="true"></i>
         Intensidad de mercado
+        <span class="section-emoji" aria-hidden="true">⚡</span>
       </h2>
       ${body}
     </section>
@@ -763,23 +814,58 @@ function renderStatusLine() {
 function renderKpis() {
   const stats = (state.reportData && state.reportData.stats) || {};
   const cards = [
-    { label: 'Movimientos', value: stats.totalEvents || 0 },
-    { label: 'Anuncios nuevos', value: stats.newAds || 0 },
-    { label: 'Cambios de copy', value: stats.copyChanges || 0 },
-    { label: 'Reactivaciones', value: stats.reactivations || 0 },
-    { label: 'Desactivaciones', value: stats.deactivations || 0 },
-    { label: 'Entidades con movimiento', value: stats.activeEntities || 0 },
+    {
+      label: 'Movimientos',
+      value: stats.totalEvents || 0,
+      tone: 'accent',
+      icon: 'ti-activity',
+    },
+    {
+      label: 'Anuncios nuevos',
+      value: stats.newAds || 0,
+      tone: 'accent',
+      icon: 'ti-plus',
+    },
+    {
+      label: 'Cambios de copy',
+      value: stats.copyChanges || 0,
+      tone: 'neutral',
+      icon: 'ti-edit',
+    },
+    {
+      label: 'Reactivaciones',
+      value: stats.reactivations || 0,
+      tone: 'success',
+      icon: 'ti-refresh',
+    },
+    {
+      label: 'Desactivaciones',
+      value: stats.deactivations || 0,
+      tone: 'danger',
+      icon: 'ti-power',
+    },
+    {
+      label: 'Entidades con movimiento',
+      value: stats.activeEntities || 0,
+      tone: 'neutral',
+      icon: 'ti-building',
+    },
   ];
 
   const cardsHtml = cards
-    .map(
-      (card) => `
-        <div class="kpi-card">
-          <div class="kpi-value">${escapeHtml(String(card.value))}</div>
-          <div class="kpi-label">${escapeHtml(card.label)}</div>
+    .map((card) => {
+      const valueTone =
+        card.tone === 'success' || card.tone === 'danger' ? ` is-${card.tone}` : '';
+      return `
+        <div class="kpi-card is-${escapeHtml(card.tone)}">
+          <div class="kpi-value${valueTone}">${escapeHtml(String(card.value))}</div>
+          <div class="kpi-label">
+            <i class="ti ${escapeHtml(card.icon)}" aria-hidden="true"></i>
+            ${escapeHtml(card.label)}
+          </div>
         </div>
-      `,
-    )
+      `;
+    })
     .join('');
 
   return `<section class="section"><div class="kpi-grid">${cardsHtml}</div></section>`;
