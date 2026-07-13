@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const supabase = require('../clients/supabase');
 const env = require('../config/env');
 const logger = require('../lib/logger');
+const { todayUtc, shiftDateUtc } = require('../activity/dates');
 
 const SOURCE = 'meta_marketing_api';
 const MAX_PAGES = 100;
@@ -19,6 +20,69 @@ function parseIntOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = parseInt(String(value), 10);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Previous closed reporting day — same UTC date helpers as the rest of MIE. */
+function resolvePreviousClosedReportingDay() {
+  return shiftDateUtc(todayUtc(), -1);
+}
+
+function buildSuccessRawJson({
+  reportingDate,
+  reportingRange,
+  campaignsFound,
+  metricsInserted,
+}) {
+  return {
+    reportingDate,
+    reportingRange: {
+      since: reportingRange.since,
+      until: reportingRange.until,
+    },
+    campaignsFound,
+    metricsInserted,
+    noCampaignsFound: campaignsFound === 0,
+  };
+}
+
+/**
+ * Defensive failure payload: never throw while serializing; preserve diagnostics;
+ * always enrich with reportingDate/reportingRange when available.
+ */
+function buildFailureRawJson(err, reportingDate, reportingRange) {
+  const base = {
+    reportingDate: reportingDate || null,
+    reportingRange: reportingRange
+      ? { since: reportingRange.since, until: reportingRange.until }
+      : null,
+  };
+
+  try {
+    const payload = {
+      ...base,
+      message: err && err.message != null ? String(err.message) : 'unknown',
+    };
+
+    if (err && err.metaBody !== undefined) {
+      try {
+        JSON.stringify(err.metaBody);
+        payload.metaError = err.metaBody;
+      } catch (serErr) {
+        payload.error_raw = String(err.metaBody);
+      }
+    }
+
+    JSON.stringify(payload);
+    return payload;
+  } catch (outerErr) {
+    return {
+      ...base,
+      error_raw:
+        err && err.message != null
+          ? String(err.message)
+          : String(err),
+    };
+  }
 }
 
 async function resolveSelfEntityId() {
@@ -71,7 +135,7 @@ async function finishRun({ runId, status, rawJson }) {
   return finishedAt;
 }
 
-function buildInsightsUrl({ version, adAccountId, after }) {
+function buildInsightsUrl({ version, adAccountId, reportingRange, after }) {
   const params = new URLSearchParams({
     level: 'campaign',
     fields: [
@@ -85,7 +149,10 @@ function buildInsightsUrl({ version, adAccountId, after }) {
       'frequency',
       'date_start',
     ].join(','),
-    date_preset: 'yesterday',
+    time_range: JSON.stringify({
+      since: reportingRange.since,
+      until: reportingRange.until,
+    }),
     limit: '100',
   });
   if (after) {
@@ -126,7 +193,12 @@ async function fetchInsightsPage({ url, accessToken, pageNumber }) {
   return body;
 }
 
-async function fetchAllCampaignRows({ version, adAccountId, accessToken }) {
+async function fetchAllCampaignRows({
+  version,
+  adAccountId,
+  accessToken,
+  reportingRange,
+}) {
   const rows = [];
   const seenCursors = new Set();
   let after = null;
@@ -138,7 +210,12 @@ async function fetchAllCampaignRows({ version, adAccountId, accessToken }) {
       throw new Error(`Meta Insights pagination exceeded max pages (${MAX_PAGES})`);
     }
 
-    const url = buildInsightsUrl({ version, adAccountId, after });
+    const url = buildInsightsUrl({
+      version,
+      adAccountId,
+      reportingRange,
+      after,
+    });
     const body = await fetchInsightsPage({ url, accessToken, pageNumber });
     const pageRows = Array.isArray(body.data) ? body.data : [];
     rows.push(...pageRows);
@@ -226,6 +303,9 @@ async function collectOwnMetrics(options = {}) {
     throw new Error('META_AD_ACCOUNT_ID is not configured');
   }
 
+  const reportingDate = resolvePreviousClosedReportingDay();
+  const reportingRange = { since: reportingDate, until: reportingDate };
+
   const { entityId, entityName } = await resolveSelfEntityId();
   const runId = randomUUID();
 
@@ -234,6 +314,8 @@ async function collectOwnMetrics(options = {}) {
     entityId,
     entityName,
     apiVersion,
+    reportingDate,
+    reportingRange,
     // Día anterior cerrado, sujeto a ajustes posteriores de atribución.
     note: 'Prior day closed, subject to later attribution adjustments.',
   });
@@ -245,17 +327,32 @@ async function collectOwnMetrics(options = {}) {
       version: apiVersion,
       adAccountId,
       accessToken,
+      reportingRange,
     });
 
     if (!campaignRows.length) {
-      logger.info('No campaigns found.', { runId, entityId });
+      logger.info('No campaigns found.', {
+        runId,
+        entityId,
+        reportingDate,
+      });
     }
 
     const metricRows = campaignRows.map((row) =>
       mapRowToMetric({ row, entityId, runId }));
 
     const { inserted } = await insertMetrics(metricRows);
-    const finishedAt = await finishRun({ runId, status: 'success' });
+    const successRawJson = buildSuccessRawJson({
+      reportingDate,
+      reportingRange,
+      campaignsFound: campaignRows.length,
+      metricsInserted: inserted,
+    });
+    const finishedAt = await finishRun({
+      runId,
+      status: 'success',
+      rawJson: successRawJson,
+    });
 
     const summary = {
       status: 'meta_own_metrics_complete',
@@ -264,6 +361,8 @@ async function collectOwnMetrics(options = {}) {
       entityName,
       campaignsFound: campaignRows.length,
       rowsInserted: inserted,
+      reportingDate,
+      reportingRange,
       finishedAt,
       // Prior day closed, subject to later attribution adjustments.
       attributionNote:
@@ -274,15 +373,13 @@ async function collectOwnMetrics(options = {}) {
       runId,
       campaignsFound: campaignRows.length,
       rowsInserted: inserted,
+      reportingDate,
       status: 'success',
     });
 
     return summary;
   } catch (err) {
-    const errorPayload = {
-      message: err && err.message ? err.message : 'unknown',
-      ...(err && err.metaBody ? { metaError: err.metaBody } : {}),
-    };
+    const errorPayload = buildFailureRawJson(err, reportingDate, reportingRange);
 
     try {
       await finishRun({
@@ -299,7 +396,8 @@ async function collectOwnMetrics(options = {}) {
 
     logger.error('Meta own-metrics collect failed', {
       runId,
-      error: errorPayload.message,
+      error: errorPayload.message || errorPayload.error_raw || 'unknown',
+      reportingDate,
     });
 
     throw err;
@@ -311,5 +409,8 @@ module.exports = {
   parseFloatOrNull,
   parseIntOrNull,
   mapRowToMetric,
+  resolvePreviousClosedReportingDay,
+  buildSuccessRawJson,
+  buildFailureRawJson,
   MAX_PAGES,
 };
