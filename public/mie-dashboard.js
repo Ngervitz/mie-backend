@@ -383,97 +383,125 @@ async function loadIntensityGauges(selectedDate) {
   }
 }
 
+/** Display/sort helpers for intensity chips — presentation only; does not alter models. */
+function getIntensityPctDisplay(intensity) {
+  const today = Number(intensity && intensity.todayCount) || 0;
+  const avg = Number(intensity && intensity.baselineAverage) || 0;
+  if (avg <= 0) {
+    return {
+      sortValue: today <= 0 ? 0 : Number.POSITIVE_INFINITY,
+      pctLabel: today <= 0 ? '0%' : '100%+',
+    };
+  }
+  const sortValue = (today / avg) * 100;
+  return {
+    sortValue,
+    pctLabel: `${Math.round(sortValue)}%`,
+  };
+}
+
+/**
+ * Sort groups (exact mode/level from buildIntensityGaugeModels / calculateEntityIntensity):
+ * mode: 'ready' | 'collecting'
+ * level: 'above' | 'normal' | 'below'
+ * Unknown mode/level → group 3 (before collecting).
+ */
+function getIntensityChipSortMeta(g) {
+  const name = String(g.entityName || '');
+  if (g.mode === 'collecting') {
+    return { group: 4, sortValue: 0, name };
+  }
+  if (g.mode === 'ready' && g.intensity) {
+    const level = g.intensity.level;
+    const { sortValue } = getIntensityPctDisplay(g.intensity);
+    if (level === 'above') return { group: 0, sortValue, name };
+    if (level === 'normal') return { group: 1, sortValue, name };
+    if (level === 'below') return { group: 2, sortValue, name };
+  }
+  // Unrecognized mode/level (null, unexpected string, ready without intensity, etc.)
+  const sortValue = g.intensity ? getIntensityPctDisplay(g.intensity).sortValue : 0;
+  return { group: 3, sortValue, name };
+}
+
+function compareIntensityChips(a, b) {
+  const ma = getIntensityChipSortMeta(a);
+  const mb = getIntensityChipSortMeta(b);
+  if (ma.group !== mb.group) return ma.group - mb.group;
+  if (ma.group === 4) {
+    return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
+  }
+  if (mb.sortValue !== ma.sortValue) return mb.sortValue - ma.sortValue;
+  return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
+}
+
+function renderIntensityChip(g, index) {
+  const delay = `${(index * 0.04).toFixed(2)}s`;
+  const fullName = g.entityName || '—';
+  const titleAttr = escapeHtml(fullName);
+
+  if (g.mode === 'collecting') {
+    const n = Math.min(7, g.historicalDays || 0);
+    return `
+      <div class="gauge-chip is-collecting" style="--gauge-delay:${delay}" title="${titleAttr}">
+        <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
+        <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+        <span class="gauge-chip-value is-fallback-label">día ${escapeHtml(String(n))}/7</span>
+      </div>
+    `;
+  }
+
+  const meta = getIntensityChipSortMeta(g);
+  if (meta.group === 3) {
+    const pctLabel = g.intensity
+      ? getIntensityPctDisplay(g.intensity).pctLabel
+      : '—';
+    return `
+      <div class="gauge-chip is-unknown" style="--gauge-delay:${delay}" title="${titleAttr}">
+        <span class="gauge-chip-emoji" aria-hidden="true">❔</span>
+        <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+        <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
+      </div>
+    `;
+  }
+
+  const intensity = g.intensity;
+  const level = intensity.level;
+  const { pctLabel } = getIntensityPctDisplay(intensity);
+  let emoji = '✅';
+  let chipClass = 'is-normal';
+  if (level === 'above') {
+    emoji = '🔥';
+    chipClass = 'is-above';
+  } else if (level === 'below') {
+    emoji = '📉';
+    chipClass = 'is-below';
+  }
+
+  return `
+    <div class="gauge-chip ${chipClass}" style="--gauge-delay:${delay}" title="${titleAttr}">
+      <span class="gauge-chip-emoji" aria-hidden="true">${emoji}</span>
+      <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+      <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
+    </div>
+  `;
+}
+
 function renderIntensityGauges() {
   let body;
   if (state.gauge.loading) {
-    const skeletons = new Array(8)
-      .fill('<div class="gauge-row skeleton skeleton-gauge-row"></div>')
+    const skeletons = new Array(10)
+      .fill('<div class="gauge-chip skeleton skeleton-gauge-chip"></div>')
       .join('');
-    body = `<div class="gauge-list">${skeletons}</div>`;
+    body = `<div class="gauge-chip-grid">${skeletons}</div>`;
   } else if (state.gauge.error) {
     body = `<div class="empty-state">No se pudo cargar la intensidad: ${escapeHtml(state.gauge.error)}</div>`;
   } else if (!state.gauge.entities.length) {
     body = `<div class="empty-state">Sin entidades monitoreadas.</div>`;
   } else {
-    const entities = state.gauge.entities;
-    const ranked = entities
-      .filter((g) => g.mode === 'ready' && g.intensity)
-      .map((g) => ({
-        entityId: g.entityId,
-        deviation: Math.abs(
-          (g.intensity.todayCount || 0) - (g.intensity.baselineAverage || 0),
-        ),
-        level: g.intensity.level,
-      }))
-      .filter((g) => g.deviation > 0)
-      .sort((a, b) => b.deviation - a.deviation);
-
-    const alertIds = new Set(ranked.slice(0, 3).map((g) => g.entityId));
-
-    body = `<div class="gauge-list">${entities
-      .map((g, index) => {
-        const delay = `${(index * 0.06).toFixed(2)}s`;
-        const fullName = g.entityName || '—';
-
-        if (g.mode === 'collecting') {
-          const n = Math.min(7, g.historicalDays || 0);
-          return `
-            <div class="gauge-row is-fallback" style="--gauge-delay:${delay}" title="${escapeHtml(fullName)}">
-              <div class="gauge-row-name">${escapeHtml(fullName)}</div>
-              <div class="gauge-row-track"><div class="gauge-row-fill is-empty"></div></div>
-              <div class="gauge-row-status">día ${escapeHtml(String(n))}/7</div>
-            </div>
-          `;
-        }
-
-        const intensity = g.intensity || {
-          todayCount: 0,
-          baselineAverage: 0,
-          level: 'normal',
-        };
-        const today = Number(intensity.todayCount) || 0;
-        const avg = Number(intensity.baselineAverage) || 0;
-        const level = intensity.level || 'normal';
-
-        let widthPct;
-        if (avg <= 0) {
-          // Zero vs zero must show an empty bar (matches "0%" label).
-          widthPct = today <= 0 ? 0 : 92;
-        } else if (today <= 0) {
-          widthPct = 0;
-        } else {
-          widthPct = Math.max(6, Math.min(100, Math.round((today / avg) * 50)));
-        }
-
-        let pctLabel;
-        if (avg <= 0) {
-          pctLabel = today <= 0 ? '0%' : '100%+';
-        } else {
-          pctLabel = `${Math.round((today / avg) * 100)}%`;
-        }
-
-        const isAlert = alertIds.has(g.entityId);
-        const alertClass = isAlert
-          ? ` is-alert is-alert-${escapeHtml(level)}`
-          : '';
-        const pulseDot = isAlert
-          ? `<span class="gauge-alert-dot" aria-hidden="true"></span>`
-          : '';
-        const alertEmoji = isAlert
-          ? `<span class="gauge-alert-emoji" aria-hidden="true">⚠️</span>`
-          : '';
-        const fillClass = widthPct <= 0 ? 'is-empty' : `is-${escapeHtml(level)}`;
-
-        return `
-          <div class="gauge-row${alertClass}" style="--gauge-delay:${delay};--gauge-width:${widthPct}%" title="${escapeHtml(fullName)}">
-            <div class="gauge-row-name">${pulseDot}${alertEmoji}${escapeHtml(fullName)}</div>
-            <div class="gauge-row-track">
-              <div class="gauge-row-fill ${fillClass}"></div>
-            </div>
-            <div class="gauge-row-status">${escapeHtml(pctLabel)}</div>
-          </div>
-        `;
-      })
+    // Local copy only — never mutate state.gauge.entities (Array#sort is in-place).
+    const sorted = [...state.gauge.entities].sort(compareIntensityChips);
+    body = `<div class="gauge-chip-grid">${sorted
+      .map((g, index) => renderIntensityChip(g, index))
       .join('')}</div>`;
   }
 

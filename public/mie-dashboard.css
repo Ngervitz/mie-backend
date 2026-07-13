@@ -588,7 +588,11 @@
 #mie-dashboard-app .skeleton-line { height: 14px; margin-bottom: 10px; }
 #mie-dashboard-app .skeleton-line.short { width: 40%; }
 #mie-dashboard-app .skeleton-block { height: 180px; }
-#mie-dashboard-app .skeleton-gauge-row { height: 36px; border-radius: var(--radius-sm); }
+#mie-dashboard-app .skeleton-gauge-chip {
+  height: 96px;
+  min-height: 96px;
+  border-radius: 12px;
+}
 
 #mie-dashboard-app .section-emoji {
   font-size: 0.9rem;
@@ -601,141 +605,102 @@
   line-height: 1;
 }
 
-/* ---------- Intensity gauges (compact rows) ---------- */
-#mie-dashboard-app .gauge-list {
+/* ---------- Intensity gauges (chip grid) ---------- */
+#mie-dashboard-app .gauge-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+#mie-dashboard-app .gauge-chip {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-}
-
-#mie-dashboard-app .gauge-row {
-  display: flex;
   align-items: center;
-  gap: 10px;
-  height: 36px;
-  min-height: 36px;
-  max-height: 36px;
-  padding: 0 14px;
-  border-radius: var(--radius-sm);
-  border-left: 3px solid transparent;
+  justify-content: center;
+  gap: 4px;
+  min-height: 96px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
   box-sizing: border-box;
-  background: transparent;
+  text-align: center;
+  animation: gauge-chip-in 0.35s ease both;
+  animation-delay: var(--gauge-delay, 0s);
 }
 
-#mie-dashboard-app .gauge-row.is-fallback {
-  opacity: 0.4;
+@keyframes gauge-chip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-#mie-dashboard-app .gauge-row.is-alert-above {
-  background: var(--accent-warn-soft);
-  border-left-color: var(--accent-warn);
+#mie-dashboard-app .gauge-chip-emoji {
+  font-size: 18px;
+  line-height: 1;
 }
 
-#mie-dashboard-app .gauge-row.is-alert-below {
-  background: rgba(107, 115, 128, 0.18);
-  border-left-color: var(--text-faint);
-}
-
-#mie-dashboard-app .gauge-row.is-alert-normal {
-  background: var(--accent-info-soft);
-  border-left-color: var(--accent-info);
-}
-
-#mie-dashboard-app .gauge-row-name {
-  flex: 0 0 168px;
-  width: 168px;
-  font-size: 13px;
+#mie-dashboard-app .gauge-chip-name {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
   font-weight: var(--font-weight-medium);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  line-height: 1.25;
 }
 
-#mie-dashboard-app .gauge-alert-emoji {
-  flex: 0 0 auto;
+#mie-dashboard-app .gauge-chip-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+#mie-dashboard-app .gauge-chip-value.is-fallback-label {
   font-size: 11px;
-  line-height: 1;
-}
-
-#mie-dashboard-app .gauge-alert-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  color: var(--accent-warn);
-  animation: gauge-pulse-dot 1.6s ease-in-out infinite;
-}
-
-#mie-dashboard-app .gauge-row.is-alert-below .gauge-alert-dot {
-  color: var(--text-faint);
-}
-
-#mie-dashboard-app .gauge-row.is-alert-normal .gauge-alert-dot {
-  color: var(--accent-info);
-}
-
-@keyframes gauge-pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-#mie-dashboard-app .gauge-row-track {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 6px;
-  background: var(--surface-2);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-#mie-dashboard-app .gauge-row-fill {
-  height: 100%;
-  border-radius: 4px;
-  width: 0;
-  background: var(--accent-info);
-  animation: gauge-fill-grow 0.9s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
-  animation-delay: var(--gauge-delay, 0s);
-}
-
-#mie-dashboard-app .gauge-row-fill.is-above {
-  background: var(--accent-warn);
-}
-
-#mie-dashboard-app .gauge-row-fill.is-below {
-  background: var(--text-faint);
-}
-
-#mie-dashboard-app .gauge-row-fill.is-normal {
-  background: var(--accent-info);
-}
-
-#mie-dashboard-app .gauge-row-fill.is-empty {
-  width: 0;
-  animation: none;
-  background: transparent;
-}
-
-@keyframes gauge-fill-grow {
-  from { width: 0; }
-  to { width: var(--gauge-width, 50%); }
-}
-
-#mie-dashboard-app .gauge-row-status {
-  flex: 0 0 64px;
-  width: 64px;
-  text-align: right;
-  font-size: 12px;
+  font-weight: var(--font-weight-medium);
   color: var(--text-muted);
-  white-space: nowrap;
+}
+
+#mie-dashboard-app .gauge-chip.is-above {
+  background: var(--accent-warn-soft);
+  border-color: rgba(176, 137, 74, 0.45);
+}
+
+#mie-dashboard-app .gauge-chip.is-above .gauge-chip-value {
+  color: var(--accent-warn);
+}
+
+#mie-dashboard-app .gauge-chip.is-normal {
+  background: var(--surface);
+}
+
+#mie-dashboard-app .gauge-chip.is-below {
+  background: var(--surface);
+  opacity: 0.7;
+}
+
+#mie-dashboard-app .gauge-chip.is-below .gauge-chip-value {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .gauge-chip.is-unknown {
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .gauge-chip.is-unknown .gauge-chip-value {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .gauge-chip.is-collecting {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  opacity: 0.4;
 }
 
 /* ---------- Ad detail modal ---------- */
