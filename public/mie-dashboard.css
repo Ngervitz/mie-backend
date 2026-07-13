@@ -626,8 +626,17 @@
   background: var(--surface);
   box-sizing: border-box;
   text-align: center;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
   animation: gauge-chip-in 0.35s ease both;
   animation-delay: var(--gauge-delay, 0s);
+}
+
+#mie-dashboard-app .gauge-chip:hover {
+  border-color: var(--border-strong);
 }
 
 @keyframes gauge-chip-in {
@@ -701,6 +710,91 @@
   border-style: dashed;
   border-color: var(--border-strong);
   opacity: 0.4;
+}
+
+#mie-dashboard-app .gauge-chip.is-paused {
+  background: var(--surface-2);
+  opacity: 0.55;
+  border-style: solid;
+  border-color: var(--border);
+}
+
+#mie-dashboard-app .gauge-chip.is-paused .gauge-chip-value {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+#mie-dashboard-app .section-title-row .section-title {
+  margin-bottom: 0;
+}
+
+#mie-dashboard-app .gauge-toolbar {
+  margin-bottom: 12px;
+}
+
+#mie-dashboard-app .gauge-toolbar .input {
+  width: 100%;
+  max-width: 320px;
+}
+
+#mie-dashboard-app .entity-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: var(--font-weight-medium);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+#mie-dashboard-app .entity-status-badge.is-active {
+  color: var(--accent-success);
+  background: var(--accent-success-soft);
+  border-color: transparent;
+}
+
+#mie-dashboard-app .entity-status-badge.is-paused {
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .entity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#mie-dashboard-app .entity-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#mie-dashboard-app .entity-form-field .input,
+#mie-dashboard-app .entity-form-field .select {
+  width: 100%;
+}
+
+#mie-dashboard-app .btn-warn {
+  color: var(--accent-warn);
+  border-color: rgba(176, 137, 74, 0.45);
+  background: var(--accent-warn-soft);
+}
+
+#mie-dashboard-app .btn-warn:hover {
+  border-color: var(--accent-warn);
+}
+
+#mie-dashboard-app .text-muted {
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 /* ---------- Ad detail modal ---------- */

@@ -100,7 +100,7 @@ async function collect(entityId) {
     ...(entityId && { entityId }),
   });
 
-  let query = supabase.from('monitored_entities').select('*').eq('is_self', false);
+  let query = supabase.from('monitored_entities').select('*').eq('is_self', false).eq('active', true);
 
   if (entityId) {
     query = query.eq('id', entityId);

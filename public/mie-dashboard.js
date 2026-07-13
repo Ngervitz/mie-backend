@@ -40,6 +40,7 @@ const state = {
     loading: false,
     error: null,
     entities: [],
+    searchTerm: '',
   },
   adModal: {
     open: false,
@@ -47,6 +48,20 @@ const state = {
     error: null,
     event: null,
     detail: null,
+  },
+  entityModal: {
+    open: false,
+    entityId: null,
+    busy: false,
+    error: null,
+  },
+  addEntityModal: {
+    open: false,
+    busy: false,
+    error: null,
+    name: '',
+    segment: 'prestamos',
+    adLibraryUrl: '',
   },
 };
 
@@ -219,10 +234,71 @@ async function supabaseRestGet(pathAndQuery) {
   return all;
 }
 
-/** Read-only: competitor entities (is_self = false). */
+async function supabaseRestPatch(pathAndQuery, payload) {
+  const cfg = getSupabaseDatasourceConfig();
+  if (!cfg.url || !cfg.anonKey) {
+    throw new Error('Datasource Supabase no configurado');
+  }
+  const base = cfg.url.replace(/\/+$/, '');
+  const url = `${base}/rest/v1/${pathAndQuery.replace(/^\//, '')}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      apikey: cfg.anonKey,
+      Authorization: `Bearer ${cfg.anonKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let body = '';
+    try {
+      body = await res.text();
+    } catch (ignore) {
+      body = '';
+    }
+    throw new Error(`Supabase HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+  }
+  return res.json();
+}
+
+async function supabaseRestPost(pathAndQuery, payload) {
+  const cfg = getSupabaseDatasourceConfig();
+  if (!cfg.url || !cfg.anonKey) {
+    throw new Error('Datasource Supabase no configurado');
+  }
+  const base = cfg.url.replace(/\/+$/, '');
+  const url = `${base}/rest/v1/${pathAndQuery.replace(/^\//, '')}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      apikey: cfg.anonKey,
+      Authorization: `Bearer ${cfg.anonKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let body = '';
+    try {
+      body = await res.text();
+    } catch (ignore) {
+      body = '';
+    }
+    throw new Error(`Supabase HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+  }
+  return res.json();
+}
+
+/** Competitor entities (is_self = false). Includes paused (active=false) for the chip grid. */
 async function queryCompetitorEntities() {
   return supabaseRestGet(
-    'monitored_entities?select=id,name,is_self&is_self=eq.false&order=name.asc',
+    'monitored_entities?select=id,name,is_self,active,segment,sector,ad_library_url,slug' +
+      '&is_self=eq.false&order=name.asc',
   );
 }
 
@@ -320,9 +396,24 @@ function calculateEntityIntensity(todayCount, baselineDayCounts) {
   };
 }
 
+function buildLastMovementByEntity(windowRows, historyRows) {
+  const map = new Map();
+  const push = (row) => {
+    if (!row || !row.entity_id || !row.detected_at) return;
+    const prev = map.get(row.entity_id);
+    if (!prev || String(row.detected_at) > String(prev)) {
+      map.set(row.entity_id, row.detected_at);
+    }
+  };
+  (windowRows || []).forEach(push);
+  (historyRows || []).forEach(push);
+  return map;
+}
+
 function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDate) {
   const daily = countDailyMovementsByEntityDay(windowRows);
   const histDays = countDistinctHistoricalDaysByEntity(historyRows);
+  const lastMovement = buildLastMovementByEntity(windowRows, historyRows);
   const baselineDates = [];
   for (let i = 7; i >= 1; i -= 1) {
     baselineDates.push(shiftDate(selectedDate, -i));
@@ -332,6 +423,13 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
     const entityId = entity.id;
     const historicalDays = histDays.get(entityId) || 0;
     const todayCount = daily.get(`${entityId}|${selectedDate}`) || 0;
+    const meta = {
+      active: entity.active !== false,
+      segment: entity.segment || null,
+      sector: entity.sector || null,
+      adLibraryUrl: entity.ad_library_url || null,
+      lastMovementDate: lastMovement.get(entityId) || null,
+    };
 
     if (historicalDays < 7) {
       return {
@@ -340,6 +438,7 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
         mode: 'collecting',
         historicalDays,
         intensity: null,
+        ...meta,
       };
     }
 
@@ -350,6 +449,7 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
       mode: 'ready',
       historicalDays,
       intensity: calculateEntityIntensity(todayCount, baselineCounts),
+      ...meta,
     };
   });
 }
@@ -405,9 +505,13 @@ function getIntensityPctDisplay(intensity) {
  * mode: 'ready' | 'collecting'
  * level: 'above' | 'normal' | 'below'
  * Unknown mode/level → group 3 (before collecting).
+ * Paused (active === false) → group 5 (after collecting), alphabetical.
  */
 function getIntensityChipSortMeta(g) {
   const name = String(g.entityName || '');
+  if (g.active === false) {
+    return { group: 5, sortValue: 0, name };
+  }
   if (g.mode === 'collecting') {
     return { group: 4, sortValue: 0, name };
   }
@@ -427,7 +531,7 @@ function compareIntensityChips(a, b) {
   const ma = getIntensityChipSortMeta(a);
   const mb = getIntensityChipSortMeta(b);
   if (ma.group !== mb.group) return ma.group - mb.group;
-  if (ma.group === 4) {
+  if (ma.group === 4 || ma.group === 5) {
     return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
   }
   if (mb.sortValue !== ma.sortValue) return mb.sortValue - ma.sortValue;
@@ -438,15 +542,28 @@ function renderIntensityChip(g, index) {
   const delay = `${(index * 0.04).toFixed(2)}s`;
   const fullName = g.entityName || '—';
   const titleAttr = escapeHtml(fullName);
+  const entityAttr = escapeHtml(String(g.entityId || ''));
+
+  if (g.active === false) {
+    return `
+      <button type="button" class="gauge-chip is-paused" style="--gauge-delay:${delay}"
+        title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+        <span class="gauge-chip-emoji" aria-hidden="true">🚫</span>
+        <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+        <span class="gauge-chip-value is-fallback-label">pausada</span>
+      </button>
+    `;
+  }
 
   if (g.mode === 'collecting') {
     const n = Math.min(7, g.historicalDays || 0);
     return `
-      <div class="gauge-chip is-collecting" style="--gauge-delay:${delay}" title="${titleAttr}">
+      <button type="button" class="gauge-chip is-collecting" style="--gauge-delay:${delay}"
+        title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value is-fallback-label">día ${escapeHtml(String(n))}/7</span>
-      </div>
+      </button>
     `;
   }
 
@@ -456,11 +573,12 @@ function renderIntensityChip(g, index) {
       ? getIntensityPctDisplay(g.intensity).pctLabel
       : '—';
     return `
-      <div class="gauge-chip is-unknown" style="--gauge-delay:${delay}" title="${titleAttr}">
+      <button type="button" class="gauge-chip is-unknown" style="--gauge-delay:${delay}"
+        title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         <span class="gauge-chip-emoji" aria-hidden="true">❔</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
-      </div>
+      </button>
     `;
   }
 
@@ -478,10 +596,290 @@ function renderIntensityChip(g, index) {
   }
 
   return `
-    <div class="gauge-chip ${chipClass}" style="--gauge-delay:${delay}" title="${titleAttr}">
+    <button type="button" class="gauge-chip ${chipClass}" style="--gauge-delay:${delay}"
+      title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
       <span class="gauge-chip-emoji" aria-hidden="true">${emoji}</span>
       <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
       <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
+    </button>
+  `;
+}
+
+function formatSegmentLabel(segment) {
+  const map = {
+    prestamos: 'Préstamos',
+    cooperativa: 'Cooperativa',
+    deuda: 'Deuda',
+  };
+  if (!segment) return '—';
+  return map[segment] || String(segment);
+}
+
+function slugifyEntityName(name) {
+  return String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function looksLikeUrl(value) {
+  const s = String(value || '').trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch (err) {
+    return false;
+  }
+}
+
+function findGaugeEntity(entityId) {
+  return (state.gauge.entities || []).find((g) => String(g.entityId) === String(entityId)) || null;
+}
+
+function openEntityModal(entityId) {
+  state.entityModal = {
+    open: true,
+    entityId,
+    busy: false,
+    error: null,
+  };
+  state.addEntityModal.open = false;
+  render();
+}
+
+function closeEntityModal() {
+  state.entityModal = {
+    open: false,
+    entityId: null,
+    busy: false,
+    error: null,
+  };
+  render();
+}
+
+function openAddEntityModal() {
+  state.addEntityModal = {
+    open: true,
+    busy: false,
+    error: null,
+    name: '',
+    segment: 'prestamos',
+    adLibraryUrl: '',
+  };
+  state.entityModal.open = false;
+  render();
+}
+
+function closeAddEntityModal() {
+  state.addEntityModal.open = false;
+  state.addEntityModal.busy = false;
+  state.addEntityModal.error = null;
+  render();
+}
+
+async function toggleEntityActive() {
+  const entity = findGaugeEntity(state.entityModal.entityId);
+  if (!entity || state.entityModal.busy) return;
+
+  const nextActive = entity.active === false;
+  state.entityModal.busy = true;
+  state.entityModal.error = null;
+  render();
+
+  try {
+    await supabaseRestPatch(
+      `monitored_entities?id=eq.${encodeURIComponent(entity.entityId)}`,
+      { active: nextActive },
+    );
+    await loadIntensityGauges(state.selectedDate);
+    // Keep modal open on refreshed entity
+    state.entityModal = {
+      open: true,
+      entityId: entity.entityId,
+      busy: false,
+      error: null,
+    };
+    render();
+  } catch (err) {
+    state.entityModal.busy = false;
+    state.entityModal.error = err && err.message ? err.message : 'No se pudo actualizar';
+    render();
+  }
+}
+
+async function submitAddEntity() {
+  if (state.addEntityModal.busy) return;
+
+  const name = String(state.addEntityModal.name || '').trim();
+  const segment = String(state.addEntityModal.segment || '').trim();
+  const adLibraryUrl = String(state.addEntityModal.adLibraryUrl || '').trim();
+
+  if (!name || !segment || !adLibraryUrl) {
+    state.addEntityModal.error = 'Completá nombre, categoría y URL de Ad Library.';
+    render();
+    return;
+  }
+  if (!looksLikeUrl(adLibraryUrl)) {
+    state.addEntityModal.error = 'La URL de Ad Library no parece válida (usá http:// o https://).';
+    render();
+    return;
+  }
+
+  const slug = slugifyEntityName(name);
+  if (!slug) {
+    state.addEntityModal.error = 'No se pudo generar un slug válido a partir del nombre.';
+    render();
+    return;
+  }
+
+  state.addEntityModal.busy = true;
+  state.addEntityModal.error = null;
+  render();
+
+  try {
+    await supabaseRestPost('monitored_entities', {
+      name,
+      slug,
+      entity_type: 'marca',
+      segment,
+      sector: 'financiero',
+      ad_library_url: adLibraryUrl,
+      is_self: false,
+      active: true,
+    });
+    closeAddEntityModal();
+    await loadIntensityGauges(state.selectedDate);
+  } catch (err) {
+    state.addEntityModal.busy = false;
+    state.addEntityModal.error = err && err.message ? err.message : 'No se pudo crear la entidad';
+    render();
+  }
+}
+
+function renderEntityModal() {
+  if (!state.entityModal.open) return '';
+  const entity = findGaugeEntity(state.entityModal.entityId);
+  if (!entity) {
+    return `
+      <div class="ad-modal-backdrop" data-action="close-entity-modal" role="presentation">
+        <div class="ad-modal" role="dialog" aria-modal="true" aria-label="Detalle de entidad">
+          <div class="ad-modal-header">
+            <h3 class="ad-modal-title">Entidad</h3>
+            <button type="button" class="ad-modal-close" data-action="close-entity-modal" aria-label="Cerrar">
+              <i class="ti ti-x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="ad-modal-error">Entidad no encontrada.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const isActive = entity.active !== false;
+  const statusBadge = isActive
+    ? '<span class="entity-status-badge is-active">Activa</span>'
+    : '<span class="entity-status-badge is-paused">Pausada</span>';
+  const toggleLabel = state.entityModal.busy
+    ? 'Guardando…'
+    : (isActive ? 'Pausar' : 'Reactivar');
+  const libraryLink = entity.adLibraryUrl
+    ? `<a class="btn" href="${escapeHtml(entity.adLibraryUrl)}" target="_blank" rel="noopener noreferrer">
+         Abrir Ad Library <i class="ti ti-external-link" aria-hidden="true"></i>
+       </a>`
+    : '<span class="text-muted">Sin URL de Ad Library</span>';
+  const errorHtml = state.entityModal.error
+    ? `<div class="ad-modal-error">${escapeHtml(state.entityModal.error)}</div>`
+    : '';
+
+  return `
+    <div class="ad-modal-backdrop" data-action="close-entity-modal" role="presentation">
+      <div class="ad-modal entity-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle de entidad">
+        <div class="ad-modal-header">
+          <h3 class="ad-modal-title">${escapeHtml(entity.entityName || '—')}</h3>
+          <button type="button" class="ad-modal-close" data-action="close-entity-modal" aria-label="Cerrar">
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="ad-modal-meta">${statusBadge}</div>
+        <div class="ad-modal-block">
+          <div class="ad-modal-label">Categoría</div>
+          <div>${escapeHtml(formatSegmentLabel(entity.segment))} · ${escapeHtml(entity.sector || '—')}</div>
+        </div>
+        <div class="ad-modal-block">
+          <div class="ad-modal-label">Días de historial</div>
+          <div>${escapeHtml(String(entity.historicalDays || 0))}</div>
+        </div>
+        <div class="ad-modal-block">
+          <div class="ad-modal-label">Último movimiento</div>
+          <div>${escapeHtml(entity.lastMovementDate ? formatDate(entity.lastMovementDate) : '—')}</div>
+        </div>
+        <div class="ad-modal-actions" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          ${libraryLink}
+          <button type="button" class="btn ${isActive ? 'btn-warn' : 'btn-primary'}"
+            data-action="toggle-entity-active" ${state.entityModal.busy ? 'disabled' : ''}>
+            ${escapeHtml(toggleLabel)}
+          </button>
+        </div>
+        ${errorHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderAddEntityModal() {
+  if (!state.addEntityModal.open) return '';
+  const m = state.addEntityModal;
+  const errorHtml = m.error
+    ? `<div class="ad-modal-error">${escapeHtml(m.error)}</div>`
+    : '';
+  const segmentOptions = [
+    { value: 'prestamos', label: 'Préstamos' },
+    { value: 'cooperativa', label: 'Cooperativa' },
+    { value: 'deuda', label: 'Deuda' },
+  ].map((opt) => {
+    const selected = opt.value === m.segment ? ' selected' : '';
+    return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
+  }).join('');
+
+  return `
+    <div class="ad-modal-backdrop" data-action="close-add-entity-modal" role="presentation">
+      <div class="ad-modal entity-detail-modal" role="dialog" aria-modal="true" aria-label="Agregar entidad">
+        <div class="ad-modal-header">
+          <h3 class="ad-modal-title">Agregar entidad</h3>
+          <button type="button" class="ad-modal-close" data-action="close-add-entity-modal" aria-label="Cerrar">
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+        <form id="add-entity-form" class="entity-form">
+          <label class="entity-form-field">
+            <span class="ad-modal-label">Nombre</span>
+            <input class="input" type="text" name="name" id="add-entity-name"
+              value="${escapeHtml(m.name)}" required ${m.busy ? 'disabled' : ''} />
+          </label>
+          <label class="entity-form-field">
+            <span class="ad-modal-label">Categoría</span>
+            <select class="select" name="segment" id="add-entity-segment" ${m.busy ? 'disabled' : ''}>
+              ${segmentOptions}
+            </select>
+          </label>
+          <label class="entity-form-field">
+            <span class="ad-modal-label">Ad Library URL</span>
+            <input class="input" type="url" name="adLibraryUrl" id="add-entity-url"
+              value="${escapeHtml(m.adLibraryUrl)}" required ${m.busy ? 'disabled' : ''}
+              placeholder="https://www.facebook.com/ads/library/..." />
+          </label>
+          ${errorHtml}
+          <div class="ad-modal-actions">
+            <button type="submit" class="btn btn-primary" ${m.busy ? 'disabled' : ''}>
+              ${m.busy ? 'Guardando…' : 'Crear entidad'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   `;
 }
@@ -498,20 +896,44 @@ function renderIntensityGauges() {
   } else if (!state.gauge.entities.length) {
     body = `<div class="empty-state">Sin entidades monitoreadas.</div>`;
   } else {
+    const term = String(state.gauge.searchTerm || '').trim().toLowerCase();
     // Local copy only — never mutate state.gauge.entities (Array#sort is in-place).
-    const sorted = [...state.gauge.entities].sort(compareIntensityChips);
-    body = `<div class="gauge-chip-grid">${sorted
-      .map((g, index) => renderIntensityChip(g, index))
-      .join('')}</div>`;
+    let sorted = [...state.gauge.entities].sort(compareIntensityChips);
+    if (term) {
+      sorted = sorted.filter((g) =>
+        String(g.entityName || '').toLowerCase().includes(term));
+    }
+    if (!sorted.length) {
+      body = `<div class="empty-state">Sin resultados</div>`;
+    } else {
+      body = `<div class="gauge-chip-grid">${sorted
+        .map((g, index) => renderIntensityChip(g, index))
+        .join('')}</div>`;
+    }
   }
 
   return `
     <section class="section">
-      <h2 class="section-title">
-        <i class="ti ti-activity" aria-hidden="true"></i>
-        Intensidad de mercado
-        <span class="section-emoji" aria-hidden="true">📊</span>
-      </h2>
+      <div class="section-title-row">
+        <h2 class="section-title">
+          <i class="ti ti-activity" aria-hidden="true"></i>
+          Intensidad de mercado
+          <span class="section-emoji" aria-hidden="true">📊</span>
+        </h2>
+        <button type="button" class="btn btn-primary" data-action="open-add-entity">
+          + Agregar
+        </button>
+      </div>
+      <div class="gauge-toolbar">
+        <input
+          class="input"
+          type="search"
+          id="gauge-search-input"
+          placeholder="Buscar entidad…"
+          value="${escapeHtml(state.gauge.searchTerm || '')}"
+          autocomplete="off"
+        />
+      </div>
       ${body}
     </section>
   `;
@@ -1141,13 +1563,13 @@ function renderContent() {
 
 function render() {
   if (state.loading) {
-    root.innerHTML = `${renderLoadingSkeleton()}${renderAdModal()}`;
+    root.innerHTML = `${renderLoadingSkeleton()}${renderAdModal()}${renderEntityModal()}${renderAddEntityModal()}`;
     bindEvents();
     return;
   }
 
   if (state.error) {
-    root.innerHTML = `${renderError()}${renderAdModal()}`;
+    root.innerHTML = `${renderError()}${renderAdModal()}${renderEntityModal()}${renderAddEntityModal()}`;
     bindEvents();
     return;
   }
@@ -1157,6 +1579,8 @@ function render() {
     ${renderStatusLine()}
     ${renderContent()}
     ${renderAdModal()}
+    ${renderEntityModal()}
+    ${renderAddEntityModal()}
   `;
   bindEvents();
 }
@@ -1204,12 +1628,11 @@ function bindEvents() {
     });
   });
 
-  const modalPanel = root.querySelector('.ad-modal');
-  if (modalPanel) {
+  root.querySelectorAll('.ad-modal').forEach((modalPanel) => {
     modalPanel.addEventListener('click', (e) => {
       e.stopPropagation();
     });
-  }
+  });
 
   const search = root.querySelector('#search-input');
   if (search) {
@@ -1228,6 +1651,38 @@ function bindEvents() {
           /* ignore */
         }
       }
+    });
+  }
+
+  const gaugeSearch = root.querySelector('#gauge-search-input');
+  if (gaugeSearch) {
+    gaugeSearch.addEventListener('input', (e) => {
+      state.gauge.searchTerm = e.target.value;
+      const caret = e.target.selectionStart;
+      render();
+      const newSearch = root.querySelector('#gauge-search-input');
+      if (newSearch) {
+        newSearch.focus();
+        try {
+          newSearch.setSelectionRange(caret, caret);
+        } catch (err) {
+          /* ignore */
+        }
+      }
+    });
+  }
+
+  const addForm = root.querySelector('#add-entity-form');
+  if (addForm) {
+    addForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const nameInput = root.querySelector('#add-entity-name');
+      const segmentInput = root.querySelector('#add-entity-segment');
+      const urlInput = root.querySelector('#add-entity-url');
+      state.addEntityModal.name = nameInput ? nameInput.value : '';
+      state.addEntityModal.segment = segmentInput ? segmentInput.value : 'prestamos';
+      state.addEntityModal.adLibraryUrl = urlInput ? urlInput.value : '';
+      submitAddEntity();
     });
   }
 
@@ -1265,6 +1720,23 @@ function onActionClick(e) {
       break;
     case 'close-ad-modal':
       closeAdModal();
+      break;
+    case 'open-entity-modal': {
+      const entityId = e.currentTarget.getAttribute('data-entity-id');
+      if (entityId) openEntityModal(entityId);
+      break;
+    }
+    case 'close-entity-modal':
+      closeEntityModal();
+      break;
+    case 'toggle-entity-active':
+      toggleEntityActive();
+      break;
+    case 'open-add-entity':
+      openAddEntityModal();
+      break;
+    case 'close-add-entity-modal':
+      closeAddEntityModal();
       break;
     default:
       break;
