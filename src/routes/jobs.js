@@ -1,7 +1,7 @@
 const express = require('express');
 const { dailySync } = require('../jobs/dailySync');
 const { runActivity } = require('../activity/runActivity');
-const { isValidDateOnly } = require('../activity/dates');
+const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const logger = require('../lib/logger');
 
 const router = express.Router();
@@ -65,7 +65,7 @@ const runSyncHandler = (req, res) => {
   });
 
   dailySync(entityId)
-    .then((result) => {
+    .then(async (result) => {
       jobState.status = 'idle';
       jobState.finishedAt = new Date().toISOString();
       jobState.lastResult = result;
@@ -76,12 +76,105 @@ const runSyncHandler = (req, res) => {
         totalSnapshotsInserted: result.totalSnapshotsInserted,
         totalReconciledEntities: result.totalReconciledEntities,
       });
+
+      // Chain Activity for entities that synced OK this run (partial sync is fine).
+      // Never mutate jobState from Activity outcome.
+      const successfulEntityIds = (result.results || [])
+        .map((r) => r.entityId)
+        .filter(Boolean);
+
+      if (successfulEntityIds.length === 0) {
+        logger.info('Activity skipped after sync', {
+          reason: 'no successful entities',
+          failedEntities: result.failedEntities,
+          successfulEntities: result.successfulEntities,
+        });
+        return;
+      }
+
+      if (activityJobState.status === 'running') {
+        logger.info('Activity skipped after sync', {
+          reason: 'activity already running',
+          startedAt: activityJobState.startedAt,
+        });
+        return;
+      }
+
+      // Sync has no backfill date — collectedAt/snapshot_date are always "now" UTC.
+      const executionDate = todayUtc();
+
+      activityJobState.status = 'running';
+      activityJobState.startedAt = new Date().toISOString();
+      activityJobState.finishedAt = null;
+      activityJobState.lastResult = null;
+      activityJobState.lastError = null;
+
+      logger.info('Activity chained after sync — started', {
+        executionDate,
+        entityCount: successfulEntityIds.length,
+        skippedFailedEntities: result.failedEntities || 0,
+      });
+
+      try {
+        // runActivity accepts a single entityId; loop keeps the change local to jobs.js.
+        const aggregated = {
+          status: 'activity_complete',
+          executionDate,
+          entitiesProcessed: 0,
+          entitiesFailed: 0,
+          rowsInserted: 0,
+          results: [],
+        };
+
+        for (const successEntityId of successfulEntityIds) {
+          try {
+            const activityResult = await runActivity({
+              entityId: successEntityId,
+              executionDate,
+            });
+            aggregated.entitiesProcessed += activityResult.entitiesProcessed || 0;
+            aggregated.entitiesFailed += activityResult.entitiesFailed || 0;
+            aggregated.rowsInserted += activityResult.rowsInserted || 0;
+            if (Array.isArray(activityResult.results)) {
+              aggregated.results.push(...activityResult.results);
+            }
+          } catch (entityErr) {
+            aggregated.entitiesFailed += 1;
+            logger.error('Activity chained entity failed', {
+              entityId: successEntityId,
+              executionDate,
+              error: entityErr && entityErr.message ? entityErr.message : 'unknown',
+            });
+          }
+        }
+
+        activityJobState.status = 'idle';
+        activityJobState.finishedAt = new Date().toISOString();
+        activityJobState.lastResult = aggregated;
+        logger.info('Activity job completed', {
+          entitiesProcessed: aggregated.entitiesProcessed,
+          entitiesFailed: aggregated.entitiesFailed,
+          rowsInserted: aggregated.rowsInserted,
+          executionDate: aggregated.executionDate,
+        });
+      } catch (err) {
+        activityJobState.status = 'idle';
+        activityJobState.finishedAt = new Date().toISOString();
+        activityJobState.lastError = err && err.message ? err.message : 'unknown';
+        logger.error('Activity job failed', {
+          error: err && err.message ? err.message : 'unknown',
+        });
+      }
     })
     .catch((err) => {
       jobState.status = 'idle';
       jobState.finishedAt = new Date().toISOString();
       jobState.lastError = err.message;
       logger.error('Sync failed', { error: err.message });
+      logger.info('Activity skipped after sync', {
+        reason: 'sync failed',
+        error: err.message,
+      });
     });
 
   res.status(202).json({
