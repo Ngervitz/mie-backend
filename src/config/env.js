@@ -27,4 +27,8 @@ module.exports = {
   supabaseServiceRoleKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
   apifyToken: requireEnv('APIFY_TOKEN'),
   apifyActorId: requireEnv('APIFY_ACTOR_ID'),
+  // Optional at boot — validated when collectOwnMetrics runs.
+  metaMarketingApiToken: process.env.META_MARKETING_API_TOKEN || null,
+  metaAdAccountId: process.env.META_AD_ACCOUNT_ID || null,
+  metaMarketingApiVersion: process.env.META_MARKETING_API_VERSION || 'v25.0',
 };

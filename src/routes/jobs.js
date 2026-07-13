@@ -1,6 +1,7 @@
 const express = require('express');
 const { dailySync } = require('../jobs/dailySync');
 const { runActivity } = require('../activity/runActivity');
+const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const logger = require('../lib/logger');
 
@@ -15,6 +16,14 @@ const jobState = {
 };
 
 const activityJobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+const metaJobState = {
   status: 'idle',
   startedAt: null,
   finishedAt: null,
@@ -77,8 +86,7 @@ const runSyncHandler = (req, res) => {
         totalReconciledEntities: result.totalReconciledEntities,
       });
 
-      // Chain Activity for entities that synced OK this run (partial sync is fine).
-      // Never mutate jobState from Activity outcome.
+      // Sibling branches after successful Sync (same gate). Never mutate jobState here.
       const successfulEntityIds = (result.results || [])
         .map((r) => r.entityId)
         .filter(Boolean);
@@ -89,82 +97,126 @@ const runSyncHandler = (req, res) => {
           failedEntities: result.failedEntities,
           successfulEntities: result.successfulEntities,
         });
-        return;
-      }
-
-      if (activityJobState.status === 'running') {
-        logger.info('Activity skipped after sync', {
-          reason: 'activity already running',
-          startedAt: activityJobState.startedAt,
+        logger.info('Meta own-metrics skipped after sync', {
+          reason: 'no successful entities',
+          failedEntities: result.failedEntities,
+          successfulEntities: result.successfulEntities,
         });
         return;
       }
 
-      // Sync has no backfill date — collectedAt/snapshot_date are always "now" UTC.
-      const executionDate = todayUtc();
-
-      activityJobState.status = 'running';
-      activityJobState.startedAt = new Date().toISOString();
-      activityJobState.finishedAt = null;
-      activityJobState.lastResult = null;
-      activityJobState.lastError = null;
-
-      logger.info('Activity chained after sync — started', {
-        executionDate,
-        entityCount: successfulEntityIds.length,
-        skippedFailedEntities: result.failedEntities || 0,
-      });
-
-      try {
-        // runActivity accepts a single entityId; loop keeps the change local to jobs.js.
-        const aggregated = {
-          status: 'activity_complete',
-          executionDate,
-          entitiesProcessed: 0,
-          entitiesFailed: 0,
-          rowsInserted: 0,
-          results: [],
-        };
-
-        for (const successEntityId of successfulEntityIds) {
-          try {
-            const activityResult = await runActivity({
-              entityId: successEntityId,
-              executionDate,
-            });
-            aggregated.entitiesProcessed += activityResult.entitiesProcessed || 0;
-            aggregated.entitiesFailed += activityResult.entitiesFailed || 0;
-            aggregated.rowsInserted += activityResult.rowsInserted || 0;
-            if (Array.isArray(activityResult.results)) {
-              aggregated.results.push(...activityResult.results);
-            }
-          } catch (entityErr) {
-            aggregated.entitiesFailed += 1;
-            logger.error('Activity chained entity failed', {
-              entityId: successEntityId,
-              executionDate,
-              error: entityErr && entityErr.message ? entityErr.message : 'unknown',
-            });
-          }
+      const activityBranch = (async () => {
+        if (activityJobState.status === 'running') {
+          logger.info('Activity skipped after sync', {
+            reason: 'activity already running',
+            startedAt: activityJobState.startedAt,
+          });
+          return;
         }
 
-        activityJobState.status = 'idle';
-        activityJobState.finishedAt = new Date().toISOString();
-        activityJobState.lastResult = aggregated;
-        logger.info('Activity job completed', {
-          entitiesProcessed: aggregated.entitiesProcessed,
-          entitiesFailed: aggregated.entitiesFailed,
-          rowsInserted: aggregated.rowsInserted,
-          executionDate: aggregated.executionDate,
+        const executionDate = todayUtc();
+
+        activityJobState.status = 'running';
+        activityJobState.startedAt = new Date().toISOString();
+        activityJobState.finishedAt = null;
+        activityJobState.lastResult = null;
+        activityJobState.lastError = null;
+
+        logger.info('Activity chained after sync — started', {
+          executionDate,
+          entityCount: successfulEntityIds.length,
+          skippedFailedEntities: result.failedEntities || 0,
         });
-      } catch (err) {
-        activityJobState.status = 'idle';
-        activityJobState.finishedAt = new Date().toISOString();
-        activityJobState.lastError = err && err.message ? err.message : 'unknown';
-        logger.error('Activity job failed', {
-          error: err && err.message ? err.message : 'unknown',
-        });
-      }
+
+        try {
+          const aggregated = {
+            status: 'activity_complete',
+            executionDate,
+            entitiesProcessed: 0,
+            entitiesFailed: 0,
+            rowsInserted: 0,
+            results: [],
+          };
+
+          for (const successEntityId of successfulEntityIds) {
+            try {
+              const activityResult = await runActivity({
+                entityId: successEntityId,
+                executionDate,
+              });
+              aggregated.entitiesProcessed += activityResult.entitiesProcessed || 0;
+              aggregated.entitiesFailed += activityResult.entitiesFailed || 0;
+              aggregated.rowsInserted += activityResult.rowsInserted || 0;
+              if (Array.isArray(activityResult.results)) {
+                aggregated.results.push(...activityResult.results);
+              }
+            } catch (entityErr) {
+              aggregated.entitiesFailed += 1;
+              logger.error('Activity chained entity failed', {
+                entityId: successEntityId,
+                executionDate,
+                error: entityErr && entityErr.message ? entityErr.message : 'unknown',
+              });
+            }
+          }
+
+          activityJobState.status = 'idle';
+          activityJobState.finishedAt = new Date().toISOString();
+          activityJobState.lastResult = aggregated;
+          logger.info('Activity job completed', {
+            entitiesProcessed: aggregated.entitiesProcessed,
+            entitiesFailed: aggregated.entitiesFailed,
+            rowsInserted: aggregated.rowsInserted,
+            executionDate: aggregated.executionDate,
+          });
+        } catch (err) {
+          activityJobState.status = 'idle';
+          activityJobState.finishedAt = new Date().toISOString();
+          activityJobState.lastError = err && err.message ? err.message : 'unknown';
+          logger.error('Activity job failed', {
+            error: err && err.message ? err.message : 'unknown',
+          });
+        }
+      })();
+
+      const metaBranch = (async () => {
+        if (metaJobState.status === 'running') {
+          logger.info('Meta own-metrics skipped after sync', {
+            reason: 'meta already running',
+            startedAt: metaJobState.startedAt,
+          });
+          return;
+        }
+
+        metaJobState.status = 'running';
+        metaJobState.startedAt = new Date().toISOString();
+        metaJobState.finishedAt = null;
+        metaJobState.lastResult = null;
+        metaJobState.lastError = null;
+
+        logger.info('Meta own-metrics chained after sync — started');
+
+        try {
+          const metaResult = await collectOwnMetrics();
+          metaJobState.status = 'idle';
+          metaJobState.finishedAt = new Date().toISOString();
+          metaJobState.lastResult = metaResult;
+          logger.info('Meta own-metrics job completed', {
+            runId: metaResult.runId,
+            campaignsFound: metaResult.campaignsFound,
+            rowsInserted: metaResult.rowsInserted,
+          });
+        } catch (err) {
+          metaJobState.status = 'idle';
+          metaJobState.finishedAt = new Date().toISOString();
+          metaJobState.lastError = err && err.message ? err.message : 'unknown';
+          logger.error('Meta own-metrics job failed', {
+            error: err && err.message ? err.message : 'unknown',
+          });
+        }
+      })();
+
+      await Promise.all([activityBranch, metaBranch]);
     })
     .catch((err) => {
       jobState.status = 'idle';
@@ -172,6 +224,10 @@ const runSyncHandler = (req, res) => {
       jobState.lastError = err.message;
       logger.error('Sync failed', { error: err.message });
       logger.info('Activity skipped after sync', {
+        reason: 'sync failed',
+        error: err.message,
+      });
+      logger.info('Meta own-metrics skipped after sync', {
         reason: 'sync failed',
         error: err.message,
       });
@@ -262,5 +318,60 @@ const runActivityHandler = (req, res) => {
 
 router.post('/run-activity', runActivityHandler);
 router.get('/run-activity', runActivityHandler);
+
+router.get('/metaagente-status', (req, res) => {
+  res.json({
+    status: metaJobState.status,
+    startedAt: metaJobState.startedAt,
+    finishedAt: metaJobState.finishedAt,
+    lastResult: metaJobState.lastResult,
+    lastError: metaJobState.lastError,
+  });
+});
+
+const runMetaAgenteHandler = (req, res) => {
+  if (metaJobState.status === 'running') {
+    return res.status(409).json({
+      error: 'Meta own-metrics job already in progress',
+      status: metaJobState.status,
+      startedAt: metaJobState.startedAt,
+    });
+  }
+
+  metaJobState.status = 'running';
+  metaJobState.startedAt = new Date().toISOString();
+  metaJobState.finishedAt = null;
+  metaJobState.lastResult = null;
+  metaJobState.lastError = null;
+
+  logger.info('POST /jobs/run-metaagente — started');
+
+  collectOwnMetrics()
+    .then((result) => {
+      metaJobState.status = 'idle';
+      metaJobState.finishedAt = new Date().toISOString();
+      metaJobState.lastResult = result;
+      logger.info('Meta own-metrics job completed', {
+        runId: result.runId,
+        campaignsFound: result.campaignsFound,
+        rowsInserted: result.rowsInserted,
+      });
+    })
+    .catch((err) => {
+      metaJobState.status = 'idle';
+      metaJobState.finishedAt = new Date().toISOString();
+      metaJobState.lastError = err.message;
+      logger.error('Meta own-metrics job failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'Meta own-metrics started',
+    status: 'running',
+    startedAt: metaJobState.startedAt,
+  });
+};
+
+router.post('/run-metaagente', runMetaAgenteHandler);
+router.get('/run-metaagente', runMetaAgenteHandler);
 
 module.exports = router;
