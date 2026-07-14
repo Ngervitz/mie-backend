@@ -2,6 +2,7 @@ const express = require('express');
 const { dailySync } = require('../jobs/dailySync');
 const { runActivity } = require('../activity/runActivity');
 const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
+const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const logger = require('../lib/logger');
 
@@ -205,12 +206,50 @@ const runSyncHandler = (req, res) => {
             runId: metaResult.runId,
             campaignsFound: metaResult.campaignsFound,
             rowsInserted: metaResult.rowsInserted,
+            reportingDate: metaResult.reportingDate,
           });
+
+          // Isolated Own Ads Brief — only after successful Meta collection.
+          try {
+            if (metaResult && metaResult.reportingDate) {
+              logger.info('Own Ads Brief chained after meta — started', {
+                reportingDate: metaResult.reportingDate,
+              });
+              const ownAdsResult = await runOwnAdsBrief({
+                date: metaResult.reportingDate,
+                skipIfRunning: true,
+              });
+              if (ownAdsResult && ownAdsResult.skipped) {
+                logger.info('Own Ads Brief chained after meta — skipped', {
+                  reason: ownAdsResult.reason,
+                  reportingDate: metaResult.reportingDate,
+                });
+              } else {
+                logger.info('Own Ads Brief chained after meta — completed', {
+                  reportingDate: metaResult.reportingDate,
+                  state: ownAdsResult && ownAdsResult.state,
+                });
+              }
+            } else {
+              logger.info('Own Ads Brief skipped after meta', {
+                reason: 'missing reportingDate on meta result',
+              });
+            }
+          } catch (ownAdsErr) {
+            logger.error('Own Ads Brief after meta failed', {
+              error:
+                ownAdsErr && ownAdsErr.message ? ownAdsErr.message : 'unknown',
+            });
+          }
         } catch (err) {
           metaJobState.status = 'idle';
           metaJobState.finishedAt = new Date().toISOString();
           metaJobState.lastError = err && err.message ? err.message : 'unknown';
           logger.error('Meta own-metrics job failed', {
+            error: err && err.message ? err.message : 'unknown',
+          });
+          logger.info('Own Ads Brief skipped after meta', {
+            reason: 'meta collection failed',
             error: err && err.message ? err.message : 'unknown',
           });
         }

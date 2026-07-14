@@ -641,3 +641,4 @@ module.exports = router;
 module.exports.buildHugoContext = buildHugoContext;
 module.exports.isValidDateOnly = isValidDateOnly;
 module.exports.todayUtc = todayUtc;
+module.exports.HISTORY_WINDOW_DAYS = HISTORY_WINDOW_DAYS;

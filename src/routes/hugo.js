@@ -5,7 +5,9 @@ const { askHugo } = require('../services/hugo-ask');
 const { handleOpenAiChatCompletion, streamOpenAiChatCompletion } = require('../services/hugo-openai');
 const { startAvatarSession, keepAliveAvatarSession, stopAvatarSession } = require('../services/hugo-avatar');
 const { loadDailyKnowledge } = require('../services/daily-knowledge');
+const { DAILY_KNOWLEDGE_KIND } = require('../services/daily-knowledge-kinds');
 const { isValidDateOnly, todayUtc } = require('./reports');
+const { runOwnAdsBrief, OwnAdsBriefError } = require('../services/own-ads-brief');
 const logger = require('../lib/logger');
 
 const router = express.Router();
@@ -138,6 +140,69 @@ router.get('/knowledge', async (req, res) => {
   } catch (err) {
     logger.error('Hugo knowledge failed', { date, error: err && err.message ? err.message : 'unknown' });
     return res.status(500).json({ error: 'Failed to load Daily Knowledge' });
+  }
+});
+
+// Own Ads Brief — generate (Claude + GPT) and persist kind=own_ads.
+router.post('/run-own-ads', async (req, res) => {
+  const rawDate = req.body?.date;
+
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+  }
+
+  const date = rawDate ? String(rawDate) : undefined;
+
+  try {
+    const result = await runOwnAdsBrief({ date });
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof OwnAdsBriefError || (err && typeof err.status === 'number' && err.body)) {
+      logger.error('Own Ads Brief run failed', {
+        status: err.status,
+        error: err.body && err.body.error,
+        detail: err.body && err.body.detail,
+      });
+      return res.status(err.status).json(err.body);
+    }
+
+    logger.error('Own Ads Brief run failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to run Own Ads Brief' });
+  }
+});
+
+// Own Ads Brief — read-only persisted knowledge (never calls LLMs, never writes).
+router.get('/knowledge-own-ads', async (req, res) => {
+  const rawDate = req.query?.date;
+
+  let date;
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    date = String(rawDate);
+  } else {
+    date = todayUtc();
+  }
+
+  try {
+    const knowledge = await loadDailyKnowledge(date, DAILY_KNOWLEDGE_KIND.OWN_ADS);
+    if (!knowledge) {
+      return res.status(404).json({
+        error: 'Own Ads Daily Knowledge not found for requested date.',
+      });
+    }
+    return res.json(knowledge);
+  } catch (err) {
+    logger.error('Own Ads knowledge failed', {
+      date,
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to load Own Ads Daily Knowledge' });
   }
 });
 
