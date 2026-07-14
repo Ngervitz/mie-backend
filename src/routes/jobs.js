@@ -2,6 +2,7 @@ const express = require('express');
 const { dailySync } = require('../jobs/dailySync');
 const { runActivity } = require('../activity/runActivity');
 const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
+const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const logger = require('../lib/logger');
@@ -25,6 +26,14 @@ const activityJobState = {
 };
 
 const metaJobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+const ownAdChangesJobState = {
   status: 'idle',
   startedAt: null,
   finishedAt: null,
@@ -180,7 +189,7 @@ const runSyncHandler = (req, res) => {
         }
       })();
 
-      const metaBranch = (async () => {
+      const metricsBranch = (async () => {
         if (metaJobState.status === 'running') {
           logger.info('Meta own-metrics skipped after sync', {
             reason: 'meta already running',
@@ -255,7 +264,47 @@ const runSyncHandler = (req, res) => {
         }
       })();
 
-      await Promise.all([activityBranch, metaBranch]);
+      // Sibling of metricsBranch — capture-only; never touches metrics / Own Ads Brief.
+      const changesBranch = (async () => {
+        if (ownAdChangesJobState.status === 'running') {
+          logger.info('Meta own-ad-changes skipped after sync', {
+            reason: 'own-ad-changes already running',
+            startedAt: ownAdChangesJobState.startedAt,
+          });
+          return;
+        }
+
+        ownAdChangesJobState.status = 'running';
+        ownAdChangesJobState.startedAt = new Date().toISOString();
+        ownAdChangesJobState.finishedAt = null;
+        ownAdChangesJobState.lastResult = null;
+        ownAdChangesJobState.lastError = null;
+
+        logger.info('Meta own-ad-changes chained after sync — started');
+
+        try {
+          const changesResult = await collectOwnAdChanges();
+          ownAdChangesJobState.status = 'idle';
+          ownAdChangesJobState.finishedAt = new Date().toISOString();
+          ownAdChangesJobState.lastResult = changesResult;
+          logger.info('Meta own-ad-changes job completed', {
+            runId: changesResult.runId,
+            changesFound: changesResult.changesFound,
+            eventsInserted: changesResult.eventsInserted,
+            reportingDate: changesResult.reportingDate,
+          });
+        } catch (err) {
+          ownAdChangesJobState.status = 'idle';
+          ownAdChangesJobState.finishedAt = new Date().toISOString();
+          ownAdChangesJobState.lastError =
+            err && err.message ? err.message : 'unknown';
+          logger.error('Meta own-ad-changes job failed', {
+            error: err && err.message ? err.message : 'unknown',
+          });
+        }
+      })();
+
+      await Promise.all([activityBranch, metricsBranch, changesBranch]);
     })
     .catch((err) => {
       jobState.status = 'idle';
@@ -267,6 +316,10 @@ const runSyncHandler = (req, res) => {
         error: err.message,
       });
       logger.info('Meta own-metrics skipped after sync', {
+        reason: 'sync failed',
+        error: err.message,
+      });
+      logger.info('Meta own-ad-changes skipped after sync', {
         reason: 'sync failed',
         error: err.message,
       });
@@ -412,5 +465,61 @@ const runMetaAgenteHandler = (req, res) => {
 
 router.post('/run-metaagente', runMetaAgenteHandler);
 router.get('/run-metaagente', runMetaAgenteHandler);
+
+router.get('/own-ad-changes-status', (req, res) => {
+  res.json({
+    status: ownAdChangesJobState.status,
+    startedAt: ownAdChangesJobState.startedAt,
+    finishedAt: ownAdChangesJobState.finishedAt,
+    lastResult: ownAdChangesJobState.lastResult,
+    lastError: ownAdChangesJobState.lastError,
+  });
+});
+
+const runOwnAdChangesHandler = (req, res) => {
+  if (ownAdChangesJobState.status === 'running') {
+    return res.status(409).json({
+      error: 'Own ad changes job already in progress',
+      status: ownAdChangesJobState.status,
+      startedAt: ownAdChangesJobState.startedAt,
+    });
+  }
+
+  ownAdChangesJobState.status = 'running';
+  ownAdChangesJobState.startedAt = new Date().toISOString();
+  ownAdChangesJobState.finishedAt = null;
+  ownAdChangesJobState.lastResult = null;
+  ownAdChangesJobState.lastError = null;
+
+  logger.info('POST /jobs/run-own-ad-changes — started');
+
+  collectOwnAdChanges()
+    .then((result) => {
+      ownAdChangesJobState.status = 'idle';
+      ownAdChangesJobState.finishedAt = new Date().toISOString();
+      ownAdChangesJobState.lastResult = result;
+      logger.info('Meta own-ad-changes job completed', {
+        runId: result.runId,
+        changesFound: result.changesFound,
+        eventsInserted: result.eventsInserted,
+        reportingDate: result.reportingDate,
+      });
+    })
+    .catch((err) => {
+      ownAdChangesJobState.status = 'idle';
+      ownAdChangesJobState.finishedAt = new Date().toISOString();
+      ownAdChangesJobState.lastError = err.message;
+      logger.error('Meta own-ad-changes job failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'Own ad changes started',
+    status: 'running',
+    startedAt: ownAdChangesJobState.startedAt,
+  });
+};
+
+router.post('/run-own-ad-changes', runOwnAdChangesHandler);
+router.get('/run-own-ad-changes', runOwnAdChangesHandler);
 
 module.exports = router;
