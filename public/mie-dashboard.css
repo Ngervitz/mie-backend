@@ -900,6 +900,205 @@
   padding: 12px 0;
 }
 
+/* ---------- Meta Ads chrome + Historial de cambios (sibling of #meta-ads-root) ---------- */
+#mie-dashboard-app #meta-ads-panel {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 20px 64px;
+}
+
+#mie-dashboard-app .meta-ads-chrome {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 0;
+}
+
+#mie-dashboard-app .meta-ads-chrome.hidden,
+#mie-dashboard-app #meta-ads-root.hidden,
+#mie-dashboard-app #meta-changes-landing.hidden,
+#mie-dashboard-app .meta-ads-chrome[hidden],
+#mie-dashboard-app #meta-ads-root[hidden],
+#mie-dashboard-app #meta-changes-landing[hidden] {
+  display: none !important;
+}
+
+#mie-dashboard-app .meta-ads-chrome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+#mie-dashboard-app .mcl-chrome-btn,
+#mie-dashboard-app .mcl-back-btn,
+#mie-dashboard-app .mcl-more-btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+}
+
+#mie-dashboard-app .mcl-chrome-btn:hover,
+#mie-dashboard-app .mcl-back-btn:hover,
+#mie-dashboard-app .mcl-more-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .mcl-landing {
+  padding-top: 8px;
+}
+
+#mie-dashboard-app .mcl-header {
+  padding: 8px 0 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+#mie-dashboard-app .mcl-back-btn {
+  margin-bottom: 12px;
+}
+
+#mie-dashboard-app .mcl-title {
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .mcl-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .mcl-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+#mie-dashboard-app .mcl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+#mie-dashboard-app .mcl-field-label {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#mie-dashboard-app .mcl-select,
+#mie-dashboard-app .mcl-input {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+#mie-dashboard-app .mcl-status {
+  min-height: 1.4em;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .mcl-status.mcl-error {
+  color: var(--accent-danger);
+}
+
+#mie-dashboard-app .mcl-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#mie-dashboard-app .mcl-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(140px, 1fr) minmax(120px, 1.2fr) minmax(100px, 0.8fr) minmax(100px, 0.8fr);
+  gap: 10px 14px;
+  align-items: start;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#mie-dashboard-app .mcl-row-time {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#mie-dashboard-app .mcl-badge {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--accent-info);
+  background: var(--accent-info-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+#mie-dashboard-app .mcl-row-object,
+#mie-dashboard-app .mcl-row-type,
+#mie-dashboard-app .mcl-row-actor {
+  font-size: 0.9rem;
+  color: var(--text);
+  word-break: break-word;
+}
+
+#mie-dashboard-app .mcl-row-type,
+#mie-dashboard-app .mcl-row-actor {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .mcl-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+
+#mie-dashboard-app .mcl-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0 0;
+}
+
+#mie-dashboard-app .mcl-more-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 800px) {
+  #mie-dashboard-app .mcl-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 980px) {
   #mie-dashboard-app .kpi-grid { grid-template-columns: repeat(3, 1fr); }

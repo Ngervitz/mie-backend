@@ -45,12 +45,56 @@
       aria-labelledby="tab-market">
     </main>
 
+    <!-- Meta Ads tab shell: chrome + agent root + changes landing are siblings.
+         Visibility toggles only — never rebuild agent DOM from this shell. -->
     <div
       class="dashboard-panel hidden"
-      id="meta-ads-root"
+      id="meta-ads-panel"
       role="tabpanel"
       aria-labelledby="tab-meta"
       hidden>
+      <div id="meta-ads-chrome" class="meta-ads-chrome">
+        <div class="meta-ads-chrome-actions">
+          <button type="button" id="meta-changes-open-btn" class="mcl-chrome-btn">
+            Historial de cambios
+          </button>
+        </div>
+      </div>
+
+      <div id="meta-ads-root"></div>
+
+      <div id="meta-changes-landing" class="mcl-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <button type="button" id="meta-changes-back-btn" class="mcl-back-btn">
+              ← Volver a Meta Ads
+            </button>
+            <h1 class="mcl-title">Historial de cambios</h1>
+            <p class="mcl-subtitle">Registro de actividad de la cuenta publicitaria</p>
+          </div>
+        </header>
+
+        <div class="mcl-filters" role="group" aria-label="Filtros del historial">
+          <label class="mcl-field">
+            <span class="mcl-field-label">Tipo</span>
+            <select id="mcl-event-type" class="mcl-select">
+              <option value="">Todos los tipos</option>
+            </select>
+          </label>
+          <label class="mcl-field">
+            <span class="mcl-field-label">Desde</span>
+            <input type="date" id="mcl-from" class="mcl-input" />
+          </label>
+          <label class="mcl-field">
+            <span class="mcl-field-label">Hasta</span>
+            <input type="date" id="mcl-to" class="mcl-input" />
+          </label>
+        </div>
+
+        <div id="mcl-status" class="mcl-status" aria-live="polite"></div>
+        <div id="mcl-results" class="mcl-results"></div>
+        <div id="mcl-pagination" class="mcl-pagination"></div>
+      </div>
     </div>
   </div>
 
@@ -67,18 +111,18 @@
       'use strict';
       var tabs = document.querySelectorAll('[data-dashboard-tab]');
       var market = document.getElementById('mie-market-root');
-      var meta = document.getElementById('meta-ads-root');
-      if (!market || !meta || !tabs.length) return;
+      var metaPanel = document.getElementById('meta-ads-panel');
+      if (!market || !metaPanel || !tabs.length) return;
 
       function activate(name) {
         var showMarket = name === 'market';
         market.classList.toggle('hidden', !showMarket);
-        meta.classList.toggle('hidden', showMarket);
+        metaPanel.classList.toggle('hidden', showMarket);
         if (showMarket) {
           market.removeAttribute('hidden');
-          meta.setAttribute('hidden', '');
+          metaPanel.setAttribute('hidden', '');
         } else {
-          meta.removeAttribute('hidden');
+          metaPanel.removeAttribute('hidden');
           market.setAttribute('hidden', '');
         }
         tabs.forEach(function (btn) {

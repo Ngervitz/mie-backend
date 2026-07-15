@@ -637,6 +637,230 @@ router.get('/hugo-context', async (req, res) => {
   }
 });
 
+const OWN_AD_CHANGES_MAX_RANGE_DAYS = 365;
+const OWN_AD_CHANGES_DEFAULT_LIMIT = 50;
+const OWN_AD_CHANGES_MAX_LIMIT = 100;
+
+function daysBetweenUtc(startDateStr, endDateStr) {
+  const [y1, m1, d1] = String(startDateStr).split('-').map(Number);
+  const [y2, m2, d2] = String(endDateStr).split('-').map(Number);
+  const a = Date.UTC(y1, m1 - 1, d1);
+  const b = Date.UTC(y2, m2 - 1, d2);
+  return Math.floor((b - a) / (1000 * 60 * 60 * 24));
+}
+
+/** YYYY-MM-DD → inclusive UTC day start as ISO timestamptz. */
+function dateOnlyToUtcStartIso(dateStr) {
+  return `${dateStr}T00:00:00.000Z`;
+}
+
+async function resolveSelfEntityId() {
+  const { data, error } = await supabase
+    .from('monitored_entities')
+    .select('id')
+    .eq('is_self', true)
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Failed to load self entity: ${error.message}`);
+  }
+  if (!data || !data.length || !data[0].id) {
+    throw new Error('No monitored_entities row with is_self=true');
+  }
+  return data[0].id;
+}
+
+function mapOwnAdChangeRow(row) {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    entityId: row.entity_id,
+    eventTime: row.event_time ?? null,
+    eventType: row.event_type ?? null,
+    objectId: row.object_id ?? null,
+    objectName: row.object_name ?? null,
+    objectType: row.object_type ?? null,
+    actorId: row.actor_id ?? null,
+    actorName: row.actor_name ?? null,
+    applicationId: row.application_id ?? null,
+    applicationName: row.application_name ?? null,
+    translatedEventType: row.translated_event_type ?? null,
+    dateTimeInTimezone: row.date_time_in_timezone ?? null,
+    extraData: row.extra_data ?? null,
+    createdAt: row.created_at ?? null,
+  };
+}
+
+// Distinct event_type values for Credizona — register before the list route.
+router.get('/own-ad-changes/event-types', async (req, res) => {
+  logger.info('Reports own-ad-changes/event-types requested');
+
+  try {
+    const entityId = await resolveSelfEntityId();
+
+    // Ordered by event_time DESC so the first non-empty translated_event_type
+    // per event_type is the most recent (DISTINCT ON semantics in app code).
+    const { data, error } = await supabase
+      .from('own_ad_changes')
+      .select('event_type, translated_event_type, event_time')
+      .eq('entity_id', entityId)
+      .not('event_type', 'is', null)
+      .order('event_time', { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to fetch event types: ${error.message}`);
+    }
+
+    // First encounter per event_type wins for label when translated is non-empty
+    // (rows are event_time DESC → most recent non-empty translated_event_type).
+    const byType = new Map();
+    for (const row of data || []) {
+      const eventType = row.event_type != null ? String(row.event_type) : '';
+      if (!eventType) continue;
+
+      if (!byType.has(eventType)) {
+        byType.set(eventType, {
+          eventType,
+          label: eventType,
+          hasTranslated: false,
+        });
+      }
+
+      const entry = byType.get(eventType);
+      if (entry.hasTranslated) continue;
+
+      const translated =
+        row.translated_event_type != null
+          ? String(row.translated_event_type).trim()
+          : '';
+      if (translated) {
+        entry.label = translated;
+        entry.hasTranslated = true;
+      }
+    }
+
+    const types = [...byType.values()]
+      .map(({ eventType, label }) => ({ eventType, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+    return res.json(types);
+  } catch (err) {
+    logger.error('Reports own-ad-changes/event-types failed', {
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to fetch event types' });
+  }
+});
+
+// Read-only log of Meta Ad Account activity (Credizona / is_self).
+router.get('/own-ad-changes', async (req, res) => {
+  const from = req.query?.from != null ? String(req.query.from).trim() : '';
+  const to = req.query?.to != null ? String(req.query.to).trim() : '';
+  const rawEventType =
+    req.query?.eventType != null ? String(req.query.eventType).trim() : '';
+
+  if (!from || !to) {
+    return res.status(400).json({
+      error: 'Query params from and to are required (YYYY-MM-DD).',
+    });
+  }
+  if (!isValidDateOnly(from) || !isValidDateOnly(to)) {
+    return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+  }
+  if (from > to) {
+    return res.status(400).json({ error: 'from must be less than or equal to to.' });
+  }
+  if (daysBetweenUtc(from, to) > OWN_AD_CHANGES_MAX_RANGE_DAYS) {
+    return res.status(400).json({
+      error: `Date range must not exceed ${OWN_AD_CHANGES_MAX_RANGE_DAYS} days.`,
+    });
+  }
+
+  let page = Number.parseInt(String(req.query?.page ?? '1'), 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+
+  let limit = Number.parseInt(
+    String(req.query?.limit ?? String(OWN_AD_CHANGES_DEFAULT_LIMIT)),
+    10,
+  );
+  if (!Number.isFinite(limit) || limit < 1) limit = OWN_AD_CHANGES_DEFAULT_LIMIT;
+  if (limit > OWN_AD_CHANGES_MAX_LIMIT) limit = OWN_AD_CHANGES_MAX_LIMIT;
+
+  const rangeStartIso = dateOnlyToUtcStartIso(from);
+  const rangeEndExclusiveIso = dateOnlyToUtcStartIso(shiftDateUtc(to, 1));
+  const offset = (page - 1) * limit;
+
+  logger.info('Reports own-ad-changes requested', {
+    from,
+    to,
+    eventType: rawEventType || null,
+    page,
+    limit,
+  });
+
+  try {
+    const entityId = await resolveSelfEntityId();
+
+    let query = supabase
+      .from('own_ad_changes')
+      .select(
+        [
+          'id',
+          'run_id',
+          'entity_id',
+          'event_time',
+          'event_type',
+          'object_id',
+          'object_name',
+          'object_type',
+          'actor_id',
+          'actor_name',
+          'application_id',
+          'application_name',
+          'translated_event_type',
+          'date_time_in_timezone',
+          'extra_data',
+          'created_at',
+        ].join(', '),
+        { count: 'exact' },
+      )
+      .eq('entity_id', entityId)
+      .gte('event_time', rangeStartIso)
+      .lt('event_time', rangeEndExclusiveIso)
+      .order('event_time', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (rawEventType) {
+      query = query.eq('event_type', rawEventType);
+    }
+
+    const { data, error, count } = await query;
+    if (error) {
+      throw new Error(`Failed to fetch own_ad_changes: ${error.message}`);
+    }
+
+    const total = typeof count === 'number' ? count : 0;
+    const rows = (data || []).map(mapOwnAdChangeRow);
+
+    return res.json({
+      rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasMore: offset + rows.length < total,
+      },
+    });
+  } catch (err) {
+    logger.error('Reports own-ad-changes failed', {
+      from,
+      to,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to fetch own ad changes' });
+  }
+});
+
 module.exports = router;
 module.exports.buildHugoContext = buildHugoContext;
 module.exports.isValidDateOnly = isValidDateOnly;

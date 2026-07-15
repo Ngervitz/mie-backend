@@ -1759,3 +1759,336 @@ function init() {
 }
 
 init();
+
+/* ----------------------------------------------------------------------------
+ * Meta Ads — Historial de cambios (sibling of #meta-ads-root; visibility only)
+ * Does not touch #mie-market-root or rebuild the Meta Ads agent DOM.
+ * ------------------------------------------------------------------------- */
+(function initMetaChangesLanding() {
+  const landing = document.getElementById('meta-changes-landing');
+  const agentRoot = document.getElementById('meta-ads-root');
+  const chrome = document.getElementById('meta-ads-chrome');
+  const openBtn = document.getElementById('meta-changes-open-btn');
+  const backBtn = document.getElementById('meta-changes-back-btn');
+  const eventTypeSelect = document.getElementById('mcl-event-type');
+  const fromInput = document.getElementById('mcl-from');
+  const toInput = document.getElementById('mcl-to');
+  const statusEl = document.getElementById('mcl-status');
+  const resultsEl = document.getElementById('mcl-results');
+  const paginationEl = document.getElementById('mcl-pagination');
+
+  if (
+    !landing ||
+    !agentRoot ||
+    !openBtn ||
+    !backBtn ||
+    !eventTypeSelect ||
+    !fromInput ||
+    !toInput ||
+    !statusEl ||
+    !resultsEl ||
+    !paginationEl
+  ) {
+    return;
+  }
+
+  const EMPTY_FILTERED = 'No se registraron cambios en este rango.';
+  const EMPTY_NEVER = 'Todavía no se registraron cambios desde que comenzó la captura.';
+  const PAGE_LIMIT = 50;
+
+  const mclState = {
+    page: 1,
+    hasMore: false,
+    rows: [],
+    historyExists: null,
+    eventTypesLoaded: false,
+    loading: false,
+  };
+
+  let abortController = null;
+  let requestSeq = 0;
+
+  function shiftUtcDateOnly(dateStr, deltaDays) {
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    const dt = new Date(Date.UTC(year, month - 1, day));
+    dt.setUTCDate(dt.getUTCDate() + deltaDays);
+    return dt.toISOString().split('T')[0];
+  }
+
+  function todayUtcDateOnly() {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  function setDefaultDates() {
+    const to = todayUtcDateOnly();
+    const from = shiftUtcDateOnly(to, -29);
+    toInput.value = to;
+    fromInput.value = from;
+  }
+
+  function setVisible(el, visible) {
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+    if (visible) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+  }
+
+  function showAgentView() {
+    setVisible(landing, false);
+    setVisible(agentRoot, true);
+    setVisible(chrome, true);
+  }
+
+  function showChangesView() {
+    setVisible(agentRoot, false);
+    setVisible(chrome, false);
+    setVisible(landing, true);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatEventTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString('es-UY', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'UTC',
+      hour12: false,
+    }) + ' UTC';
+  }
+
+  function setStatus(message, isError) {
+    statusEl.textContent = message || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function renderEventTypeOptions(types) {
+    const previous = eventTypeSelect.value;
+    eventTypeSelect.innerHTML = '';
+    const allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'Todos los tipos';
+    eventTypeSelect.appendChild(allOpt);
+
+    (types || []).forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t.eventType;
+      opt.textContent = t.label || t.eventType;
+      eventTypeSelect.appendChild(opt);
+    });
+
+    if (previous && [...eventTypeSelect.options].some((o) => o.value === previous)) {
+      eventTypeSelect.value = previous;
+    }
+  }
+
+  function buildRowElement(row) {
+    const el = document.createElement('article');
+    el.className = 'mcl-row';
+    const badgeLabel = row.translatedEventType || row.eventType || 'cambio';
+    el.innerHTML =
+      '<div class="mcl-row-time">' +
+      escapeHtml(formatEventTime(row.eventTime)) +
+      '</div>' +
+      '<div><span class="mcl-badge" title="' +
+      escapeHtml(row.eventType || '') +
+      '">' +
+      escapeHtml(badgeLabel) +
+      '</span></div>' +
+      '<div class="mcl-row-object">' +
+      escapeHtml(row.objectName || '—') +
+      '</div>' +
+      '<div class="mcl-row-type">' +
+      escapeHtml(row.objectType || '—') +
+      '</div>' +
+      '<div class="mcl-row-actor">' +
+      escapeHtml(row.actorName || '—') +
+      '</div>';
+    return el;
+  }
+
+  function renderEmptyState() {
+    resultsEl.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'mcl-empty';
+    empty.textContent =
+      mclState.historyExists === false ? EMPTY_NEVER : EMPTY_FILTERED;
+    resultsEl.appendChild(empty);
+  }
+
+  function renderRows(rows, append) {
+    if (!append) resultsEl.innerHTML = '';
+    if (!rows.length && !append) {
+      renderEmptyState();
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    rows.forEach((row) => {
+      frag.appendChild(buildRowElement(row));
+    });
+    resultsEl.appendChild(frag);
+  }
+
+  function renderPagination() {
+    paginationEl.innerHTML = '';
+    if (!mclState.hasMore) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mcl-more-btn';
+    btn.textContent = mclState.loading ? 'Cargando…' : 'Cargar más';
+    btn.disabled = mclState.loading;
+    btn.addEventListener('click', () => {
+      if (mclState.loading || !mclState.hasMore) return;
+      loadChanges({ page: mclState.page + 1, append: true });
+    });
+    paginationEl.appendChild(btn);
+  }
+
+  async function loadEventTypes() {
+    try {
+      const res = await fetch(API_BASE + '/reports/own-ad-changes/event-types', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error('event-types ' + res.status);
+      const types = await res.json();
+      const list = Array.isArray(types) ? types : [];
+      mclState.historyExists = list.length > 0;
+      renderEventTypeOptions(list);
+      mclState.eventTypesLoaded = true;
+    } catch (err) {
+      mclState.historyExists = null;
+      renderEventTypeOptions([]);
+      mclState.eventTypesLoaded = true;
+    }
+  }
+
+  async function loadChanges({ page, append }) {
+    const from = fromInput.value;
+    const to = toInput.value;
+    if (!from || !to) {
+      setStatus('Indicá un rango de fechas válido.', true);
+      return;
+    }
+
+    if (abortController) {
+      abortController.abort();
+    }
+    abortController = new AbortController();
+    const seq = ++requestSeq;
+    const signal = abortController.signal;
+
+    mclState.loading = true;
+    mclState.page = page;
+    setStatus(append ? 'Cargando más…' : 'Cargando…', false);
+    renderPagination();
+
+    const params = new URLSearchParams({
+      from,
+      to,
+      page: String(page),
+      limit: String(PAGE_LIMIT),
+    });
+    const eventType = eventTypeSelect.value;
+    if (eventType) params.set('eventType', eventType);
+
+    try {
+      const res = await fetch(
+        API_BASE + '/reports/own-ad-changes?' + params.toString(),
+        { headers: { Accept: 'application/json' }, signal },
+      );
+
+      if (seq !== requestSeq) return;
+
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (parseErr) {
+        body = null;
+      }
+
+      if (seq !== requestSeq) return;
+
+      if (!res.ok) {
+        const msg =
+          (body && body.error) ||
+          'No se pudo cargar el historial de cambios.';
+        setStatus(msg, true);
+        if (!append) {
+          mclState.rows = [];
+          resultsEl.innerHTML = '';
+        }
+        mclState.hasMore = false;
+        mclState.loading = false;
+        renderPagination();
+        return;
+      }
+
+      const nextRows = Array.isArray(body.rows) ? body.rows : [];
+      const pagination = body.pagination || {};
+      mclState.hasMore = Boolean(pagination.hasMore);
+      mclState.page = pagination.page || page;
+      mclState.rows = append ? mclState.rows.concat(nextRows) : nextRows;
+
+      if (!mclState.rows.length) {
+        renderEmptyState();
+      } else {
+        renderRows(nextRows, append);
+      }
+
+      setStatus(
+        mclState.rows.length
+          ? mclState.rows.length +
+            (pagination.total != null ? ' de ' + pagination.total : '') +
+            ' cambios'
+          : '',
+        false,
+      );
+      mclState.loading = false;
+      renderPagination();
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      if (seq !== requestSeq) return;
+      setStatus('No se pudo conectar con el servidor.', true);
+      mclState.loading = false;
+      renderPagination();
+    }
+  }
+
+  function onFiltersChanged() {
+    mclState.page = 1;
+    mclState.rows = [];
+    loadChanges({ page: 1, append: false });
+  }
+
+  openBtn.addEventListener('click', async () => {
+    showChangesView();
+    if (!fromInput.value || !toInput.value) setDefaultDates();
+    if (!mclState.eventTypesLoaded) await loadEventTypes();
+    mclState.page = 1;
+    mclState.rows = [];
+    loadChanges({ page: 1, append: false });
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (abortController) abortController.abort();
+    showAgentView();
+  });
+
+  eventTypeSelect.addEventListener('change', onFiltersChanged);
+  fromInput.addEventListener('change', onFiltersChanged);
+  toInput.addEventListener('change', onFiltersChanged);
+
+  setDefaultDates();
+  showAgentView();
+})();
