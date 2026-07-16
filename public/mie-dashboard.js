@@ -2186,6 +2186,9 @@ init();
           impressions: null,
           clicks: null,
           frequency: null,
+          ctr: null,
+          cpc: null,
+          cpm: null,
         },
         highlights: [],
         alerts: [],
@@ -2244,6 +2247,10 @@ init();
         impressions: asNullableNumber(metricsIn.impressions),
         clicks: asNullableNumber(metricsIn.clicks),
         frequency: asNullableNumber(metricsIn.frequency),
+        // Backend sends ctr as a ratio (0.023); percentage is display-only.
+        ctr: asNullableNumber(metricsIn.ctr),
+        cpc: asNullableNumber(metricsIn.cpc),
+        cpm: asNullableNumber(metricsIn.cpm),
       },
       highlights: asStringArray(brief.highlights),
       alerts: asStringArray(brief.alerts),
@@ -2281,12 +2288,30 @@ init();
     );
   }
 
+  // Display-only formatters: null stays "—", never a fabricated 0.
+  function formatPercentDisplay(ratio) {
+    if (ratio === null || ratio === undefined) return '—';
+    const n = Number(ratio);
+    if (!Number.isFinite(n)) return '—';
+    return (n * 100).toFixed(2) + '%';
+  }
+
+  function formatCurrencyDisplay(value) {
+    if (value === null || value === undefined) return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return '$' + n.toFixed(2);
+  }
+
   function renderMetricsRow(metrics) {
     const cells = [
       { label: 'Spend', value: metrics.spend },
       { label: 'Impressions', value: metrics.impressions },
       { label: 'Clicks', value: metrics.clicks },
       { label: 'Frequency', value: metrics.frequency },
+      { label: 'CTR', value: metrics.ctr, format: formatPercentDisplay },
+      { label: 'CPC', value: metrics.cpc, format: formatCurrencyDisplay },
+      { label: 'CPM', value: metrics.cpm, format: formatCurrencyDisplay },
     ];
     return (
       '<div class="moa-metrics">' +
@@ -2298,7 +2323,7 @@ init();
             escapeHtml(c.label) +
             '</div>' +
             '<div class="moa-metric-value">' +
-            escapeHtml(formatMetricDisplay(c.value)) +
+            escapeHtml((c.format || formatMetricDisplay)(c.value)) +
             '</div>' +
             '</div>',
         )
