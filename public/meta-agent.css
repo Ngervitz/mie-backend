@@ -235,6 +235,14 @@
   margin-bottom: 24px;
 }
 
+.ma-next-events {
+  margin-bottom: 24px;
+}
+
+.ma-next-events .ma-kpi-sub {
+  margin-top: 6px;
+}
+
 .ma-card {
   background: var(--meta-agent-surface);
   border: 1px solid var(--meta-agent-border);

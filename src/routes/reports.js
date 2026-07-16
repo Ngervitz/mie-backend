@@ -691,6 +691,46 @@ function mapOwnAdChangeRow(row) {
   };
 }
 
+// Next upcoming holiday + BPS payment window from economic_calendar_events.
+// Read-only; missing/empty calendar → nulls, never an error.
+router.get('/next-economic-events', async (req, res) => {
+  const today = todayUtc();
+  logger.info('Reports next-economic-events requested', { today });
+
+  // Per-type errors (e.g. table not migrated yet) degrade to null — the card
+  // shows "Sin datos" instead of breaking the panel.
+  const nextOfType = async (eventType) => {
+    const { data, error } = await supabase
+      .from('economic_calendar_events')
+      .select('title, date_start, date_end, description')
+      .eq('event_type', eventType)
+      .gte('date_start', today)
+      .order('date_start', { ascending: true })
+      .limit(1);
+
+    if (error) {
+      logger.error('next-economic-events query failed', {
+        eventType,
+        error: error.message,
+      });
+      return null;
+    }
+    if (!data || !data.length) return null;
+    return {
+      title: data[0].title ?? null,
+      date_start: data[0].date_start ?? null,
+      date_end: data[0].date_end ?? null,
+      description: data[0].description ?? null,
+    };
+  };
+
+  const [nextHoliday, nextBpsPayment] = await Promise.all([
+    nextOfType('holiday'),
+    nextOfType('bps_payment'),
+  ]);
+  return res.json({ nextHoliday, nextBpsPayment });
+});
+
 // Distinct event_type values for Credizona — register before the list route.
 router.get('/own-ad-changes/event-types', async (req, res) => {
   logger.info('Reports own-ad-changes/event-types requested');

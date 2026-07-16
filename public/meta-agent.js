@@ -40,6 +40,8 @@
     tab: 'campaigns',
     lastUpdate: null,
     configMissing: false,
+    // Read-only economic calendar card; null fields render "Sin datos".
+    nextEvents: { nextHoliday: null, nextBpsPayment: null },
   };
 
   var root = null;
@@ -751,6 +753,50 @@
     );
   }
 
+  var MONTH_NAMES_ES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
+  ];
+
+  /** '2026-07-18' → '18 de julio'. Invalid/missing → null. */
+  function formatDateEs(dateStr) {
+    if (!dateStr) return null;
+    var parts = String(dateStr).split('-');
+    if (parts.length !== 3) return null;
+    var month = Number(parts[1]);
+    var day = Number(parts[2]);
+    if (!month || !day || month < 1 || month > 12) return null;
+    return day + ' de ' + MONTH_NAMES_ES[month - 1];
+  }
+
+  function describeCalendarEvent(ev) {
+    if (!ev || !ev.date_start) return 'Sin datos';
+    var start = formatDateEs(ev.date_start);
+    if (!start) return 'Sin datos';
+    var range = ev.date_end && ev.date_end !== ev.date_start
+      ? start + ' al ' + (formatDateEs(ev.date_end) || ev.date_end)
+      : start;
+    return ev.title ? range + ' — ' + ev.title : range;
+  }
+
+  function renderNextEvents() {
+    var ev = state.nextEvents || {};
+    return (
+      '<div class="ma-card ma-next-events">' +
+      '<div class="ma-card-top">' +
+      '<div class="ma-kpi-label">PRÓXIMO EVENTO</div>' +
+      '<span class="ma-kpi-icon">📅</span>' +
+      '</div>' +
+      '<div class="ma-kpi-sub">Próximo feriado: ' +
+      escapeHtml(describeCalendarEvent(ev.nextHoliday)) +
+      '</div>' +
+      '<div class="ma-kpi-sub">Próximo pago BPS: ' +
+      escapeHtml(describeCalendarEvent(ev.nextBpsPayment)) +
+      '</div>' +
+      '</div>'
+    );
+  }
+
   function renderBody(derived) {
     var tabContent = '';
     if (state.tab === 'campaigns') {
@@ -764,6 +810,7 @@
     return (
       '<div class="ma-body">' +
       renderKpis(derived, state.data) +
+      renderNextEvents() +
       renderSubTabs(derived.alertas.length) +
       tabContent +
       renderFooter(state.data) +
@@ -842,6 +889,33 @@
     }
     state.loading = false;
     render();
+    loadNextEvents();
+  }
+
+  /**
+   * Economic calendar card — isolated fetch against the backend (relative
+   * path; same-origin as the dashboard). Any failure leaves nulls in place,
+   * which render as "Sin datos"; it never breaks the metrics panel.
+   */
+  async function loadNextEvents() {
+    var base = window.location.protocol === 'file:'
+      ? 'https://mie-backend-production.up.railway.app'
+      : '';
+    try {
+      var res = await fetch(base + '/reports/next-economic-events', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return;
+      var body = await res.json();
+      if (!body || typeof body !== 'object') return;
+      state.nextEvents = {
+        nextHoliday: body.nextHoliday || null,
+        nextBpsPayment: body.nextBpsPayment || null,
+      };
+      render();
+    } catch (e) {
+      // Keep nulls → "Sin datos".
+    }
   }
 
   function init() {
