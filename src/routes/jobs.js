@@ -5,6 +5,7 @@ const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
 const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays');
 const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
+const { collectSearchTrends } = require('../steps/collectSearchTrends');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const env = require('../config/env');
@@ -617,5 +618,70 @@ const runEconomicCalendarHandler = (req, res) => {
 
 router.post('/run-economic-calendar', runEconomicCalendarHandler);
 router.get('/run-economic-calendar', runEconomicCalendarHandler);
+
+// --- Search trends (standalone, manual trigger; NOT chained into daily sync) ---
+const searchTrendsJobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+router.get('/search-trends-status', (req, res) => {
+  res.json({
+    status: searchTrendsJobState.status,
+    startedAt: searchTrendsJobState.startedAt,
+    finishedAt: searchTrendsJobState.finishedAt,
+    lastResult: searchTrendsJobState.lastResult,
+    lastError: searchTrendsJobState.lastError,
+  });
+});
+
+const runSearchTrendsHandler = (req, res) => {
+  if (searchTrendsJobState.status === 'running') {
+    return res.status(409).json({
+      error: 'Search trends job already in progress',
+      status: searchTrendsJobState.status,
+      startedAt: searchTrendsJobState.startedAt,
+    });
+  }
+
+  searchTrendsJobState.status = 'running';
+  searchTrendsJobState.startedAt = new Date().toISOString();
+  searchTrendsJobState.finishedAt = null;
+  searchTrendsJobState.lastResult = null;
+  searchTrendsJobState.lastError = null;
+
+  logger.info('POST /jobs/run-search-trends — started');
+
+  collectSearchTrends()
+    .then((result) => {
+      searchTrendsJobState.status = 'idle';
+      searchTrendsJobState.finishedAt = new Date().toISOString();
+      searchTrendsJobState.lastResult = result;
+      logger.info('Search trends job completed', {
+        totalTerms: result.totalTerms,
+        succeededCount: result.succeededCount,
+        failedCount: result.failedCount,
+        rowsUpserted: result.rowsUpserted,
+      });
+    })
+    .catch((err) => {
+      searchTrendsJobState.status = 'idle';
+      searchTrendsJobState.finishedAt = new Date().toISOString();
+      searchTrendsJobState.lastError = err.message;
+      logger.error('Search trends job failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'Search trends started',
+    status: 'running',
+    startedAt: searchTrendsJobState.startedAt,
+  });
+};
+
+router.post('/run-search-trends', runSearchTrendsHandler);
+router.get('/run-search-trends', runSearchTrendsHandler);
 
 module.exports = router;
