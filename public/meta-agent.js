@@ -114,6 +114,8 @@
       gasto: spendStr,
       conversions: convStr,
       conversiones: convStr,
+      impressions: toCsvCompatString(row.impressions),
+      clicks: toCsvCompatString(row.clicks),
       metric_date: toCsvCompatString(row.metric_date),
     };
   }
@@ -282,6 +284,50 @@
     );
   }
 
+  /**
+   * Deterministic account-level aggregates for the latest available
+   * metric_date. Null-safety: no rows / zero denominator → null (never 0,
+   * Infinity or NaN). ctr is returned as a percentage for this panel's
+   * existing display convention (fmt(x) + '%').
+   */
+  function computeLatestDateStats(data) {
+    var latestDate = null;
+    data.forEach(function (row) {
+      var d = row.metric_date || '';
+      if (d && (!latestDate || d > latestDate)) latestDate = d;
+    });
+
+    if (!latestDate) {
+      return { date: null, spend: null, ctr: null, cpc: null, cpm: null };
+    }
+
+    var spend = null;
+    var impressions = null;
+    var clicks = null;
+    data.forEach(function (row) {
+      if ((row.metric_date || '') !== latestDate) return;
+      var s = fmtN(row.spend);
+      var i = fmtN(row.impressions);
+      var c = fmtN(row.clicks);
+      if (s !== null) spend = (spend || 0) + s;
+      if (i !== null) impressions = (impressions || 0) + i;
+      if (c !== null) clicks = (clicks || 0) + c;
+    });
+
+    var ctr =
+      impressions !== null && impressions > 0 && clicks !== null
+        ? (clicks / impressions) * 100
+        : null;
+    var cpc =
+      clicks !== null && clicks > 0 && spend !== null ? spend / clicks : null;
+    var cpm =
+      impressions !== null && impressions > 0 && spend !== null
+        ? (spend / impressions) * 1000
+        : null;
+
+    return { date: latestDate, spend: spend, ctr: ctr, cpc: cpc, cpm: cpm };
+  }
+
   function computeDerived(data) {
     var campList = buildCampList(data);
     var totalGasto = campList.reduce(function (a, c) { return a + (c.gasto || 0); }, 0);
@@ -297,6 +343,7 @@
       totalConv: totalConv,
       avgCPL: avgCPL,
       alertas: alertas,
+      latest: computeLatestDateStats(data),
     };
   }
 
@@ -372,34 +419,63 @@
   function renderKpis(derived, data) {
     var avgCPL = derived.avgCPL;
     var alertas = derived.alertas;
+    var latest = derived.latest || {};
+    var latestSub = latest.date ? latest.date : 'sin datos';
     var kpis = [
       {
-        label: 'GASTO TOTAL',
-        val: '$' + fmt(derived.totalGasto, 0),
-        sub: data.length + ' registros',
+        label: 'GASTO',
+        val: latest.spend !== null && latest.spend !== undefined
+          ? '$' + fmt(latest.spend, 0)
+          : '—',
+        sub: latestSub,
         color: '#3b82f6',
         icon: '💰',
       },
       {
         label: 'CONVERSIONES',
         val: derived.totalConv ? fmt(derived.totalConv, 0) : '—',
-        sub: 'total acumulado',
+        sub: derived.totalConv ? 'total acumulado' : 'sin datos',
         color: '#22c55e',
         icon: '🎯',
       },
       {
         label: 'CPL PROMEDIO',
         val: avgCPL !== null ? '$' + fmt(avgCPL) : '—',
-        sub: avgCPL !== null && avgCPL <= 1 ? '✓ Bajo objetivo' : '⚠ Sobre objetivo',
+        sub: avgCPL === null
+          ? 'sin datos'
+          : avgCPL <= 1
+            ? '✓ Bajo objetivo'
+            : '⚠ Sobre objetivo',
         color: avgCPL !== null && avgCPL <= 1 ? '#22c55e' : '#f59e0b',
         icon: '📉',
       },
       {
         label: 'ALERTAS',
         val: String(alertas.length),
-        sub: alertas.length === 0 ? 'Todo en orden' : 'Requieren atención',
+        sub: alertas.length === 0 ? 'Sin alertas' : 'Requieren atención',
         color: alertas.length === 0 ? '#22c55e' : '#ef4444',
         icon: alertas.length === 0 ? '✅' : '🚨',
+      },
+      {
+        label: 'CTR',
+        val: latest.ctr !== null && latest.ctr !== undefined ? fmt(latest.ctr) + '%' : '—',
+        sub: latestSub,
+        color: '#3b82f6',
+        icon: '👁',
+      },
+      {
+        label: 'CPC',
+        val: latest.cpc !== null && latest.cpc !== undefined ? '$' + fmt(latest.cpc) : '—',
+        sub: latestSub,
+        color: '#8b5cf6',
+        icon: '🖱',
+      },
+      {
+        label: 'CPM',
+        val: latest.cpm !== null && latest.cpm !== undefined ? '$' + fmt(latest.cpm) : '—',
+        sub: latestSub,
+        color: '#f59e0b',
+        icon: '📡',
       },
     ];
 
