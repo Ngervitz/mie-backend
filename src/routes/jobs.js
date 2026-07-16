@@ -5,6 +5,7 @@ const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
 const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
+const env = require('../config/env');
 const logger = require('../lib/logger');
 
 const router = express.Router();
@@ -189,122 +190,135 @@ const runSyncHandler = (req, res) => {
         }
       })();
 
-      const metricsBranch = (async () => {
-        if (metaJobState.status === 'running') {
-          logger.info('Meta own-metrics skipped after sync', {
-            reason: 'meta already running',
-            startedAt: metaJobState.startedAt,
-          });
+      // Metrics + own-ads brief + changes — gated as one metaBranch for auto chain only.
+      const metaBranch = (async () => {
+        if (!env.metaAgenteEnabled) {
+          logger.info('metaBranch skipped — META_AGENTE_ENABLED=false');
           return;
         }
 
-        metaJobState.status = 'running';
-        metaJobState.startedAt = new Date().toISOString();
-        metaJobState.finishedAt = null;
-        metaJobState.lastResult = null;
-        metaJobState.lastError = null;
+        const metricsBranch = (async () => {
+          if (metaJobState.status === 'running') {
+            logger.info('Meta own-metrics skipped after sync', {
+              reason: 'meta already running',
+              startedAt: metaJobState.startedAt,
+            });
+            return;
+          }
 
-        logger.info('Meta own-metrics chained after sync — started');
+          metaJobState.status = 'running';
+          metaJobState.startedAt = new Date().toISOString();
+          metaJobState.finishedAt = null;
+          metaJobState.lastResult = null;
+          metaJobState.lastError = null;
 
-        try {
-          const metaResult = await collectOwnMetrics();
-          metaJobState.status = 'idle';
-          metaJobState.finishedAt = new Date().toISOString();
-          metaJobState.lastResult = metaResult;
-          logger.info('Meta own-metrics job completed', {
-            runId: metaResult.runId,
-            campaignsFound: metaResult.campaignsFound,
-            rowsInserted: metaResult.rowsInserted,
-            reportingDate: metaResult.reportingDate,
-          });
+          logger.info('Meta own-metrics chained after sync — started');
 
-          // Isolated Own Ads Brief — only after successful Meta collection.
           try {
-            if (metaResult && metaResult.reportingDate) {
-              logger.info('Own Ads Brief chained after meta — started', {
-                reportingDate: metaResult.reportingDate,
-              });
-              const ownAdsResult = await runOwnAdsBrief({
-                date: metaResult.reportingDate,
-                skipIfRunning: true,
-              });
-              if (ownAdsResult && ownAdsResult.skipped) {
-                logger.info('Own Ads Brief chained after meta — skipped', {
-                  reason: ownAdsResult.reason,
+            const metaResult = await collectOwnMetrics();
+            metaJobState.status = 'idle';
+            metaJobState.finishedAt = new Date().toISOString();
+            metaJobState.lastResult = metaResult;
+            logger.info('Meta own-metrics job completed', {
+              runId: metaResult.runId,
+              campaignsFound: metaResult.campaignsFound,
+              rowsInserted: metaResult.rowsInserted,
+              reportingDate: metaResult.reportingDate,
+            });
+
+            // Isolated Own Ads Brief — only after successful Meta collection.
+            try {
+              if (metaResult && metaResult.reportingDate) {
+                logger.info('Own Ads Brief chained after meta — started', {
                   reportingDate: metaResult.reportingDate,
                 });
+                const ownAdsResult = await runOwnAdsBrief({
+                  date: metaResult.reportingDate,
+                  skipIfRunning: true,
+                });
+                if (ownAdsResult && ownAdsResult.skipped) {
+                  logger.info('Own Ads Brief chained after meta — skipped', {
+                    reason: ownAdsResult.reason,
+                    reportingDate: metaResult.reportingDate,
+                  });
+                } else {
+                  logger.info('Own Ads Brief chained after meta — completed', {
+                    reportingDate: metaResult.reportingDate,
+                    state: ownAdsResult && ownAdsResult.state,
+                  });
+                }
               } else {
-                logger.info('Own Ads Brief chained after meta — completed', {
-                  reportingDate: metaResult.reportingDate,
-                  state: ownAdsResult && ownAdsResult.state,
+                logger.info('Own Ads Brief skipped after meta', {
+                  reason: 'missing reportingDate on meta result',
                 });
               }
-            } else {
-              logger.info('Own Ads Brief skipped after meta', {
-                reason: 'missing reportingDate on meta result',
+            } catch (ownAdsErr) {
+              logger.error('Own Ads Brief after meta failed', {
+                error:
+                  ownAdsErr && ownAdsErr.message
+                    ? ownAdsErr.message
+                    : 'unknown',
               });
             }
-          } catch (ownAdsErr) {
-            logger.error('Own Ads Brief after meta failed', {
-              error:
-                ownAdsErr && ownAdsErr.message ? ownAdsErr.message : 'unknown',
+          } catch (err) {
+            metaJobState.status = 'idle';
+            metaJobState.finishedAt = new Date().toISOString();
+            metaJobState.lastError =
+              err && err.message ? err.message : 'unknown';
+            logger.error('Meta own-metrics job failed', {
+              error: err && err.message ? err.message : 'unknown',
+            });
+            logger.info('Own Ads Brief skipped after meta', {
+              reason: 'meta collection failed',
+              error: err && err.message ? err.message : 'unknown',
             });
           }
-        } catch (err) {
-          metaJobState.status = 'idle';
-          metaJobState.finishedAt = new Date().toISOString();
-          metaJobState.lastError = err && err.message ? err.message : 'unknown';
-          logger.error('Meta own-metrics job failed', {
-            error: err && err.message ? err.message : 'unknown',
-          });
-          logger.info('Own Ads Brief skipped after meta', {
-            reason: 'meta collection failed',
-            error: err && err.message ? err.message : 'unknown',
-          });
-        }
+        })();
+
+        // Sibling of metricsBranch — capture-only; never touches metrics / Own Ads Brief.
+        const changesBranch = (async () => {
+          if (ownAdChangesJobState.status === 'running') {
+            logger.info('Meta own-ad-changes skipped after sync', {
+              reason: 'own-ad-changes already running',
+              startedAt: ownAdChangesJobState.startedAt,
+            });
+            return;
+          }
+
+          ownAdChangesJobState.status = 'running';
+          ownAdChangesJobState.startedAt = new Date().toISOString();
+          ownAdChangesJobState.finishedAt = null;
+          ownAdChangesJobState.lastResult = null;
+          ownAdChangesJobState.lastError = null;
+
+          logger.info('Meta own-ad-changes chained after sync — started');
+
+          try {
+            const changesResult = await collectOwnAdChanges();
+            ownAdChangesJobState.status = 'idle';
+            ownAdChangesJobState.finishedAt = new Date().toISOString();
+            ownAdChangesJobState.lastResult = changesResult;
+            logger.info('Meta own-ad-changes job completed', {
+              runId: changesResult.runId,
+              changesFound: changesResult.changesFound,
+              eventsInserted: changesResult.eventsInserted,
+              reportingDate: changesResult.reportingDate,
+            });
+          } catch (err) {
+            ownAdChangesJobState.status = 'idle';
+            ownAdChangesJobState.finishedAt = new Date().toISOString();
+            ownAdChangesJobState.lastError =
+              err && err.message ? err.message : 'unknown';
+            logger.error('Meta own-ad-changes job failed', {
+              error: err && err.message ? err.message : 'unknown',
+            });
+          }
+        })();
+
+        await Promise.all([metricsBranch, changesBranch]);
       })();
 
-      // Sibling of metricsBranch — capture-only; never touches metrics / Own Ads Brief.
-      const changesBranch = (async () => {
-        if (ownAdChangesJobState.status === 'running') {
-          logger.info('Meta own-ad-changes skipped after sync', {
-            reason: 'own-ad-changes already running',
-            startedAt: ownAdChangesJobState.startedAt,
-          });
-          return;
-        }
-
-        ownAdChangesJobState.status = 'running';
-        ownAdChangesJobState.startedAt = new Date().toISOString();
-        ownAdChangesJobState.finishedAt = null;
-        ownAdChangesJobState.lastResult = null;
-        ownAdChangesJobState.lastError = null;
-
-        logger.info('Meta own-ad-changes chained after sync — started');
-
-        try {
-          const changesResult = await collectOwnAdChanges();
-          ownAdChangesJobState.status = 'idle';
-          ownAdChangesJobState.finishedAt = new Date().toISOString();
-          ownAdChangesJobState.lastResult = changesResult;
-          logger.info('Meta own-ad-changes job completed', {
-            runId: changesResult.runId,
-            changesFound: changesResult.changesFound,
-            eventsInserted: changesResult.eventsInserted,
-            reportingDate: changesResult.reportingDate,
-          });
-        } catch (err) {
-          ownAdChangesJobState.status = 'idle';
-          ownAdChangesJobState.finishedAt = new Date().toISOString();
-          ownAdChangesJobState.lastError =
-            err && err.message ? err.message : 'unknown';
-          logger.error('Meta own-ad-changes job failed', {
-            error: err && err.message ? err.message : 'unknown',
-          });
-        }
-      })();
-
-      await Promise.all([activityBranch, metricsBranch, changesBranch]);
+      await Promise.all([activityBranch, metaBranch]);
     })
     .catch((err) => {
       jobState.status = 'idle';

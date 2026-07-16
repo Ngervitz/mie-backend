@@ -31,4 +31,8 @@ module.exports = {
   metaMarketingApiToken: process.env.META_MARKETING_API_TOKEN || null,
   metaAdAccountId: process.env.META_AD_ACCOUNT_ID || null,
   metaMarketingApiVersion: process.env.META_MARKETING_API_VERSION || 'v25.0',
+  // Pause automatic metaBranch after sync (metrics + own-ads brief + changes).
+  // Default true; only the string "false" (case-insensitive) disables.
+  metaAgenteEnabled:
+    String(process.env.META_AGENTE_ENABLED ?? 'true').toLowerCase() !== 'false',
 };
