@@ -918,9 +918,11 @@
 #mie-dashboard-app .meta-ads-chrome.hidden,
 #mie-dashboard-app #meta-ads-root.hidden,
 #mie-dashboard-app #meta-changes-landing.hidden,
+#mie-dashboard-app #meta-own-ads-landing.hidden,
 #mie-dashboard-app .meta-ads-chrome[hidden],
 #mie-dashboard-app #meta-ads-root[hidden],
-#mie-dashboard-app #meta-changes-landing[hidden] {
+#mie-dashboard-app #meta-changes-landing[hidden],
+#mie-dashboard-app #meta-own-ads-landing[hidden] {
   display: none !important;
 }
 
@@ -1096,6 +1098,227 @@
 @media (max-width: 800px) {
   #mie-dashboard-app .mcl-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Meta Ads — Análisis IA (Own Ads brief) ---------- */
+#mie-dashboard-app .moa-landing {
+  padding-top: 8px;
+}
+
+#mie-dashboard-app .moa-header {
+  padding: 8px 0 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+#mie-dashboard-app .moa-title {
+  margin: 12px 0 6px;
+  font-size: 1.35rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .moa-subtitle {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .moa-date-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#mie-dashboard-app .moa-nav-btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  min-width: 40px;
+}
+
+#mie-dashboard-app .moa-nav-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .moa-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#mie-dashboard-app .moa-date-label {
+  font-size: 1rem;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 110px;
+  text-align: center;
+}
+
+#mie-dashboard-app .moa-body {
+  min-height: 180px;
+}
+
+#mie-dashboard-app .moa-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 18px 16px;
+}
+
+#mie-dashboard-app .moa-panel-error {
+  border-color: var(--accent-danger);
+  background: var(--accent-danger-soft);
+}
+
+#mie-dashboard-app .moa-panel-progress {
+  border-color: var(--accent-info);
+  background: var(--accent-info-soft);
+}
+
+#mie-dashboard-app .moa-panel-info {
+  border-color: var(--border);
+}
+
+#mie-dashboard-app .moa-panel-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+#mie-dashboard-app .moa-panel-title {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .moa-panel-top .moa-panel-title {
+  margin-bottom: 0;
+}
+
+#mie-dashboard-app .moa-panel-text {
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+#mie-dashboard-app .moa-technical {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+#mie-dashboard-app .moa-conf {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#mie-dashboard-app .moa-conf-none {
+  color: var(--text-faint);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .moa-conf-low {
+  color: var(--accent-warn);
+  background: var(--accent-warn-soft);
+}
+
+#mie-dashboard-app .moa-conf-medium {
+  color: var(--accent-info);
+  background: var(--accent-info-soft);
+}
+
+#mie-dashboard-app .moa-conf-high {
+  color: var(--accent-success);
+  background: var(--accent-success-soft);
+}
+
+#mie-dashboard-app .moa-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 8px;
+}
+
+#mie-dashboard-app .moa-metric {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+#mie-dashboard-app .moa-metric-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+#mie-dashboard-app .moa-metric-value {
+  font-size: 1.05rem;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+#mie-dashboard-app .moa-section {
+  margin-top: 16px;
+}
+
+#mie-dashboard-app .moa-section-title {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#mie-dashboard-app .moa-list {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+#mie-dashboard-app .moa-list li {
+  margin-bottom: 6px;
+}
+
+#mie-dashboard-app .moa-alerts .moa-list {
+  color: var(--accent-warn);
+}
+
+#mie-dashboard-app .moa-footer {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+@media (max-width: 800px) {
+  #mie-dashboard-app .moa-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

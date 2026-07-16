@@ -45,7 +45,7 @@
       aria-labelledby="tab-market">
     </main>
 
-    <!-- Meta Ads tab shell: chrome + agent root + changes landing are siblings.
+    <!-- Meta Ads tab shell: chrome + agent + landings are siblings.
          Visibility toggles only — never rebuild agent DOM from this shell. -->
     <div
       class="dashboard-panel hidden"
@@ -55,6 +55,9 @@
       hidden>
       <div id="meta-ads-chrome" class="meta-ads-chrome">
         <div class="meta-ads-chrome-actions">
+          <button type="button" id="meta-own-ads-open-btn" class="mcl-chrome-btn">
+            🧠 Análisis IA
+          </button>
           <button type="button" id="meta-changes-open-btn" class="mcl-chrome-btn">
             Historial de cambios
           </button>
@@ -94,6 +97,23 @@
         <div id="mcl-status" class="mcl-status" aria-live="polite"></div>
         <div id="mcl-results" class="mcl-results"></div>
         <div id="mcl-pagination" class="mcl-pagination"></div>
+      </div>
+
+      <div id="meta-own-ads-landing" class="moa-landing hidden" hidden>
+        <header class="moa-header">
+          <button type="button" id="meta-own-ads-back-btn" class="mcl-back-btn">
+            ← Volver a Meta Ads
+          </button>
+          <h1 class="moa-title">Análisis IA — Own Ads</h1>
+          <p class="moa-subtitle">Brief diario de la pauta propia (fecha de reporting)</p>
+          <div class="moa-date-nav" role="group" aria-label="Navegación por fecha">
+            <button type="button" id="moa-prev-date" class="moa-nav-btn" aria-label="Día anterior">◀</button>
+            <span id="moa-date-label" class="moa-date-label"></span>
+            <button type="button" id="moa-next-date" class="moa-nav-btn" aria-label="Día siguiente">▶</button>
+          </div>
+        </header>
+        <div id="moa-body" class="moa-body" aria-live="polite"></div>
+        <footer id="moa-footer" class="moa-footer"></footer>
       </div>
     </div>
   </div>

@@ -1761,13 +1761,40 @@ function init() {
 init();
 
 /* ----------------------------------------------------------------------------
+ * Meta Ads — mutually exclusive views (agent | changes | own-ads)
+ * Visibility toggles only; never rebuild #meta-ads-root.
+ * ------------------------------------------------------------------------- */
+(function initMetaAdsViews() {
+  const agentRoot = document.getElementById('meta-ads-root');
+  const chrome = document.getElementById('meta-ads-chrome');
+  const changesLanding = document.getElementById('meta-changes-landing');
+  const ownAdsLanding = document.getElementById('meta-own-ads-landing');
+
+  function setVisible(el, visible) {
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+    if (visible) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+  }
+
+  function setMetaAdsView(view) {
+    const v = view === 'changes' || view === 'own-ads' ? view : 'agent';
+    setVisible(agentRoot, v === 'agent');
+    setVisible(chrome, v === 'agent');
+    setVisible(changesLanding, v === 'changes');
+    setVisible(ownAdsLanding, v === 'own-ads');
+  }
+
+  window.__setMetaAdsView = setMetaAdsView;
+  setMetaAdsView('agent');
+})();
+
+/* ----------------------------------------------------------------------------
  * Meta Ads — Historial de cambios (sibling of #meta-ads-root; visibility only)
  * Does not touch #mie-market-root or rebuild the Meta Ads agent DOM.
  * ------------------------------------------------------------------------- */
 (function initMetaChangesLanding() {
   const landing = document.getElementById('meta-changes-landing');
-  const agentRoot = document.getElementById('meta-ads-root');
-  const chrome = document.getElementById('meta-ads-chrome');
   const openBtn = document.getElementById('meta-changes-open-btn');
   const backBtn = document.getElementById('meta-changes-back-btn');
   const eventTypeSelect = document.getElementById('mcl-event-type');
@@ -1779,7 +1806,6 @@ init();
 
   if (
     !landing ||
-    !agentRoot ||
     !openBtn ||
     !backBtn ||
     !eventTypeSelect ||
@@ -1787,7 +1813,8 @@ init();
     !toInput ||
     !statusEl ||
     !resultsEl ||
-    !paginationEl
+    !paginationEl ||
+    typeof window.__setMetaAdsView !== 'function'
   ) {
     return;
   }
@@ -1824,33 +1851,6 @@ init();
     const from = shiftUtcDateOnly(to, -29);
     toInput.value = to;
     fromInput.value = from;
-  }
-
-  function setVisible(el, visible) {
-    if (!el) return;
-    el.classList.toggle('hidden', !visible);
-    if (visible) el.removeAttribute('hidden');
-    else el.setAttribute('hidden', '');
-  }
-
-  function showAgentView() {
-    setVisible(landing, false);
-    setVisible(agentRoot, true);
-    setVisible(chrome, true);
-  }
-
-  function showChangesView() {
-    setVisible(agentRoot, false);
-    setVisible(chrome, false);
-    setVisible(landing, true);
-  }
-
-  function escapeHtml(value) {
-    return String(value == null ? '' : value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 
   function formatEventTime(iso) {
@@ -2072,7 +2072,7 @@ init();
   }
 
   openBtn.addEventListener('click', async () => {
-    showChangesView();
+    window.__setMetaAdsView('changes');
     if (!fromInput.value || !toInput.value) setDefaultDates();
     if (!mclState.eventTypesLoaded) await loadEventTypes();
     mclState.page = 1;
@@ -2082,7 +2082,7 @@ init();
 
   backBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
-    showAgentView();
+    window.__setMetaAdsView('agent');
   });
 
   eventTypeSelect.addEventListener('change', onFiltersChanged);
@@ -2090,5 +2090,504 @@ init();
   toInput.addEventListener('change', onFiltersChanged);
 
   setDefaultDates();
-  showAgentView();
+})();
+
+/* ----------------------------------------------------------------------------
+ * Meta Ads — Análisis IA (Own Ads brief, day-by-day)
+ * Consumes GET /hugo/knowledge-own-ads via the same API_BASE pattern.
+ * Renderer reads ONLY normalizeOwnAdsKnowledge() output.
+ * ------------------------------------------------------------------------- */
+(function initMetaOwnAdsLanding() {
+  const landing = document.getElementById('meta-own-ads-landing');
+  const openBtn = document.getElementById('meta-own-ads-open-btn');
+  const backBtn = document.getElementById('meta-own-ads-back-btn');
+  const prevBtn = document.getElementById('moa-prev-date');
+  const nextBtn = document.getElementById('moa-next-date');
+  const dateLabel = document.getElementById('moa-date-label');
+  const bodyEl = document.getElementById('moa-body');
+  const footerEl = document.getElementById('moa-footer');
+
+  if (
+    !landing ||
+    !openBtn ||
+    !backBtn ||
+    !prevBtn ||
+    !nextBtn ||
+    !dateLabel ||
+    !bodyEl ||
+    !footerEl ||
+    typeof window.__setMetaAdsView !== 'function'
+  ) {
+    return;
+  }
+
+  const KNOWN_STATES = {
+    has_data: true,
+    no_campaigns_found: true,
+    collection_failed: true,
+    collection_in_progress: true,
+    no_metrics_for_date: true,
+    no_successful_run: true,
+  };
+
+  const moaState = {
+    date: null,
+    loading: false,
+  };
+
+  let abortController = null;
+  let requestSeq = 0;
+
+  function maxReportingDate() {
+    // Own Ads briefs are keyed by reporting date (= yesterday convention).
+    return shiftDate(getLocalToday(), -1);
+  }
+
+  function formatMetricDisplay(value) {
+    if (value === null || value === undefined) return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return String(n);
+  }
+
+  function asStringArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => (item == null ? '' : String(item).trim()))
+      .filter(Boolean);
+  }
+
+  function asNullableNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Single normalizer: live GET /hugo/knowledge-own-ads → flat internal object.
+   * Authoritative map (Phase 0 audit 2026-07-12):
+   * - state: top-level knowledge.state (also mirrored in brief.state)
+   * - headline/summary/metrics/lists/confidence: brief.*
+   * - generatedAt: top-level
+   * - modelArchitect/modelAuditor: meta.*
+   * HTTP 404 → notFound: true (no fabricated no_successful_run).
+   */
+  function normalizeOwnAdsKnowledge(payload, httpStatus) {
+    if (httpStatus === 404 || !payload || typeof payload !== 'object') {
+      return {
+        notFound: true,
+        httpStatus: httpStatus || null,
+        date: '',
+        state: null,
+        headline: '',
+        summary: '',
+        metrics: {
+          spend: null,
+          impressions: null,
+          clicks: null,
+          frequency: null,
+        },
+        highlights: [],
+        alerts: [],
+        recommendations: [],
+        confidence: 'none',
+        generatedAt: '',
+        modelArchitect: null,
+        modelAuditor: null,
+        errorMessage: '',
+      };
+    }
+
+    const brief =
+      payload.brief && typeof payload.brief === 'object' ? payload.brief : {};
+    const meta =
+      payload.meta && typeof payload.meta === 'object' ? payload.meta : {};
+    const metricsIn =
+      brief.metrics && typeof brief.metrics === 'object' ? brief.metrics : {};
+
+    const topState =
+      payload.state != null && String(payload.state).trim()
+        ? String(payload.state).trim()
+        : '';
+    const briefState =
+      brief.state != null && String(brief.state).trim()
+        ? String(brief.state).trim()
+        : '';
+    const state = topState || briefState || 'unknown';
+
+    const architect =
+      meta.modelArchitect != null && String(meta.modelArchitect).trim()
+        ? String(meta.modelArchitect).trim()
+        : null;
+    const auditor =
+      meta.modelAuditor != null && String(meta.modelAuditor).trim()
+        ? String(meta.modelAuditor).trim()
+        : null;
+
+    let confidence =
+      brief.confidence != null && String(brief.confidence).trim()
+        ? String(brief.confidence).trim().toLowerCase()
+        : 'none';
+    if (!['none', 'low', 'medium', 'high'].includes(confidence)) {
+      confidence = 'none';
+    }
+
+    return {
+      notFound: false,
+      httpStatus: httpStatus || 200,
+      date: payload.date != null ? String(payload.date) : '',
+      state,
+      headline: brief.headline != null ? String(brief.headline) : '',
+      summary: brief.summary != null ? String(brief.summary) : '',
+      metrics: {
+        spend: asNullableNumber(metricsIn.spend),
+        impressions: asNullableNumber(metricsIn.impressions),
+        clicks: asNullableNumber(metricsIn.clicks),
+        frequency: asNullableNumber(metricsIn.frequency),
+      },
+      highlights: asStringArray(brief.highlights),
+      alerts: asStringArray(brief.alerts),
+      recommendations: asStringArray(brief.recommendations),
+      confidence,
+      generatedAt: payload.generatedAt != null ? String(payload.generatedAt) : '',
+      modelArchitect: architect,
+      modelAuditor: auditor,
+      errorMessage: '',
+    };
+  }
+
+  function confidenceBadgeClass(confidence) {
+    if (confidence === 'high') return 'moa-conf moa-conf-high';
+    if (confidence === 'medium') return 'moa-conf moa-conf-medium';
+    if (confidence === 'low') return 'moa-conf moa-conf-low';
+    return 'moa-conf moa-conf-none';
+  }
+
+  function renderListSection(title, items, className) {
+    if (!items.length) return '';
+    return (
+      '<section class="moa-section ' +
+      className +
+      '">' +
+      '<h2 class="moa-section-title">' +
+      escapeHtml(title) +
+      '</h2>' +
+      '<ul class="moa-list">' +
+      items
+        .map((item) => '<li>' + escapeHtml(item) + '</li>')
+        .join('') +
+      '</ul>' +
+      '</section>'
+    );
+  }
+
+  function renderMetricsRow(metrics) {
+    const cells = [
+      { label: 'Spend', value: metrics.spend },
+      { label: 'Impressions', value: metrics.impressions },
+      { label: 'Clicks', value: metrics.clicks },
+      { label: 'Frequency', value: metrics.frequency },
+    ];
+    return (
+      '<div class="moa-metrics">' +
+      cells
+        .map(
+          (c) =>
+            '<div class="moa-metric">' +
+            '<div class="moa-metric-label">' +
+            escapeHtml(c.label) +
+            '</div>' +
+            '<div class="moa-metric-value">' +
+            escapeHtml(formatMetricDisplay(c.value)) +
+            '</div>' +
+            '</div>',
+        )
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function renderFooter(normalized) {
+    if (normalized.modelArchitect && normalized.modelAuditor) {
+      footerEl.textContent =
+        normalized.modelArchitect + ' · ' + normalized.modelAuditor;
+      return;
+    }
+    footerEl.textContent = 'Modelos no informados';
+  }
+
+  function renderNormalized(normalized) {
+    renderFooter(normalized);
+
+    if (normalized.notFound) {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-empty">' +
+        '<p class="moa-panel-title">Sin brief para esta fecha</p>' +
+        '<p class="moa-panel-text">No hay un Own Ads Daily Knowledge persistido para esta fecha de reporting. ' +
+        'Esto es esperable antes de que existiera el pipeline o si aún no se generó el brief.</p>' +
+        '</div>';
+      return;
+    }
+
+    if (normalized.errorMessage) {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-error">' +
+        '<p class="moa-panel-title">No se pudo cargar el brief</p>' +
+        '<p class="moa-panel-text">' +
+        escapeHtml(normalized.errorMessage) +
+        '</p>' +
+        '</div>';
+      return;
+    }
+
+    const state = normalized.state;
+    if (!KNOWN_STATES[state]) {
+      console.warn('[own-ads] Unknown state:', state);
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-neutral">' +
+        '<p class="moa-panel-title">Estado no reconocido</p>' +
+        '<p class="moa-panel-text">El brief devolvió un estado que esta pantalla aún no interpreta' +
+        (state ? ' (' + escapeHtml(state) + ')' : '') +
+        '. No se muestra un análisis incompleto.</p>' +
+        '</div>';
+      return;
+    }
+
+    if (state === 'collection_in_progress') {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-progress">' +
+        '<p class="moa-panel-title">Recolección en curso</p>' +
+        '<p class="moa-panel-text">' +
+        escapeHtml(
+          normalized.summary ||
+            normalized.headline ||
+            'La recolección de métricas Own Ads está en curso. Todavía no hay resultados para mostrar.',
+        ) +
+        '</p>' +
+        '</div>';
+      return;
+    }
+
+    if (state === 'collection_failed') {
+      const technical =
+        [normalized.headline, normalized.summary]
+          .filter(Boolean)
+          .join('\n\n') ||
+        'Falló la recolección Own Ads.';
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-error">' +
+        '<div class="moa-panel-top">' +
+        '<p class="moa-panel-title">Falla de recolección</p>' +
+        '<span class="' +
+        confidenceBadgeClass(normalized.confidence) +
+        '">' +
+        escapeHtml(normalized.confidence) +
+        '</span>' +
+        '</div>' +
+        '<p class="moa-panel-text moa-technical">' +
+        escapeHtml(technical) +
+        '</p>' +
+        '</div>';
+      return;
+    }
+
+    if (state === 'no_successful_run') {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-empty">' +
+        '<p class="moa-panel-title">' +
+        escapeHtml(normalized.headline || 'Sin recolección exitosa') +
+        '</p>' +
+        '<p class="moa-panel-text">' +
+        escapeHtml(
+          normalized.summary ||
+            'Todavía no existe una recolección Own Ads exitosa para esta fecha. No se puede inferir el estado de las campañas.',
+        ) +
+        '</p>' +
+        '</div>';
+      return;
+    }
+
+    if (state === 'no_metrics_for_date') {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-empty">' +
+        '<div class="moa-panel-top">' +
+        '<p class="moa-panel-title">' +
+        escapeHtml(normalized.headline || 'Sin métricas para esta fecha') +
+        '</p>' +
+        '<span class="' +
+        confidenceBadgeClass(normalized.confidence) +
+        '">' +
+        escapeHtml(normalized.confidence) +
+        '</span>' +
+        '</div>' +
+        '<p class="moa-panel-text">' +
+        escapeHtml(
+          normalized.summary ||
+            'Hay datos Own Ads en otras fechas de la ventana, pero no para esta fecha de reporting.',
+        ) +
+        '</p>' +
+        renderMetricsRow(normalized.metrics) +
+        '</div>';
+      return;
+    }
+
+    if (state === 'no_campaigns_found') {
+      bodyEl.innerHTML =
+        '<div class="moa-panel moa-panel-info">' +
+        '<div class="moa-panel-top">' +
+        '<p class="moa-panel-title">' +
+        escapeHtml(normalized.headline || 'Sin campañas activas') +
+        '</p>' +
+        '<span class="' +
+        confidenceBadgeClass(normalized.confidence) +
+        '">' +
+        escapeHtml(normalized.confidence) +
+        '</span>' +
+        '</div>' +
+        '<p class="moa-panel-text">' +
+        escapeHtml(
+          normalized.summary ||
+            'La recolección finalizó exitosamente y no encontró campañas activas.',
+        ) +
+        '</p>' +
+        renderMetricsRow(normalized.metrics) +
+        renderListSection('Alertas', normalized.alerts, 'moa-alerts') +
+        renderListSection(
+          'Highlights',
+          normalized.highlights,
+          'moa-highlights',
+        ) +
+        renderListSection(
+          'Recomendaciones',
+          normalized.recommendations,
+          'moa-recs',
+        ) +
+        '</div>';
+      return;
+    }
+
+    // has_data
+    bodyEl.innerHTML =
+      '<div class="moa-panel moa-panel-data">' +
+      '<div class="moa-panel-top">' +
+      '<p class="moa-panel-title">' +
+      escapeHtml(normalized.headline || 'Own Ads') +
+      '</p>' +
+      '<span class="' +
+      confidenceBadgeClass(normalized.confidence) +
+      '">' +
+      escapeHtml(normalized.confidence) +
+      '</span>' +
+      '</div>' +
+      '<p class="moa-panel-text">' +
+      escapeHtml(normalized.summary || '') +
+      '</p>' +
+      renderMetricsRow(normalized.metrics) +
+      renderListSection('Highlights', normalized.highlights, 'moa-highlights') +
+      renderListSection('Alertas', normalized.alerts, 'moa-alerts') +
+      renderListSection(
+        'Recomendaciones',
+        normalized.recommendations,
+        'moa-recs',
+      ) +
+      '</div>';
+  }
+
+  function updateDateChrome() {
+    const maxDate = maxReportingDate();
+    dateLabel.textContent = moaState.date || '—';
+    nextBtn.disabled = !moaState.date || moaState.date >= maxDate;
+  }
+
+  async function loadBrief(date) {
+    const maxDate = maxReportingDate();
+    let target = date;
+    if (!target || target > maxDate) target = maxDate;
+    moaState.date = target;
+    updateDateChrome();
+
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+    const seq = ++requestSeq;
+    const signal = abortController.signal;
+
+    moaState.loading = true;
+    bodyEl.innerHTML =
+      '<div class="moa-panel moa-panel-neutral"><p class="moa-panel-text">Cargando brief…</p></div>';
+    footerEl.textContent = '';
+
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/hugo/knowledge-own-ads?date=' +
+          encodeURIComponent(target),
+        { headers: { Accept: 'application/json' }, signal },
+      );
+
+      if (seq !== requestSeq) return;
+
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (parseErr) {
+        body = null;
+      }
+
+      if (seq !== requestSeq) return;
+
+      if (res.status === 404) {
+        renderNormalized(normalizeOwnAdsKnowledge(null, 404));
+        moaState.loading = false;
+        return;
+      }
+
+      if (!res.ok) {
+        const msg =
+          (body && body.error) ||
+          'No se pudo cargar el Own Ads Daily Knowledge.';
+        renderNormalized({
+          ...normalizeOwnAdsKnowledge(null, res.status),
+          notFound: false,
+          errorMessage: String(msg),
+        });
+        moaState.loading = false;
+        return;
+      }
+
+      renderNormalized(normalizeOwnAdsKnowledge(body, res.status));
+      moaState.loading = false;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      if (seq !== requestSeq) return;
+      renderNormalized({
+        ...normalizeOwnAdsKnowledge(null, null),
+        notFound: false,
+        errorMessage: 'No se pudo conectar con el servidor.',
+      });
+      moaState.loading = false;
+    }
+  }
+
+  openBtn.addEventListener('click', () => {
+    window.__setMetaAdsView('own-ads');
+    loadBrief(maxReportingDate());
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (abortController) abortController.abort();
+    window.__setMetaAdsView('agent');
+  });
+
+  prevBtn.addEventListener('click', () => {
+    if (!moaState.date || moaState.loading) return;
+    loadBrief(shiftDate(moaState.date, -1));
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (!moaState.date || moaState.loading) return;
+    const maxDate = maxReportingDate();
+    const next = shiftDate(moaState.date, 1);
+    if (next > maxDate) return;
+    loadBrief(next);
+  });
 })();
