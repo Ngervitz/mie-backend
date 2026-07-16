@@ -758,41 +758,67 @@
     'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
   ];
 
-  /** '2026-07-18' → '18 de julio'. Invalid/missing → null. */
-  function formatDateEs(dateStr) {
+  function splitDateOnly(dateStr) {
     if (!dateStr) return null;
     var parts = String(dateStr).split('-');
     if (parts.length !== 3) return null;
     var month = Number(parts[1]);
     var day = Number(parts[2]);
     if (!month || !day || month < 1 || month > 12) return null;
-    return day + ' de ' + MONTH_NAMES_ES[month - 1];
+    return { month: month, day: day };
   }
 
-  function describeCalendarEvent(ev) {
-    if (!ev || !ev.date_start) return 'Sin datos';
-    var start = formatDateEs(ev.date_start);
-    if (!start) return 'Sin datos';
-    var range = ev.date_end && ev.date_end !== ev.date_start
-      ? start + ' al ' + (formatDateEs(ev.date_end) || ev.date_end)
-      : start;
-    return ev.title ? range + ' — ' + ev.title : range;
+  /** '2026-07-18' → '18 de julio'. Invalid/missing → null. */
+  function formatDateEs(dateStr) {
+    var p = splitDateOnly(dateStr);
+    return p ? p.day + ' de ' + MONTH_NAMES_ES[p.month - 1] : null;
+  }
+
+  /** Compact range: same month → '2 al 22 de julio'; else full both ends. */
+  function formatRangeEs(startStr, endStr) {
+    var start = splitDateOnly(startStr);
+    if (!start) return null;
+    var end = splitDateOnly(endStr);
+    if (!end || (start.month === end.month && start.day === end.day)) {
+      return formatDateEs(startStr);
+    }
+    if (start.month === end.month) {
+      return start.day + ' al ' + end.day + ' de ' + MONTH_NAMES_ES[start.month - 1];
+    }
+    return formatDateEs(startStr) + ' al ' + formatDateEs(endStr);
+  }
+
+  function renderEventCard(label, icon, ev) {
+    var value = '—';
+    var sub = 'Sin datos';
+    if (ev && ev.date_start) {
+      var range = formatRangeEs(ev.date_start, ev.date_end);
+      if (range) {
+        value = range;
+        sub = (ev.active ? 'En curso' : 'Próximo') +
+          (ev.title ? ' — ' + ev.title : '');
+      }
+    }
+    return (
+      '<div class="ma-card">' +
+      '<div class="ma-card-top">' +
+      '<div class="ma-kpi-label">' + escapeHtml(label) + '</div>' +
+      '<span class="ma-kpi-icon">' + icon + '</span>' +
+      '</div>' +
+      '<div class="ma-mv ma-kpi-value ma-event-value">' +
+      escapeHtml(value) +
+      '</div>' +
+      '<div class="ma-kpi-sub">' + escapeHtml(sub) + '</div>' +
+      '</div>'
+    );
   }
 
   function renderNextEvents() {
     var ev = state.nextEvents || {};
     return (
-      '<div class="ma-card ma-next-events">' +
-      '<div class="ma-card-top">' +
-      '<div class="ma-kpi-label">PRÓXIMO EVENTO</div>' +
-      '<span class="ma-kpi-icon">📅</span>' +
-      '</div>' +
-      '<div class="ma-kpi-sub">Próximo feriado: ' +
-      escapeHtml(describeCalendarEvent(ev.nextHoliday)) +
-      '</div>' +
-      '<div class="ma-kpi-sub">Próximo pago BPS: ' +
-      escapeHtml(describeCalendarEvent(ev.nextBpsPayment)) +
-      '</div>' +
+      '<div class="ma-kpi-grid ma-next-events">' +
+      renderEventCard('FERIADO', '📅', ev.nextHoliday) +
+      renderEventCard('PAGO BPS', '🏦', ev.nextBpsPayment) +
       '</div>'
     );
   }

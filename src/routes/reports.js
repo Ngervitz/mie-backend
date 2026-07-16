@@ -700,28 +700,54 @@ router.get('/next-economic-events', async (req, res) => {
   // Per-type errors (e.g. table not migrated yet) degrade to null — the card
   // shows "Sin datos" instead of breaking the panel.
   const nextOfType = async (eventType) => {
-    const { data, error } = await supabase
+    const mapRow = (row, active) => ({
+      title: row.title ?? null,
+      date_start: row.date_start ?? null,
+      date_end: row.date_end ?? null,
+      description: row.description ?? null,
+      active,
+    });
+
+    // 1) Currently-active window: started already and not yet ended.
+    //    Single-day events (date_end null) are active only on their own day.
+    const activeQuery = await supabase
       .from('economic_calendar_events')
       .select('title, date_start, date_end, description')
       .eq('event_type', eventType)
-      .gte('date_start', today)
+      .lte('date_start', today)
+      .or(`date_end.gte.${today},and(date_end.is.null,date_start.eq.${today})`)
       .order('date_start', { ascending: true })
       .limit(1);
 
-    if (error) {
-      logger.error('next-economic-events query failed', {
+    if (activeQuery.error) {
+      logger.error('next-economic-events active query failed', {
         eventType,
-        error: error.message,
+        error: activeQuery.error.message,
       });
       return null;
     }
-    if (!data || !data.length) return null;
-    return {
-      title: data[0].title ?? null,
-      date_start: data[0].date_start ?? null,
-      date_end: data[0].date_end ?? null,
-      description: data[0].description ?? null,
-    };
+    if (activeQuery.data && activeQuery.data.length) {
+      return mapRow(activeQuery.data[0], true);
+    }
+
+    // 2) Fallback: nearest strictly-future start.
+    const futureQuery = await supabase
+      .from('economic_calendar_events')
+      .select('title, date_start, date_end, description')
+      .eq('event_type', eventType)
+      .gt('date_start', today)
+      .order('date_start', { ascending: true })
+      .limit(1);
+
+    if (futureQuery.error) {
+      logger.error('next-economic-events future query failed', {
+        eventType,
+        error: futureQuery.error.message,
+      });
+      return null;
+    }
+    if (!futureQuery.data || !futureQuery.data.length) return null;
+    return mapRow(futureQuery.data[0], false);
   };
 
   const [nextHoliday, nextBpsPayment] = await Promise.all([

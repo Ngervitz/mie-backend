@@ -235,12 +235,17 @@
   margin-bottom: 24px;
 }
 
+/* Economic calendar cards: same .ma-card sizing as the KPI grid above;
+   value uses the same bright text as other KPI values for contrast. */
 .ma-next-events {
+  margin-top: -10px;
   margin-bottom: 24px;
 }
 
-.ma-next-events .ma-kpi-sub {
-  margin-top: 6px;
+.ma-event-value {
+  color: #e8eaed;
+  font-size: 1.05rem;
+  line-height: 1.3;
 }
 
 .ma-card {
