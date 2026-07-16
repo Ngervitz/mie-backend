@@ -47,7 +47,8 @@ REGLAS ABSOLUTAS
 - No menciones competidores, eventos de mercado, activity_metrics, presión competitiva ni cross-analysis.
 - No hables de leads, conversiones, aprobaciones, revenue, ROAS, CPL ni CPA.
 - actions / actions_value NO están disponibles: no los discutás.
-- Solo podés usar: spend, impressions, clicks, frequency (cuando existan en el contexto).
+- Solo podés usar: spend, impressions, clicks, frequency, ctr, cpc, cpm (cuando existan en el contexto).
+- ctr/cpc/cpm vienen YA CALCULADOS por el backend (ctr es un ratio, ej. 0.023, no porcentaje). Copialos tal cual; no los recalcules ni los inventes. Si vienen null, quedan null.
 - Copiá context.confidence EXACTAMENTE en el campo confidence del JSON (es un valor determinístico del backend; no lo recalcules).
 - Copiá context.state EXACTAMENTE en el campo state del JSON.
 
@@ -57,14 +58,14 @@ COMPORTAMIENTO POR ESTADO
 - no_campaigns_found: afirmá claramente "No hay campañas activas." No inventes análisis de performance cero ni recomendaciones de optimización sobre campañas inexistentes.
 - no_metrics_for_date: decí que hay datos en otras fechas de la ventana, pero no para la fecha solicitada. No fabriques valores de ese día.
 - no_successful_run: decí que todavía no existe una recolección Own Ads exitosa. No inferas estado de campañas.
-- has_data: analizá solo spend, impressions, clicks, frequency y tendencias demostradas dentro de la ventana de 30 días.
+- has_data: analizá solo spend, impressions, clicks, frequency, ctr, cpc, cpm y tendencias demostradas dentro de la ventana de 30 días.
 
 SCHEMA OBLIGATORIO (todas las claves, sin claves extra)
 {
   "state": "collection_in_progress|collection_failed|no_campaigns_found|has_data|no_metrics_for_date|no_successful_run",
   "headline": "",
   "summary": "",
-  "metrics": { "spend": null, "impressions": null, "clicks": null, "frequency": null },
+  "metrics": { "spend": null, "impressions": null, "clicks": null, "frequency": null, "ctr": null, "cpc": null, "cpm": null },
   "highlights": [],
   "alerts": [],
   "recommendations": [],
@@ -92,6 +93,7 @@ REGLAS
 - Nunca cambies el state. En particular: NUNCA transformes collection_failed o collection_in_progress en no_campaigns_found (ni en ningún otro estado).
 - Preservá confidence exactamente como viene.
 - Preservá dataCoverage y metrics numéricos demostrados; no rellenes nulls con ceros inventados.
+- El objeto metrics tiene exactamente: spend, impressions, clicks, frequency, ctr, cpc, cpm. ctr/cpc/cpm son valores calculados por el backend (ctr es ratio, ej. 0.023, no porcentaje); preservalos tal cual, incluidos los null.
 - Mejorá claridad y tono en español ejecutivo.
 - Devolvé EXACTAMENTE el mismo schema JSON (mismas claves obligatorias, sin claves extra).
 
@@ -283,6 +285,36 @@ function summarizeRunMeta(run) {
   };
 }
 
+/**
+ * Deterministic derived metrics — computed in backend code, never by Claude.
+ * Unit convention (closed contract): ctr is a RATIO (e.g. 0.023), NOT a
+ * percentage (2.3). Never multiply by 100 here; percentage formatting, if
+ * ever needed, belongs to the presentation layer.
+ * Null-safety: if the denominator (or numerator) is null/undefined/zero or
+ * not finite, the derived metric is null — never Infinity, NaN or a fake 0.
+ */
+function computeDerivedMetrics({ spend, impressions, clicks }) {
+  const safeDivide = (numerator, denominator) => {
+    if (
+      numerator == null ||
+      denominator == null ||
+      !Number.isFinite(Number(numerator)) ||
+      !Number.isFinite(Number(denominator)) ||
+      Number(denominator) === 0
+    ) {
+      return null;
+    }
+    return Number(numerator) / Number(denominator);
+  };
+
+  const spendPerImpression = safeDivide(spend, impressions);
+  return {
+    ctr: safeDivide(clicks, impressions),
+    cpc: safeDivide(spend, clicks),
+    cpm: spendPerImpression === null ? null : spendPerImpression * 1000,
+  };
+}
+
 function aggregateRequestedDateMetrics(rows) {
   if (!rows.length) {
     return {
@@ -290,6 +322,9 @@ function aggregateRequestedDateMetrics(rows) {
       impressions: null,
       clicks: null,
       frequency: null,
+      ctr: null,
+      cpc: null,
+      cpm: null,
     };
   }
   let spend = 0;
@@ -317,6 +352,7 @@ function aggregateRequestedDateMetrics(rows) {
     impressions,
     clicks,
     frequency: freqCount > 0 ? freqSum / freqCount : null,
+    ...computeDerivedMetrics({ spend, impressions, clicks }),
   };
 }
 
@@ -515,6 +551,9 @@ function validateOwnAdsClaudeContract(analysis, expectedState, expectedConfidenc
       impressions: null,
       clicks: null,
       frequency: null,
+      ctr: null,
+      cpc: null,
+      cpm: null,
     };
   }
   if (!Array.isArray(analysis.highlights)) analysis.highlights = [];
@@ -802,6 +841,7 @@ async function runOwnAdsBrief({ date, skipIfRunning = false } = {}) {
 
 module.exports = {
   buildOwnAdsContext,
+  computeDerivedMetrics,
   runOwnAdsBrief,
   computeOwnAdsConfidence,
   buildOwnAdsClaudeUserPrompt,
