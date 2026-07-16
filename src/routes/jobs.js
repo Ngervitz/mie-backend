@@ -3,6 +3,8 @@ const { dailySync } = require('../jobs/dailySync');
 const { runActivity } = require('../activity/runActivity');
 const { collectOwnMetrics } = require('../steps/collectOwnMetrics');
 const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
+const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays');
+const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const env = require('../config/env');
@@ -535,5 +537,85 @@ const runOwnAdChangesHandler = (req, res) => {
 
 router.post('/run-own-ad-changes', runOwnAdChangesHandler);
 router.get('/run-own-ad-changes', runOwnAdChangesHandler);
+
+// --- Economic calendar (standalone, manual trigger; NOT chained into daily sync) ---
+const economicCalendarJobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+router.get('/economic-calendar-status', (req, res) => {
+  res.json({
+    status: economicCalendarJobState.status,
+    startedAt: economicCalendarJobState.startedAt,
+    finishedAt: economicCalendarJobState.finishedAt,
+    lastResult: economicCalendarJobState.lastResult,
+    lastError: economicCalendarJobState.lastError,
+  });
+});
+
+const runEconomicCalendarHandler = (req, res) => {
+  if (economicCalendarJobState.status === 'running') {
+    return res.status(409).json({
+      error: 'Economic calendar job already in progress',
+      status: economicCalendarJobState.status,
+      startedAt: economicCalendarJobState.startedAt,
+    });
+  }
+
+  economicCalendarJobState.status = 'running';
+  economicCalendarJobState.startedAt = new Date().toISOString();
+  economicCalendarJobState.finishedAt = null;
+  economicCalendarJobState.lastResult = null;
+  economicCalendarJobState.lastError = null;
+
+  logger.info('POST /jobs/run-economic-calendar — started');
+
+  (async () => {
+    const result = { holidays: null, bps: null };
+    // Holidays are deterministic/idempotent — run first, independently.
+    result.holidays = await calculateUruguayHolidays();
+    try {
+      result.bps = await collectBpsPaymentCalendar();
+    } catch (bpsErr) {
+      // BPS scrape failure must not mask a successful holiday calculation.
+      result.bps = {
+        error: bpsErr && bpsErr.message ? bpsErr.message : 'unknown',
+      };
+      logger.error('BPS scrape failed within economic calendar job', {
+        error: bpsErr && bpsErr.message ? bpsErr.message : 'unknown',
+      });
+    }
+    return result;
+  })()
+    .then((result) => {
+      economicCalendarJobState.status = 'idle';
+      economicCalendarJobState.finishedAt = new Date().toISOString();
+      economicCalendarJobState.lastResult = result;
+      logger.info('Economic calendar job completed', {
+        holidaysUpserted: result.holidays && result.holidays.eventsUpserted,
+        bpsUpserted: result.bps && result.bps.eventsUpserted,
+        bpsError: result.bps && result.bps.error,
+      });
+    })
+    .catch((err) => {
+      economicCalendarJobState.status = 'idle';
+      economicCalendarJobState.finishedAt = new Date().toISOString();
+      economicCalendarJobState.lastError = err.message;
+      logger.error('Economic calendar job failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'Economic calendar started',
+    status: 'running',
+    startedAt: economicCalendarJobState.startedAt,
+  });
+};
+
+router.post('/run-economic-calendar', runEconomicCalendarHandler);
+router.get('/run-economic-calendar', runEconomicCalendarHandler);
 
 module.exports = router;
