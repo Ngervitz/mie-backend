@@ -947,6 +947,13 @@
   padding: 8px 14px;
 }
 
+/* Google "G" source icon inside chrome buttons: alignment/spacing only —
+   the artwork itself is the official asset and must stay untouched. */
+#mie-dashboard-app .mcl-btn-gicon {
+  vertical-align: -3px;
+  margin-right: 6px;
+}
+
 #mie-dashboard-app .mcl-chrome-btn:hover,
 #mie-dashboard-app .mcl-back-btn:hover,
 #mie-dashboard-app .mcl-more-btn:hover {
