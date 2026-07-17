@@ -932,78 +932,141 @@ router.get('/own-ad-changes', async (req, res) => {
 });
 
 /**
- * GET /reports/coverage-suggestions
- * Reads the LATEST discovery row per (seed, term) from search_term_discoveries
- * (never triggers a live Trends call), cross-referenced against
- * monitored_entities (already covered?) and confirmed_search_terms (already
- * decided?). By default only pending/undecided items are returned; pass
- * ?includeDecided=1 to include everything.
+ * Shared read core for coverage-suggestions / keyword-research /
+ * search-discoveries. Computed once, shaped per view at the end:
+ *   - latest discovery row per (seed, term, query_type)
+ *   - cross-reference vs monitored_entities (already covered?)
+ *   - cross-reference vs confirmed_search_terms (decision or 'pending')
+ *   - server-side growth_percent / is_breakout (parseTrendsFormattedValue)
+ *   - marca/frase heuristic (suggestion aid only, human-overridable)
+ */
+async function loadSearchDiscoveries() {
+  const { data: discoveries, error: discErr } = await supabase
+    .from('search_term_discoveries')
+    .select('seed, term, query_type, score, formatted_value, discovered_at')
+    .order('discovered_at', { ascending: false })
+    .limit(2000);
+  if (discErr) {
+    throw new Error(`Failed to fetch search_term_discoveries: ${discErr.message}`);
+  }
+
+  // Latest row per (seed, term, query_type) — rows are already sorted desc.
+  const latestByKey = new Map();
+  for (const row of discoveries || []) {
+    const key = `${row.seed}::${row.term}::${row.query_type}`;
+    if (!latestByKey.has(key)) latestByKey.set(key, row);
+  }
+
+  const { data: entities, error: entErr } = await supabase
+    .from('monitored_entities')
+    .select('id, name, is_self, active');
+  if (entErr) {
+    throw new Error(`Failed to fetch monitored_entities: ${entErr.message}`);
+  }
+  const entityByLowerName = new Map(
+    (entities || []).map((e) => [String(e.name || '').trim().toLowerCase(), e]),
+  );
+
+  const { data: decided, error: decErr } = await supabase
+    .from('confirmed_search_terms')
+    .select('term, decision');
+  if (decErr) {
+    throw new Error(`Failed to fetch confirmed_search_terms: ${decErr.message}`);
+  }
+  const decisionByLowerTerm = new Map(
+    (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d.decision]),
+  );
+
+  const seeds = new Set();
+  const items = [];
+  for (const row of latestByKey.values()) {
+    const lower = String(row.term || '').trim().toLowerCase();
+    const entity = entityByLowerName.get(lower) || null;
+    const derived = parseTrendsFormattedValue(row.formatted_value);
+    const termStr = String(row.term || '').trim();
+    seeds.add(row.seed);
+
+    items.push({
+      term: row.term,
+      seed: row.seed,
+      queryType: row.query_type,
+      score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+      formattedValue: row.formatted_value || null,
+      discoveredAt: row.discovered_at,
+      growthPercent: derived.growth_percent,
+      isBreakout: derived.is_breakout,
+      alreadyCovered: Boolean(entity),
+      coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
+      decision: decisionByLowerTerm.get(lower) || 'pending',
+      // Heuristic aid: single capitalized word -> possible brand.
+      suggestedKind:
+        !/\s/.test(termStr) && /^[A-ZÁÉÍÓÚÑ]/.test(termStr) ? 'brand' : 'intent',
+    });
+  }
+
+  return { items, seeds: Array.from(seeds).sort() };
+}
+
+function sortRisingFirstByScore(items) {
+  return items.slice().sort((a, b) => {
+    if (a.queryType !== b.queryType) return a.queryType === 'rising' ? -1 : 1;
+    return (b.score || 0) - (a.score || 0);
+  });
+}
+
+/**
+ * GET /reports/search-discoveries?view=pending|research — unified read
+ * endpoint over search_term_discoveries.
+ * - view=pending: only undecided terms (triage screen shape)
+ * - view=research: ALL terms with their decision status (research shape,
+ *   supports the Top/Rising separation + seed filter client-side)
+ */
+router.get('/search-discoveries', async (req, res) => {
+  const view = String(req.query.view || '');
+  if (view !== 'pending' && view !== 'research') {
+    return res.status(400).json({ error: 'Invalid view. Use view=pending or view=research' });
+  }
+
+  try {
+    const { items, seeds } = await loadSearchDiscoveries();
+
+    if (view === 'pending') {
+      const suggestions = sortRisingFirstByScore(
+        items.filter((i) => i.decision === 'pending'),
+      );
+      return res.json({ view, suggestions, total: suggestions.length });
+    }
+
+    return res.json({ view, keywords: items, seeds, total: items.length });
+  } catch (err) {
+    logger.error('Reports search-discoveries failed', { view, error: err.message });
+    return res.status(500).json({ error: 'Failed to fetch search discoveries' });
+  }
+});
+
+/**
+ * GET /reports/coverage-suggestions — DEPRECATED (kept until nothing depends
+ * on it; see /search-discoveries). Delegates to the shared core and preserves
+ * the original response shape exactly (decision null when undecided).
  */
 router.get('/coverage-suggestions', async (req, res) => {
   try {
     const includeDecided = String(req.query.includeDecided || '') === '1';
+    const { items } = await loadSearchDiscoveries();
 
-    const { data: discoveries, error: discErr } = await supabase
-      .from('search_term_discoveries')
-      .select('seed, term, query_type, score, formatted_value, discovered_at')
-      .order('discovered_at', { ascending: false })
-      .limit(2000);
-    if (discErr) {
-      throw new Error(`Failed to fetch search_term_discoveries: ${discErr.message}`);
-    }
-
-    // Latest row per (seed, term, query_type) — rows are already sorted desc.
-    const latestByKey = new Map();
-    for (const row of discoveries || []) {
-      const key = `${row.seed}::${row.term}::${row.query_type}`;
-      if (!latestByKey.has(key)) latestByKey.set(key, row);
-    }
-
-    const { data: entities, error: entErr } = await supabase
-      .from('monitored_entities')
-      .select('id, name, is_self, active');
-    if (entErr) {
-      throw new Error(`Failed to fetch monitored_entities: ${entErr.message}`);
-    }
-    const entityByLowerName = new Map(
-      (entities || []).map((e) => [String(e.name || '').trim().toLowerCase(), e]),
-    );
-
-    const { data: decided, error: decErr } = await supabase
-      .from('confirmed_search_terms')
-      .select('term, decision');
-    if (decErr) {
-      throw new Error(`Failed to fetch confirmed_search_terms: ${decErr.message}`);
-    }
-    const decisionByLowerTerm = new Map(
-      (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d.decision]),
-    );
-
-    const suggestions = [];
-    for (const row of latestByKey.values()) {
-      const lower = String(row.term || '').trim().toLowerCase();
-      const entity = entityByLowerName.get(lower) || null;
-      const decision = decisionByLowerTerm.get(lower) || null;
-      if (!includeDecided && decision) continue;
-
-      suggestions.push({
-        term: row.term,
-        seed: row.seed,
-        queryType: row.query_type,
-        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
-        formattedValue: row.formatted_value || null,
-        discoveredAt: row.discovered_at,
-        alreadyCovered: Boolean(entity),
-        coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
-        decision,
-      });
-    }
-
-    // Rising first (growth signal), then top by score desc.
-    suggestions.sort((a, b) => {
-      if (a.queryType !== b.queryType) return a.queryType === 'rising' ? -1 : 1;
-      return (b.score || 0) - (a.score || 0);
-    });
+    const suggestions = sortRisingFirstByScore(
+      items.filter((i) => includeDecided || i.decision === 'pending'),
+    ).map((i) => ({
+      term: i.term,
+      seed: i.seed,
+      queryType: i.queryType,
+      score: i.score,
+      formattedValue: i.formattedValue,
+      discoveredAt: i.discoveredAt,
+      alreadyCovered: i.alreadyCovered,
+      coveredByEntity: i.coveredByEntity,
+      decision: i.decision === 'pending' ? null : i.decision,
+    }));
 
     return res.json({ suggestions, total: suggestions.length });
   } catch (err) {
@@ -1200,53 +1263,26 @@ function parseTrendsFormattedValue(formattedValue) {
 }
 
 /**
- * GET /reports/keyword-research
- * Read-only view over search_term_discoveries for Google Ads keyword
- * planning. Same de-duplication convention as /coverage-suggestions:
- * latest row per (seed, term, query_type).
- *
- * IMPORTANT: scores are Google Trends' RELATIVE interest index / growth,
- * not real search volume, competition or CPC — the UI must say so.
+ * GET /reports/keyword-research — DEPRECATED (kept until nothing depends on
+ * it; see /search-discoveries?view=research). Delegates to the shared core
+ * and preserves the original snake_case response shape exactly.
  */
 router.get('/keyword-research', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('search_term_discoveries')
-      .select('seed, term, query_type, score, formatted_value, discovered_at')
-      .order('discovered_at', { ascending: false })
-      .limit(2000);
-    if (error) {
-      throw new Error(`Failed to fetch search_term_discoveries: ${error.message}`);
-    }
+    const { items, seeds } = await loadSearchDiscoveries();
 
-    const latestByKey = new Map();
-    for (const row of data || []) {
-      const key = `${row.seed}::${row.term}::${row.query_type}`;
-      if (!latestByKey.has(key)) latestByKey.set(key, row);
-    }
+    const keywords = items.map((i) => ({
+      term: i.term,
+      query_type: i.queryType,
+      score: i.score,
+      formatted_value: i.formattedValue,
+      seed: i.seed,
+      discovered_at: i.discoveredAt,
+      growth_percent: i.growthPercent,
+      is_breakout: i.isBreakout,
+    }));
 
-    const seeds = new Set();
-    const keywords = [];
-    for (const row of latestByKey.values()) {
-      seeds.add(row.seed);
-      const derived = parseTrendsFormattedValue(row.formatted_value);
-      keywords.push({
-        term: row.term,
-        query_type: row.query_type,
-        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
-        formatted_value: row.formatted_value || null,
-        seed: row.seed,
-        discovered_at: row.discovered_at,
-        growth_percent: derived.growth_percent,
-        is_breakout: derived.is_breakout,
-      });
-    }
-
-    return res.json({
-      keywords,
-      seeds: Array.from(seeds).sort(),
-      total: keywords.length,
-    });
+    return res.json({ keywords, seeds, total: keywords.length });
   } catch (err) {
     logger.error('Reports keyword-research failed', { error: err.message });
     return res.status(500).json({ error: 'Failed to fetch keyword research data' });

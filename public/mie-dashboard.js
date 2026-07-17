@@ -2624,17 +2624,13 @@ init();
  * POST /reports/coverage-suggestions/decide.
  * ------------------------------------------------------------------------- */
 (function initCoverageLanding() {
-  const openBtn = document.getElementById('coverage-open-btn');
-  const backBtn = document.getElementById('coverage-back-btn');
-  const landing = document.getElementById('coverage-landing');
-  const marketRoot = document.getElementById('mie-market-root');
   const statusEl = document.getElementById('cov-status');
   const suggestionsEl = document.getElementById('cov-suggestions');
   const applyBtn = document.getElementById('cov-apply-btn');
   const feedbackEl = document.getElementById('cov-apply-feedback');
   const draftsEl = document.getElementById('cov-drafts');
 
-  if (!openBtn || !backBtn || !landing || !marketRoot || !suggestionsEl || !applyBtn || !draftsEl) {
+  if (!statusEl || !suggestionsEl || !applyBtn || !draftsEl) {
     return;
   }
 
@@ -2645,28 +2641,6 @@ init();
     pollTimer: null,
     pollAttempts: 0,
   };
-
-  function setView(showLanding) {
-    landing.classList.toggle('hidden', !showLanding);
-    marketRoot.classList.toggle('hidden', showLanding);
-    if (showLanding) {
-      landing.removeAttribute('hidden');
-      marketRoot.setAttribute('hidden', '');
-      // Sibling landings in the market tab are mutually exclusive.
-      const kwLanding = document.getElementById('keyword-landing');
-      if (kwLanding) {
-        kwLanding.classList.add('hidden');
-        kwLanding.setAttribute('hidden', '');
-      }
-    } else {
-      marketRoot.removeAttribute('hidden');
-      landing.setAttribute('hidden', '');
-      if (covState.pollTimer) {
-        clearTimeout(covState.pollTimer);
-        covState.pollTimer = null;
-      }
-    }
-  }
 
   // Human judgment aid only — always overridable by the dropdown choice.
   function suggestKind(term) {
@@ -2800,7 +2774,7 @@ init();
   async function loadSuggestions() {
     statusEl.textContent = 'Cargando sugerencias…';
     try {
-      const res = await fetch(`${API_BASE}/reports/coverage-suggestions`, {
+      const res = await fetch(`${API_BASE}/reports/search-discoveries?view=pending`, {
         headers: { Accept: 'application/json' },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2906,14 +2880,21 @@ init();
     await loadDrafts();
   }
 
-  openBtn.addEventListener('click', () => {
-    setView(true);
-    loadSuggestions();
-    loadDrafts();
-  });
-
-  backBtn.addEventListener('click', () => setView(false));
   applyBtn.addEventListener('click', applyDecisions);
+
+  // Loading and teardown are driven by the unified discoveries controller.
+  window.__discPending = {
+    load: () => {
+      loadSuggestions();
+      loadDrafts();
+    },
+    stop: () => {
+      if (covState.pollTimer) {
+        clearTimeout(covState.pollTimer);
+        covState.pollTimer = null;
+      }
+    },
+  };
 })();
 
 /* ----------------------------------------------------------------------------
@@ -2924,16 +2905,12 @@ init();
  * Directional Trends data only: no volume / competition / CPC claims.
  * ------------------------------------------------------------------------- */
 (function initKeywordLanding() {
-  const openBtn = document.getElementById('keyword-open-btn');
-  const backBtn = document.getElementById('keyword-back-btn');
-  const landing = document.getElementById('keyword-landing');
-  const marketRoot = document.getElementById('mie-market-root');
   const statusEl = document.getElementById('kw-status');
   const seedFilter = document.getElementById('kw-seed-filter');
   const topList = document.getElementById('kw-top-list');
   const risingList = document.getElementById('kw-rising-list');
 
-  if (!openBtn || !backBtn || !landing || !marketRoot || !seedFilter || !topList || !risingList) {
+  if (!statusEl || !seedFilter || !topList || !risingList) {
     return;
   }
 
@@ -2944,40 +2921,35 @@ init();
     loaded: false,
   };
 
-  function setView(showLanding) {
-    landing.classList.toggle('hidden', !showLanding);
-    marketRoot.classList.toggle('hidden', showLanding);
-    if (showLanding) {
-      landing.removeAttribute('hidden');
-      marketRoot.setAttribute('hidden', '');
-      const covLanding = document.getElementById('coverage-landing');
-      if (covLanding) {
-        covLanding.classList.add('hidden');
-        covLanding.setAttribute('hidden', '');
-      }
-    } else {
-      marketRoot.removeAttribute('hidden');
-      landing.setAttribute('hidden', '');
-    }
-  }
-
   // Tooltip text is fixed by spec — never mention competencia/pujas/costo/
   // CPC/volumen mensual anywhere near these badges.
   const BADGE_TOOLTIP = 'Candidato a investigar en Keyword Planner de Google Ads';
 
   function badgeFor(row) {
-    if (row.is_breakout === true) {
+    if (row.isBreakout === true) {
       return `<span class="kw-badge is-breakout" title="${BADGE_TOOLTIP}">Tendencia emergente (Aumento puntual)</span>`;
     }
-    if (typeof row.growth_percent === 'number' && row.growth_percent > 500) {
+    if (typeof row.growthPercent === 'number' && row.growthPercent > 500) {
       return `<span class="kw-badge is-fast" title="${BADGE_TOOLTIP}">Crecimiento acelerado</span>`;
     }
     return '';
   }
 
+  const DECISION_BADGES = {
+    monitor_trends: ['Monitoreado', 'is-monitored'],
+    added_as_competitor: ['Competidor', 'is-competitor'],
+    discarded: ['Descartado', 'is-discarded'],
+    pending: ['Pendiente', 'is-pending'],
+  };
+
+  function decisionBadgeFor(row) {
+    const [label, cls] = DECISION_BADGES[row.decision] || DECISION_BADGES.pending;
+    return `<span class="kw-badge kw-decision ${cls}">${label}</span>`;
+  }
+
   function filteredRows(queryType) {
     return kwState.keywords.filter(
-      (k) => k.query_type === queryType && (!kwState.seed || k.seed === kwState.seed),
+      (k) => k.queryType === queryType && (!kwState.seed || k.seed === kwState.seed),
     );
   }
 
@@ -2994,8 +2966,9 @@ init();
           <div class="kw-row-main">
             <span class="kw-term">${escapeHtml(r.term)}</span>
             <span class="kw-score" title="Índice de interés relativo de Google Trends (0-100)">${escapeHtml(
-              r.formatted_value || String(r.score ?? '—'),
+              r.formattedValue || String(r.score ?? '—'),
             )}</span>
+            ${decisionBadgeFor(r)}
           </div>
           <div class="kw-row-meta">seed: ${escapeHtml(r.seed)}</div>
         </div>`,
@@ -3005,10 +2978,10 @@ init();
 
   function renderRisingColumn() {
     const rows = filteredRows('rising').sort((a, b) => {
-      const aBreak = a.is_breakout === true ? 1 : 0;
-      const bBreak = b.is_breakout === true ? 1 : 0;
+      const aBreak = a.isBreakout === true ? 1 : 0;
+      const bBreak = b.isBreakout === true ? 1 : 0;
       if (aBreak !== bBreak) return bBreak - aBreak;
-      return (b.growth_percent || 0) - (a.growth_percent || 0);
+      return (b.growthPercent || 0) - (a.growthPercent || 0);
     });
     if (!rows.length) {
       risingList.innerHTML = '<div class="kw-empty">Sin tendencias en alza para este filtro.</div>';
@@ -3017,15 +2990,16 @@ init();
     risingList.innerHTML = rows
       .map((r) => {
         const growth =
-          r.is_breakout === true
+          r.isBreakout === true
             ? ''
-            : `<span class="kw-score">${escapeHtml(r.formatted_value || '—')}</span>`;
+            : `<span class="kw-score">${escapeHtml(r.formattedValue || '—')}</span>`;
         return `
         <div class="kw-row">
           <div class="kw-row-main">
             <span class="kw-term">${escapeHtml(r.term)}</span>
             ${growth}
             ${badgeFor(r)}
+            ${decisionBadgeFor(r)}
           </div>
           <div class="kw-row-meta">seed: ${escapeHtml(r.seed)}</div>
         </div>`;
@@ -3054,7 +3028,7 @@ init();
   async function loadKeywords() {
     statusEl.textContent = 'Cargando términos…';
     try {
-      const res = await fetch(`${API_BASE}/reports/keyword-research`, {
+      const res = await fetch(`${API_BASE}/reports/search-discoveries?view=research`, {
         headers: { Accept: 'application/json' },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3079,10 +3053,72 @@ init();
     renderRisingColumn();
   });
 
+  // Loading is driven by the unified discoveries controller.
+  window.__discResearch = { load: loadKeywords };
+})();
+
+/* ----------------------------------------------------------------------------
+ * Unified discoveries landing controller: one entry point, internal
+ * Pendientes / Investigación toggle. Owns landing visibility and delegates
+ * data loading to the two pane modules above.
+ * ------------------------------------------------------------------------- */
+(function initDiscoveriesLanding() {
+  const openBtn = document.getElementById('discoveries-open-btn');
+  const backBtn = document.getElementById('discoveries-back-btn');
+  const landing = document.getElementById('discoveries-landing');
+  const marketRoot = document.getElementById('mie-market-root');
+  const tabPending = document.getElementById('disc-tab-pending');
+  const tabResearch = document.getElementById('disc-tab-research');
+  const panePending = document.getElementById('disc-pane-pending');
+  const paneResearch = document.getElementById('disc-pane-research');
+
+  if (
+    !openBtn || !backBtn || !landing || !marketRoot ||
+    !tabPending || !tabResearch || !panePending || !paneResearch
+  ) {
+    return;
+  }
+
+  function setLanding(show) {
+    landing.classList.toggle('hidden', !show);
+    marketRoot.classList.toggle('hidden', show);
+    if (show) {
+      landing.removeAttribute('hidden');
+      marketRoot.setAttribute('hidden', '');
+    } else {
+      marketRoot.removeAttribute('hidden');
+      landing.setAttribute('hidden', '');
+      if (window.__discPending) window.__discPending.stop();
+    }
+  }
+
+  function activateTab(name) {
+    const isPending = name === 'pending';
+    tabPending.classList.toggle('active', isPending);
+    tabResearch.classList.toggle('active', !isPending);
+    tabPending.setAttribute('aria-selected', isPending ? 'true' : 'false');
+    tabResearch.setAttribute('aria-selected', isPending ? 'false' : 'true');
+
+    panePending.classList.toggle('hidden', !isPending);
+    paneResearch.classList.toggle('hidden', isPending);
+    if (isPending) {
+      panePending.removeAttribute('hidden');
+      paneResearch.setAttribute('hidden', '');
+      if (window.__discPending) window.__discPending.load();
+    } else {
+      paneResearch.removeAttribute('hidden');
+      panePending.setAttribute('hidden', '');
+      if (window.__discPending) window.__discPending.stop();
+      if (window.__discResearch) window.__discResearch.load();
+    }
+  }
+
   openBtn.addEventListener('click', () => {
-    setView(true);
-    loadKeywords();
+    setLanding(true);
+    activateTab('pending');
   });
 
-  backBtn.addEventListener('click', () => setView(false));
+  backBtn.addEventListener('click', () => setLanding(false));
+  tabPending.addEventListener('click', () => activateTab('pending'));
+  tabResearch.addEventListener('click', () => activateTab('research'));
 })();

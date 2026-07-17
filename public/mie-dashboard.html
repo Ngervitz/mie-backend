@@ -47,84 +47,83 @@
       aria-labelledby="tab-market">
       <div id="market-chrome" class="meta-ads-chrome">
         <div class="meta-ads-chrome-actions">
-          <button type="button" id="coverage-open-btn" class="mcl-chrome-btn">
-            🔎 Sugerencias de cobertura
-          </button>
-          <button type="button" id="keyword-open-btn" class="mcl-chrome-btn">
-            📊 Keyword research
+          <button type="button" id="discoveries-open-btn" class="mcl-chrome-btn">
+            🔎 Términos descubiertos
           </button>
         </div>
       </div>
 
       <main class="app" id="mie-market-root"></main>
 
-      <div id="coverage-landing" class="cov-landing hidden" hidden>
+      <!-- Unified discoveries landing: one entry point, two internal views
+           (Pendientes = triage, Investigación = keyword research). Both read
+           from GET /reports/search-discoveries. -->
+      <div id="discoveries-landing" class="cov-landing hidden" hidden>
         <header class="mcl-header">
           <div class="mcl-header-left">
-            <button type="button" id="coverage-back-btn" class="mcl-back-btn">
+            <button type="button" id="discoveries-back-btn" class="mcl-back-btn">
               ← Volver a Inteligencia de mercado
             </button>
-            <h1 class="mcl-title">Sugerencias de cobertura</h1>
+            <h1 class="mcl-title">Términos descubiertos</h1>
             <p class="mcl-subtitle">
-              Términos reales descubiertos en Google Trends (UY), cruzados contra las entidades monitoreadas
+              Términos reales descubiertos en Google Trends (UY): triage de cobertura e investigación de keywords
             </p>
           </div>
         </header>
 
-        <div id="cov-status" class="cov-status" aria-live="polite"></div>
-        <div id="cov-suggestions" class="cov-suggestions"></div>
-        <div class="cov-actions">
-          <button type="button" id="cov-apply-btn" class="btn btn-primary" disabled>
-            Aplicar decisiones
+        <div class="disc-tabs" role="tablist" aria-label="Vistas de términos descubiertos">
+          <button type="button" id="disc-tab-pending" class="disc-tab active" role="tab" aria-selected="true">
+            Pendientes
           </button>
-          <span id="cov-apply-feedback" class="cov-apply-feedback" aria-live="polite"></span>
+          <button type="button" id="disc-tab-research" class="disc-tab" role="tab" aria-selected="false">
+            Investigación
+          </button>
         </div>
 
-        <section class="cov-drafts-section">
-          <h2 class="cov-section-title">Borradores de landing SEO</h2>
-          <p class="cov-section-sub">
-            Generados automáticamente al confirmar un término. Nunca se publican solos: revisar, descargar y subir manualmente.
-          </p>
-          <div id="cov-drafts" class="cov-drafts"></div>
-        </section>
-      </div>
-
-      <div id="keyword-landing" class="kw-landing hidden" hidden>
-        <header class="mcl-header">
-          <div class="mcl-header-left">
-            <button type="button" id="keyword-back-btn" class="mcl-back-btn">
-              ← Volver a Inteligencia de mercado
+        <div id="disc-pane-pending" role="tabpanel">
+          <div id="cov-status" class="cov-status" aria-live="polite"></div>
+          <div id="cov-suggestions" class="cov-suggestions"></div>
+          <div class="cov-actions">
+            <button type="button" id="cov-apply-btn" class="btn btn-primary" disabled>
+              Aplicar decisiones
             </button>
-            <h1 class="mcl-title">Keyword research</h1>
-            <p class="mcl-subtitle">
-              Términos descubiertos en Google Trends (UY) organizados para planificar keywords de Google Ads
-            </p>
+            <span id="cov-apply-feedback" class="cov-apply-feedback" aria-live="polite"></span>
           </div>
-        </header>
 
-        <div class="kw-disclaimer" role="alert">
-          <strong>Aviso de Planificación:</strong> Los datos presentados son de carácter direccional basados en el índice de interés relativo de Google Trends (0-100). No representan volumen real de búsquedas mensuales, nivel de competencia ni costo por clic (CPC). Para la planificación y configuración de pujas reales en tu campaña, debés contrastar estos términos de forma manual en el Keyword Planner de Google Ads.
+          <section class="cov-drafts-section">
+            <h2 class="cov-section-title">Borradores de landing SEO</h2>
+            <p class="cov-section-sub">
+              Generados automáticamente al confirmar un término. Nunca se publican solos: revisar, descargar y subir manualmente.
+            </p>
+            <div id="cov-drafts" class="cov-drafts"></div>
+          </section>
         </div>
 
-        <div class="kw-filters">
-          <label class="mcl-field">
-            <span class="mcl-field-label">Seed</span>
-            <select id="kw-seed-filter" class="mcl-select">
-              <option value="">Todos los seeds</option>
-            </select>
-          </label>
-        </div>
+        <div id="disc-pane-research" class="hidden" role="tabpanel" hidden>
+          <div class="kw-disclaimer" role="alert">
+            <strong>Aviso de Planificación:</strong> Los datos presentados son de carácter direccional basados en el índice de interés relativo de Google Trends (0-100). No representan volumen real de búsquedas mensuales, nivel de competencia ni costo por clic (CPC). Para la planificación y configuración de pujas reales en tu campaña, debés contrastar estos términos de forma manual en el Keyword Planner de Google Ads.
+          </div>
 
-        <div id="kw-status" class="kw-status" aria-live="polite"></div>
-        <div class="kw-columns">
-          <section class="kw-column">
-            <h2 class="kw-column-title">Términos Más Buscados (Top)</h2>
-            <div id="kw-top-list"></div>
-          </section>
-          <section class="kw-column">
-            <h2 class="kw-column-title">Tendencias en Alza (Rising)</h2>
-            <div id="kw-rising-list"></div>
-          </section>
+          <div class="kw-filters">
+            <label class="mcl-field">
+              <span class="mcl-field-label">Seed</span>
+              <select id="kw-seed-filter" class="mcl-select">
+                <option value="">Todos los seeds</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="kw-status" class="kw-status" aria-live="polite"></div>
+          <div class="kw-columns">
+            <section class="kw-column">
+              <h2 class="kw-column-title">Términos Más Buscados (Top)</h2>
+              <div id="kw-top-list"></div>
+            </section>
+            <section class="kw-column">
+              <h2 class="kw-column-title">Tendencias en Alza (Rising)</h2>
+              <div id="kw-rising-list"></div>
+            </section>
+          </div>
         </div>
       </div>
     </div>
