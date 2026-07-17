@@ -10,6 +10,7 @@ const {
   discoverRelatedQueries,
   createSession: createDiscoverySession,
 } = require('../steps/discoverRelatedQueries');
+const { buildDiscoveryRows } = require('../lib/discovery-rows');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const env = require('../config/env');
@@ -758,28 +759,6 @@ const DISCOVERY_REFRESH_SEEDS = ['préstamo', 'crédito', 'dinero rápido', 'efe
 // 10s proved insufficient in production (cumulative throttling across seeds);
 // this is a monthly low-stakes job, so generous spacing is fine.
 const DISCOVERY_INTER_SEED_DELAY_MS = 45000;
-
-function buildDiscoveryRows(seed, result, discoveredAt) {
-  const rows = [];
-  for (const [queryType, items] of [
-    ['top', result.top || []],
-    ['rising', result.rising || []],
-  ]) {
-    for (const item of items) {
-      if (!item.query) continue;
-      rows.push({
-        seed,
-        term: item.query,
-        query_type: queryType,
-        score: item.value,
-        formatted_value: item.formattedValue,
-        raw_json: item,
-        discovered_at: discoveredAt,
-      });
-    }
-  }
-  return rows;
-}
 
 const discoveryRefreshJobState = {
   status: 'idle',
