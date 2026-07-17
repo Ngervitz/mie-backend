@@ -13,6 +13,7 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
+    "@google-analytics/data": "^6.1.0",
     "@supabase/supabase-js": "^2.108.2",
     "apify-client": "^2.23.4",
     "dotenv": "^17.4.2",

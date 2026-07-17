@@ -6,6 +6,7 @@ const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays');
 const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
 const { collectSearchTrends } = require('../steps/collectSearchTrends');
+const { collectGa4Metrics, runGa4Audit } = require('../steps/collectGa4Metrics');
 const {
   discoverRelatedQueries,
   createSession: createDiscoverySession,
@@ -880,5 +881,82 @@ const runDiscoveryRefreshHandler = (req, res) => {
 
 router.post('/run-discovery-refresh', runDiscoveryRefreshHandler);
 router.get('/run-discovery-refresh', runDiscoveryRefreshHandler);
+
+// --- GA4 metrics capture (standalone, manual trigger; NOT chained into metaBranch) ---
+const ga4JobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+router.get('/ga4-metrics-status', (req, res) => {
+  res.json({
+    status: ga4JobState.status,
+    startedAt: ga4JobState.startedAt,
+    finishedAt: ga4JobState.finishedAt,
+    lastResult: ga4JobState.lastResult,
+    lastError: ga4JobState.lastError,
+  });
+});
+
+// Read-only diagnostic (Phase 1 audit): getMetadata + checkCompatibility +
+// one tiny runReport with returnPropertyQuota against the real property.
+// Touches no tables; synchronous (responds in a few seconds).
+router.get('/ga4-audit', async (req, res) => {
+  logger.info('GET /jobs/ga4-audit');
+  try {
+    const result = await runGa4Audit();
+    res.json(result);
+  } catch (err) {
+    logger.error('GA4 audit failed', { error: err.message });
+    res.status(502).json({ error: err.message });
+  }
+});
+
+const runGa4MetricsHandler = (req, res) => {
+  if (ga4JobState.status === 'running') {
+    return res.status(409).json({
+      error: 'GA4 metrics job already in progress',
+      status: ga4JobState.status,
+      startedAt: ga4JobState.startedAt,
+    });
+  }
+
+  ga4JobState.status = 'running';
+  ga4JobState.startedAt = new Date().toISOString();
+  ga4JobState.finishedAt = null;
+  ga4JobState.lastResult = null;
+  ga4JobState.lastError = null;
+
+  logger.info('POST /jobs/run-ga4-metrics — started');
+
+  collectGa4Metrics()
+    .then((result) => {
+      ga4JobState.status = 'idle';
+      ga4JobState.finishedAt = new Date().toISOString();
+      ga4JobState.lastResult = result;
+      logger.info('GA4 metrics job completed', {
+        reportingDate: result.reportingDate,
+        rowsUpserted: result.rowsUpserted,
+      });
+    })
+    .catch((err) => {
+      ga4JobState.status = 'idle';
+      ga4JobState.finishedAt = new Date().toISOString();
+      ga4JobState.lastError = err.message;
+      logger.error('GA4 metrics job failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'GA4 metrics started',
+    status: 'running',
+    startedAt: ga4JobState.startedAt,
+  });
+};
+
+router.post('/run-ga4-metrics', runGa4MetricsHandler);
+router.get('/run-ga4-metrics', runGa4MetricsHandler);
 
 module.exports = router;
