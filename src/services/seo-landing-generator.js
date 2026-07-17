@@ -181,6 +181,30 @@ function buildFaqJsonLd(faq) {
   return `<script type="application/ld+json">${JSON.stringify(schema)}</script>`;
 }
 
+/**
+ * Optional hero background photo (licensed asset uploaded by Nico to the
+ * public `landing-assets` Storage bucket). Read from env so the image can be
+ * swapped without a code change. When set, the photo sits BEHIND a dark
+ * semi-transparent purple overlay (brand dark tone) so the white headline,
+ * body text and CTA keep full contrast — the raw photo never touches the
+ * text directly. When unset, the hero falls back to the existing solid
+ * purple gradient (previous behavior, unchanged).
+ */
+function buildHeroBackgroundCss() {
+  const imageUrl = String(process.env.SEO_LANDING_HERO_IMAGE_URL || '').trim();
+  if (!imageUrl) {
+    return 'background: linear-gradient(135deg, var(--cz-primary), var(--cz-dark));';
+  }
+  // CSS url() literal: escape quotes/backslashes defensively.
+  const safeUrl = imageUrl.replace(/\\/g, '\\\\').replace(/"/g, '%22');
+  return [
+    // Purple-tinted overlay over the photo: reads as brand, not as a clash.
+    `background: linear-gradient(rgba(75, 0, 130, 0.62), rgba(46, 8, 84, 0.78)), url("${safeUrl}");`,
+    'background-size: cover;',
+    'background-position: center;',
+  ].join('\n      ');
+}
+
 function renderLandingHtml(term, content) {
   const metaTitle = content.metaTitle || `${term} | Credizona`;
   const metaDescription = content.metaDescription || '';
@@ -242,7 +266,7 @@ function renderLandingHtml(term, content) {
       line-height: 1.6;
     }
     .hero {
-      background: linear-gradient(135deg, var(--cz-primary), var(--cz-dark));
+      ${buildHeroBackgroundCss()}
       color: var(--cz-white);
       padding: 56px 20px 64px;
       text-align: center;
