@@ -1460,3 +1460,106 @@
   cursor: not-allowed;
 }
 
+/* ---------- Keyword research landing (Inteligencia de mercado) ---------- */
+#mie-dashboard-app .kw-landing {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 20px;
+  color: var(--text);
+}
+
+#mie-dashboard-app .kw-landing.hidden { display: none; }
+
+#mie-dashboard-app .kw-disclaimer {
+  background: var(--accent-warn-soft);
+  border: 1px solid var(--accent-warn);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin: 16px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+#mie-dashboard-app .kw-filters {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+#mie-dashboard-app .kw-status {
+  margin: 8px 0 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+#mie-dashboard-app .kw-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  #mie-dashboard-app .kw-columns { grid-template-columns: 1fr; }
+}
+
+#mie-dashboard-app .kw-column {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+#mie-dashboard-app .kw-column-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app .kw-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#mie-dashboard-app .kw-row:last-child { border-bottom: none; }
+
+#mie-dashboard-app .kw-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#mie-dashboard-app .kw-term { font-weight: var(--font-weight-medium); }
+
+#mie-dashboard-app .kw-score {
+  color: var(--accent-info);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+#mie-dashboard-app .kw-row-meta {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+#mie-dashboard-app .kw-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#mie-dashboard-app .kw-badge.is-breakout { background: var(--accent-danger-soft); color: var(--accent-danger); }
+#mie-dashboard-app .kw-badge.is-fast { background: var(--accent-warn-soft); color: var(--accent-warn); }
+
+#mie-dashboard-app .kw-empty {
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+

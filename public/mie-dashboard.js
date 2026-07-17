@@ -2652,6 +2652,12 @@ init();
     if (showLanding) {
       landing.removeAttribute('hidden');
       marketRoot.setAttribute('hidden', '');
+      // Sibling landings in the market tab are mutually exclusive.
+      const kwLanding = document.getElementById('keyword-landing');
+      if (kwLanding) {
+        kwLanding.classList.add('hidden');
+        kwLanding.setAttribute('hidden', '');
+      }
     } else {
       marketRoot.removeAttribute('hidden');
       landing.setAttribute('hidden', '');
@@ -2908,4 +2914,175 @@ init();
 
   backBtn.addEventListener('click', () => setView(false));
   applyBtn.addEventListener('click', applyDecisions);
+})();
+
+/* ----------------------------------------------------------------------------
+ * Keyword research landing (Inteligencia de mercado tab) — additive IIFE.
+ * Read-only view over GET /reports/keyword-research. All parsing of Google's
+ * formatted_value happens server-side (growth_percent / is_breakout come
+ * pre-computed) — this UI never parses that string.
+ * Directional Trends data only: no volume / competition / CPC claims.
+ * ------------------------------------------------------------------------- */
+(function initKeywordLanding() {
+  const openBtn = document.getElementById('keyword-open-btn');
+  const backBtn = document.getElementById('keyword-back-btn');
+  const landing = document.getElementById('keyword-landing');
+  const marketRoot = document.getElementById('mie-market-root');
+  const statusEl = document.getElementById('kw-status');
+  const seedFilter = document.getElementById('kw-seed-filter');
+  const topList = document.getElementById('kw-top-list');
+  const risingList = document.getElementById('kw-rising-list');
+
+  if (!openBtn || !backBtn || !landing || !marketRoot || !seedFilter || !topList || !risingList) {
+    return;
+  }
+
+  const kwState = {
+    keywords: [],
+    seeds: [],
+    seed: '',
+    loaded: false,
+  };
+
+  function setView(showLanding) {
+    landing.classList.toggle('hidden', !showLanding);
+    marketRoot.classList.toggle('hidden', showLanding);
+    if (showLanding) {
+      landing.removeAttribute('hidden');
+      marketRoot.setAttribute('hidden', '');
+      const covLanding = document.getElementById('coverage-landing');
+      if (covLanding) {
+        covLanding.classList.add('hidden');
+        covLanding.setAttribute('hidden', '');
+      }
+    } else {
+      marketRoot.removeAttribute('hidden');
+      landing.setAttribute('hidden', '');
+    }
+  }
+
+  // Tooltip text is fixed by spec — never mention competencia/pujas/costo/
+  // CPC/volumen mensual anywhere near these badges.
+  const BADGE_TOOLTIP = 'Candidato a investigar en Keyword Planner de Google Ads';
+
+  function badgeFor(row) {
+    if (row.is_breakout === true) {
+      return `<span class="kw-badge is-breakout" title="${BADGE_TOOLTIP}">Tendencia emergente (Aumento puntual)</span>`;
+    }
+    if (typeof row.growth_percent === 'number' && row.growth_percent > 500) {
+      return `<span class="kw-badge is-fast" title="${BADGE_TOOLTIP}">Crecimiento acelerado</span>`;
+    }
+    return '';
+  }
+
+  function filteredRows(queryType) {
+    return kwState.keywords.filter(
+      (k) => k.query_type === queryType && (!kwState.seed || k.seed === kwState.seed),
+    );
+  }
+
+  function renderTopColumn() {
+    const rows = filteredRows('top').sort((a, b) => (b.score || 0) - (a.score || 0));
+    if (!rows.length) {
+      topList.innerHTML = '<div class="kw-empty">Sin términos top para este filtro.</div>';
+      return;
+    }
+    topList.innerHTML = rows
+      .map(
+        (r) => `
+        <div class="kw-row">
+          <div class="kw-row-main">
+            <span class="kw-term">${escapeHtml(r.term)}</span>
+            <span class="kw-score" title="Índice de interés relativo de Google Trends (0-100)">${escapeHtml(
+              r.formatted_value || String(r.score ?? '—'),
+            )}</span>
+          </div>
+          <div class="kw-row-meta">seed: ${escapeHtml(r.seed)}</div>
+        </div>`,
+      )
+      .join('');
+  }
+
+  function renderRisingColumn() {
+    const rows = filteredRows('rising').sort((a, b) => {
+      const aBreak = a.is_breakout === true ? 1 : 0;
+      const bBreak = b.is_breakout === true ? 1 : 0;
+      if (aBreak !== bBreak) return bBreak - aBreak;
+      return (b.growth_percent || 0) - (a.growth_percent || 0);
+    });
+    if (!rows.length) {
+      risingList.innerHTML = '<div class="kw-empty">Sin tendencias en alza para este filtro.</div>';
+      return;
+    }
+    risingList.innerHTML = rows
+      .map((r) => {
+        const growth =
+          r.is_breakout === true
+            ? ''
+            : `<span class="kw-score">${escapeHtml(r.formatted_value || '—')}</span>`;
+        return `
+        <div class="kw-row">
+          <div class="kw-row-main">
+            <span class="kw-term">${escapeHtml(r.term)}</span>
+            ${growth}
+            ${badgeFor(r)}
+          </div>
+          <div class="kw-row-meta">seed: ${escapeHtml(r.seed)}</div>
+        </div>`;
+      })
+      .join('');
+  }
+
+  function renderSeedFilter() {
+    const current = kwState.seed;
+    seedFilter.innerHTML =
+      '<option value="">Todos los seeds</option>' +
+      kwState.seeds
+        .map(
+          (s) =>
+            `<option value="${escapeHtml(s)}" ${s === current ? 'selected' : ''}>${escapeHtml(s)}</option>`,
+        )
+        .join('');
+  }
+
+  function renderAll() {
+    renderSeedFilter();
+    renderTopColumn();
+    renderRisingColumn();
+  }
+
+  async function loadKeywords() {
+    statusEl.textContent = 'Cargando términos…';
+    try {
+      const res = await fetch(`${API_BASE}/reports/keyword-research`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      kwState.keywords = Array.isArray(body.keywords) ? body.keywords : [];
+      kwState.seeds = Array.isArray(body.seeds) ? body.seeds : [];
+      kwState.loaded = true;
+      statusEl.textContent = kwState.keywords.length
+        ? `${kwState.keywords.length} términos descubiertos`
+        : 'Sin datos de discovery todavía — corré el discovery refresh primero.';
+      renderAll();
+    } catch (err) {
+      statusEl.textContent = 'No se pudieron cargar los términos.';
+      topList.innerHTML = '';
+      risingList.innerHTML = '';
+    }
+  }
+
+  seedFilter.addEventListener('change', () => {
+    kwState.seed = seedFilter.value;
+    renderTopColumn();
+    renderRisingColumn();
+  });
+
+  openBtn.addEventListener('click', () => {
+    setView(true);
+    loadKeywords();
+  });
+
+  backBtn.addEventListener('click', () => setView(false));
 })();

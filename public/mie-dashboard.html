@@ -50,6 +50,9 @@
           <button type="button" id="coverage-open-btn" class="mcl-chrome-btn">
             🔎 Sugerencias de cobertura
           </button>
+          <button type="button" id="keyword-open-btn" class="mcl-chrome-btn">
+            📊 Keyword research
+          </button>
         </div>
       </div>
 
@@ -84,6 +87,45 @@
           </p>
           <div id="cov-drafts" class="cov-drafts"></div>
         </section>
+      </div>
+
+      <div id="keyword-landing" class="kw-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <button type="button" id="keyword-back-btn" class="mcl-back-btn">
+              ← Volver a Inteligencia de mercado
+            </button>
+            <h1 class="mcl-title">Keyword research</h1>
+            <p class="mcl-subtitle">
+              Términos descubiertos en Google Trends (UY) organizados para planificar keywords de Google Ads
+            </p>
+          </div>
+        </header>
+
+        <div class="kw-disclaimer" role="alert">
+          <strong>Aviso de Planificación:</strong> Los datos presentados son de carácter direccional basados en el índice de interés relativo de Google Trends (0-100). No representan volumen real de búsquedas mensuales, nivel de competencia ni costo por clic (CPC). Para la planificación y configuración de pujas reales en tu campaña, debés contrastar estos términos de forma manual en el Keyword Planner de Google Ads.
+        </div>
+
+        <div class="kw-filters">
+          <label class="mcl-field">
+            <span class="mcl-field-label">Seed</span>
+            <select id="kw-seed-filter" class="mcl-select">
+              <option value="">Todos los seeds</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="kw-status" class="kw-status" aria-live="polite"></div>
+        <div class="kw-columns">
+          <section class="kw-column">
+            <h2 class="kw-column-title">Términos Más Buscados (Top)</h2>
+            <div id="kw-top-list"></div>
+          </section>
+          <section class="kw-column">
+            <h2 class="kw-column-title">Tendencias en Alza (Rising)</h2>
+            <div id="kw-rising-list"></div>
+          </section>
+        </div>
       </div>
     </div>
 

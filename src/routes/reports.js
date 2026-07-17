@@ -1169,8 +1169,93 @@ router.get('/seo-landing-drafts/:id/html', async (req, res) => {
   }
 });
 
+/**
+ * Parses Google Trends' formatted_value for rising queries into derived
+ * fields, server-side (the string format is fragile — never parse it in the
+ * frontend). Audited against real rows (2026-07-17, hl=es):
+ *   - Breakout tier is literally "Aumento puntual" (localized, NOT "Breakout")
+ *   - Percentages look like "+3.700 %" (space before %, dot = thousands
+ *     separator, so "+3.700 %" must parse to 3700, not 3.7)
+ *   - Top rows carry plain "100".."<1" (no %) -> both fields null
+ */
+function parseTrendsFormattedValue(formattedValue) {
+  const raw = formattedValue === null || formattedValue === undefined ? '' : String(formattedValue).trim();
+  if (!raw) return { growth_percent: null, is_breakout: null };
+
+  if (/aumento puntual|breakout/i.test(raw)) {
+    return { growth_percent: null, is_breakout: true };
+  }
+
+  if (raw.includes('%')) {
+    // "+3.700 %" -> "3.700" -> drop thousands dots, comma = decimal -> 3700
+    const numericPart = raw.replace(/[^\d.,]/g, '');
+    const normalized = numericPart.replace(/\./g, '').replace(/,/g, '.');
+    const value = Number(normalized);
+    if (Number.isFinite(value)) {
+      return { growth_percent: value, is_breakout: false };
+    }
+  }
+
+  return { growth_percent: null, is_breakout: null };
+}
+
+/**
+ * GET /reports/keyword-research
+ * Read-only view over search_term_discoveries for Google Ads keyword
+ * planning. Same de-duplication convention as /coverage-suggestions:
+ * latest row per (seed, term, query_type).
+ *
+ * IMPORTANT: scores are Google Trends' RELATIVE interest index / growth,
+ * not real search volume, competition or CPC — the UI must say so.
+ */
+router.get('/keyword-research', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('search_term_discoveries')
+      .select('seed, term, query_type, score, formatted_value, discovered_at')
+      .order('discovered_at', { ascending: false })
+      .limit(2000);
+    if (error) {
+      throw new Error(`Failed to fetch search_term_discoveries: ${error.message}`);
+    }
+
+    const latestByKey = new Map();
+    for (const row of data || []) {
+      const key = `${row.seed}::${row.term}::${row.query_type}`;
+      if (!latestByKey.has(key)) latestByKey.set(key, row);
+    }
+
+    const seeds = new Set();
+    const keywords = [];
+    for (const row of latestByKey.values()) {
+      seeds.add(row.seed);
+      const derived = parseTrendsFormattedValue(row.formatted_value);
+      keywords.push({
+        term: row.term,
+        query_type: row.query_type,
+        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+        formatted_value: row.formatted_value || null,
+        seed: row.seed,
+        discovered_at: row.discovered_at,
+        growth_percent: derived.growth_percent,
+        is_breakout: derived.is_breakout,
+      });
+    }
+
+    return res.json({
+      keywords,
+      seeds: Array.from(seeds).sort(),
+      total: keywords.length,
+    });
+  } catch (err) {
+    logger.error('Reports keyword-research failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to fetch keyword research data' });
+  }
+});
+
 module.exports = router;
 module.exports.buildHugoContext = buildHugoContext;
 module.exports.isValidDateOnly = isValidDateOnly;
 module.exports.todayUtc = todayUtc;
 module.exports.HISTORY_WINDOW_DAYS = HISTORY_WINDOW_DAYS;
+module.exports.parseTrendsFormattedValue = parseTrendsFormattedValue;
