@@ -18,8 +18,15 @@ const GEO = 'UY';
 const TIMEFRAME = 'today 3-m';
 const HL = 'es';
 const TZ = 180;
-const MAX_DATA_ATTEMPTS = 5;
-const DATA_BACKOFF_STEP_MS = 15000; // 15s, 30s, 45s, 60s between attempts
+// relatedsearches throttles much harder than multiline, and datacenter IPs
+// (Railway) get hit harder than residential ones — observed in production:
+// 3/4 seeds failed at a 5-attempt ceiling. This job is monthly and
+// low-stakes, so patience beats speed: escalating backoff up to 10 attempts
+// (~15.5 min worst case per seed).
+const MAX_DATA_ATTEMPTS = 10;
+const DATA_BACKOFF_SCHEDULE_MS = [
+  15000, 30000, 45000, 60000, 90000, 120000, 150000, 180000, 210000,
+];
 
 const BROWSER_HEADERS = {
   'User-Agent':
@@ -107,7 +114,8 @@ async function fetchRelatedSearches(widget, session) {
         `Trends relatedsearches still throttled (429) after ${MAX_DATA_ATTEMPTS} attempts`
       );
     }
-    const backoff = attempt * DATA_BACKOFF_STEP_MS;
+    const backoff =
+      DATA_BACKOFF_SCHEDULE_MS[Math.min(attempt - 1, DATA_BACKOFF_SCHEDULE_MS.length - 1)];
     logger.info('Trends relatedsearches 429 — backing off', { attempt, backoff });
     await sleep(backoff);
   }
@@ -128,10 +136,18 @@ function mapRankedList(list) {
  * Google returns two ranked lists: index 0 = "top" (most common co-searched,
  * relative 0-100 scale), index 1 = "rising" (fastest-growing, value is a
  * growth percentage; "Breakout" terms come formatted as e.g. "+3.900 %").
+ *
+ * An optional pre-existing session can be passed so batch callers
+ * (run-discovery-refresh) reuse the NID cookie established by earlier seeds
+ * instead of re-triggering the fresh-session 429 on every seed.
  */
-async function discoverRelatedQueries(seed) {
-  const session = createSession();
-  logger.info('Related queries discovery started', { seed, geo: GEO, timeframe: TIMEFRAME });
+async function discoverRelatedQueries(seed, session = createSession()) {
+  logger.info('Related queries discovery started', {
+    seed,
+    geo: GEO,
+    timeframe: TIMEFRAME,
+    reusedSession: Boolean(session.cookie),
+  });
 
   const widget = await exploreSeed(seed, session);
   await sleep(1000);
@@ -155,4 +171,4 @@ async function discoverRelatedQueries(seed) {
   return result;
 }
 
-module.exports = { discoverRelatedQueries };
+module.exports = { discoverRelatedQueries, createSession };

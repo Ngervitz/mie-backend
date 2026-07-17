@@ -6,7 +6,10 @@ const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays');
 const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
 const { collectSearchTrends } = require('../steps/collectSearchTrends');
-const { discoverRelatedQueries } = require('../steps/discoverRelatedQueries');
+const {
+  discoverRelatedQueries,
+  createSession: createDiscoverySession,
+} = require('../steps/discoverRelatedQueries');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const env = require('../config/env');
@@ -752,7 +755,9 @@ router.get('/discover-search-terms', async (req, res) => {
 // persists everything into search_term_discoveries. Distinct from the ad-hoc
 // single-seed route above, which stays unchanged.
 const DISCOVERY_REFRESH_SEEDS = ['préstamo', 'crédito', 'dinero rápido', 'efectivo urgente'];
-const DISCOVERY_INTER_SEED_DELAY_MS = 10000;
+// 10s proved insufficient in production (cumulative throttling across seeds);
+// this is a monthly low-stakes job, so generous spacing is fine.
+const DISCOVERY_INTER_SEED_DELAY_MS = 45000;
 
 function buildDiscoveryRows(seed, result, discoveredAt) {
   const rows = [];
@@ -798,6 +803,9 @@ async function runDiscoveryRefresh() {
   const succeeded = [];
   const failed = [];
   let rowsPersisted = 0;
+  // One shared session for the whole run: the NID cookie established by the
+  // first seed is reused by later ones, avoiding the fresh-session 429 tax.
+  const session = createDiscoverySession();
 
   for (let i = 0; i < DISCOVERY_REFRESH_SEEDS.length; i += 1) {
     const seed = DISCOVERY_REFRESH_SEEDS[i];
@@ -806,7 +814,7 @@ async function runDiscoveryRefresh() {
     }
 
     try {
-      const result = await discoverRelatedQueries(seed);
+      const result = await discoverRelatedQueries(seed, session);
       const rows = buildDiscoveryRows(seed, result, new Date().toISOString());
       let persisted = 0;
       if (rows.length) {
