@@ -2761,6 +2761,10 @@ init();
             <div class="cov-draft-actions">
               ${previewLink}
               ${downloadLink}
+              <button type="button" class="btn cov-regenerate-btn" data-draft-id="${escapeHtml(d.id)}"
+                title="Vuelve a generar el contenido con los prompts actuales (el borrador vuelve a revisión)">
+                Regenerar
+              </button>
               <button type="button" class="btn cov-upload-btn" disabled
                 title="Publicación automática pendiente — subir manualmente por ahora">
                 Subir
@@ -2769,6 +2773,31 @@ init();
           </div>`;
       })
       .join('');
+
+    draftsEl.querySelectorAll('.cov-regenerate-btn').forEach((btn) => {
+      btn.addEventListener('click', () => regenerateDraft(btn));
+    });
+  }
+
+  // Regeneration runs async server-side (same fire-and-forget pattern as the
+  // decide trigger) — disable the button and reuse the drafts poll to pick up
+  // the refreshed row when it lands.
+  async function regenerateDraft(btn) {
+    const draftId = btn.getAttribute('data-draft-id');
+    if (!draftId || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Regenerando…';
+    try {
+      const res = await fetch(
+        `${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(draftId)}/regenerate`,
+        { method: 'POST', headers: { Accept: 'application/json' } },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      schedulePoll();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Regenerar';
+    }
   }
 
   async function loadSuggestions() {

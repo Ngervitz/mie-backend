@@ -7,6 +7,7 @@ const {
 } = require('../steps/market-exit');
 const {
   generateSeoLandingDraft,
+  regenerateSeoLandingDraft,
   hasActiveDraft,
 } = require('../services/seo-landing-generator');
 
@@ -1229,6 +1230,56 @@ router.get('/seo-landing-drafts/:id/html', async (req, res) => {
       error: err.message,
     });
     return res.status(500).json({ error: 'Failed to fetch draft HTML' });
+  }
+});
+
+/**
+ * POST /reports/seo-landing-drafts/:id/regenerate
+ * Intentional manual regeneration of an existing draft (e.g. after a prompt
+ * fix). Updates the SAME row in place — html_content, storage_path,
+ * generated_at — and resets status to 'draft'. Deliberately bypasses the
+ * "skip if active draft exists" guard used by automatic generation.
+ * Fire-and-forget like the /decide trigger: responds immediately.
+ */
+router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('seo_landing_drafts')
+      .select('id, term_id, confirmed_search_terms(term)')
+      .eq('id', req.params.id)
+      .limit(1);
+    if (error) {
+      throw new Error(`Failed to fetch draft: ${error.message}`);
+    }
+    if (!data || !data.length) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    const row = data[0];
+    const term =
+      row.confirmed_search_terms && row.confirmed_search_terms.term
+        ? row.confirmed_search_terms.term
+        : null;
+    if (!term) {
+      return res.status(422).json({ error: 'Draft has no associated term' });
+    }
+
+    // Fire-and-forget: the HTTP caller never waits for Claude+GPT.
+    regenerateSeoLandingDraft({ draftId: row.id, termId: row.term_id, term }).catch((err) => {
+      logger.error('Async SEO landing regeneration crashed', {
+        draftId: row.id,
+        term,
+        error: err && err.message,
+      });
+    });
+
+    return res.json({ draftId: row.id, term, regeneration: 'started' });
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts/:id/regenerate failed', {
+      id: req.params.id,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to start regeneration' });
   }
 });
 

@@ -1460,6 +1460,11 @@
   cursor: not-allowed;
 }
 
+#mie-dashboard-app .cov-regenerate-btn[disabled] {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 /* ---------- Keyword research landing (Inteligencia de mercado) ---------- */
 #mie-dashboard-app .kw-landing {
   max-width: var(--maxw);

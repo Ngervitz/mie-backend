@@ -470,6 +470,94 @@ async function generateSeoLandingDraft({ termId, term }) {
   }
 }
 
+/**
+ * Regenerates an EXISTING draft row in place (intentional manual action from
+ * the drafts review UI). Unlike generateSeoLandingDraft, this deliberately
+ * bypasses the hasActiveDraft guard — regenerating is the whole point — and
+ * UPDATEs the existing row instead of inserting a new one, so a term never
+ * accumulates duplicate rows. Status always resets to 'draft' (a previously
+ * 'reviewed' draft must go through review again after regeneration).
+ * Never throws for generation failures; records status='failed' on the row.
+ */
+async function regenerateSeoLandingDraft({ draftId, termId, term }) {
+  logger.info('SEO landing regeneration started', { draftId, termId, term });
+
+  const recordRegenFailure = async (message) => {
+    try {
+      const { error } = await supabase
+        .from('seo_landing_drafts')
+        .update({
+          status: 'failed',
+          generation_error: message,
+          generated_at: new Date().toISOString(),
+        })
+        .eq('id', draftId);
+      if (error) {
+        logger.error('Failed to record SEO landing regen failure', {
+          draftId,
+          error: error.message,
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to record SEO landing regen failure', { draftId, error: err.message });
+    }
+  };
+
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENAI_API_KEY) {
+    const message = 'Missing ANTHROPIC_API_KEY / OPENAI_API_KEY';
+    await recordRegenFailure(message);
+    return { status: 'failed', draftId, termId, term, error: message };
+  }
+
+  try {
+    const draft = await callClaudeDraft(term);
+    const audited = await callGptAudit(term, draft);
+    const html = renderLandingHtml(term, audited);
+
+    // Same slug+date naming convention: same-day regeneration overwrites the
+    // file (upsert: true); a later-day regeneration gets a fresh date suffix
+    // and the row's storage_path points at the new file.
+    const upload = await uploadDraftToStorage(term, html);
+    if (upload.error) {
+      logger.warn('SEO landing regen storage upload failed — draft kept in DB only', {
+        term,
+        error: upload.error,
+      });
+    }
+
+    const { error } = await supabase
+      .from('seo_landing_drafts')
+      .update({
+        html_content: html,
+        storage_path: upload.path,
+        status: 'draft',
+        generation_error: null,
+        generated_at: new Date().toISOString(),
+        reviewed_at: null,
+        published_at: null,
+      })
+      .eq('id', draftId);
+
+    if (error) {
+      throw new Error(`Failed to update seo_landing_drafts row: ${error.message}`);
+    }
+
+    logger.info('SEO landing regeneration completed', {
+      draftId,
+      termId,
+      term,
+      storagePath: upload.path,
+      htmlBytes: html.length,
+    });
+    return { status: 'draft', draftId, termId, term, storagePath: upload.path };
+  } catch (err) {
+    const message = err && err.message ? err.message : 'unknown';
+    logger.error('SEO landing regeneration failed', { draftId, termId, term, error: message });
+    await recordRegenFailure(message);
+    return { status: 'failed', draftId, termId, term, error: message };
+  }
+}
+
 async function recordFailure(termId, message) {
   try {
     const { error } = await supabase.from('seo_landing_drafts').insert({
@@ -488,4 +576,10 @@ async function recordFailure(termId, message) {
   }
 }
 
-module.exports = { generateSeoLandingDraft, hasActiveDraft, renderLandingHtml, slugifyTerm };
+module.exports = {
+  generateSeoLandingDraft,
+  regenerateSeoLandingDraft,
+  hasActiveDraft,
+  renderLandingHtml,
+  slugifyTerm,
+};
