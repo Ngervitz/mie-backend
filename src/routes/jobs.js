@@ -932,9 +932,14 @@ const runGa4MetricsHandler = (req, res) => {
   ga4JobState.lastResult = null;
   ga4JobState.lastError = null;
 
-  logger.info('POST /jobs/run-ga4-metrics — started');
+  // Optional ?date=YYYY-MM-DD override for backfill; default = yesterday.
+  const dateOverride = typeof req.query.date === 'string' ? req.query.date.trim() : '';
 
-  collectGa4Metrics()
+  logger.info('POST /jobs/run-ga4-metrics — started', {
+    dateOverride: dateOverride || null,
+  });
+
+  collectGa4Metrics(dateOverride ? { reportingDate: dateOverride } : {})
     .then((result) => {
       ga4JobState.status = 'idle';
       ga4JobState.finishedAt = new Date().toISOString();

@@ -218,11 +218,20 @@ async function finishRun({ runId, status, rowsCount, errorMessage, rawJson }) {
   }
 }
 
-async function collectGa4Metrics() {
+/**
+ * @param {{ reportingDate?: string }} [options] Optional YYYY-MM-DD override
+ * (backfill/diagnostics). Default: previous closed day. Idempotent either
+ * way thanks to the (date, channel_group, landing_page) upsert key.
+ */
+async function collectGa4Metrics(options = {}) {
   const propertyId = getPropertyId();
   const client = buildGa4Client();
   const property = `properties/${propertyId}`;
-  const reportingDate = resolvePreviousClosedReportingDay();
+  const override = String(options.reportingDate || '').trim();
+  if (override && !/^\d{4}-\d{2}-\d{2}$/.test(override)) {
+    throw new Error('reportingDate override must be YYYY-MM-DD');
+  }
+  const reportingDate = override || resolvePreviousClosedReportingDay();
   const runId = randomUUID();
 
   logger.info('GA4 metrics collect started', { runId, propertyId, reportingDate });
