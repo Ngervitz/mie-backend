@@ -278,7 +278,7 @@ async function collectGa4Metrics() {
  * and issues one tiny runReport with returnPropertyQuota to report actual
  * quota consumption. Touches no tables.
  */
-async function runGa4Audit() {
+async function runGa4Audit(options = {}) {
   const propertyId = getPropertyId();
   const client = buildGa4Client();
   const property = `properties/${propertyId}`;
@@ -307,13 +307,16 @@ async function runGa4Audit() {
     compatibilityFilter: 'INCOMPATIBLE',
   });
 
+  // Optional date override for diagnosis (e.g. GA4 processing-latency checks).
   const yesterday = resolvePreviousClosedReportingDay();
+  const startDate = options.startDate || yesterday;
+  const endDate = options.endDate || yesterday;
   const [testReport] = await client.runReport({
     property,
-    dateRanges: [{ startDate: yesterday, endDate: yesterday }],
+    dateRanges: [{ startDate, endDate }],
     dimensions: DIMENSIONS.map((name) => ({ name })),
     metrics: METRICS.map((name) => ({ name })),
-    limit: 5,
+    limit: 20,
     returnPropertyQuota: true,
   });
 
@@ -327,9 +330,9 @@ async function runGa4Audit() {
       (m) => m.metricMetadata && m.metricMetadata.apiName,
     ),
     testReport: {
-      reportingDate: yesterday,
+      reportingDate: `${startDate}..${endDate}`,
       rowCount: Number(testReport.rowCount || 0),
-      sampleRows: mapResponseRows(testReport, yesterday).map(
+      sampleRows: mapResponseRows(testReport, startDate).map(
         ({ raw_json, ...rest }) => rest,
       ),
       propertyQuota: quotaSummary(testReport.propertyQuota),

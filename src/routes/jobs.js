@@ -905,9 +905,11 @@ router.get('/ga4-metrics-status', (req, res) => {
 // one tiny runReport with returnPropertyQuota against the real property.
 // Touches no tables; synchronous (responds in a few seconds).
 router.get('/ga4-audit', async (req, res) => {
-  logger.info('GET /jobs/ga4-audit');
+  const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
+  const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
+  logger.info('GET /jobs/ga4-audit', { startDate, endDate });
   try {
-    const result = await runGa4Audit();
+    const result = await runGa4Audit({ startDate, endDate });
     res.json(result);
   } catch (err) {
     logger.error('GA4 audit failed', { error: err.message });
