@@ -58,6 +58,9 @@
             </svg>
             🔎 Términos descubiertos
           </button>
+          <button type="button" id="ga4-open-btn" class="mcl-chrome-btn">
+            📈 GA4 — Tráfico
+          </button>
         </div>
       </div>
 
@@ -133,6 +136,36 @@
             </section>
           </div>
         </div>
+      </div>
+
+      <!-- GA4 traffic viewer: read-only table over captured ga4_metrics.
+           Sibling landing, same non-destructive toggle pattern as above. -->
+      <div id="ga4-landing" class="mcl-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <button type="button" id="ga4-back-btn" class="mcl-back-btn">
+              ← Volver a Inteligencia de mercado
+            </button>
+            <h1 class="mcl-title">GA4 — Tráfico</h1>
+            <p class="mcl-subtitle">
+              Tráfico capturado desde Google Analytics 4 (sesiones, usuarios y key events por canal y landing)
+            </p>
+          </div>
+        </header>
+
+        <div class="mcl-filters">
+          <label class="mcl-field">
+            <span class="mcl-field-label">Desde</span>
+            <input type="date" id="ga4-from" class="mcl-input" />
+          </label>
+          <label class="mcl-field">
+            <span class="mcl-field-label">Hasta</span>
+            <input type="date" id="ga4-to" class="mcl-input" />
+          </label>
+        </div>
+
+        <div id="ga4-status" class="mcl-status" aria-live="polite"></div>
+        <div id="ga4-results"></div>
       </div>
     </div>
 

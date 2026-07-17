@@ -1340,6 +1340,67 @@ router.get('/keyword-research', async (req, res) => {
   }
 });
 
+/**
+ * GET /reports/ga4-metrics?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Read-only viewer feed for captured GA4 traffic (ga4_metrics). Default
+ * range: last 30 calendar dates inclusive (today-29 .. today, UTC).
+ * firstAvailableDate = earliest date in the table overall, so the frontend
+ * can render an honest empty state without a second endpoint.
+ */
+router.get('/ga4-metrics', async (req, res) => {
+  const rawFrom = typeof req.query.from === 'string' ? req.query.from.trim() : '';
+  const rawTo = typeof req.query.to === 'string' ? req.query.to.trim() : '';
+
+  const to = rawTo || todayUtc();
+  const from = rawFrom || shiftDateOnlyUtc(to, -29);
+
+  if (!isValidDateOnly(from) || !isValidDateOnly(to)) {
+    return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+  }
+  if (from > to) {
+    return res.status(400).json({ error: 'from must be less than or equal to to.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('ga4_metrics')
+      .select('date, channel_group, landing_page, sessions, total_users, key_events')
+      .gte('date', from)
+      .lte('date', to)
+      .order('date', { ascending: false })
+      .order('sessions', { ascending: false });
+    if (error) {
+      throw new Error(`Failed to fetch ga4_metrics: ${error.message}`);
+    }
+
+    const { data: firstRow, error: firstError } = await supabase
+      .from('ga4_metrics')
+      .select('date')
+      .order('date', { ascending: true })
+      .limit(1);
+    if (firstError) {
+      throw new Error(`Failed to fetch first ga4_metrics date: ${firstError.message}`);
+    }
+
+    return res.json({
+      rows: data || [],
+      range: { from, to },
+      firstAvailableDate:
+        firstRow && firstRow.length && firstRow[0].date ? firstRow[0].date : null,
+    });
+  } catch (err) {
+    logger.error('Reports ga4-metrics failed', { from, to, error: err.message });
+    return res.status(500).json({ error: 'Failed to fetch GA4 metrics' });
+  }
+});
+
+function shiftDateOnlyUtc(dateStr, deltaDays) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().split('T')[0];
+}
+
 module.exports = router;
 module.exports.buildHugoContext = buildHugoContext;
 module.exports.isValidDateOnly = isValidDateOnly;

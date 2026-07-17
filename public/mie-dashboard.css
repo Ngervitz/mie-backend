@@ -1609,3 +1609,38 @@
 #mie-dashboard-app .kw-decision.is-discarded { background: var(--accent-danger-soft); color: var(--accent-danger); }
 #mie-dashboard-app .kw-decision.is-pending { background: var(--surface-2); color: var(--text-muted); }
 
+
+/* ---------- GA4 traffic viewer (Inteligencia de mercado) ---------- */
+#mie-dashboard-app #ga4-landing.hidden { display: none; }
+
+#mie-dashboard-app .ga4-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+#mie-dashboard-app .ga4-table th,
+#mie-dashboard-app .ga4-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  color: var(--text);
+}
+
+#mie-dashboard-app .ga4-table th {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+#mie-dashboard-app .ga4-table .ga4-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+#mie-dashboard-app .ga4-table .ga4-landing-cell {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

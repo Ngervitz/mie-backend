@@ -3109,6 +3109,12 @@ init();
   }
 
   function setLanding(show) {
+    // Delegate to the market-view coordinator (mutual exclusivity with the
+    // GA4 landing); fall back to the original two-view toggle if absent.
+    if (typeof window.__setMarketView === 'function') {
+      window.__setMarketView(show ? 'discoveries' : 'market');
+      return;
+    }
     landing.classList.toggle('hidden', !show);
     marketRoot.classList.toggle('hidden', show);
     if (show) {
@@ -3150,4 +3156,189 @@ init();
   backBtn.addEventListener('click', () => setLanding(false));
   tabPending.addEventListener('click', () => activateTab('pending'));
   tabResearch.addEventListener('click', () => activateTab('research'));
+})();
+
+/* ----------------------------------------------------------------------------
+ * Market tab view coordinator — mutual exclusivity between the market root,
+ * the discoveries landing and the GA4 landing (same philosophy as
+ * window.__setMetaAdsView in the Meta Ads tab; visibility toggles only,
+ * never rebuilds DOM).
+ * ------------------------------------------------------------------------- */
+(function initMarketViews() {
+  const marketRoot = document.getElementById('mie-market-root');
+  const discoveries = document.getElementById('discoveries-landing');
+  const ga4 = document.getElementById('ga4-landing');
+  if (!marketRoot || !discoveries || !ga4) return;
+
+  function setVisible(el, show) {
+    el.classList.toggle('hidden', !show);
+    if (show) {
+      el.removeAttribute('hidden');
+    } else {
+      el.setAttribute('hidden', '');
+    }
+  }
+
+  window.__setMarketView = function setMarketView(view) {
+    setVisible(marketRoot, view === 'market');
+    setVisible(discoveries, view === 'discoveries');
+    setVisible(ga4, view === 'ga4');
+    if (view !== 'discoveries' && window.__discPending) {
+      window.__discPending.stop();
+    }
+  };
+})();
+
+/* ----------------------------------------------------------------------------
+ * GA4 traffic viewer (Inteligencia de mercado) — read-only table over
+ * GET /reports/ga4-metrics. Same AbortController/request-token pattern as
+ * "Historial de cambios" for race protection on filter changes.
+ * ------------------------------------------------------------------------- */
+(function initGa4Landing() {
+  const landing = document.getElementById('ga4-landing');
+  const openBtn = document.getElementById('ga4-open-btn');
+  const backBtn = document.getElementById('ga4-back-btn');
+  const fromInput = document.getElementById('ga4-from');
+  const toInput = document.getElementById('ga4-to');
+  const statusEl = document.getElementById('ga4-status');
+  const resultsEl = document.getElementById('ga4-results');
+
+  if (
+    !landing || !openBtn || !backBtn || !fromInput ||
+    !toInput || !statusEl || !resultsEl ||
+    typeof window.__setMarketView !== 'function'
+  ) {
+    return;
+  }
+
+  let abortController = null;
+  let requestSeq = 0;
+
+  function shiftUtcDateOnly(dateStr, deltaDays) {
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    const dt = new Date(Date.UTC(year, month - 1, day));
+    dt.setUTCDate(dt.getUTCDate() + deltaDays);
+    return dt.toISOString().split('T')[0];
+  }
+
+  function setDefaultDates() {
+    const to = new Date().toISOString().split('T')[0];
+    toInput.value = to;
+    fromInput.value = shiftUtcDateOnly(to, -29);
+  }
+
+  function setStatus(message, isError) {
+    statusEl.textContent = message || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function formatMetric(value) {
+    return value === null || value === undefined ? '—' : String(value);
+  }
+
+  function renderEmptyState(firstAvailableDate) {
+    resultsEl.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'mcl-empty';
+    empty.textContent = firstAvailableDate
+      ? 'Sin datos para este rango — la captura arrancó el ' + firstAvailableDate + '.'
+      : 'Todavía no hay datos capturados.';
+    resultsEl.appendChild(empty);
+  }
+
+  function renderTable(rows) {
+    resultsEl.innerHTML = '';
+    const table = document.createElement('table');
+    table.className = 'ga4-table';
+    table.innerHTML =
+      '<thead><tr>' +
+      '<th>Fecha</th><th>Canal</th><th>Landing</th>' +
+      '<th class="ga4-num">Sesiones</th><th class="ga4-num">Usuarios</th><th class="ga4-num">Key events</th>' +
+      '</tr></thead>';
+    const tbody = document.createElement('tbody');
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escapeHtml(row.date || '—') + '</td>' +
+        '<td>' + escapeHtml(row.channel_group || '—') + '</td>' +
+        '<td class="ga4-landing-cell">' + escapeHtml(row.landing_page || '—') + '</td>' +
+        '<td class="ga4-num">' + escapeHtml(formatMetric(row.sessions)) + '</td>' +
+        '<td class="ga4-num">' + escapeHtml(formatMetric(row.total_users)) + '</td>' +
+        '<td class="ga4-num">' + escapeHtml(formatMetric(row.key_events)) + '</td>';
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    resultsEl.appendChild(table);
+  }
+
+  async function loadMetrics() {
+    const from = fromInput.value;
+    const to = toInput.value;
+    if (!from || !to) {
+      setStatus('Indicá un rango de fechas válido.', true);
+      return;
+    }
+
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+    const seq = ++requestSeq;
+    const signal = abortController.signal;
+
+    setStatus('Cargando…', false);
+
+    try {
+      const params = new URLSearchParams({ from, to });
+      const res = await fetch(API_BASE + '/reports/ga4-metrics?' + params.toString(), {
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+
+      if (seq !== requestSeq) return;
+
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (parseErr) {
+        body = null;
+      }
+
+      if (seq !== requestSeq) return;
+
+      if (!res.ok) {
+        setStatus((body && body.error) || 'No se pudieron cargar los datos de GA4.', true);
+        resultsEl.innerHTML = '';
+        return;
+      }
+
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      if (!rows.length) {
+        setStatus('', false);
+        renderEmptyState(body.firstAvailableDate || null);
+        return;
+      }
+
+      renderTable(rows);
+      setStatus(rows.length + ' filas', false);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      if (seq !== requestSeq) return;
+      setStatus('No se pudo conectar con el servidor.', true);
+    }
+  }
+
+  openBtn.addEventListener('click', () => {
+    window.__setMarketView('ga4');
+    if (!fromInput.value || !toInput.value) setDefaultDates();
+    loadMetrics();
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (abortController) abortController.abort();
+    window.__setMarketView('market');
+  });
+
+  fromInput.addEventListener('change', loadMetrics);
+  toInput.addEventListener('change', loadMetrics);
+
+  setDefaultDates();
 })();
