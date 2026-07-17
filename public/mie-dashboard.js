@@ -2616,3 +2616,296 @@ init();
     loadBrief(next);
   });
 })();
+
+/* ----------------------------------------------------------------------------
+ * Coverage suggestions landing (Inteligencia de mercado tab) — additive IIFE.
+ * Reads GET /reports/coverage-suggestions (DB-backed, never a live Trends
+ * call) and GET /reports/seo-landing-drafts. Decisions go through
+ * POST /reports/coverage-suggestions/decide.
+ * ------------------------------------------------------------------------- */
+(function initCoverageLanding() {
+  const openBtn = document.getElementById('coverage-open-btn');
+  const backBtn = document.getElementById('coverage-back-btn');
+  const landing = document.getElementById('coverage-landing');
+  const marketRoot = document.getElementById('mie-market-root');
+  const statusEl = document.getElementById('cov-status');
+  const suggestionsEl = document.getElementById('cov-suggestions');
+  const applyBtn = document.getElementById('cov-apply-btn');
+  const feedbackEl = document.getElementById('cov-apply-feedback');
+  const draftsEl = document.getElementById('cov-drafts');
+
+  if (!openBtn || !backBtn || !landing || !marketRoot || !suggestionsEl || !applyBtn || !draftsEl) {
+    return;
+  }
+
+  const covState = {
+    suggestions: [],
+    decisions: {}, // term -> decision value
+    applying: false,
+    pollTimer: null,
+    pollAttempts: 0,
+  };
+
+  function setView(showLanding) {
+    landing.classList.toggle('hidden', !showLanding);
+    marketRoot.classList.toggle('hidden', showLanding);
+    if (showLanding) {
+      landing.removeAttribute('hidden');
+      marketRoot.setAttribute('hidden', '');
+    } else {
+      marketRoot.removeAttribute('hidden');
+      landing.setAttribute('hidden', '');
+      if (covState.pollTimer) {
+        clearTimeout(covState.pollTimer);
+        covState.pollTimer = null;
+      }
+    }
+  }
+
+  // Human judgment aid only — always overridable by the dropdown choice.
+  function suggestKind(term) {
+    const t = String(term || '').trim();
+    const isSingleCapitalizedWord = !/\s/.test(t) && /^[A-ZÁÉÍÓÚÑ]/.test(t);
+    return isSingleCapitalizedWord
+      ? { label: 'posible marca sin monitorear', cls: 'is-brand' }
+      : { label: 'frase de intención', cls: 'is-intent' };
+  }
+
+  function storagePublicUrl(storagePath) {
+    const ds = window.__META_AGENT_DATASOURCE__ || {};
+    if (!ds.supabaseUrl || !storagePath) return null;
+    return `${String(ds.supabaseUrl).replace(/\/+$/, '')}/storage/v1/object/public/${storagePath}`;
+  }
+
+  function renderSuggestions() {
+    if (!covState.suggestions.length) {
+      suggestionsEl.innerHTML =
+        '<div class="cov-empty">No hay sugerencias pendientes. Corré un discovery (' +
+        '<code>/jobs/discover-search-terms?seed=…</code>) para poblar esta lista.</div>';
+      applyBtn.disabled = true;
+      return;
+    }
+
+    const rows = covState.suggestions
+      .map((s, idx) => {
+        const kind = suggestKind(s.term);
+        const sourceLabel = `${s.queryType === 'rising' ? '📈 Rising' : '🔝 Top'} · ${escapeHtml(
+          s.formattedValue || String(s.score ?? '—'),
+        )} · seed: ${escapeHtml(s.seed)}`;
+        const covered = s.alreadyCovered
+          ? `<span class="cov-badge is-covered" title="Ya existe en monitored_entities: ${escapeHtml(
+              (s.coveredByEntity && s.coveredByEntity.name) || '',
+            )}">ya monitoreada</span>`
+          : '';
+        const selected = covState.decisions[s.term] || '';
+        return `
+          <tr>
+            <td class="cov-term">${escapeHtml(s.term)}</td>
+            <td class="cov-source">${sourceLabel}</td>
+            <td><span class="cov-badge ${kind.cls}">${kind.label}</span> ${covered}</td>
+            <td>
+              <select class="cov-decision mcl-select" data-cov-idx="${idx}" ${covState.applying ? 'disabled' : ''}>
+                <option value="" ${selected === '' ? 'selected' : ''}>— Sin decisión —</option>
+                <option value="added_as_competitor" ${selected === 'added_as_competitor' ? 'selected' : ''}>Agregar como competidor</option>
+                <option value="monitor_trends" ${selected === 'monitor_trends' ? 'selected' : ''}>Agregar solo como término</option>
+                <option value="discarded" ${selected === 'discarded' ? 'selected' : ''}>Descartar</option>
+              </select>
+            </td>
+          </tr>`;
+      })
+      .join('');
+
+    suggestionsEl.innerHTML = `
+      <table class="cov-table">
+        <thead>
+          <tr><th>Término</th><th>Fuente</th><th>Tipo sugerido</th><th>Decisión</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+    suggestionsEl.querySelectorAll('.cov-decision').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const idx = Number(sel.getAttribute('data-cov-idx'));
+        const suggestion = covState.suggestions[idx];
+        if (!suggestion) return;
+        if (sel.value) {
+          covState.decisions[suggestion.term] = sel.value;
+        } else {
+          delete covState.decisions[suggestion.term];
+        }
+        applyBtn.disabled = covState.applying || !Object.keys(covState.decisions).length;
+      });
+    });
+
+    applyBtn.disabled = covState.applying || !Object.keys(covState.decisions).length;
+  }
+
+  function draftStatusBadge(draft) {
+    const map = {
+      draft: ['Borrador', 'is-draft'],
+      reviewed: ['Revisado', 'is-reviewed'],
+      published: ['Publicado', 'is-published'],
+      failed: ['Falló', 'is-failed'],
+    };
+    const [label, cls] = map[draft.status] || [draft.status, ''];
+    return `<span class="cov-badge ${cls}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderDrafts(drafts) {
+    if (!drafts.length) {
+      draftsEl.innerHTML = '<div class="cov-empty">Sin borradores generados todavía.</div>';
+      return;
+    }
+    draftsEl.innerHTML = drafts
+      .map((d) => {
+        const when = d.generatedAt ? String(d.generatedAt).slice(0, 16).replace('T', ' ') : '—';
+        const downloadUrl = storagePublicUrl(d.storagePath);
+        const previewLink =
+          d.status !== 'failed'
+            ? `<a class="cov-link" href="${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(d.id)}/html" target="_blank" rel="noopener">Vista previa</a>`
+            : '';
+        const downloadLink = downloadUrl
+          ? `<a class="cov-link" href="${downloadUrl}" target="_blank" rel="noopener" download>Descargar HTML</a>`
+          : '';
+        const errorNote = d.generationError
+          ? `<div class="cov-draft-error">${escapeHtml(d.generationError)}</div>`
+          : '';
+        return `
+          <div class="cov-draft-card">
+            <div class="cov-draft-main">
+              <span class="cov-draft-term">${escapeHtml(d.term || '(término desconocido)')}</span>
+              ${draftStatusBadge(d)}
+              <span class="cov-draft-date">${escapeHtml(when)}</span>
+            </div>
+            ${errorNote}
+            <div class="cov-draft-actions">
+              ${previewLink}
+              ${downloadLink}
+              <button type="button" class="btn cov-upload-btn" disabled
+                title="Publicación automática pendiente — subir manualmente por ahora">
+                Subir
+              </button>
+            </div>
+          </div>`;
+      })
+      .join('');
+  }
+
+  async function loadSuggestions() {
+    statusEl.textContent = 'Cargando sugerencias…';
+    try {
+      const res = await fetch(`${API_BASE}/reports/coverage-suggestions`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      covState.suggestions = Array.isArray(body.suggestions) ? body.suggestions : [];
+      covState.decisions = {};
+      statusEl.textContent = covState.suggestions.length
+        ? `${covState.suggestions.length} sugerencias pendientes de decisión`
+        : '';
+      renderSuggestions();
+    } catch (err) {
+      statusEl.textContent = 'No se pudieron cargar las sugerencias.';
+      suggestionsEl.innerHTML = '';
+    }
+  }
+
+  async function loadDrafts() {
+    try {
+      const res = await fetch(`${API_BASE}/reports/seo-landing-drafts`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      renderDrafts(Array.isArray(body.drafts) ? body.drafts : []);
+      return body.drafts || [];
+    } catch (err) {
+      draftsEl.innerHTML = '<div class="cov-empty">No se pudieron cargar los borradores.</div>';
+      return [];
+    }
+  }
+
+  // Generation runs async server-side (~8-15s) — poll the drafts list a few
+  // times after a monitor_trends decision so the new draft shows up alone.
+  function schedulePoll() {
+    if (covState.pollTimer) clearTimeout(covState.pollTimer);
+    covState.pollAttempts = 0;
+    const poll = async () => {
+      covState.pollAttempts += 1;
+      await loadDrafts();
+      if (covState.pollAttempts < 8) {
+        covState.pollTimer = setTimeout(poll, 5000);
+      } else {
+        covState.pollTimer = null;
+      }
+    };
+    covState.pollTimer = setTimeout(poll, 5000);
+  }
+
+  async function applyDecisions() {
+    const entries = Object.entries(covState.decisions);
+    if (!entries.length || covState.applying) return;
+
+    covState.applying = true;
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Aplicando…';
+    feedbackEl.textContent = '';
+    renderSuggestions();
+
+    let ok = 0;
+    let failed = 0;
+    let landingsStarted = 0;
+
+    for (const [term, decision] of entries) {
+      const suggestion = covState.suggestions.find((s) => s.term === term);
+      try {
+        const res = await fetch(`${API_BASE}/reports/coverage-suggestions/decide`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            term,
+            decision,
+            termType:
+              suggestion && suggestKind(term).cls === 'is-brand'
+                ? 'competitor_candidate'
+                : 'generic',
+            sourceSeed: suggestion ? suggestion.seed : null,
+            discoveredScore: suggestion ? suggestion.score : null,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        ok += 1;
+        if (body.landingGeneration === 'started') landingsStarted += 1;
+      } catch (err) {
+        failed += 1;
+      }
+    }
+
+    covState.applying = false;
+    applyBtn.textContent = 'Aplicar decisiones';
+
+    const parts = [`${ok} decisión(es) registradas`];
+    if (failed) parts.push(`${failed} fallaron`);
+    if (landingsStarted) {
+      parts.push(
+        `${landingsStarted} borrador(es) de landing en generación — aparecerán abajo en "Borradores de landing SEO" en unos segundos`,
+      );
+      schedulePoll();
+    }
+    feedbackEl.textContent = parts.join(' · ');
+
+    await loadSuggestions();
+    await loadDrafts();
+  }
+
+  openBtn.addEventListener('click', () => {
+    setView(true);
+    loadSuggestions();
+    loadDrafts();
+  });
+
+  backBtn.addEventListener('click', () => setView(false));
+  applyBtn.addEventListener('click', applyDecisions);
+})();

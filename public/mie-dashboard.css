@@ -1333,3 +1333,130 @@
   #mie-dashboard-app .table-wrap { overflow-x: auto; }
   #mie-dashboard-app table { min-width: 560px; }
 }
+
+/* ---------- Coverage suggestions landing (Inteligencia de mercado) ---------- */
+#mie-dashboard-app .cov-landing {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 20px;
+  color: var(--text);
+}
+
+#mie-dashboard-app .cov-landing.hidden { display: none; }
+
+#mie-dashboard-app .cov-status {
+  margin: 12px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+#mie-dashboard-app .cov-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#mie-dashboard-app .cov-table th,
+#mie-dashboard-app .cov-table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+#mie-dashboard-app .cov-table th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app .cov-term { font-weight: var(--font-weight-medium); }
+#mie-dashboard-app .cov-source { color: var(--text-muted); font-size: 13px; }
+
+#mie-dashboard-app .cov-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#mie-dashboard-app .cov-badge.is-brand { background: var(--accent-warn-soft); color: var(--accent-warn); }
+#mie-dashboard-app .cov-badge.is-intent { background: var(--accent-info-soft); color: var(--accent-info); }
+#mie-dashboard-app .cov-badge.is-covered { background: var(--accent-success-soft); color: var(--accent-success); }
+#mie-dashboard-app .cov-badge.is-draft { background: var(--accent-info-soft); color: var(--accent-info); }
+#mie-dashboard-app .cov-badge.is-reviewed { background: var(--accent-warn-soft); color: var(--accent-warn); }
+#mie-dashboard-app .cov-badge.is-published { background: var(--accent-success-soft); color: var(--accent-success); }
+#mie-dashboard-app .cov-badge.is-failed { background: var(--accent-danger-soft); color: var(--accent-danger); }
+
+#mie-dashboard-app .cov-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 16px 0 28px;
+}
+
+#mie-dashboard-app .cov-apply-feedback {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#mie-dashboard-app .cov-empty {
+  padding: 20px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+#mie-dashboard-app .cov-section-title { margin: 0 0 4px; font-size: 18px; }
+#mie-dashboard-app .cov-section-sub { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; }
+
+#mie-dashboard-app .cov-draft-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+#mie-dashboard-app .cov-draft-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#mie-dashboard-app .cov-draft-term { font-weight: var(--font-weight-medium); }
+#mie-dashboard-app .cov-draft-date { color: var(--text-faint); font-size: 12px; }
+
+#mie-dashboard-app .cov-draft-error {
+  margin-top: 8px;
+  color: var(--accent-danger);
+  font-size: 13px;
+}
+
+#mie-dashboard-app .cov-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+#mie-dashboard-app .cov-link {
+  color: var(--accent-info);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+#mie-dashboard-app .cov-link:hover { text-decoration: underline; }
+
+#mie-dashboard-app .cov-upload-btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+

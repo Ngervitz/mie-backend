@@ -5,6 +5,10 @@ const {
   isMarketExitConfirmed,
   normalizeSnapshotStatus,
 } = require('../steps/market-exit');
+const {
+  generateSeoLandingDraft,
+  hasActiveDraft,
+} = require('../services/seo-landing-generator');
 
 const router = express.Router();
 
@@ -924,6 +928,244 @@ router.get('/own-ad-changes', async (req, res) => {
       error: err.message,
     });
     return res.status(500).json({ error: 'Failed to fetch own ad changes' });
+  }
+});
+
+/**
+ * GET /reports/coverage-suggestions
+ * Reads the LATEST discovery row per (seed, term) from search_term_discoveries
+ * (never triggers a live Trends call), cross-referenced against
+ * monitored_entities (already covered?) and confirmed_search_terms (already
+ * decided?). By default only pending/undecided items are returned; pass
+ * ?includeDecided=1 to include everything.
+ */
+router.get('/coverage-suggestions', async (req, res) => {
+  try {
+    const includeDecided = String(req.query.includeDecided || '') === '1';
+
+    const { data: discoveries, error: discErr } = await supabase
+      .from('search_term_discoveries')
+      .select('seed, term, query_type, score, formatted_value, discovered_at')
+      .order('discovered_at', { ascending: false })
+      .limit(2000);
+    if (discErr) {
+      throw new Error(`Failed to fetch search_term_discoveries: ${discErr.message}`);
+    }
+
+    // Latest row per (seed, term, query_type) — rows are already sorted desc.
+    const latestByKey = new Map();
+    for (const row of discoveries || []) {
+      const key = `${row.seed}::${row.term}::${row.query_type}`;
+      if (!latestByKey.has(key)) latestByKey.set(key, row);
+    }
+
+    const { data: entities, error: entErr } = await supabase
+      .from('monitored_entities')
+      .select('id, name, is_self, active');
+    if (entErr) {
+      throw new Error(`Failed to fetch monitored_entities: ${entErr.message}`);
+    }
+    const entityByLowerName = new Map(
+      (entities || []).map((e) => [String(e.name || '').trim().toLowerCase(), e]),
+    );
+
+    const { data: decided, error: decErr } = await supabase
+      .from('confirmed_search_terms')
+      .select('term, decision');
+    if (decErr) {
+      throw new Error(`Failed to fetch confirmed_search_terms: ${decErr.message}`);
+    }
+    const decisionByLowerTerm = new Map(
+      (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d.decision]),
+    );
+
+    const suggestions = [];
+    for (const row of latestByKey.values()) {
+      const lower = String(row.term || '').trim().toLowerCase();
+      const entity = entityByLowerName.get(lower) || null;
+      const decision = decisionByLowerTerm.get(lower) || null;
+      if (!includeDecided && decision) continue;
+
+      suggestions.push({
+        term: row.term,
+        seed: row.seed,
+        queryType: row.query_type,
+        score: row.score !== null && row.score !== undefined ? Number(row.score) : null,
+        formattedValue: row.formatted_value || null,
+        discoveredAt: row.discovered_at,
+        alreadyCovered: Boolean(entity),
+        coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
+        decision,
+      });
+    }
+
+    // Rising first (growth signal), then top by score desc.
+    suggestions.sort((a, b) => {
+      if (a.queryType !== b.queryType) return a.queryType === 'rising' ? -1 : 1;
+      return (b.score || 0) - (a.score || 0);
+    });
+
+    return res.json({ suggestions, total: suggestions.length });
+  } catch (err) {
+    logger.error('Reports coverage-suggestions failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to fetch coverage suggestions' });
+  }
+});
+
+const COVERAGE_DECISIONS = new Set(['monitor_trends', 'added_as_competitor', 'discarded']);
+
+/**
+ * POST /reports/coverage-suggestions/decide
+ * Body: { term, decision, termType?, sourceSeed?, discoveredScore? }
+ * Records the decision and responds immediately. For decision='monitor_trends'
+ * the landing draft generation runs asynchronously (fire-and-forget) AFTER
+ * checking no active draft already exists for the term (double-click /
+ * HTTP-retry protection). decision='added_as_competitor' does NOT insert
+ * into monitored_entities — the existing "+ Agregar" flow handles that.
+ */
+router.post('/coverage-suggestions/decide', async (req, res) => {
+  const body = req.body || {};
+  const term = typeof body.term === 'string' ? body.term.trim() : '';
+  const decision = typeof body.decision === 'string' ? body.decision : '';
+
+  if (!term) {
+    return res.status(400).json({ error: 'Missing required field: term' });
+  }
+  if (!COVERAGE_DECISIONS.has(decision)) {
+    return res.status(400).json({
+      error: 'Invalid decision. Use monitor_trends | added_as_competitor | discarded',
+    });
+  }
+
+  const termType =
+    body.termType === 'competitor_candidate' ? 'competitor_candidate' : 'generic';
+  const sourceSeed = typeof body.sourceSeed === 'string' ? body.sourceSeed : null;
+  const discoveredScore = Number.isFinite(Number(body.discoveredScore))
+    ? Number(body.discoveredScore)
+    : null;
+
+  try {
+    const { data: upserted, error } = await supabase
+      .from('confirmed_search_terms')
+      .upsert(
+        {
+          term,
+          term_type: termType,
+          decision,
+          source_seed: sourceSeed,
+          discovered_score: discoveredScore,
+        },
+        { onConflict: 'term' },
+      )
+      .select('id, term, decision')
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to record decision: ${error.message}`);
+    }
+
+    let landingGeneration = 'not_applicable';
+    if (decision === 'monitor_trends') {
+      const alreadyHasDraft = await hasActiveDraft(upserted.id);
+      if (alreadyHasDraft) {
+        landingGeneration = 'skipped_existing';
+      } else {
+        landingGeneration = 'started';
+        // Fire-and-forget: the HTTP caller never waits for Claude+GPT.
+        generateSeoLandingDraft({ termId: upserted.id, term: upserted.term }).catch((err) => {
+          logger.error('Async SEO landing generation crashed', {
+            termId: upserted.id,
+            term: upserted.term,
+            error: err && err.message,
+          });
+        });
+      }
+    }
+
+    logger.info('Coverage suggestion decided', { term, decision, landingGeneration });
+    return res.json({
+      termId: upserted.id,
+      term: upserted.term,
+      decision: upserted.decision,
+      landingGeneration,
+    });
+  } catch (err) {
+    logger.error('Reports coverage-suggestions/decide failed', {
+      term,
+      decision,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to record decision' });
+  }
+});
+
+/**
+ * GET /reports/seo-landing-drafts
+ * Read-only list for the drafts review section.
+ */
+router.get('/seo-landing-drafts', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('seo_landing_drafts')
+      .select(
+        'id, term_id, status, generation_error, storage_path, generated_at, reviewed_at, published_at, created_at, confirmed_search_terms(term)',
+      )
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      throw new Error(`Failed to fetch seo_landing_drafts: ${error.message}`);
+    }
+
+    const drafts = (data || []).map((row) => ({
+      id: row.id,
+      termId: row.term_id,
+      term:
+        row.confirmed_search_terms && row.confirmed_search_terms.term
+          ? row.confirmed_search_terms.term
+          : null,
+      status: row.status,
+      generationError: row.generation_error || null,
+      storagePath: row.storage_path || null,
+      generatedAt: row.generated_at,
+      reviewedAt: row.reviewed_at,
+      publishedAt: row.published_at,
+      createdAt: row.created_at,
+    }));
+    return res.json({ drafts, total: drafts.length });
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to fetch landing drafts' });
+  }
+});
+
+/**
+ * GET /reports/seo-landing-drafts/:id/html
+ * Returns the draft HTML for in-dashboard preview (text/html).
+ */
+router.get('/seo-landing-drafts/:id/html', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('seo_landing_drafts')
+      .select('id, html_content, status')
+      .eq('id', req.params.id)
+      .limit(1);
+    if (error) {
+      throw new Error(`Failed to fetch draft: ${error.message}`);
+    }
+    if (!data || !data.length) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    if (!data[0].html_content) {
+      return res.status(404).json({ error: 'Draft has no HTML content (failed generation?)' });
+    }
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    return res.send(data[0].html_content);
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts/:id/html failed', {
+      id: req.params.id,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to fetch draft HTML' });
   }
 });
 

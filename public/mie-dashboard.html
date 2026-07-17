@@ -38,12 +38,54 @@
       </button>
     </nav>
 
-    <main
-      class="app dashboard-panel"
-      id="mie-market-root"
+    <!-- Market tab shell: chrome + market root + coverage landing are siblings.
+         Visibility toggles only — market root keeps being fully owned by render(). -->
+    <div
+      class="dashboard-panel"
+      id="market-panel"
       role="tabpanel"
       aria-labelledby="tab-market">
-    </main>
+      <div id="market-chrome" class="meta-ads-chrome">
+        <div class="meta-ads-chrome-actions">
+          <button type="button" id="coverage-open-btn" class="mcl-chrome-btn">
+            🔎 Sugerencias de cobertura
+          </button>
+        </div>
+      </div>
+
+      <main class="app" id="mie-market-root"></main>
+
+      <div id="coverage-landing" class="cov-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <button type="button" id="coverage-back-btn" class="mcl-back-btn">
+              ← Volver a Inteligencia de mercado
+            </button>
+            <h1 class="mcl-title">Sugerencias de cobertura</h1>
+            <p class="mcl-subtitle">
+              Términos reales descubiertos en Google Trends (UY), cruzados contra las entidades monitoreadas
+            </p>
+          </div>
+        </header>
+
+        <div id="cov-status" class="cov-status" aria-live="polite"></div>
+        <div id="cov-suggestions" class="cov-suggestions"></div>
+        <div class="cov-actions">
+          <button type="button" id="cov-apply-btn" class="btn btn-primary" disabled>
+            Aplicar decisiones
+          </button>
+          <span id="cov-apply-feedback" class="cov-apply-feedback" aria-live="polite"></span>
+        </div>
+
+        <section class="cov-drafts-section">
+          <h2 class="cov-section-title">Borradores de landing SEO</h2>
+          <p class="cov-section-sub">
+            Generados automáticamente al confirmar un término. Nunca se publican solos: revisar, descargar y subir manualmente.
+          </p>
+          <div id="cov-drafts" class="cov-drafts"></div>
+        </section>
+      </div>
+    </div>
 
     <!-- Meta Ads tab shell: chrome + agent + landings are siblings.
          Visibility toggles only — never rebuild agent DOM from this shell. -->
@@ -130,7 +172,7 @@
     (function () {
       'use strict';
       var tabs = document.querySelectorAll('[data-dashboard-tab]');
-      var market = document.getElementById('mie-market-root');
+      var market = document.getElementById('market-panel');
       var metaPanel = document.getElementById('meta-ads-panel');
       if (!market || !metaPanel || !tabs.length) return;
 

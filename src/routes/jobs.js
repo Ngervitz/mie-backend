@@ -6,10 +6,12 @@ const { collectOwnAdChanges } = require('../steps/collectOwnAdChanges');
 const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays');
 const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
 const { collectSearchTrends } = require('../steps/collectSearchTrends');
+const { discoverRelatedQueries } = require('../steps/discoverRelatedQueries');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const env = require('../config/env');
 const logger = require('../lib/logger');
+const supabase = require('../clients/supabase');
 
 const router = express.Router();
 
@@ -683,5 +685,213 @@ const runSearchTrendsHandler = (req, res) => {
 
 router.post('/run-search-trends', runSearchTrendsHandler);
 router.get('/run-search-trends', runSearchTrendsHandler);
+
+// --- Related-queries discovery (read-only, synchronous; no persistence) ---
+// NOTE: the relatedsearches endpoint throttles hard; this request can take
+// a couple of minutes while backing off on 429 before responding.
+router.get('/discover-search-terms', async (req, res) => {
+  const seed = typeof req.query.seed === 'string' ? req.query.seed.trim() : '';
+  if (!seed) {
+    return res.status(400).json({ error: 'Missing required query param: seed' });
+  }
+
+  logger.info('GET /jobs/discover-search-terms', { seed });
+  try {
+    const result = await discoverRelatedQueries(seed);
+
+    // Persist into search_term_discoveries (append-only) so the coverage
+    // suggestions screen reads from the DB instead of live Trends calls.
+    // Best-effort: a persistence failure must not hide the discovery result.
+    const discoveredAt = new Date().toISOString();
+    const rows = [];
+    for (const item of result.top || []) {
+      if (!item.query) continue;
+      rows.push({
+        seed,
+        term: item.query,
+        query_type: 'top',
+        score: item.value,
+        formatted_value: item.formattedValue,
+        raw_json: item,
+        discovered_at: discoveredAt,
+      });
+    }
+    for (const item of result.rising || []) {
+      if (!item.query) continue;
+      rows.push({
+        seed,
+        term: item.query,
+        query_type: 'rising',
+        score: item.value,
+        formatted_value: item.formattedValue,
+        raw_json: item,
+        discovered_at: discoveredAt,
+      });
+    }
+    let persisted = 0;
+    if (rows.length) {
+      const { error: insertError } = await supabase
+        .from('search_term_discoveries')
+        .insert(rows);
+      if (insertError) {
+        logger.warn('Failed to persist discovery rows', { seed, error: insertError.message });
+      } else {
+        persisted = rows.length;
+      }
+    }
+
+    res.json({ ...result, persisted });
+  } catch (err) {
+    logger.error('Related queries discovery failed', { seed, error: err.message });
+    res.status(502).json({ error: err.message, seed });
+  }
+});
+
+// --- Batch discovery refresh (for external monthly cron, e.g. cron-job.org) ---
+// Loops the fixed standard seed list through discoverRelatedQueries and
+// persists everything into search_term_discoveries. Distinct from the ad-hoc
+// single-seed route above, which stays unchanged.
+const DISCOVERY_REFRESH_SEEDS = ['préstamo', 'crédito', 'dinero rápido', 'efectivo urgente'];
+const DISCOVERY_INTER_SEED_DELAY_MS = 10000;
+
+function buildDiscoveryRows(seed, result, discoveredAt) {
+  const rows = [];
+  for (const [queryType, items] of [
+    ['top', result.top || []],
+    ['rising', result.rising || []],
+  ]) {
+    for (const item of items) {
+      if (!item.query) continue;
+      rows.push({
+        seed,
+        term: item.query,
+        query_type: queryType,
+        score: item.value,
+        formatted_value: item.formattedValue,
+        raw_json: item,
+        discovered_at: discoveredAt,
+      });
+    }
+  }
+  return rows;
+}
+
+const discoveryRefreshJobState = {
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  lastResult: null,
+  lastError: null,
+};
+
+router.get('/discovery-refresh-status', (req, res) => {
+  res.json({
+    status: discoveryRefreshJobState.status,
+    startedAt: discoveryRefreshJobState.startedAt,
+    finishedAt: discoveryRefreshJobState.finishedAt,
+    lastResult: discoveryRefreshJobState.lastResult,
+    lastError: discoveryRefreshJobState.lastError,
+  });
+});
+
+async function runDiscoveryRefresh() {
+  const succeeded = [];
+  const failed = [];
+  let rowsPersisted = 0;
+
+  for (let i = 0; i < DISCOVERY_REFRESH_SEEDS.length; i += 1) {
+    const seed = DISCOVERY_REFRESH_SEEDS[i];
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, DISCOVERY_INTER_SEED_DELAY_MS));
+    }
+
+    try {
+      const result = await discoverRelatedQueries(seed);
+      const rows = buildDiscoveryRows(seed, result, new Date().toISOString());
+      let persisted = 0;
+      if (rows.length) {
+        const { error: insertError } = await supabase
+          .from('search_term_discoveries')
+          .insert(rows);
+        if (insertError) {
+          throw new Error(`Persist failed: ${insertError.message}`);
+        }
+        persisted = rows.length;
+      }
+      rowsPersisted += persisted;
+      succeeded.push({
+        seed,
+        top: (result.top || []).length,
+        rising: (result.rising || []).length,
+        persisted,
+      });
+      logger.info('Discovery refresh seed completed', { seed, persisted });
+    } catch (err) {
+      const message = err && err.message ? err.message : 'unknown';
+      failed.push({ seed, error: message });
+      logger.error('Discovery refresh seed failed — continuing with remaining seeds', {
+        seed,
+        error: message,
+      });
+    }
+  }
+
+  return {
+    totalSeeds: DISCOVERY_REFRESH_SEEDS.length,
+    succeededCount: succeeded.length,
+    failedCount: failed.length,
+    rowsPersisted,
+    succeeded,
+    failed,
+  };
+}
+
+const runDiscoveryRefreshHandler = (req, res) => {
+  if (discoveryRefreshJobState.status === 'running') {
+    return res.status(409).json({
+      error: 'Discovery refresh already in progress',
+      status: discoveryRefreshJobState.status,
+      startedAt: discoveryRefreshJobState.startedAt,
+    });
+  }
+
+  discoveryRefreshJobState.status = 'running';
+  discoveryRefreshJobState.startedAt = new Date().toISOString();
+  discoveryRefreshJobState.finishedAt = null;
+  discoveryRefreshJobState.lastResult = null;
+  discoveryRefreshJobState.lastError = null;
+
+  logger.info('POST /jobs/run-discovery-refresh — started', {
+    seeds: DISCOVERY_REFRESH_SEEDS,
+  });
+
+  runDiscoveryRefresh()
+    .then((result) => {
+      discoveryRefreshJobState.status = 'idle';
+      discoveryRefreshJobState.finishedAt = new Date().toISOString();
+      discoveryRefreshJobState.lastResult = result;
+      logger.info('Discovery refresh completed', {
+        succeededCount: result.succeededCount,
+        failedCount: result.failedCount,
+        rowsPersisted: result.rowsPersisted,
+      });
+    })
+    .catch((err) => {
+      discoveryRefreshJobState.status = 'idle';
+      discoveryRefreshJobState.finishedAt = new Date().toISOString();
+      discoveryRefreshJobState.lastError = err.message;
+      logger.error('Discovery refresh failed', { error: err.message });
+    });
+
+  res.status(202).json({
+    message: 'Discovery refresh started',
+    status: 'running',
+    seeds: DISCOVERY_REFRESH_SEEDS,
+    startedAt: discoveryRefreshJobState.startedAt,
+  });
+};
+
+router.post('/run-discovery-refresh', runDiscoveryRefreshHandler);
+router.get('/run-discovery-refresh', runDiscoveryRefreshHandler);
 
 module.exports = router;

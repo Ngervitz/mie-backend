@@ -170,6 +170,33 @@ async function resolveCompetitorTerms() {
     }));
 }
 
+/**
+ * Human-confirmed terms from the coverage-suggestions triage
+ * (confirmed_search_terms, decision='monitor_trends'). Resolved fresh each
+ * run, same as competitors. Best-effort: if the table doesn't exist yet
+ * (migration not applied), the collector keeps working with the base lists.
+ */
+async function resolveConfirmedTerms() {
+  const { data, error } = await supabase
+    .from('confirmed_search_terms')
+    .select('term')
+    .eq('decision', 'monitor_trends');
+
+  if (error) {
+    logger.warn('Failed to load confirmed_search_terms — continuing without them', {
+      error: error.message,
+    });
+    return [];
+  }
+  return (data || [])
+    .filter((row) => row.term && String(row.term).trim())
+    .map((row) => ({
+      term: String(row.term).trim(),
+      termType: 'generic',
+      entityId: null,
+    }));
+}
+
 async function upsertRows(rows) {
   if (!rows.length) return 0;
   const { error } = await supabase
@@ -187,14 +214,27 @@ async function upsertRows(rows) {
  */
 async function collectSearchTrends() {
   const competitorTerms = await resolveCompetitorTerms();
-  const terms = [
-    ...GENERIC_TERMS.map((t) => ({ term: t, termType: 'generic', entityId: null })),
+  const confirmedTerms = await resolveConfirmedTerms();
+
+  // Union of: 3 original generic terms + confirmed monitor_trends terms +
+  // dynamic competitors — deduplicated case-insensitively (first wins).
+  const seen = new Set();
+  const terms = [];
+  for (const t of [
+    ...GENERIC_TERMS.map((term) => ({ term, termType: 'generic', entityId: null })),
+    ...confirmedTerms,
     ...competitorTerms,
-  ];
+  ]) {
+    const key = t.term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    terms.push(t);
+  }
 
   logger.info('Search trends collect started', {
     totalTerms: terms.length,
     generic: GENERIC_TERMS.length,
+    confirmed: confirmedTerms.length,
     competitors: competitorTerms.length,
     geo: GEO,
     timeframe: TIMEFRAME,
