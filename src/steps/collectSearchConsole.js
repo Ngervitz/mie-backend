@@ -58,7 +58,11 @@ function buildClient() {
  *  4. real row/field shape with all 5 dimensions
  *  5. real pagination behavior (rowLimit/startRow, stop condition)
  */
-async function runSearchConsoleAudit() {
+async function runSearchConsoleAudit(options = {}) {
+  const lookbackDays =
+    Number.isFinite(Number(options.lookbackDays)) && Number(options.lookbackDays) > 0
+      ? Math.min(Math.trunc(Number(options.lookbackDays)), 480)
+      : 10;
   const searchconsole = buildClient();
 
   // --- 2. sites.list: exact siteUrl + access confirmation ---
@@ -75,15 +79,15 @@ async function runSearchConsoleAudit() {
     return { ...audit, error: 'sites.list returned no accessible properties' };
   }
 
-  // --- 3. latency discovery: date-only query, last 10 days ---
+  // --- 3. latency discovery: date-only query over the lookback window ---
   const today = todayUtc();
   const latencyRes = await searchconsole.searchanalytics.query({
     siteUrl,
     requestBody: {
-      startDate: shiftDateUtc(today, -10),
+      startDate: shiftDateUtc(today, -lookbackDays),
       endDate: today,
       dimensions: ['date'],
-      rowLimit: 25,
+      rowLimit: 500,
     },
   });
   const latencyRows = (latencyRes.data && latencyRes.data.rows) || [];
@@ -92,7 +96,7 @@ async function runSearchConsoleAudit() {
     ? datesWithData[datesWithData.length - 1]
     : null;
   audit.latency = {
-    queriedRange: { startDate: shiftDateUtc(today, -10), endDate: today },
+    queriedRange: { startDate: shiftDateUtc(today, -lookbackDays), endDate: today },
     datesReturned: latencyRows.map((r) => ({
       date: r.keys[0],
       clicks: r.clicks,

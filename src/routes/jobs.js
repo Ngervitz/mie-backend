@@ -972,9 +972,10 @@ router.get('/run-ga4-metrics', runGa4MetricsHandler);
 // discovery, real response shape with 5 dimensions, pagination behavior.
 // Touches no tables. Reuses GA4_SERVICE_ACCOUNT_JSON (no new credential).
 router.get('/search-console-audit', async (req, res) => {
-  logger.info('GET /jobs/search-console-audit');
+  const lookbackDays = typeof req.query.lookbackDays === 'string' ? req.query.lookbackDays : undefined;
+  logger.info('GET /jobs/search-console-audit', { lookbackDays });
   try {
-    const result = await runSearchConsoleAudit();
+    const result = await runSearchConsoleAudit({ lookbackDays });
     res.json(result);
   } catch (err) {
     logger.error('Search Console audit failed', { error: err.message });
