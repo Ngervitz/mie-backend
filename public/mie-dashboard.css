@@ -108,6 +108,11 @@
 #mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="ga4"] {
   box-shadow: inset 0 -2px 0 var(--accent-warn);
 }
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="searchconsole"] {
+  /* Google blue, matching the Search Console logomark (same brand-accent
+     convention as the Meta Ads tab). */
+  box-shadow: inset 0 -2px 0 #4285f4;
+}
 #mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="meta"] {
   box-shadow: inset 0 -2px 0 #60a5fa;
 }
@@ -936,10 +941,23 @@
    section content (tables, headers) never sits glued to the screen edge. */
 #mie-dashboard-app #meta-ads-panel,
 #mie-dashboard-app #discoveries-panel,
-#mie-dashboard-app #ga4-panel {
+#mie-dashboard-app #ga4-panel,
+#mie-dashboard-app #search-console-panel {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 20px 64px;
+}
+
+/* Search Console placeholder: static informational card, no data UI yet. */
+#mie-dashboard-app .sc-placeholder {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-muted);
+  max-width: 640px;
+  line-height: 1.6;
 }
 
 /* Meta Ads secondary sub-row: subordinate to the primary tabs, left-aligned,

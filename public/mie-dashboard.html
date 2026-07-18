@@ -64,6 +64,26 @@
         class="dashboard-tab"
         role="tab"
         aria-selected="false"
+        data-dashboard-tab="searchconsole"
+        id="tab-searchconsole">
+        <!-- Official Search Console logomark (2025 rebrand, extracted unmodified
+             from ssl.gstatic.com/search-console/scfe/logo_search_console.svg).
+             Do not recolor or distort. -->
+        <svg class="tab-brand-icon" viewBox="0 0 40 40" width="16" height="16" fill="none" aria-hidden="true" focusable="false">
+          <path d="M11.081 30.527l-4.72 4.721a.933.933 0 0 1-1.317 0l-.292-.292a.933.933 0 0 1 0-1.316l4.72-4.721a.933.933 0 0 1 1.318 0l.291.291a.93.93 0 0 1 0 1.317z" fill="#FBBC04"/>
+          <path d="M23.75 32.5h6.042a6.04 6.04 0 0 0 6.041-6.042v-16.25a6.04 6.04 0 0 0-6.041-6.041 6.04 6.04 0 0 0-6.042 6.041V32.5z" fill="#4285F4"/>
+          <path d="M13.75 32.5a6.04 6.04 0 0 0 6.042-6.042 6.04 6.04 0 0 0-6.042-6.041 6.04 6.04 0 0 0-6.042 6.041A6.04 6.04 0 0 0 13.75 32.5z" fill="#FBBC04"/>
+          <path d="M27.97 32.5h-5.887a6.04 6.04 0 0 1-6.041-6.042v-7.916a6.04 6.04 0 0 1 6.041-6.042 6.04 6.04 0 0 1 6.042 6.042v13.804a.154.154 0 0 1-.154.154z" fill="#34A853"/>
+          <path d="M28.125 32.346V18.542a6.042 6.042 0 0 0-4.375-5.807V32.5h4.22a.154.154 0 0 0 .155-.154z" fill="#1967D2"/>
+          <path d="M19.792 26.575a6.04 6.04 0 0 0-3.75-5.59v5.59c0 1.72.72 3.273 1.875 4.373a6.024 6.024 0 0 0 1.875-4.373z" fill="#EA4335"/>
+        </svg>
+        Search Console
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
         data-dashboard-tab="meta"
         id="tab-meta">
         <!-- Official Meta infinity logomark (unmodified artwork, incl. gradients).
@@ -209,6 +229,35 @@
       </div>
     </div>
 
+    <!-- Search Console: honest placeholder only. The backend integration
+         (table/collector/endpoint) is intentionally paused — the property was
+         verified recently and Google hasn't processed any data yet (confirmed
+         via /jobs/search-console-audit). No API calls from this panel. -->
+    <div
+      class="dashboard-panel hidden"
+      id="search-console-panel"
+      role="tabpanel"
+      aria-labelledby="tab-searchconsole"
+      hidden>
+      <div id="search-console-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Search Console — en preparación</h1>
+            <p class="mcl-subtitle">
+              Consultas reales de búsqueda de Google (impresiones, clics, CTR y posición)
+            </p>
+          </div>
+        </header>
+        <div class="sc-placeholder">
+          <p>
+            La propiedad fue verificada recientemente. Google Search Console todavía no procesó
+            datos para este sitio — esto puede tardar unos días. Cuando haya datos disponibles,
+            esta sección se conecta automáticamente.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- Meta Ads tab shell: chrome + agent + landings are siblings.
          Visibility toggles only — never rebuild agent DOM from this shell. -->
     <div
@@ -298,9 +347,10 @@
         market: document.getElementById('market-panel'),
         discoveries: document.getElementById('discoveries-panel'),
         ga4: document.getElementById('ga4-panel'),
+        searchconsole: document.getElementById('search-console-panel'),
         meta: document.getElementById('meta-ads-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.meta || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !tabs.length) return;
 
       var current = 'market';
 
