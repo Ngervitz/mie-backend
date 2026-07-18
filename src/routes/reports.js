@@ -1364,7 +1364,9 @@ router.get('/ga4-metrics', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('ga4_metrics')
-      .select('date, channel_group, landing_page, sessions, total_users, key_events')
+      .select(
+        'date, channel_group, landing_page, source, medium, sessions, total_users, key_events, conversion_rate',
+      )
       .gte('date', from)
       .lte('date', to)
       .order('date', { ascending: false })

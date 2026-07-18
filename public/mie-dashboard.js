@@ -3181,6 +3181,15 @@ init();
     return value === null || value === undefined ? '—' : String(value);
   }
 
+  // Same percentage convention as CTR in the own-ads metrics row:
+  // ratio -> (ratio * 100).toFixed(2) + '%'; null/absent -> '—'.
+  function formatRatePercent(ratio) {
+    if (ratio === null || ratio === undefined) return '—';
+    const n = Number(ratio);
+    if (!Number.isFinite(n)) return '—';
+    return (n * 100).toFixed(2) + '%';
+  }
+
   function renderEmptyState(firstAvailableDate) {
     resultsEl.innerHTML = '';
     const empty = document.createElement('div');
@@ -3197,8 +3206,9 @@ init();
     table.className = 'ga4-table';
     table.innerHTML =
       '<thead><tr>' +
-      '<th>Fecha</th><th>Canal</th><th>Landing</th>' +
+      '<th>Fecha</th><th>Canal</th><th>Landing</th><th>Source</th><th>Medium</th>' +
       '<th class="ga4-num">Sesiones</th><th class="ga4-num">Usuarios</th><th class="ga4-num">Key events</th>' +
+      '<th class="ga4-num">Conversión</th>' +
       '</tr></thead>';
     const tbody = document.createElement('tbody');
     rows.forEach((row) => {
@@ -3207,9 +3217,12 @@ init();
         '<td>' + escapeHtml(row.date || '—') + '</td>' +
         '<td>' + escapeHtml(row.channel_group || '—') + '</td>' +
         '<td class="ga4-landing-cell">' + escapeHtml(row.landing_page || '—') + '</td>' +
+        '<td>' + escapeHtml(row.source || '—') + '</td>' +
+        '<td>' + escapeHtml(row.medium || '—') + '</td>' +
         '<td class="ga4-num">' + escapeHtml(formatMetric(row.sessions)) + '</td>' +
         '<td class="ga4-num">' + escapeHtml(formatMetric(row.total_users)) + '</td>' +
-        '<td class="ga4-num">' + escapeHtml(formatMetric(row.key_events)) + '</td>';
+        '<td class="ga4-num">' + escapeHtml(formatMetric(row.key_events)) + '</td>' +
+        '<td class="ga4-num">' + escapeHtml(formatRatePercent(row.conversion_rate)) + '</td>';
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

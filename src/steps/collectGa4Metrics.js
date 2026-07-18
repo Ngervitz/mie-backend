@@ -19,7 +19,12 @@ const { todayUtc, shiftDateUtc } = require('../activity/dates');
  */
 
 const METRICS = ['sessions', 'totalUsers', 'keyEvents'];
-const DIMENSIONS = ['sessionDefaultChannelGroup', 'landingPagePlusQueryString'];
+const DIMENSIONS = [
+  'sessionDefaultChannelGroup',
+  'landingPagePlusQueryString',
+  'sessionSource',
+  'sessionMedium',
+];
 const PAGE_SIZE = 10000;
 const MAX_PAGES = 20;
 
@@ -83,6 +88,20 @@ function metricCellToNumber(metricValues, index) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * conversion_rate = keyEvents / sessions, with the same division-by-zero
+ * discipline as CTR/CPC in own-ads metrics: if sessions is 0/null/absent the
+ * result is null — never Infinity, NaN or a fabricated 0. Explicit numeric
+ * casting because GA4's API returns metric values as strings.
+ */
+function computeConversionRate(sessions, keyEvents) {
+  const totalSessions = Number(sessions || 0);
+  const totalKeyEvents = Number(keyEvents || 0);
+  if (!Number.isFinite(totalSessions) || totalSessions <= 0) return null;
+  if (!Number.isFinite(totalKeyEvents)) return null;
+  return totalKeyEvents / totalSessions;
+}
+
 function mapResponseRows(response, reportingDate) {
   const metricIndex = {};
   (response.metricHeaders || []).forEach((h, i) => {
@@ -106,20 +125,30 @@ function mapResponseRows(response, reportingDate) {
         ? dims[dimensionIndex.landingPagePlusQueryString].value
         : '',
     );
+    const source = normalizeDimensionValue(
+      dims[dimensionIndex.sessionSource] ? dims[dimensionIndex.sessionSource].value : '',
+    );
+    const medium = normalizeDimensionValue(
+      dims[dimensionIndex.sessionMedium] ? dims[dimensionIndex.sessionMedium].value : '',
+    );
 
     const toNumber = (name) =>
       metricIndex[name] === undefined ? null : metricCellToNumber(mets, metricIndex[name]);
 
     const sessions = toNumber('sessions');
     const totalUsers = toNumber('totalUsers');
+    const keyEvents = toNumber('keyEvents');
 
     return {
       date: reportingDate,
       channel_group: channelGroup,
       landing_page: landingPage,
+      source,
+      medium,
       sessions: sessions === null ? null : Math.trunc(sessions),
       total_users: totalUsers === null ? null : Math.trunc(totalUsers),
-      key_events: toNumber('keyEvents'),
+      key_events: keyEvents,
+      conversion_rate: computeConversionRate(sessions, keyEvents),
       raw_json: {
         dimensionValues: dims.map((d) => d.value),
         metricValues: mets.map((m) => m.value),
@@ -242,9 +271,11 @@ async function collectGa4Metrics(options = {}) {
 
     let upserted = 0;
     if (rows.length) {
+      // Idempotency: upsert against the 5-column unique key (source/medium
+      // are NOT NULL '(not set)'-normalized, so the key is always comparable).
       const { error } = await supabase
         .from('ga4_metrics')
-        .upsert(rows, { onConflict: 'date,channel_group,landing_page' });
+        .upsert(rows, { onConflict: 'date,channel_group,landing_page,source,medium' });
       if (error) {
         throw new Error(`Failed to upsert ga4_metrics: ${error.message}`);
       }
@@ -331,6 +362,8 @@ async function runGa4Audit(options = {}) {
 
   return {
     propertyId,
+    requestedDimensions: DIMENSIONS,
+    requestedMetrics: METRICS,
     metadataCheck,
     incompatibleDimensions: (compat.dimensionCompatibilities || []).map(
       (d) => d.dimensionMetadata && d.dimensionMetadata.apiName,
@@ -338,6 +371,13 @@ async function runGa4Audit(options = {}) {
     incompatibleMetrics: (compat.metricCompatibilities || []).map(
       (m) => m.metricMetadata && m.metricMetadata.apiName,
     ),
+    // Deterministic division-by-zero checks for conversion_rate (re-runnable
+    // any time via this diagnostic route; no dependence on production data).
+    conversionRateTests: [
+      { sessions: 0, keyEvents: 5, result: computeConversionRate(0, 5) },
+      { sessions: 0, keyEvents: 0, result: computeConversionRate(0, 0) },
+      { sessions: 8, keyEvents: 2, result: computeConversionRate(8, 2) },
+    ],
     testReport: {
       reportingDate: `${startDate}..${endDate}`,
       rowCount: Number(testReport.rowCount || 0),
@@ -355,5 +395,6 @@ module.exports = {
   resolvePreviousClosedReportingDay,
   normalizeDimensionValue,
   metricCellToNumber,
+  computeConversionRate,
   mapResponseRows,
 };
