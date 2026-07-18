@@ -18,6 +18,7 @@
     "apify-client": "^2.23.4",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "googleapis": "^173.0.0",
     "pdf-parse": "^1.1.1",
     "ws": "^8.21.0"
   },

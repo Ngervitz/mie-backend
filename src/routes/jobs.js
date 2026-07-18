@@ -7,6 +7,7 @@ const { calculateUruguayHolidays } = require('../steps/calculateUruguayHolidays'
 const { collectBpsPaymentCalendar } = require('../steps/collectBpsPaymentCalendar');
 const { collectSearchTrends } = require('../steps/collectSearchTrends');
 const { collectGa4Metrics, runGa4Audit } = require('../steps/collectGa4Metrics');
+const { runSearchConsoleAudit } = require('../steps/collectSearchConsole');
 const {
   discoverRelatedQueries,
   createSession: createDiscoverySession,
@@ -965,5 +966,20 @@ const runGa4MetricsHandler = (req, res) => {
 
 router.post('/run-ga4-metrics', runGa4MetricsHandler);
 router.get('/run-ga4-metrics', runGa4MetricsHandler);
+
+// --- Search Console (Phase 1 audit only for now) ---
+// Read-only diagnostic: sites.list (exact siteUrl + permission), data-latency
+// discovery, real response shape with 5 dimensions, pagination behavior.
+// Touches no tables. Reuses GA4_SERVICE_ACCOUNT_JSON (no new credential).
+router.get('/search-console-audit', async (req, res) => {
+  logger.info('GET /jobs/search-console-audit');
+  try {
+    const result = await runSearchConsoleAudit();
+    res.json(result);
+  } catch (err) {
+    logger.error('Search Console audit failed', { error: err.message });
+    res.status(502).json({ error: err.message });
+  }
+});
 
 module.exports = router;
