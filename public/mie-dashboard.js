@@ -1769,6 +1769,8 @@ init();
   const chrome = document.getElementById('meta-ads-chrome');
   const changesLanding = document.getElementById('meta-changes-landing');
   const ownAdsLanding = document.getElementById('meta-own-ads-landing');
+  const ownAdsBtn = document.getElementById('meta-own-ads-open-btn');
+  const changesBtn = document.getElementById('meta-changes-open-btn');
 
   function setVisible(el, visible) {
     if (!el) return;
@@ -1780,9 +1782,13 @@ init();
   function setMetaAdsView(view) {
     const v = view === 'changes' || view === 'own-ads' ? view : 'agent';
     setVisible(agentRoot, v === 'agent');
-    setVisible(chrome, v === 'agent');
+    // The sub-row stays visible for every Meta Ads sub-view; only the active
+    // sub-view button gets highlighted (none when the agent panel is shown).
+    setVisible(chrome, true);
     setVisible(changesLanding, v === 'changes');
     setVisible(ownAdsLanding, v === 'own-ads');
+    if (ownAdsBtn) ownAdsBtn.classList.toggle('active', v === 'own-ads');
+    if (changesBtn) changesBtn.classList.toggle('active', v === 'changes');
   }
 
   window.__setMetaAdsView = setMetaAdsView;
@@ -3092,39 +3098,14 @@ init();
  * data loading to the two pane modules above.
  * ------------------------------------------------------------------------- */
 (function initDiscoveriesLanding() {
-  const openBtn = document.getElementById('discoveries-open-btn');
-  const backBtn = document.getElementById('discoveries-back-btn');
   const landing = document.getElementById('discoveries-landing');
-  const marketRoot = document.getElementById('mie-market-root');
   const tabPending = document.getElementById('disc-tab-pending');
   const tabResearch = document.getElementById('disc-tab-research');
   const panePending = document.getElementById('disc-pane-pending');
   const paneResearch = document.getElementById('disc-pane-research');
 
-  if (
-    !openBtn || !backBtn || !landing || !marketRoot ||
-    !tabPending || !tabResearch || !panePending || !paneResearch
-  ) {
+  if (!landing || !tabPending || !tabResearch || !panePending || !paneResearch) {
     return;
-  }
-
-  function setLanding(show) {
-    // Delegate to the market-view coordinator (mutual exclusivity with the
-    // GA4 landing); fall back to the original two-view toggle if absent.
-    if (typeof window.__setMarketView === 'function') {
-      window.__setMarketView(show ? 'discoveries' : 'market');
-      return;
-    }
-    landing.classList.toggle('hidden', !show);
-    marketRoot.classList.toggle('hidden', show);
-    if (show) {
-      landing.removeAttribute('hidden');
-      marketRoot.setAttribute('hidden', '');
-    } else {
-      marketRoot.removeAttribute('hidden');
-      landing.setAttribute('hidden', '');
-      if (window.__discPending) window.__discPending.stop();
-    }
   }
 
   function activateTab(name) {
@@ -3148,44 +3129,14 @@ init();
     }
   }
 
-  openBtn.addEventListener('click', () => {
-    setLanding(true);
-    activateTab('pending');
-  });
-
-  backBtn.addEventListener('click', () => setLanding(false));
   tabPending.addEventListener('click', () => activateTab('pending'));
   tabResearch.addEventListener('click', () => activateTab('research'));
-})();
 
-/* ----------------------------------------------------------------------------
- * Market tab view coordinator — mutual exclusivity between the market root,
- * the discoveries landing and the GA4 landing (same philosophy as
- * window.__setMetaAdsView in the Meta Ads tab; visibility toggles only,
- * never rebuilds DOM).
- * ------------------------------------------------------------------------- */
-(function initMarketViews() {
-  const marketRoot = document.getElementById('mie-market-root');
-  const discoveries = document.getElementById('discoveries-landing');
-  const ga4 = document.getElementById('ga4-landing');
-  if (!marketRoot || !discoveries || !ga4) return;
-
-  function setVisible(el, show) {
-    el.classList.toggle('hidden', !show);
-    if (show) {
-      el.removeAttribute('hidden');
-    } else {
-      el.setAttribute('hidden', '');
-    }
-  }
-
-  window.__setMarketView = function setMarketView(view) {
-    setVisible(marketRoot, view === 'market');
-    setVisible(discoveries, view === 'discoveries');
-    setVisible(ga4, view === 'ga4');
-    if (view !== 'discoveries' && window.__discPending) {
-      window.__discPending.stop();
-    }
+  // Enter/leave hooks for the top-level tab controller (the section is now a
+  // primary panel — visibility itself is handled by the dashboard tabs).
+  window.__openDiscoveries = () => activateTab('pending');
+  window.__leaveDiscoveries = () => {
+    if (window.__discPending) window.__discPending.stop();
   };
 })();
 
@@ -3196,18 +3147,12 @@ init();
  * ------------------------------------------------------------------------- */
 (function initGa4Landing() {
   const landing = document.getElementById('ga4-landing');
-  const openBtn = document.getElementById('ga4-open-btn');
-  const backBtn = document.getElementById('ga4-back-btn');
   const fromInput = document.getElementById('ga4-from');
   const toInput = document.getElementById('ga4-to');
   const statusEl = document.getElementById('ga4-status');
   const resultsEl = document.getElementById('ga4-results');
 
-  if (
-    !landing || !openBtn || !backBtn || !fromInput ||
-    !toInput || !statusEl || !resultsEl ||
-    typeof window.__setMarketView !== 'function'
-  ) {
+  if (!landing || !fromInput || !toInput || !statusEl || !resultsEl) {
     return;
   }
 
@@ -3326,19 +3271,15 @@ init();
     }
   }
 
-  openBtn.addEventListener('click', () => {
-    window.__setMarketView('ga4');
-    if (!fromInput.value || !toInput.value) setDefaultDates();
-    loadMetrics();
-  });
-
-  backBtn.addEventListener('click', () => {
-    if (abortController) abortController.abort();
-    window.__setMarketView('market');
-  });
-
   fromInput.addEventListener('change', loadMetrics);
   toInput.addEventListener('change', loadMetrics);
+
+  // Enter hook for the top-level tab controller (the section is now a
+  // primary panel — visibility itself is handled by the dashboard tabs).
+  window.__openGa4 = () => {
+    if (!fromInput.value || !toInput.value) setDefaultDates();
+    loadMetrics();
+  };
 
   setDefaultDates();
 })();

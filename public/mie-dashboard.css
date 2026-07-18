@@ -48,13 +48,14 @@
 }
 
 /* ---------- Tabs / nav ---------- */
+/* Primary row: 4 equal top-level sections in a single row. */
 #mie-dashboard-app .dashboard-tabs {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 12px 20px 0;
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 #mie-dashboard-app .dashboard-tab {
@@ -66,8 +67,19 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px 14px;
+  padding: 10px 14px;
   text-transform: none;
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+#mie-dashboard-app .tab-brand-icon {
+  flex-shrink: 0;
 }
 
 #mie-dashboard-app .dashboard-tab:hover {
@@ -79,6 +91,25 @@
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--border-strong);
+}
+
+/* Active-state accents per section, reusing each section's existing accent:
+   - Competidores + Términos descubiertos: --accent-info (the accent already
+     used by entity selection, KPI cards and the disc-tab active state)
+   - GA4: --accent-warn (the palette's amber, matching GA's orange identity
+     and the kw growth badges)
+   - Meta Ads: #60a5fa (the blue used by meta-agent.css .ma-tab.active) */
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="market"] {
+  box-shadow: inset 0 -2px 0 var(--accent-info);
+}
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="discoveries"] {
+  box-shadow: inset 0 -2px 0 var(--accent-info);
+}
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="ga4"] {
+  box-shadow: inset 0 -2px 0 var(--accent-warn);
+}
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="meta"] {
+  box-shadow: inset 0 -2px 0 #60a5fa;
 }
 
 #mie-dashboard-app .dashboard-panel.hidden,
@@ -900,37 +931,60 @@
   padding: 12px 0;
 }
 
-/* ---------- Meta Ads chrome + Historial de cambios (sibling of #meta-ads-root) ---------- */
-#mie-dashboard-app #meta-ads-panel {
+/* ---------- Top-level section panels (standardized content container) ----------
+   Same max-width + 20px horizontal padding used by .app/.dashboard-tabs, so
+   section content (tables, headers) never sits glued to the screen edge. */
+#mie-dashboard-app #meta-ads-panel,
+#mie-dashboard-app #discoveries-panel,
+#mie-dashboard-app #ga4-panel {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 20px 64px;
 }
 
-#mie-dashboard-app .meta-ads-chrome {
+/* Meta Ads secondary sub-row: subordinate to the primary tabs, left-aligned,
+   only rendered inside the Meta Ads panel. Active sub-view highlighted with
+   the Meta Ads accent (#60a5fa, same blue as meta-agent.css .ma-tab.active). */
+#mie-dashboard-app .meta-subnav {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 12px 0 0;
 }
 
-#mie-dashboard-app .meta-ads-chrome.hidden,
+#mie-dashboard-app .meta-subnav-btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
+#mie-dashboard-app .meta-subnav-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+#mie-dashboard-app .meta-subnav-btn.active {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+#mie-dashboard-app .meta-subnav.hidden,
 #mie-dashboard-app #meta-ads-root.hidden,
 #mie-dashboard-app #meta-changes-landing.hidden,
 #mie-dashboard-app #meta-own-ads-landing.hidden,
-#mie-dashboard-app .meta-ads-chrome[hidden],
+#mie-dashboard-app .meta-subnav[hidden],
 #mie-dashboard-app #meta-ads-root[hidden],
 #mie-dashboard-app #meta-changes-landing[hidden],
 #mie-dashboard-app #meta-own-ads-landing[hidden] {
   display: none !important;
-}
-
-#mie-dashboard-app .meta-ads-chrome-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
 }
 
 #mie-dashboard-app .mcl-chrome-btn,

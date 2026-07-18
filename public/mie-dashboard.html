@@ -17,6 +17,8 @@
       </a>
     </nav>
 
+    <!-- Primary nav: 4 equal top-level sections. Trends discovery and GA4 are
+         top-level here (no longer nested inside Competidores). -->
     <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
       <button
         type="button"
@@ -25,7 +27,37 @@
         aria-selected="true"
         data-dashboard-tab="market"
         id="tab-market">
-        Inteligencia de mercado
+        Competidores
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="discoveries"
+        id="tab-discoveries">
+        <!-- Official Google "G" (unmodified 4-color artwork). Do not recolor or distort. -->
+        <svg class="tab-brand-icon" viewBox="0 0 48 48" width="16" height="16" aria-hidden="true" focusable="false">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Términos descubiertos
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="ga4"
+        id="tab-ga4">
+        <!-- Official Google Analytics logomark (unmodified). Do not recolor or distort. -->
+        <svg class="tab-brand-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+          <path fill="#F9AB00" d="M22.84 2.9982v17.9987c.0086 1.6473-1.3197 2.9897-2.967 2.9984-.1235.0006-.2469-.0066-.3695-.0218-1.5303-.2266-2.6524-1.5559-2.6155-3.0981V3.1204c-.0369-1.5434 1.0867-2.8733 2.618-3.0981 1.6355-.2007 3.1244.9628 3.3251 2.5983.0152.1226.0224.246.0218.3695z"/>
+          <path fill="#E37400" d="M4.98 18.0576c1.6507 0 2.9888 1.3381 2.9888 2.9888s-1.3381 2.9888-2.9888 2.9888S1.9912 22.6971 1.9912 21.0464c0-1.6507 1.3381-2.9888 2.9888-2.9888zM11.9722 9.0518c-1.6598.0912-2.9593 1.4664-2.9494 3.1287v8.0198c0 2.1766.9578 3.4977 2.3612 3.7795 1.6197.3283 3.1998-.7185 3.5281-2.3382.04-.1974.06-.3983.0597-.5997V12.0844c.0027-1.6577-1.3386-3.0034-2.9962-3.0061-.0011 0-.0023 0-.0034 0z"/>
+        </svg>
+        GA4 — Tráfico
       </button>
       <button
         type="button"
@@ -34,47 +66,51 @@
         aria-selected="false"
         data-dashboard-tab="meta"
         id="tab-meta">
+        <!-- Official Meta infinity logomark (unmodified artwork, incl. gradients).
+             Do not recolor or distort. -->
+        <svg class="tab-brand-icon" viewBox="0 0 290 191" width="22" height="15" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="mie-meta-grad1" x1="61" y1="117" x2="259" y2="127" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#0064e1" offset="0"/>
+              <stop stop-color="#0064e1" offset="0.4"/>
+              <stop stop-color="#0073ee" offset="0.83"/>
+              <stop stop-color="#0082fb" offset="1"/>
+            </linearGradient>
+            <linearGradient id="mie-meta-grad2" x1="45" y1="139" x2="45" y2="66" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#0082fb" offset="0"/>
+              <stop stop-color="#0064e0" offset="1"/>
+            </linearGradient>
+          </defs>
+          <path fill="#0081fb" d="m31.06,125.96c0,10.98 2.41,19.41 5.56,24.51 4.13,6.68 10.29,9.51 16.57,9.51 8.1,0 15.51-2.01 29.79-21.76 11.44-15.83 24.92-38.05 33.99-51.98l15.36-23.6c10.67-16.39 23.02-34.61 37.18-46.96 11.56-10.08 24.03-15.68 36.58-15.68 21.07,0 41.14,12.21 56.5,35.11 16.81,25.08 24.97,56.67 24.97,89.27 0,19.38-3.82,33.62-10.32,44.87-6.28,10.88-18.52,21.75-39.11,21.75l0-31.02c17.63,0 22.03-16.2 22.03-34.74 0-26.42-6.16-55.74-19.73-76.69-9.63-14.86-22.11-23.94-35.84-23.94-14.85,0-26.8,11.2-40.23,31.17-7.14,10.61-14.47,23.54-22.7,38.13l-9.06,16.05c-18.2,32.27-22.81,39.62-31.91,51.75-15.95,21.24-29.57,29.29-47.5,29.29-21.27,0-34.72-9.21-43.05-23.09-6.8-11.31-10.14-26.15-10.14-43.06z"/>
+          <path fill="url(#mie-meta-grad1)" d="m24.49,37.3c14.24-21.95 34.79-37.3 58.36-37.3 13.65,0 27.22,4.04 41.39,15.61 15.5,12.65 32.02,33.48 52.63,67.81l7.39,12.32c17.84,29.72 27.99,45.01 33.93,52.22 7.64,9.26 12.99,12.02 19.94,12.02 17.63,0 22.03-16.2 22.03-34.74l27.4-.86c0,19.38-3.82,33.62-10.32,44.87-6.28,10.88-18.52,21.75-39.11,21.75-12.8,0-24.14-2.78-36.68-14.61-9.64-9.08-20.91-25.21-29.58-39.71l-25.79-43.08c-12.94-21.62-24.81-37.74-31.68-45.04-7.39-7.85-16.89-17.33-32.05-17.33-12.27,0-22.69,8.61-31.41,21.78z"/>
+          <path fill="url(#mie-meta-grad2)" d="m82.35,31.23c-12.27,0-22.69,8.61-31.41,21.78-12.33,18.61-19.88,46.33-19.88,72.95 0,10.98 2.41,19.41 5.56,24.51l-26.48,17.44c-6.8-11.31-10.14-26.15-10.14-43.06 0-30.75 8.44-62.8 24.49-87.55 14.24-21.95 34.79-37.3 58.36-37.3z"/>
+        </svg>
         Meta Ads
       </button>
     </nav>
 
-    <!-- Market tab shell: chrome + market root + coverage landing are siblings.
-         Visibility toggles only — market root keeps being fully owned by render(). -->
+    <!-- Competidores: ONLY its own entities/activity content (Trends and GA4
+         moved to their own top-level panels). Market root stays fully owned
+         by render(). -->
     <div
       class="dashboard-panel"
       id="market-panel"
       role="tabpanel"
       aria-labelledby="tab-market">
-      <div id="market-chrome" class="meta-ads-chrome">
-        <div class="meta-ads-chrome-actions">
-          <button type="button" id="discoveries-open-btn" class="mcl-chrome-btn">
-            <!-- Official Google "G" (unmodified 4-color artwork) — indicates the
-                 data source is Google Trends. Do not recolor or distort. -->
-            <svg class="mcl-btn-gicon" viewBox="0 0 48 48" width="17" height="17" aria-hidden="true" focusable="false">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            🔎 Términos descubiertos
-          </button>
-          <button type="button" id="ga4-open-btn" class="mcl-chrome-btn">
-            📈 GA4 — Tráfico
-          </button>
-        </div>
-      </div>
-
       <main class="app" id="mie-market-root"></main>
+    </div>
 
-      <!-- Unified discoveries landing: one entry point, two internal views
-           (Pendientes = triage, Investigación = keyword research). Both read
-           from GET /reports/search-discoveries. -->
-      <div id="discoveries-landing" class="cov-landing hidden" hidden>
+    <!-- Términos descubiertos: top-level section (was nested under the market
+         tab). Same content, new navigation attachment point. -->
+    <div
+      class="dashboard-panel hidden"
+      id="discoveries-panel"
+      role="tabpanel"
+      aria-labelledby="tab-discoveries"
+      hidden>
+      <div id="discoveries-landing" class="cov-landing">
         <header class="mcl-header">
           <div class="mcl-header-left">
-            <button type="button" id="discoveries-back-btn" class="mcl-back-btn">
-              ← Volver a Inteligencia de mercado
-            </button>
             <h1 class="mcl-title">Términos descubiertos</h1>
             <p class="mcl-subtitle">
               Términos reales descubiertos en Google Trends (UY): triage de cobertura e investigación de keywords
@@ -137,15 +173,19 @@
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- GA4 traffic viewer: read-only table over captured ga4_metrics.
-           Sibling landing, same non-destructive toggle pattern as above. -->
-      <div id="ga4-landing" class="mcl-landing hidden" hidden>
+    <!-- GA4 — Tráfico: top-level section (was nested under the market tab).
+         Same content, new navigation attachment point. -->
+    <div
+      class="dashboard-panel hidden"
+      id="ga4-panel"
+      role="tabpanel"
+      aria-labelledby="tab-ga4"
+      hidden>
+      <div id="ga4-landing" class="mcl-landing">
         <header class="mcl-header">
           <div class="mcl-header-left">
-            <button type="button" id="ga4-back-btn" class="mcl-back-btn">
-              ← Volver a Inteligencia de mercado
-            </button>
             <h1 class="mcl-title">GA4 — Tráfico</h1>
             <p class="mcl-subtitle">
               Tráfico capturado desde Google Analytics 4 (sesiones, usuarios y key events por canal y landing)
@@ -177,15 +217,15 @@
       role="tabpanel"
       aria-labelledby="tab-meta"
       hidden>
-      <div id="meta-ads-chrome" class="meta-ads-chrome">
-        <div class="meta-ads-chrome-actions">
-          <button type="button" id="meta-own-ads-open-btn" class="mcl-chrome-btn">
-            🧠 Análisis IA
-          </button>
-          <button type="button" id="meta-changes-open-btn" class="mcl-chrome-btn">
-            Historial de cambios
-          </button>
-        </div>
+      <!-- Secondary sub-row: only visible while Meta Ads is the active primary
+           section. Subordinate styling; the active sub-view gets a highlight. -->
+      <div id="meta-ads-chrome" class="meta-subnav">
+        <button type="button" id="meta-own-ads-open-btn" class="meta-subnav-btn">
+          🧠 Análisis IA
+        </button>
+        <button type="button" id="meta-changes-open-btn" class="meta-subnav-btn">
+          Historial de cambios
+        </button>
       </div>
 
       <div id="meta-ads-root"></div>
@@ -254,26 +294,37 @@
     (function () {
       'use strict';
       var tabs = document.querySelectorAll('[data-dashboard-tab]');
-      var market = document.getElementById('market-panel');
-      var metaPanel = document.getElementById('meta-ads-panel');
-      if (!market || !metaPanel || !tabs.length) return;
+      var panels = {
+        market: document.getElementById('market-panel'),
+        discoveries: document.getElementById('discoveries-panel'),
+        ga4: document.getElementById('ga4-panel'),
+        meta: document.getElementById('meta-ads-panel'),
+      };
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.meta || !tabs.length) return;
+
+      var current = 'market';
 
       function activate(name) {
-        var showMarket = name === 'market';
-        market.classList.toggle('hidden', !showMarket);
-        metaPanel.classList.toggle('hidden', showMarket);
-        if (showMarket) {
-          market.removeAttribute('hidden');
-          metaPanel.setAttribute('hidden', '');
-        } else {
-          metaPanel.removeAttribute('hidden');
-          market.setAttribute('hidden', '');
-        }
+        if (!panels[name]) return;
+        Object.keys(panels).forEach(function (key) {
+          var show = key === name;
+          panels[key].classList.toggle('hidden', !show);
+          if (show) panels[key].removeAttribute('hidden');
+          else panels[key].setAttribute('hidden', '');
+        });
         tabs.forEach(function (btn) {
           var on = btn.getAttribute('data-dashboard-tab') === name;
           btn.classList.toggle('active', on);
           btn.setAttribute('aria-selected', on ? 'true' : 'false');
         });
+
+        // Section-specific enter/leave hooks (loaders exposed by mie-dashboard.js).
+        if (current === 'discoveries' && name !== 'discoveries' && window.__leaveDiscoveries) {
+          window.__leaveDiscoveries();
+        }
+        if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
+        if (name === 'ga4' && window.__openGa4) window.__openGa4();
+        current = name;
       }
 
       tabs.forEach(function (btn) {
