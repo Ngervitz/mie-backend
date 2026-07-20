@@ -164,44 +164,68 @@
           </div>
         </header>
 
-        <form id="serp-import-form" class="serp-upload-form" enctype="multipart/form-data">
-          <label class="mcl-field">
-            <span class="mcl-field-label">Archivo HTML</span>
-            <input type="file" id="serp-file-input" class="mcl-input" accept=".html,.htm,text/html" required />
-          </label>
-          <label class="mcl-field" id="serp-term-field">
-            <span class="mcl-field-label">Término de búsqueda (fallback)</span>
-            <input
-              type="text"
-              id="serp-search-term"
-              class="mcl-input"
-              placeholder="Solo si el HTML no trae el término en la caja de búsqueda"
-              autocomplete="off"
-            />
-          </label>
-          <label class="mcl-field">
-            <span class="mcl-field-label">Fecha de la búsqueda</span>
-            <input type="date" id="serp-date" class="mcl-input" />
-          </label>
-          <div class="serp-upload-actions">
-            <button type="submit" id="serp-upload-btn" class="btn btn-primary">
-              Subir e importar
-            </button>
-          </div>
-        </form>
+        <div class="serp-toolbar">
+          <button type="button" id="serp-toggle-import-btn" class="btn">
+            + Nueva importación
+          </button>
+        </div>
+
+        <div id="serp-upload-panel" class="serp-upload-panel" hidden>
+          <form id="serp-import-form" class="serp-upload-form" enctype="multipart/form-data">
+            <div
+              id="serp-dropzone"
+              class="serp-dropzone"
+              tabindex="0"
+              role="button"
+              aria-label="Zona para soltar o elegir archivos HTML"
+            >
+              <input
+                type="file"
+                id="serp-file-input"
+                class="serp-file-input-hidden"
+                accept=".html,.htm,text/html"
+                multiple
+              />
+              <p class="serp-dropzone-title">Arrastrá archivos .html aquí</p>
+              <p class="serp-dropzone-hint">o hacé clic para elegir uno o varios</p>
+              <p id="serp-selected-files" class="serp-selected-files">
+                Ningún archivo seleccionado
+              </p>
+            </div>
+            <label class="mcl-field" id="serp-term-field">
+              <span class="mcl-field-label">Término de búsqueda (fallback)</span>
+              <input
+                type="text"
+                id="serp-search-term"
+                class="mcl-input"
+                placeholder="Solo si el HTML no trae el término en la caja de búsqueda"
+                autocomplete="off"
+              />
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Fecha de la búsqueda</span>
+              <input type="date" id="serp-date" class="mcl-input" />
+            </label>
+            <div class="serp-upload-actions">
+              <button type="submit" id="serp-upload-btn" class="btn btn-primary" disabled>
+                Subir e importar
+              </button>
+            </div>
+          </form>
+        </div>
 
         <div id="serp-import-status" class="mcl-status" aria-live="polite"></div>
         <div id="serp-import-summary" class="serp-summary" hidden></div>
+
+        <section class="serp-history-section">
+          <h2 class="cov-section-title">Importaciones anteriores</h2>
+          <div id="serp-imports-list" class="serp-imports-table-wrap"></div>
+        </section>
 
         <section class="serp-presence-section">
           <h2 class="cov-section-title">Presencia de competidores</h2>
           <div id="serp-presence-status" class="mcl-status" aria-live="polite"></div>
           <div id="serp-presence-list" class="serp-presence-list"></div>
-        </section>
-
-        <section class="serp-history-section">
-          <h2 class="cov-section-title">Importaciones anteriores</h2>
-          <div id="serp-imports-list" class="serp-imports-list"></div>
         </section>
 
         <section id="serp-ads-detail" class="serp-ads-detail" hidden>

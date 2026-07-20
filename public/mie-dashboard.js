@@ -3395,12 +3395,19 @@ init();
   const uploadBtn = document.getElementById('serp-upload-btn');
   const presenceStatusEl = document.getElementById('serp-presence-status');
   const presenceListEl = document.getElementById('serp-presence-list');
+  const uploadPanel = document.getElementById('serp-upload-panel');
+  const toggleImportBtn = document.getElementById('serp-toggle-import-btn');
+  const dropzone = document.getElementById('serp-dropzone');
+  const selectedFilesEl = document.getElementById('serp-selected-files');
 
   if (!landing || !form) return;
 
   let selectedPath = null;
   let busy = false;
   let importsCache = [];
+  let formExpanded = false;
+  /** @type {File[]} Shared selection for picker + drag-and-drop. */
+  let selectedFiles = [];
 
   function setStatus(text, isError) {
     if (!statusEl) return;
@@ -3420,6 +3427,160 @@ init();
     if (parts.length !== 3) return String(isoDate);
     return parts[2] + '/' + parts[1] + '/' + parts[0];
   }
+
+  /** Centralized parse_status → badge label/tone. Does not alter stored values. */
+  function serpParseStatusMeta(parseStatus) {
+    const raw = parseStatus == null ? '' : String(parseStatus);
+    if (raw === 'success') {
+      return { label: 'Procesada', tone: 'success' };
+    }
+    if (raw === 'no_ads_found') {
+      return { label: 'Sin resultados', tone: 'muted' };
+    }
+    if (raw === 'failed') {
+      return { label: 'Fallida', tone: 'warn' };
+    }
+    return { label: raw || '—', tone: 'muted' };
+  }
+
+  function isHtmlFile(file) {
+    if (!file || !file.name) return false;
+    const name = String(file.name).toLowerCase();
+    if (name.endsWith('.html') || name.endsWith('.htm')) return true;
+    const type = String(file.type || '').toLowerCase();
+    return type === 'text/html';
+  }
+
+  function syncFileInputFromSelection() {
+    if (!fileInput) return;
+    try {
+      const dt = new DataTransfer();
+      selectedFiles.forEach((f) => dt.items.add(f));
+      fileInput.files = dt.files;
+    } catch (_err) {
+      // Some browsers block programmatic FileList writes; selection still drives submit.
+    }
+  }
+
+  function updateSelectedFilesUi() {
+    if (!selectedFilesEl) return;
+    if (!selectedFiles.length) {
+      selectedFilesEl.textContent = 'Ningún archivo seleccionado';
+      selectedFilesEl.classList.remove('has-files');
+    } else if (selectedFiles.length === 1) {
+      selectedFilesEl.textContent = selectedFiles[0].name;
+      selectedFilesEl.classList.add('has-files');
+    } else {
+      selectedFilesEl.textContent =
+        selectedFiles.length +
+        ' archivos: ' +
+        selectedFiles.map((f) => f.name).join(', ');
+      selectedFilesEl.classList.add('has-files');
+    }
+  }
+
+  function updateSubmitEnabled() {
+    if (!uploadBtn) return;
+    uploadBtn.disabled = busy || selectedFiles.length === 0;
+  }
+
+  function setSelectedFiles(files, opts) {
+    const options = opts || {};
+    const incoming = Array.from(files || []).filter(Boolean);
+    const valid = [];
+    const rejected = [];
+    incoming.forEach((f) => {
+      if (isHtmlFile(f)) valid.push(f);
+      else rejected.push(f.name || 'archivo');
+    });
+
+    selectedFiles = valid;
+    syncFileInputFromSelection();
+    updateSelectedFilesUi();
+    updateSubmitEnabled();
+
+    if (rejected.length) {
+      setStatus(
+        'Tipo no soportado: solo .html / .htm. Se ignoró: ' + rejected.join(', '),
+        true,
+      );
+      return false;
+    }
+    if (!options.silentStatus) {
+      if (valid.length) setStatus('', false);
+      else if (incoming.length) setStatus('Seleccioná al menos un archivo .html.', true);
+    }
+    return rejected.length === 0;
+  }
+
+  function clearSelectedFiles() {
+    selectedFiles = [];
+    if (fileInput) fileInput.value = '';
+    updateSelectedFilesUi();
+    updateSubmitEnabled();
+  }
+
+  function setFormExpanded(expanded) {
+    formExpanded = Boolean(expanded);
+    if (uploadPanel) {
+      if (formExpanded) uploadPanel.removeAttribute('hidden');
+      else uploadPanel.setAttribute('hidden', '');
+    }
+    if (toggleImportBtn) {
+      toggleImportBtn.textContent = formExpanded
+        ? 'Cerrar importación'
+        : '+ Nueva importación';
+    }
+  }
+
+  if (toggleImportBtn) {
+    toggleImportBtn.addEventListener('click', () => {
+      setFormExpanded(!formExpanded);
+    });
+  }
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', (e) => {
+      if (e.target === fileInput) return;
+      fileInput.click();
+    });
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    ['dragenter', 'dragover'].forEach((evt) => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'dragend'].forEach((evt) => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('is-dragover');
+      });
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('is-dragover');
+      const files = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : [];
+      setSelectedFiles(files);
+    });
+
+    fileInput.addEventListener('change', () => {
+      setSelectedFiles(fileInput.files);
+    });
+  }
+
+  setFormExpanded(false);
+  updateSelectedFilesUi();
+  updateSubmitEnabled();
 
   function renderPresence(payload) {
     if (!presenceListEl) return;
@@ -3592,41 +3753,283 @@ init();
       unmatchedNote;
   }
 
-  function renderImportsList(imports) {
-    if (!listEl) return;
-    listEl.innerHTML = '';
-    if (!imports.length) {
-      const empty = document.createElement('div');
-      empty.className = 'mcl-empty';
-      empty.textContent = 'Todavía no hay importaciones.';
-      listEl.appendChild(empty);
+  function classifyImportOutcome(res, body) {
+    // Prefer HTTP status: 422 = loud parse empty; other non-OK = hard failure.
+    if (res.status === 422) return 'no_results';
+    if (!res.ok) return 'failed';
+    if (body.parserFoundNoResults || body.parserFoundNoAdMarkers) return 'no_results';
+    if (body.ok === false) return 'failed';
+    if (body.duplicate) return 'duplicate';
+    return 'success';
+  }
+
+  function outcomeLabel(kind) {
+    if (kind === 'success') return 'OK';
+    if (kind === 'duplicate') return 'Duplicado';
+    if (kind === 'no_results') return 'Sin resultados';
+    return 'Error';
+  }
+
+  function renderBatchSummary(results) {
+    if (!summaryEl) return;
+    const total = results.length;
+    const okCount = results.filter((r) => r.kind === 'success').length;
+    const dupCount = results.filter((r) => r.kind === 'duplicate').length;
+    const noResCount = results.filter((r) => r.kind === 'no_results').length;
+    const failCount = results.filter((r) => r.kind === 'failed').length;
+    const hasProblem = noResCount > 0 || failCount > 0;
+
+    summaryEl.hidden = false;
+    summaryEl.classList.toggle('is-error', hasProblem);
+
+    const terms = [];
+    const seenTerms = new Set();
+    results.forEach((r) => {
+      const t = r.body && r.body.searchTerm ? String(r.body.searchTerm).trim() : '';
+      if (t && !seenTerms.has(t.toLowerCase())) {
+        seenTerms.add(t.toLowerCase());
+        terms.push(t);
+      }
+    });
+
+    const rowsHtml = results
+      .map((r) => {
+        const term = (r.body && r.body.searchTerm) || '—';
+        const detail =
+          r.kind === 'success'
+            ? (r.body.adsFound || 0) +
+              ' ad(s), ' +
+              (r.body.organicFound || 0) +
+              ' orgánico(s)'
+            : r.kind === 'duplicate'
+              ? 'ya importada'
+              : r.kind === 'no_results'
+                ? 'parser sin ads/orgánicos'
+                : r.error ||
+                  (r.body && (r.body.error || r.body.message)) ||
+                  'falló';
+        return (
+          '<li class="serp-batch-item is-' +
+          escapeHtml(r.kind) +
+          '">' +
+          '<strong>' +
+          escapeHtml(r.fileName) +
+          '</strong> · ' +
+          escapeHtml(outcomeLabel(r.kind)) +
+          ' · término: ' +
+          escapeHtml(term) +
+          ' · ' +
+          escapeHtml(detail) +
+          '</li>'
+        );
+      })
+      .join('');
+
+    summaryEl.innerHTML =
+      '<p class="serp-summary-title">Lote: ' +
+      escapeHtml(String(total)) +
+      ' archivo(s)</p>' +
+      '<div style="color:var(--text-muted);font-size:13px;">' +
+      'OK: <strong style="color:var(--text)">' +
+      escapeHtml(String(okCount)) +
+      '</strong> · Duplicados: <strong style="color:var(--text)">' +
+      escapeHtml(String(dupCount)) +
+      '</strong> · Sin resultados: <strong style="color:var(--text)">' +
+      escapeHtml(String(noResCount)) +
+      '</strong> · Errores: <strong style="color:var(--text)">' +
+      escapeHtml(String(failCount)) +
+      '</strong>' +
+      (terms.length
+        ? '<br/>Términos: ' + escapeHtml(terms.join(', '))
+        : '') +
+      '</div>' +
+      '<ul class="serp-batch-list">' +
+      rowsHtml +
+      '</ul>';
+  }
+
+  function safeUserError(body, fallback) {
+    if (body && typeof body.error === 'string' && body.error.trim()) return body.error;
+    if (body && typeof body.message === 'string' && body.message.trim()) return body.message;
+    return fallback || 'Error al importar.';
+  }
+
+  async function uploadOneSerpFile(file, sharedFields) {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (sharedFields.searchTerm) fd.append('searchTerm', sharedFields.searchTerm);
+    if (sharedFields.date) fd.append('date', sharedFields.date);
+
+    const res = await fetch(API_BASE + '/reports/import-google-serp', {
+      method: 'POST',
+      body: fd,
+    });
+    const body = await res.json().catch(() => ({}));
+    const kind = classifyImportOutcome(res, body);
+    return {
+      fileName: file.name,
+      kind,
+      status: res.status,
+      body,
+      error: kind === 'failed' ? safeUserError(body, 'Error al importar.') : null,
+    };
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    if (!selectedFiles.length) {
+      setStatus('Seleccioná uno o más archivos .html.', true);
+      updateSubmitEnabled();
       return;
     }
 
-    imports.forEach((item) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className =
-        'serp-import-row' + (item.rawHtmlStoragePath === selectedPath ? ' is-selected' : '');
-      btn.innerHTML =
-        '<span class="serp-import-date">' +
-        escapeHtml(item.date || '—') +
-        '</span>' +
-        '<span class="serp-import-term">' +
-        escapeHtml(item.searchTerm || '—') +
-        '</span>' +
-        '<span class="serp-import-count">' +
-        escapeHtml(String(item.adsCount || 0)) +
-        ' ads</span>' +
-        '<span class="serp-import-count">' +
-        escapeHtml(String(item.organicCount || 0)) +
-        ' org</span>';
+    busy = true;
+    updateSubmitEnabled();
+    if (summaryEl) {
+      summaryEl.hidden = true;
+      summaryEl.innerHTML = '';
+    }
+
+    const sharedFields = {
+      searchTerm: termInput && termInput.value.trim() ? termInput.value.trim() : '',
+      date: dateInput && dateInput.value ? dateInput.value : '',
+    };
+    const fileList = selectedFiles.slice();
+
+    const results = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setStatus(
+        'Importando ' + (i + 1) + ' de ' + fileList.length + '… (' + file.name + ')',
+        false,
+      );
+      try {
+        const outcome = await uploadOneSerpFile(file, sharedFields);
+        results.push(outcome);
+      } catch (err) {
+        results.push({
+          fileName: file.name,
+          kind: 'failed',
+          status: 0,
+          body: {},
+          error: 'No se pudo conectar con el servidor.',
+        });
+      }
+    }
+
+    if (fileList.length === 1 && results[0] && results[0].kind !== 'failed') {
+      renderSummary(results[0].body);
+    } else {
+      renderBatchSummary(results);
+    }
+
+    const okish = results.filter(
+      (r) => r.kind === 'success' || r.kind === 'duplicate',
+    ).length;
+    const failedish = results.filter(
+      (r) => r.kind === 'failed' || r.kind === 'no_results',
+    ).length;
+    const anySuccess = results.some((r) => r.kind === 'success');
+
+    const lastOk = [...results]
+      .reverse()
+      .find((r) => r.body && r.body.rawHtmlStoragePath);
+    selectedPath = lastOk ? lastOk.body.rawHtmlStoragePath : null;
+
+    // Refresh history/presence once, then set the batch status (loadImports
+    // also writes status — keep the lote message as the final one).
+    await loadImports({ silent: true });
+    await loadPresence();
+    if (selectedPath) await loadCaptureDetail(selectedPath);
+
+    setStatus(
+      'Lote terminado: ' +
+        okish +
+        ' ok/duplicado(s), ' +
+        failedish +
+        ' con alerta/error, de ' +
+        results.length +
+        ' archivo(s).',
+      failedish > 0 && okish === 0,
+    );
+
+    if (anySuccess || okish > 0) {
+      clearSelectedFiles();
+      setFormExpanded(false);
+    }
+
+    busy = false;
+    updateSubmitEnabled();
+  });
+
+  function renderImportsList(imports) {
+    if (!listEl) return;
+    if (!imports.length) {
+      listEl.innerHTML = '<div class="mcl-empty">Todavía no hay importaciones.</div>';
+      return;
+    }
+
+    const bodyRows = imports
+      .map((item) => {
+        const ads = Number(item.adsCount || 0);
+        const organic = Number(item.organicCount || 0);
+        const total = ads + organic;
+        const statusMeta = serpParseStatusMeta(item.parseStatus);
+        const path = item.rawHtmlStoragePath || '';
+        const selected =
+          path && path === selectedPath ? ' is-selected' : '';
+        return (
+          '<tr class="serp-capture-row' +
+          selected +
+          '" data-path="' +
+          escapeHtml(path) +
+          '">' +
+          '<td>' +
+          escapeHtml(formatPresenceDate(item.date)) +
+          '</td>' +
+          '<td class="serp-capture-term">' +
+          escapeHtml(item.searchTerm || '—') +
+          '</td>' +
+          '<td><span class="serp-status-badge is-' +
+          escapeHtml(statusMeta.tone) +
+          '">' +
+          escapeHtml(statusMeta.label) +
+          '</span></td>' +
+          '<td class="serp-num">' +
+          escapeHtml(String(ads)) +
+          '</td>' +
+          '<td class="serp-num">' +
+          escapeHtml(String(organic)) +
+          '</td>' +
+          '<td class="serp-num">' +
+          escapeHtml(String(total)) +
+          '</td>' +
+          '<td><button type="button" class="btn serp-detail-btn" data-path="' +
+          escapeHtml(path) +
+          '">Ver detalle</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    listEl.innerHTML =
+      '<table class="serp-captures-table">' +
+      '<thead><tr>' +
+      '<th>Fecha</th><th>Término</th><th>Estado</th>' +
+      '<th>Anuncios</th><th>Orgánicos</th><th>Total</th><th>Acción</th>' +
+      '</tr></thead><tbody>' +
+      bodyRows +
+      '</tbody></table>';
+
+    listEl.querySelectorAll('.serp-detail-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        selectedPath = item.rawHtmlStoragePath;
-        renderImportsList(imports);
-        loadCaptureDetail(item.rawHtmlStoragePath);
+        const path = btn.getAttribute('data-path') || '';
+        if (!path) return;
+        selectedPath = path;
+        renderImportsList(importsCache);
+        loadCaptureDetail(path);
       });
-      listEl.appendChild(btn);
     });
   }
 
@@ -3694,8 +4097,9 @@ init();
     renderResultTable(organic, organicTableEl, 'Sin resultados orgánicos en esta importación.');
   }
 
-  async function loadImports() {
-    setStatus('Cargando importaciones…', false);
+  async function loadImports(opts) {
+    const silent = opts && opts.silent;
+    if (!silent) setStatus('Cargando importaciones…', false);
     try {
       const res = await fetch(API_BASE + '/reports/google-serp-imports', {
         headers: { Accept: 'application/json' },
@@ -3707,10 +4111,12 @@ init();
       }
       importsCache = Array.isArray(body.imports) ? body.imports : [];
       renderImportsList(importsCache);
-      setStatus(
-        body.total ? body.total + ' importación(es)' : 'Sin importaciones aún',
-        false,
-      );
+      if (!silent) {
+        setStatus(
+          body.total ? body.total + ' importación(es)' : 'Sin importaciones aún',
+          false,
+        );
+      }
     } catch (err) {
       setStatus('No se pudo conectar con el servidor.', true);
     }
@@ -3725,7 +4131,11 @@ init();
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus(body.error || 'No se pudo cargar el detalle.', true);
+        const msg =
+          typeof body.error === 'string'
+            ? body.error
+            : 'No se pudo cargar el detalle.';
+        setStatus(msg, true);
         return;
       }
       renderCaptureDetail(body);
@@ -3733,87 +4143,6 @@ init();
       setStatus('No se pudo conectar con el servidor.', true);
     }
   }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (busy) return;
-    const file = fileInput && fileInput.files && fileInput.files[0];
-    if (!file) {
-      setStatus('Seleccioná un archivo .html.', true);
-      return;
-    }
-
-    busy = true;
-    if (uploadBtn) uploadBtn.disabled = true;
-    setStatus('Subiendo e importando…', false);
-    if (summaryEl) {
-      summaryEl.hidden = true;
-      summaryEl.innerHTML = '';
-    }
-
-    const fd = new FormData();
-    fd.append('file', file);
-    if (termInput && termInput.value.trim()) {
-      fd.append('searchTerm', termInput.value.trim());
-    }
-    if (dateInput && dateInput.value) {
-      fd.append('date', dateInput.value);
-    }
-
-    try {
-      const res = await fetch(API_BASE + '/reports/import-google-serp', {
-        method: 'POST',
-        body: fd,
-      });
-      const body = await res.json().catch(() => ({}));
-
-      if (res.status === 422 || body.parserFoundNoResults || body.parserFoundNoAdMarkers) {
-        renderSummary(body);
-        setStatus(
-          body.message || 'parser found no results — revisá que sea un SERP de Google.',
-          true,
-        );
-        await loadImports();
-        await loadPresence();
-        return;
-      }
-
-      if (!res.ok) {
-        setStatus(body.error || 'Error al importar.', true);
-        if (body.code === 'SEARCH_TERM_REQUIRED') {
-          setStatus(
-            'No se pudo leer el término del HTML. Completá el campo «Término de búsqueda».',
-            true,
-          );
-        }
-        return;
-      }
-
-      renderSummary(body);
-      if (body.duplicate) {
-        setStatus(body.message || 'Esta captura ya había sido importada.', false);
-      } else {
-        setStatus(
-          'Importación OK: ' +
-            (body.adsFound || 0) +
-            ' ad(s), ' +
-            (body.organicFound || 0) +
-            ' orgánico(s).',
-          false,
-        );
-      }
-      if (fileInput) fileInput.value = '';
-      selectedPath = body.rawHtmlStoragePath || null;
-      await loadImports();
-      await loadPresence();
-      if (selectedPath) await loadCaptureDetail(selectedPath);
-    } catch (err) {
-      setStatus('No se pudo conectar con el servidor.', true);
-    } finally {
-      busy = false;
-      if (uploadBtn) uploadBtn.disabled = false;
-    }
-  });
 
   window.__openGoogleSerp = () => {
     ensureDefaultDate();
