@@ -62,6 +62,7 @@ const state = {
     name: '',
     segment: 'prestamos',
     adLibraryUrl: '',
+    websiteDomain: '',
   },
 };
 
@@ -669,6 +670,7 @@ function openAddEntityModal() {
     name: '',
     segment: 'prestamos',
     adLibraryUrl: '',
+    websiteDomain: '',
   };
   state.entityModal.open = false;
   render();
@@ -717,6 +719,7 @@ async function submitAddEntity() {
   const name = String(state.addEntityModal.name || '').trim();
   const segment = String(state.addEntityModal.segment || '').trim();
   const adLibraryUrl = String(state.addEntityModal.adLibraryUrl || '').trim();
+  const websiteDomainRaw = String(state.addEntityModal.websiteDomain || '').trim();
 
   if (!name || !segment || !adLibraryUrl) {
     state.addEntityModal.error = 'Completá nombre, categoría y URL de Ad Library.';
@@ -736,12 +739,35 @@ async function submitAddEntity() {
     return;
   }
 
+  // Optional: normalize hostname (strip protocol/www) for exact SERP matching.
+  let websiteDomain = null;
+  if (websiteDomainRaw) {
+    let candidate = websiteDomainRaw.toLowerCase();
+    if (!/^https?:\/\//i.test(candidate)) candidate = 'https://' + candidate;
+    try {
+      let host = new URL(candidate).hostname;
+      if (host.startsWith('www.')) host = host.slice(4);
+      websiteDomain = host || null;
+    } catch (err) {
+      state.addEntityModal.error =
+        'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).';
+      render();
+      return;
+    }
+    if (!websiteDomain || !websiteDomain.includes('.')) {
+      state.addEntityModal.error =
+        'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).';
+      render();
+      return;
+    }
+  }
+
   state.addEntityModal.busy = true;
   state.addEntityModal.error = null;
   render();
 
   try {
-    await supabaseRestPost('monitored_entities', {
+    const payload = {
       name,
       slug,
       entity_type: 'marca',
@@ -750,7 +776,10 @@ async function submitAddEntity() {
       ad_library_url: adLibraryUrl,
       is_self: false,
       active: true,
-    });
+    };
+    if (websiteDomain) payload.website_domain = websiteDomain;
+
+    await supabaseRestPost('monitored_entities', payload);
     closeAddEntityModal();
     await loadIntensityGauges(state.selectedDate);
   } catch (err) {
@@ -871,6 +900,12 @@ function renderAddEntityModal() {
             <input class="input" type="url" name="adLibraryUrl" id="add-entity-url"
               value="${escapeHtml(m.adLibraryUrl)}" required ${m.busy ? 'disabled' : ''}
               placeholder="https://www.facebook.com/ads/library/..." />
+          </label>
+          <label class="entity-form-field">
+            <span class="ad-modal-label">Dominio web <span class="text-muted">(opcional, para match SERP)</span></span>
+            <input class="input" type="text" name="websiteDomain" id="add-entity-website-domain"
+              value="${escapeHtml(m.websiteDomain || '')}" ${m.busy ? 'disabled' : ''}
+              placeholder="ej. alprestamo.uy" autocomplete="off" />
           </label>
           ${errorHtml}
           <div class="ad-modal-actions">
@@ -1679,9 +1714,11 @@ function bindEvents() {
       const nameInput = root.querySelector('#add-entity-name');
       const segmentInput = root.querySelector('#add-entity-segment');
       const urlInput = root.querySelector('#add-entity-url');
+      const domainInput = root.querySelector('#add-entity-website-domain');
       state.addEntityModal.name = nameInput ? nameInput.value : '';
       state.addEntityModal.segment = segmentInput ? segmentInput.value : 'prestamos';
       state.addEntityModal.adLibraryUrl = urlInput ? urlInput.value : '';
+      state.addEntityModal.websiteDomain = domainInput ? domainInput.value : '';
       submitAddEntity();
     });
   }
