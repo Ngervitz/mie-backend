@@ -971,6 +971,14 @@
   padding: 12px 0 0;
 }
 
+/* Competidores Meta/Google sub-row: same horizontal inset as .dashboard-tabs /
+   .app (max-width + 20px), so it is not flush to the screen edge. */
+#mie-dashboard-app #market-chrome.meta-subnav {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 12px 20px 0;
+}
+
 #mie-dashboard-app .meta-subnav-btn {
   cursor: pointer;
   font: inherit;
@@ -981,6 +989,9 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 #mie-dashboard-app .meta-subnav-btn:hover {
