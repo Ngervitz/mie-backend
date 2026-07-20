@@ -31,6 +31,14 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_google_serp_ads_manual_capture_result
   ON public.google_serp_ads_manual (capture_id, result_type);
 
+-- Placement for organic rows (independent of ad top/bottom).
+ALTER TABLE public.google_serp_ads_manual
+  DROP CONSTRAINT IF EXISTS google_serp_ads_manual_placement_check;
+
+ALTER TABLE public.google_serp_ads_manual
+  ADD CONSTRAINT google_serp_ads_manual_placement_check
+  CHECK (placement IN ('top', 'bottom', 'unknown', 'organic'));
+
 -- confirmed_search_terms.decision has no DB CHECK in the original migration
 -- (only a comment). Pending SERP unmatched domains use decision='pending'
 -- so they can surface in the Pendientes triage queue until a human decides.
