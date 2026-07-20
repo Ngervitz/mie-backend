@@ -998,10 +998,14 @@
 #mie-dashboard-app #meta-ads-root.hidden,
 #mie-dashboard-app #meta-changes-landing.hidden,
 #mie-dashboard-app #meta-own-ads-landing.hidden,
+#mie-dashboard-app #mie-market-root.hidden,
+#mie-dashboard-app #serp-import-landing.hidden,
 #mie-dashboard-app .meta-subnav[hidden],
 #mie-dashboard-app #meta-ads-root[hidden],
 #mie-dashboard-app #meta-changes-landing[hidden],
-#mie-dashboard-app #meta-own-ads-landing[hidden] {
+#mie-dashboard-app #meta-own-ads-landing[hidden],
+#mie-dashboard-app #mie-market-root[hidden],
+#mie-dashboard-app #serp-import-landing[hidden] {
   display: none !important;
 }
 
@@ -1716,3 +1720,169 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Google SERP manual import (Competidores sibling landing) ---------- */
+#mie-dashboard-app .serp-landing {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+#mie-dashboard-app .serp-upload-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+#mie-dashboard-app .serp-upload-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#mie-dashboard-app .serp-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+#mie-dashboard-app .serp-summary.is-error {
+  border-color: var(--accent-danger);
+  background: var(--accent-danger-soft);
+}
+
+#mie-dashboard-app .serp-summary-title {
+  font-weight: var(--font-weight-medium);
+  margin: 0 0 8px;
+}
+
+#mie-dashboard-app .serp-summary ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .serp-badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  margin-right: 6px;
+  margin-top: 4px;
+}
+
+#mie-dashboard-app .serp-badge.is-matched {
+  background: var(--accent-success-soft);
+  color: var(--accent-success);
+}
+
+#mie-dashboard-app .serp-badge.is-unmatched {
+  background: var(--accent-warn-soft);
+  color: var(--accent-warn);
+}
+
+#mie-dashboard-app .serp-history-section {
+  margin-top: 24px;
+}
+
+#mie-dashboard-app .serp-detail-subtitle {
+  font-size: 0.95rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+  margin: 20px 0 10px;
+}
+
+#mie-dashboard-app .serp-detail-subtitle:first-of-type {
+  margin-top: 12px;
+}
+
+#mie-dashboard-app .serp-imports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#mie-dashboard-app .serp-import-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  width: 100%;
+}
+
+#mie-dashboard-app .serp-import-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .serp-import-row.is-selected {
+  border-color: var(--accent-info);
+}
+
+#mie-dashboard-app .serp-import-date {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#mie-dashboard-app .serp-import-term {
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app .serp-import-count {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#mie-dashboard-app .serp-ads-detail {
+  margin-top: 24px;
+}
+
+#mie-dashboard-app .serp-ads-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+#mie-dashboard-app .serp-ads-table th,
+#mie-dashboard-app .serp-ads-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#mie-dashboard-app .serp-ads-table th {
+  color: var(--text-muted);
+  font-weight: var(--font-weight-medium);
+  font-size: 12px;
+}
+
+#mie-dashboard-app .serp-ads-table .serp-url-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  #mie-dashboard-app .serp-import-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+

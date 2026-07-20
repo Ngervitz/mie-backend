@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 const {
@@ -10,8 +11,35 @@ const {
   regenerateSeoLandingDraft,
   hasActiveDraft,
 } = require('../services/seo-landing-generator');
+const {
+  MAX_FILE_BYTES,
+  importGoogleSerpHtml,
+  listGoogleSerpImports,
+  getGoogleSerpImportAds,
+  normalizeDomain,
+} = require('../steps/collectGoogleSerpImports');
 
 const router = express.Router();
+
+const serpHtmlUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  fileFilter(req, file, cb) {
+    const name = String(file.originalname || '').toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    const okExt = name.endsWith('.html') || name.endsWith('.htm');
+    const okMime =
+      !mime ||
+      mime === 'text/html' ||
+      mime === 'application/xhtml+xml' ||
+      mime === 'application/octet-stream';
+    if (okExt || okMime) return cb(null, true);
+    const err = new Error('Solo se aceptan archivos .html');
+    err.statusCode = 400;
+    err.code = 'INVALID_FILE_TYPE';
+    return cb(err);
+  },
+});
 
 const EVENT_TYPE_TO_STAT = {
   new_ad: 'newAds',
@@ -960,33 +988,41 @@ async function loadSearchDiscoveries() {
 
   const { data: entities, error: entErr } = await supabase
     .from('monitored_entities')
-    .select('id, name, is_self, active');
+    .select('id, name, is_self, active, website_domain');
   if (entErr) {
     throw new Error(`Failed to fetch monitored_entities: ${entErr.message}`);
   }
   const entityByLowerName = new Map(
     (entities || []).map((e) => [String(e.name || '').trim().toLowerCase(), e]),
   );
+  const entityByWebsiteDomain = new Map();
+  for (const e of entities || []) {
+    const d = normalizeDomain(e.website_domain);
+    if (d) entityByWebsiteDomain.set(d, e);
+  }
 
   const { data: decided, error: decErr } = await supabase
     .from('confirmed_search_terms')
-    .select('term, decision');
+    .select('term, decision, term_type, source_seed, discovered_score, created_at');
   if (decErr) {
     throw new Error(`Failed to fetch confirmed_search_terms: ${decErr.message}`);
   }
   const decisionByLowerTerm = new Map(
-    (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d.decision]),
+    (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d]),
   );
 
   const seeds = new Set();
   const items = [];
+  const itemTerms = new Set();
   for (const row of latestByKey.values()) {
     const lower = String(row.term || '').trim().toLowerCase();
     const entity = entityByLowerName.get(lower) || null;
     const derived = parseTrendsFormattedValue(row.formatted_value);
     const termStr = String(row.term || '').trim();
     seeds.add(row.seed);
+    itemTerms.add(lower);
 
+    const decidedRow = decisionByLowerTerm.get(lower);
     items.push({
       term: row.term,
       seed: row.seed,
@@ -998,10 +1034,44 @@ async function loadSearchDiscoveries() {
       isBreakout: derived.is_breakout,
       alreadyCovered: Boolean(entity),
       coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
-      decision: decisionByLowerTerm.get(lower) || 'pending',
+      decision: decidedRow ? decidedRow.decision : 'pending',
+      termType: decidedRow ? decidedRow.term_type : 'generic',
+      sourceSeed: decidedRow ? decidedRow.source_seed : row.seed,
       // Heuristic aid: single capitalized word -> possible brand.
       suggestedKind:
         !/\s/.test(termStr) && /^[A-ZÁÉÍÓÚÑ]/.test(termStr) ? 'brand' : 'intent',
+    });
+  }
+
+  // Merge SERP-import unmatched domains queued for Pendientes (independent of Trends rows).
+  for (const row of decided || []) {
+    if (row.source_seed !== 'google_serp_import' || row.decision !== 'pending') continue;
+    const termStr = String(row.term || '').trim();
+    const lower = termStr.toLowerCase();
+    if (!termStr || itemTerms.has(lower)) continue;
+
+    const domain = normalizeDomain(termStr);
+    const entity = domain ? entityByWebsiteDomain.get(domain) || null : null;
+    seeds.add('google_serp_import');
+    itemTerms.add(lower);
+
+    items.push({
+      term: termStr,
+      seed: 'google_serp_import',
+      queryType: 'serp',
+      score: row.discovered_score !== null && row.discovered_score !== undefined
+        ? Number(row.discovered_score)
+        : null,
+      formattedValue: null,
+      discoveredAt: row.created_at || null,
+      growthPercent: null,
+      isBreakout: false,
+      alreadyCovered: Boolean(entity),
+      coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
+      decision: 'pending',
+      termType: row.term_type || 'competitor_candidate',
+      sourceSeed: 'google_serp_import',
+      suggestedKind: 'brand',
     });
   }
 
@@ -1402,6 +1472,112 @@ function shiftDateOnlyUtc(dateStr, deltaDays) {
   dt.setUTCDate(dt.getUTCDate() + deltaDays);
   return dt.toISOString().split('T')[0];
 }
+
+/**
+ * POST /reports/import-google-serp
+ * multipart/form-data: file (required .html) + optional searchTerm, optional date.
+ * Thin pass-through into collectGoogleSerpImports.importGoogleSerpHtml.
+ */
+router.post('/import-google-serp', (req, res) => {
+  serpHtmlUpload.single('file')(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      const isSize =
+        uploadErr instanceof multer.MulterError && uploadErr.code === 'LIMIT_FILE_SIZE';
+      const status = uploadErr.statusCode || (isSize ? 400 : 400);
+      logger.warn('Reports import-google-serp upload rejected', {
+        error: uploadErr.message,
+        code: uploadErr.code || null,
+      });
+      return res.status(status).json({
+        error: isSize
+          ? `El archivo supera el límite de ${Math.round(MAX_FILE_BYTES / (1024 * 1024))}MB`
+          : uploadErr.message || 'Upload rechazado',
+        code: uploadErr.code || (isSize ? 'FILE_TOO_LARGE' : 'UPLOAD_REJECTED'),
+      });
+    }
+
+    try {
+      if (!req.file || !req.file.buffer) {
+        return res.status(400).json({
+          error: 'Archivo HTML requerido (campo file)',
+          code: 'MISSING_FILE',
+        });
+      }
+
+      const searchTermFallback =
+        req.body && req.body.searchTerm != null ? String(req.body.searchTerm) : null;
+      const date = req.body && req.body.date != null ? String(req.body.date) : null;
+
+      logger.info('Reports import-google-serp requested', {
+        bytes: req.file.buffer.length,
+        hasSearchTermFallback: Boolean(searchTermFallback && searchTermFallback.trim()),
+        date: date || null,
+      });
+
+      const result = await importGoogleSerpHtml({
+        buffer: req.file.buffer,
+        contentType: req.file.mimetype,
+        searchTermFallback,
+        date,
+      });
+
+      // Release multer buffer promptly after the insert/archive completes.
+      req.file.buffer = null;
+
+      const status = result.parserFoundNoResults ? 422 : 200;
+      return res.status(status).json(result);
+    } catch (err) {
+      if (req.file) req.file.buffer = null;
+      const status = err.statusCode || 500;
+      logger.error('Reports import-google-serp failed', {
+        error: err.message,
+        code: err.code || null,
+      });
+      return res.status(status).json({
+        error: err.message || 'Failed to import Google SERP HTML',
+        code: err.code || 'IMPORT_FAILED',
+        parserFoundNoAdMarkers: Boolean(err.parserFoundNoAdMarkers),
+      });
+    }
+  });
+});
+
+/**
+ * GET /reports/google-serp-imports — prior captures (one HTML upload each).
+ */
+router.get('/google-serp-imports', async (req, res) => {
+  try {
+    const limit = req.query.limit;
+    const result = await listGoogleSerpImports({ limit });
+    return res.json(result);
+  } catch (err) {
+    logger.error('Reports google-serp-imports list failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to list Google SERP imports' });
+  }
+});
+
+/**
+ * GET /reports/google-serp-imports/ads?path=...&captureId=...
+ * Drill-down into ads for one capture (prefer captureId; path still works).
+ */
+router.get('/google-serp-imports/ads', async (req, res) => {
+  const path = req.query.path != null ? String(req.query.path) : '';
+  const captureId = req.query.captureId != null ? String(req.query.captureId) : '';
+  try {
+    const result = await getGoogleSerpImportAds({ path, captureId });
+    return res.json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports google-serp-imports ads failed', {
+      path,
+      captureId,
+      error: err.message,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to fetch Google SERP ads',
+    });
+  }
+});
 
 module.exports = router;
 module.exports.buildHugoContext = buildHugoContext;

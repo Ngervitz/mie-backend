@@ -1761,6 +1761,42 @@ function init() {
 init();
 
 /* ----------------------------------------------------------------------------
+ * Competidores — mutually exclusive sub-views (meta | google)
+ * Visibility toggles only; never rebuild #mie-market-root from this shell.
+ * ------------------------------------------------------------------------- */
+(function initMarketViews() {
+  const marketRoot = document.getElementById('mie-market-root');
+  const chrome = document.getElementById('market-chrome');
+  const googleLanding = document.getElementById('serp-import-landing');
+  const metaBtn = document.getElementById('market-meta-tab-btn');
+  const googleBtn = document.getElementById('market-google-tab-btn');
+
+  function setVisible(el, visible) {
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+    if (visible) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+  }
+
+  function setMarketView(view) {
+    const v = view === 'google' ? 'google' : 'meta';
+    setVisible(marketRoot, v === 'meta');
+    setVisible(googleLanding, v === 'google');
+    setVisible(chrome, true);
+    if (metaBtn) metaBtn.classList.toggle('active', v === 'meta');
+    if (googleBtn) googleBtn.classList.toggle('active', v === 'google');
+    if (v === 'google' && typeof window.__openGoogleSerp === 'function') {
+      window.__openGoogleSerp();
+    }
+  }
+
+  window.__setMarketView = setMarketView;
+  if (metaBtn) metaBtn.addEventListener('click', () => setMarketView('meta'));
+  if (googleBtn) googleBtn.addEventListener('click', () => setMarketView('google'));
+  setMarketView('meta');
+})();
+
+/* ----------------------------------------------------------------------------
  * Meta Ads — mutually exclusive views (agent | changes | own-ads)
  * Visibility toggles only; never rebuild #meta-ads-root.
  * ------------------------------------------------------------------------- */
@@ -2675,9 +2711,12 @@ init();
     const rows = covState.suggestions
       .map((s, idx) => {
         const kind = suggestKind(s.term);
-        const sourceLabel = `${s.queryType === 'rising' ? '📈 Rising' : '🔝 Top'} · ${escapeHtml(
-          s.formattedValue || String(s.score ?? '—'),
-        )} · seed: ${escapeHtml(s.seed)}`;
+        const sourceLabel =
+          s.queryType === 'serp'
+            ? `📥 SERP import · dominio sin match · seed: ${escapeHtml(s.seed)}`
+            : `${s.queryType === 'rising' ? '📈 Rising' : '🔝 Top'} · ${escapeHtml(
+                s.formattedValue || String(s.score ?? '—'),
+              )} · seed: ${escapeHtml(s.seed)}`;
         const covered = s.alreadyCovered
           ? `<span class="cov-badge is-covered" title="Ya existe en monitored_entities: ${escapeHtml(
               (s.coveredByEntity && s.coveredByEntity.name) || '',
@@ -2882,10 +2921,13 @@ init();
             term,
             decision,
             termType:
-              suggestion && suggestKind(term).cls === 'is-brand'
+              suggestion && suggestion.termType === 'competitor_candidate'
                 ? 'competitor_candidate'
-                : 'generic',
-            sourceSeed: suggestion ? suggestion.seed : null,
+                : suggestion && suggestKind(term).cls === 'is-brand'
+                  ? 'competitor_candidate'
+                  : 'generic',
+            sourceSeed:
+              suggestion && suggestion.sourceSeed ? suggestion.sourceSeed : suggestion ? suggestion.seed : null,
             discoveredScore: suggestion ? suggestion.score : null,
           }),
         });
@@ -3295,4 +3337,353 @@ init();
   };
 
   setDefaultDates();
+})();
+
+/* ----------------------------------------------------------------------------
+ * Google SERP manual import — Competidores › Google subtab
+ * Visibility toggles only; never touches #mie-market-root render().
+ * ------------------------------------------------------------------------- */
+(function initSerpImport() {
+  const landing = document.getElementById('serp-import-landing');
+  const form = document.getElementById('serp-import-form');
+  const fileInput = document.getElementById('serp-file-input');
+  const termInput = document.getElementById('serp-search-term');
+  const dateInput = document.getElementById('serp-date');
+  const statusEl = document.getElementById('serp-import-status');
+  const summaryEl = document.getElementById('serp-import-summary');
+  const listEl = document.getElementById('serp-imports-list');
+  const detailSection = document.getElementById('serp-ads-detail');
+  const adsTableEl = document.getElementById('serp-ads-table');
+  const organicTableEl = document.getElementById('serp-organic-table');
+  const uploadBtn = document.getElementById('serp-upload-btn');
+
+  if (!landing || !form) return;
+
+  let selectedPath = null;
+  let busy = false;
+  let importsCache = [];
+
+  function setStatus(text, isError) {
+    if (!statusEl) return;
+    statusEl.textContent = text || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function ensureDefaultDate() {
+    if (dateInput && !dateInput.value) {
+      const t = new Date();
+      dateInput.value =
+        t.getFullYear() +
+        '-' +
+        String(t.getMonth() + 1).padStart(2, '0') +
+        '-' +
+        String(t.getDate()).padStart(2, '0');
+    }
+  }
+
+  function renderSummary(body) {
+    if (!summaryEl) return;
+    summaryEl.hidden = false;
+    summaryEl.classList.toggle(
+      'is-error',
+      Boolean(body.parserFoundNoResults || body.parserFoundNoAdMarkers) || body.ok === false,
+    );
+
+    const unmatched = Array.isArray(body.unmatchedAdvertisers) ? body.unmatchedAdvertisers : [];
+    const matched = Array.isArray(body.matchedAdvertisers) ? body.matchedAdvertisers : [];
+    const advertisers = Array.isArray(body.advertisers) ? body.advertisers : [];
+    const queued = body.queuedUnmatchedDomains || {};
+
+    let advertisersHtml = '';
+    if (advertisers.length) {
+      advertisersHtml =
+        '<p class="serp-summary-title">Anunciantes / sitios</p><div>' +
+        advertisers
+          .map((a) => {
+            const label = escapeHtml(a.advertiserName || a.advertiserDomain || '—');
+            const domain = a.advertiserDomain
+              ? ' <span class="meta">(' + escapeHtml(a.advertiserDomain) + ')</span>'
+              : '';
+            if (a.matchedEntity) {
+              return (
+                '<span class="serp-badge is-matched" title="Coincide con monitored_entities">' +
+                label +
+                domain +
+                ' → ' +
+                escapeHtml(a.matchedEntity.name) +
+                '</span>'
+              );
+            }
+            return (
+              '<span class="serp-badge is-unmatched" title="No coincide con monitored_entities">' +
+              label +
+              domain +
+              ' · sin match</span>'
+            );
+          })
+          .join('') +
+        '</div>';
+    }
+
+    const queuedNote =
+      queued.queued > 0
+        ? '<p style="margin-top:10px;color:var(--text-muted);font-size:13px;">' +
+          queued.queued +
+          ' dominio(s) sin match encolados en Pendientes (google_serp_import).</p>'
+        : '';
+    const unmatchedNote = unmatched.length
+      ? '<p style="margin-top:10px;color:var(--text-muted);font-size:13px;">' +
+        unmatched.length +
+        ' dominio(s) sin match en monitored_entities.</p>'
+      : matched.length
+        ? '<p style="margin-top:10px;color:var(--text-muted);font-size:13px;">Todos los dominios matchearon una entidad monitoreada.</p>'
+        : '';
+
+    summaryEl.innerHTML =
+      '<p class="serp-summary-title">' +
+      escapeHtml(body.message || (body.ok ? 'Importación OK' : 'Importación con alerta')) +
+      '</p>' +
+      '<div style="color:var(--text-muted);font-size:13px;">' +
+      'Término: <strong style="color:var(--text)">' +
+      escapeHtml(body.searchTerm || '—') +
+      '</strong> (' +
+      escapeHtml(body.searchTermSource || '—') +
+      ') · Ads: ' +
+      escapeHtml(String(body.adsFound != null ? body.adsFound : 0)) +
+      ' · Orgánicos: ' +
+      escapeHtml(String(body.organicFound != null ? body.organicFound : 0)) +
+      (body.rawHtmlStoragePath
+        ? ' · Archivo: <code>' + escapeHtml(body.rawHtmlStoragePath) + '</code>'
+        : '') +
+      '</div>' +
+      advertisersHtml +
+      queuedNote +
+      unmatchedNote;
+  }
+
+  function renderImportsList(imports) {
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (!imports.length) {
+      const empty = document.createElement('div');
+      empty.className = 'mcl-empty';
+      empty.textContent = 'Todavía no hay importaciones.';
+      listEl.appendChild(empty);
+      return;
+    }
+
+    imports.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className =
+        'serp-import-row' + (item.rawHtmlStoragePath === selectedPath ? ' is-selected' : '');
+      btn.innerHTML =
+        '<span class="serp-import-date">' +
+        escapeHtml(item.date || '—') +
+        '</span>' +
+        '<span class="serp-import-term">' +
+        escapeHtml(item.searchTerm || '—') +
+        '</span>' +
+        '<span class="serp-import-count">' +
+        escapeHtml(String(item.adsCount || 0)) +
+        ' ads</span>' +
+        '<span class="serp-import-count">' +
+        escapeHtml(String(item.organicCount || 0)) +
+        ' org</span>';
+      btn.addEventListener('click', () => {
+        selectedPath = item.rawHtmlStoragePath;
+        renderImportsList(imports);
+        loadCaptureDetail(item.rawHtmlStoragePath);
+      });
+      listEl.appendChild(btn);
+    });
+  }
+
+  function renderResultTable(rows, tableEl, emptyLabel) {
+    if (!tableEl) return;
+    if (!rows.length) {
+      tableEl.innerHTML = '<div class="mcl-empty">' + escapeHtml(emptyLabel) + '</div>';
+      return;
+    }
+
+    const bodyRows = rows
+      .map((row) => {
+        const matchBadge = row.matchedEntity
+          ? '<span class="serp-badge is-matched">' + escapeHtml(row.matchedEntity.name) + '</span>'
+          : row.unmatched
+            ? '<span class="serp-badge is-unmatched">sin match</span>'
+            : '—';
+        const url = row.destination_url
+          ? '<a class="serp-url-cell" href="' +
+            escapeHtml(row.destination_url) +
+            '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtml(row.destination_url) +
+            '</a>'
+          : '—';
+        return (
+          '<tr>' +
+          '<td>' +
+          escapeHtml(String(row.position || '')) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(row.advertiser_name || '—') +
+          '<div style="color:var(--text-muted);font-size:12px;">' +
+          escapeHtml(row.advertiser_domain || '') +
+          '</div></td>' +
+          '<td>' +
+          escapeHtml(row.ad_title || '—') +
+          '<div style="color:var(--text-muted);font-size:12px;margin-top:4px;">' +
+          escapeHtml(row.ad_description || '') +
+          '</div></td>' +
+          '<td class="serp-url-cell">' +
+          url +
+          '</td>' +
+          '<td>' +
+          matchBadge +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    tableEl.innerHTML =
+      '<table class="serp-ads-table"><thead><tr>' +
+      '<th>#</th><th>Sitio</th><th>Título / descripción</th><th>URL destino</th><th>Entidad</th>' +
+      '</tr></thead><tbody>' +
+      bodyRows +
+      '</tbody></table>';
+  }
+
+  function renderCaptureDetail(payload) {
+    if (!detailSection) return;
+    detailSection.hidden = false;
+    const ads = Array.isArray(payload.ads) ? payload.ads : [];
+    const organic = Array.isArray(payload.organicResults) ? payload.organicResults : [];
+    renderResultTable(ads, adsTableEl, 'Sin anuncios de pago en esta importación.');
+    renderResultTable(organic, organicTableEl, 'Sin resultados orgánicos en esta importación.');
+  }
+
+  async function loadImports() {
+    setStatus('Cargando importaciones…', false);
+    try {
+      const res = await fetch(API_BASE + '/reports/google-serp-imports', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(body.error || 'No se pudo listar importaciones.', true);
+        return;
+      }
+      importsCache = Array.isArray(body.imports) ? body.imports : [];
+      renderImportsList(importsCache);
+      setStatus(
+        body.total ? body.total + ' importación(es)' : 'Sin importaciones aún',
+        false,
+      );
+    } catch (err) {
+      setStatus('No se pudo conectar con el servidor.', true);
+    }
+  }
+
+  async function loadCaptureDetail(path) {
+    if (!path) return;
+    try {
+      const res = await fetch(
+        API_BASE + '/reports/google-serp-imports/ads?path=' + encodeURIComponent(path),
+        { headers: { Accept: 'application/json' } },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(body.error || 'No se pudo cargar el detalle.', true);
+        return;
+      }
+      renderCaptureDetail(body);
+    } catch (err) {
+      setStatus('No se pudo conectar con el servidor.', true);
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) {
+      setStatus('Seleccioná un archivo .html.', true);
+      return;
+    }
+
+    busy = true;
+    if (uploadBtn) uploadBtn.disabled = true;
+    setStatus('Subiendo e importando…', false);
+    if (summaryEl) {
+      summaryEl.hidden = true;
+      summaryEl.innerHTML = '';
+    }
+
+    const fd = new FormData();
+    fd.append('file', file);
+    if (termInput && termInput.value.trim()) {
+      fd.append('searchTerm', termInput.value.trim());
+    }
+    if (dateInput && dateInput.value) {
+      fd.append('date', dateInput.value);
+    }
+
+    try {
+      const res = await fetch(API_BASE + '/reports/import-google-serp', {
+        method: 'POST',
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (res.status === 422 || body.parserFoundNoResults || body.parserFoundNoAdMarkers) {
+        renderSummary(body);
+        setStatus(
+          body.message || 'parser found no results — revisá que sea un SERP de Google.',
+          true,
+        );
+        await loadImports();
+        return;
+      }
+
+      if (!res.ok) {
+        setStatus(body.error || 'Error al importar.', true);
+        if (body.code === 'SEARCH_TERM_REQUIRED') {
+          setStatus(
+            'No se pudo leer el término del HTML. Completá el campo «Término de búsqueda».',
+            true,
+          );
+        }
+        return;
+      }
+
+      renderSummary(body);
+      if (body.duplicate) {
+        setStatus(body.message || 'Esta captura ya había sido importada.', false);
+      } else {
+        setStatus(
+          'Importación OK: ' +
+            (body.adsFound || 0) +
+            ' ad(s), ' +
+            (body.organicFound || 0) +
+            ' orgánico(s).',
+          false,
+        );
+      }
+      if (fileInput) fileInput.value = '';
+      selectedPath = body.rawHtmlStoragePath || null;
+      await loadImports();
+      if (selectedPath) await loadCaptureDetail(selectedPath);
+    } catch (err) {
+      setStatus('No se pudo conectar con el servidor.', true);
+    } finally {
+      busy = false;
+      if (uploadBtn) uploadBtn.disabled = false;
+    }
+  });
+
+  window.__openGoogleSerp = () => {
+    ensureDefaultDate();
+    loadImports();
+  };
 })();

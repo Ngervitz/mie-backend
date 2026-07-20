@@ -111,13 +111,76 @@
 
     <!-- Competidores: ONLY its own entities/activity content (Trends and GA4
          moved to their own top-level panels). Market root stays fully owned
-         by render(). -->
+         by render(). SERP import is a sibling landing (same pattern as Meta
+         Ads sub-views) so render() never wipes it. -->
     <div
       class="dashboard-panel"
       id="market-panel"
       role="tabpanel"
       aria-labelledby="tab-market">
+      <div id="market-chrome" class="meta-subnav">
+        <button type="button" id="market-meta-tab-btn" class="meta-subnav-btn active">
+          Meta
+        </button>
+        <button type="button" id="market-google-tab-btn" class="meta-subnav-btn">
+          Google
+        </button>
+      </div>
       <main class="app" id="mie-market-root"></main>
+
+      <div id="serp-import-landing" class="serp-landing mcl-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Importar búsqueda de Google</h1>
+            <p class="mcl-subtitle">
+              Guardá la SERP con Ctrl+S («Página web completa») y subí el .html.
+              Parseo manual de anuncios de pago y resultados orgánicos.
+            </p>
+          </div>
+        </header>
+
+        <form id="serp-import-form" class="serp-upload-form" enctype="multipart/form-data">
+          <label class="mcl-field">
+            <span class="mcl-field-label">Archivo HTML</span>
+            <input type="file" id="serp-file-input" class="mcl-input" accept=".html,.htm,text/html" required />
+          </label>
+          <label class="mcl-field" id="serp-term-field">
+            <span class="mcl-field-label">Término de búsqueda (fallback)</span>
+            <input
+              type="text"
+              id="serp-search-term"
+              class="mcl-input"
+              placeholder="Solo si el HTML no trae el término en la caja de búsqueda"
+              autocomplete="off"
+            />
+          </label>
+          <label class="mcl-field">
+            <span class="mcl-field-label">Fecha de la búsqueda</span>
+            <input type="date" id="serp-date" class="mcl-input" />
+          </label>
+          <div class="serp-upload-actions">
+            <button type="submit" id="serp-upload-btn" class="btn btn-primary">
+              Subir e importar
+            </button>
+          </div>
+        </form>
+
+        <div id="serp-import-status" class="mcl-status" aria-live="polite"></div>
+        <div id="serp-import-summary" class="serp-summary" hidden></div>
+
+        <section class="serp-history-section">
+          <h2 class="cov-section-title">Importaciones anteriores</h2>
+          <div id="serp-imports-list" class="serp-imports-list"></div>
+        </section>
+
+        <section id="serp-ads-detail" class="serp-ads-detail" hidden>
+          <h2 class="cov-section-title">Detalle de esta importación</h2>
+          <h3 class="serp-detail-subtitle">Ads</h3>
+          <div id="serp-ads-table"></div>
+          <h3 class="serp-detail-subtitle">Organic</h3>
+          <div id="serp-organic-table"></div>
+        </section>
+      </div>
     </div>
 
     <!-- Términos descubiertos: top-level section (was nested under the market
