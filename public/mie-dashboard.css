@@ -1799,6 +1799,53 @@
   color: var(--accent-warn);
 }
 
+#mie-dashboard-app .serp-presence-section {
+  margin-top: 24px;
+  margin-bottom: 8px;
+}
+
+#mie-dashboard-app .serp-presence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#mie-dashboard-app .serp-presence-header {
+  display: none;
+}
+
+#mie-dashboard-app .serp-presence-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+#mie-dashboard-app .serp-presence-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+#mie-dashboard-app .serp-presence-name {
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .serp-presence-domain {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+#mie-dashboard-app .serp-presence-copy,
+#mie-dashboard-app .serp-presence-last {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 #mie-dashboard-app .serp-history-section {
   margin-top: 24px;
 }

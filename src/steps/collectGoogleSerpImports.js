@@ -54,6 +54,24 @@ function normalizeDomain(urlStr) {
   }
 }
 
+/**
+ * Search-term normalization for comparison/grouping only.
+ * Does NOT mutate the original display search_term.
+ * Separate from normalizeDomain() — never reuse or alter that helper.
+ */
+function normalizeSearchTerm(term) {
+  if (term == null) return '';
+  let s = String(term).trim().toLowerCase();
+  // Unicode NFD then strip combining marks (accents/diacritics).
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+/** Captures that count toward presence denominator / appearance. */
+const PRESENCE_INCLUDED_PARSE_STATUSES = ['success'];
+const PRESENCE_EXCLUDED_PARSE_STATUSES = ['failed', 'no_ads_found'];
+
 function extractSearchTermFromHtml($) {
   const candidates = [
     () => {
@@ -689,6 +707,7 @@ async function importGoogleSerpHtml(opts) {
 
   const storagePath = await archiveHtmlToStorage(buffer, opts.contentType);
   const searchTermSource = parsed.searchTermFromHtml ? 'html' : 'form';
+  const searchTermNormalized = normalizeSearchTerm(searchTerm);
 
   // Fail loudly: no paid ads AND no organic web results.
   if (parsed.parserFoundNoResults) {
@@ -696,6 +715,7 @@ async function importGoogleSerpHtml(opts) {
       .from('google_serp_captures')
       .insert({
         search_term: searchTerm,
+        search_term_normalized: searchTermNormalized,
         date,
         storage_path: storagePath,
         file_hash: fileHash,
@@ -703,7 +723,7 @@ async function importGoogleSerpHtml(opts) {
         ads_found: 0,
       })
       .select(
-        'id, search_term, date, storage_path, file_hash, parse_status, ads_found, imported_at',
+        'id, search_term, search_term_normalized, date, storage_path, file_hash, parse_status, ads_found, imported_at',
       )
       .single();
 
@@ -752,6 +772,7 @@ async function importGoogleSerpHtml(opts) {
     .from('google_serp_captures')
     .insert({
       search_term: searchTerm,
+      search_term_normalized: searchTermNormalized,
       date,
       storage_path: storagePath,
       file_hash: fileHash,
@@ -759,7 +780,7 @@ async function importGoogleSerpHtml(opts) {
       ads_found: parsed.ads.length,
     })
     .select(
-      'id, search_term, date, storage_path, file_hash, parse_status, ads_found, imported_at',
+      'id, search_term, search_term_normalized, date, storage_path, file_hash, parse_status, ads_found, imported_at',
     )
     .single();
 
@@ -994,13 +1015,126 @@ async function getGoogleSerpImportAds({ path, captureId } = {}) {
   };
 }
 
+/**
+ * Count-based competitor presence across real (parse_status=success) captures.
+ * No percentages, rates, growth, or trends.
+ */
+async function getGoogleSerpCompetitorPresence() {
+  const { data: captures, error: capErr } = await supabase
+    .from('google_serp_captures')
+    .select('id, date, parse_status')
+    .in('parse_status', PRESENCE_INCLUDED_PARSE_STATUSES);
+  if (capErr) {
+    throw new Error(`Failed to load captures for presence: ${capErr.message}`);
+  }
+
+  const realCaptures = captures || [];
+  const totalCaptures = realCaptures.length;
+  const captureIds = realCaptures.map((c) => c.id);
+  const dateByCapture = new Map(realCaptures.map((c) => [c.id, c.date]));
+
+  const { data: entities, error: entErr } = await supabase
+    .from('monitored_entities')
+    .select('id, name, website_domain')
+    .not('website_domain', 'is', null);
+  if (entErr) {
+    throw new Error(`Failed to load entities for presence: ${entErr.message}`);
+  }
+
+  const withDomain = (entities || []).filter((e) => {
+    const d = normalizeDomain(e.website_domain);
+    return Boolean(d);
+  });
+
+  /** @type {Map<string, { captureIds: Set<string>, dates: string[] }>} */
+  const appearanceByEntityId = new Map();
+  for (const e of withDomain) {
+    appearanceByEntityId.set(e.id, { captureIds: new Set(), dates: [] });
+  }
+
+  if (captureIds.length && withDomain.length) {
+    const { data: rows, error: rowErr } = await supabase
+      .from('google_serp_ads_manual')
+      .select('capture_id, advertiser_domain')
+      .in('capture_id', captureIds);
+    if (rowErr) {
+      throw new Error(`Failed to load SERP rows for presence: ${rowErr.message}`);
+    }
+
+    const domainToEntities = new Map();
+    for (const e of withDomain) {
+      const d = normalizeDomain(e.website_domain);
+      if (!domainToEntities.has(d)) domainToEntities.set(d, []);
+      domainToEntities.get(d).push(e);
+    }
+
+    for (const row of rows || []) {
+      const d = normalizeDomain(row.advertiser_domain);
+      if (!d) continue;
+      const matched = domainToEntities.get(d);
+      if (!matched) continue;
+      for (const e of matched) {
+        const bucket = appearanceByEntityId.get(e.id);
+        if (!bucket) continue;
+        if (!bucket.captureIds.has(row.capture_id)) {
+          bucket.captureIds.add(row.capture_id);
+          const dt = dateByCapture.get(row.capture_id);
+          if (dt) bucket.dates.push(dt);
+        }
+      }
+    }
+  }
+
+  const entityRows = withDomain.map((e) => {
+    const bucket = appearanceByEntityId.get(e.id);
+    const appearedCaptureCount = bucket ? bucket.captureIds.size : 0;
+    let mostRecentAppearanceDate = null;
+    if (bucket && bucket.dates.length) {
+      mostRecentAppearanceDate = bucket.dates.slice().sort().reverse()[0];
+    }
+    return {
+      entityId: e.id,
+      entityName: e.name,
+      websiteDomain: normalizeDomain(e.website_domain),
+      appearedCaptureCount,
+      totalCaptureCount: totalCaptures,
+      mostRecentAppearanceDate,
+    };
+  });
+
+  entityRows.sort((a, b) => {
+    if (b.appearedCaptureCount !== a.appearedCaptureCount) {
+      return b.appearedCaptureCount - a.appearedCaptureCount;
+    }
+    const aDate = a.mostRecentAppearanceDate || '';
+    const bDate = b.mostRecentAppearanceDate || '';
+    if (aDate !== bDate) {
+      // DESC NULLS LAST: empty dates sort last
+      if (!aDate) return 1;
+      if (!bDate) return -1;
+      return bDate.localeCompare(aDate);
+    }
+    return String(a.entityName || '').localeCompare(String(b.entityName || ''), 'es');
+  });
+
+  return {
+    totalCaptures,
+    includedParseStatuses: [...PRESENCE_INCLUDED_PARSE_STATUSES],
+    excludedParseStatuses: [...PRESENCE_EXCLUDED_PARSE_STATUSES],
+    entities: entityRows,
+  };
+}
+
 module.exports = {
   STORAGE_BUCKET,
   MAX_FILE_BYTES,
   MALFORMED_DOMAIN,
   SERP_IMPORT_SOURCE_SEED,
+  PRESENCE_INCLUDED_PARSE_STATUSES,
+  PRESENCE_EXCLUDED_PARSE_STATUSES,
   sha256Hex,
   normalizeDomain,
+  normalizeSearchTerm,
   resolvePlacement,
   parseGoogleSerpHtml,
   parseOrganicResults,
@@ -1009,5 +1143,6 @@ module.exports = {
   importGoogleSerpHtml,
   listGoogleSerpImports,
   getGoogleSerpImportAds,
+  getGoogleSerpCompetitorPresence,
   ensureSerpHtmlBucket,
 };

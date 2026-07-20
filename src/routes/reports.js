@@ -16,6 +16,7 @@ const {
   importGoogleSerpHtml,
   listGoogleSerpImports,
   getGoogleSerpImportAds,
+  getGoogleSerpCompetitorPresence,
   normalizeDomain,
 } = require('../steps/collectGoogleSerpImports');
 
@@ -1576,6 +1577,22 @@ router.get('/google-serp-imports/ads', async (req, res) => {
     return res.status(status).json({
       error: err.message || 'Failed to fetch Google SERP ads',
     });
+  }
+});
+
+/**
+ * GET /reports/google-serp-competitor-presence
+ * Count-based presence only (no ratios or period comparisons).
+ */
+router.get('/google-serp-competitor-presence', async (req, res) => {
+  try {
+    const result = await getGoogleSerpCompetitorPresence();
+    return res.json(result);
+  } catch (err) {
+    logger.error('Reports google-serp-competitor-presence failed', {
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to fetch competitor presence' });
   }
 });
 

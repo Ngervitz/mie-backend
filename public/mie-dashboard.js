@@ -3393,6 +3393,8 @@ init();
   const adsTableEl = document.getElementById('serp-ads-table');
   const organicTableEl = document.getElementById('serp-organic-table');
   const uploadBtn = document.getElementById('serp-upload-btn');
+  const presenceStatusEl = document.getElementById('serp-presence-status');
+  const presenceListEl = document.getElementById('serp-presence-list');
 
   if (!landing || !form) return;
 
@@ -3404,6 +3406,98 @@ init();
     if (!statusEl) return;
     statusEl.textContent = text || '';
     statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function setPresenceStatus(text, isError) {
+    if (!presenceStatusEl) return;
+    presenceStatusEl.textContent = text || '';
+    presenceStatusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function formatPresenceDate(isoDate) {
+    if (!isoDate) return '—';
+    const parts = String(isoDate).split('-');
+    if (parts.length !== 3) return String(isoDate);
+    return parts[2] + '/' + parts[1] + '/' + parts[0];
+  }
+
+  function renderPresence(payload) {
+    if (!presenceListEl) return;
+    const entities = Array.isArray(payload.entities) ? payload.entities : [];
+    const total = payload.totalCaptures != null ? Number(payload.totalCaptures) : 0;
+    if (!entities.length) {
+      presenceListEl.innerHTML =
+        '<div class="mcl-empty">No hay entidades con dominio web configurado.</div>';
+      return;
+    }
+
+    const rows = entities
+      .map((e) => {
+        const appeared = Number(e.appearedCaptureCount || 0);
+        const totalForRow =
+          e.totalCaptureCount != null ? Number(e.totalCaptureCount) : total;
+        const presenceText =
+          appeared > 0
+            ? 'Apareció en ' +
+              appeared +
+              ' de ' +
+              totalForRow +
+              ' capturas realizadas.'
+            : 'No apareció en ninguna de las ' +
+              totalForRow +
+              ' capturas realizadas.';
+        const lastText =
+          'Última aparición: ' + formatPresenceDate(e.mostRecentAppearanceDate);
+        return (
+          '<div class="serp-presence-row">' +
+          '<div class="serp-presence-main">' +
+          '<span class="serp-presence-name">' +
+          escapeHtml(e.entityName || '—') +
+          '</span>' +
+          '<span class="serp-presence-domain">' +
+          escapeHtml(e.websiteDomain || '—') +
+          '</span>' +
+          '</div>' +
+          '<div class="serp-presence-copy">' +
+          escapeHtml(presenceText) +
+          '</div>' +
+          '<div class="serp-presence-last">' +
+          escapeHtml(lastText) +
+          '</div>' +
+          '</div>'
+        );
+      })
+      .join('');
+
+    presenceListEl.innerHTML =
+      '<div class="serp-presence-header">' +
+      '<span>Competidor</span><span>Dominio</span><span>Presencia</span><span>Última aparición</span>' +
+      '</div>' +
+      rows;
+  }
+
+  async function loadPresence() {
+    setPresenceStatus('Cargando presencia…', false);
+    try {
+      const res = await fetch(API_BASE + '/reports/google-serp-competitor-presence', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPresenceStatus(body.error || 'No se pudo cargar la presencia.', true);
+        if (presenceListEl) presenceListEl.innerHTML = '';
+        return;
+      }
+      renderPresence(body);
+      setPresenceStatus(
+        body.totalCaptures != null
+          ? body.totalCaptures + ' captura(s) consideradas'
+          : '',
+        false,
+      );
+    } catch (err) {
+      setPresenceStatus('No se pudo conectar con el servidor.', true);
+    }
   }
 
   function ensureDefaultDate() {
@@ -3680,6 +3774,7 @@ init();
           true,
         );
         await loadImports();
+        await loadPresence();
         return;
       }
 
@@ -3710,6 +3805,7 @@ init();
       if (fileInput) fileInput.value = '';
       selectedPath = body.rawHtmlStoragePath || null;
       await loadImports();
+      await loadPresence();
       if (selectedPath) await loadCaptureDetail(selectedPath);
     } catch (err) {
       setStatus('No se pudo conectar con el servidor.', true);
@@ -3722,5 +3818,6 @@ init();
   window.__openGoogleSerp = () => {
     ensureDefaultDate();
     loadImports();
+    loadPresence();
   };
 })();
