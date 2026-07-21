@@ -3385,7 +3385,6 @@ init();
   const form = document.getElementById('serp-import-form');
   const fileInput = document.getElementById('serp-file-input');
   const termInput = document.getElementById('serp-search-term');
-  const dateInput = document.getElementById('serp-date');
   const statusEl = document.getElementById('serp-import-status');
   const summaryEl = document.getElementById('serp-import-summary');
   const listEl = document.getElementById('serp-imports-list');
@@ -3661,18 +3660,6 @@ init();
     }
   }
 
-  function ensureDefaultDate() {
-    if (dateInput && !dateInput.value) {
-      const t = new Date();
-      dateInput.value =
-        t.getFullYear() +
-        '-' +
-        String(t.getMonth() + 1).padStart(2, '0') +
-        '-' +
-        String(t.getDate()).padStart(2, '0');
-    }
-  }
-
   function renderSummary(body) {
     if (!summaryEl) return;
     summaryEl.hidden = false;
@@ -3858,7 +3845,6 @@ init();
     const fd = new FormData();
     fd.append('file', file);
     if (sharedFields.searchTerm) fd.append('searchTerm', sharedFields.searchTerm);
-    if (sharedFields.date) fd.append('date', sharedFields.date);
 
     const res = await fetch(API_BASE + '/reports/import-google-serp', {
       method: 'POST',
@@ -3893,7 +3879,6 @@ init();
 
     const sharedFields = {
       searchTerm: termInput && termInput.value.trim() ? termInput.value.trim() : '',
-      date: dateInput && dateInput.value ? dateInput.value : '',
     };
     const fileList = selectedFiles.slice();
 
@@ -4145,7 +4130,6 @@ init();
   }
 
   window.__openGoogleSerp = () => {
-    ensureDefaultDate();
     loadImports();
     loadPresence();
   };

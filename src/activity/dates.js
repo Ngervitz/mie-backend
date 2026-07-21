@@ -6,6 +6,11 @@ function todayUtc() {
   return new Date().toISOString().split('T')[0];
 }
 
+/** Calendar date in Uruguay (America/Montevideo). Returns YYYY-MM-DD. */
+function todayUruguay() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Montevideo' });
+}
+
 function shiftDateUtc(dateStr, deltaDays) {
   const [year, month, day] = String(dateStr).split('-').map(Number);
   const dt = new Date(Date.UTC(year, month - 1, day));
@@ -43,6 +48,7 @@ function toDateOnly(value) {
 module.exports = {
   isValidDateOnly,
   todayUtc,
+  todayUruguay,
   shiftDateUtc,
   daysBetween,
   enumerateDaysHalfOpen,

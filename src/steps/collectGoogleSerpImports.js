@@ -2,7 +2,7 @@ const { createHash, randomUUID } = require('crypto');
 const cheerio = require('cheerio');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
-const { todayUtc } = require('../activity/dates');
+const { todayUruguay } = require('../activity/dates');
 
 /**
  * Manual Google SERP HTML import (capture-only, no scraper).
@@ -634,7 +634,8 @@ function buildSuccessImportMessage(adCount, organicCount) {
 /**
  * Full import pipeline: hash → dedup → archive → parse → capture + ads.
  *
- * @param {{ buffer: Buffer, contentType?: string, searchTermFallback?: string|null, date?: string|null }} opts
+ * @param {{ buffer: Buffer, contentType?: string, searchTermFallback?: string|null }} opts
+ * Date is always the Uruguay calendar day of import — client-supplied dates are ignored.
  */
 async function importGoogleSerpHtml(opts) {
   const buffer = opts.buffer;
@@ -700,10 +701,7 @@ async function importGoogleSerpHtml(opts) {
     throw err;
   }
 
-  const date =
-    opts.date && /^\d{4}-\d{2}-\d{2}$/.test(String(opts.date))
-      ? String(opts.date)
-      : todayUtc();
+  const date = todayUruguay();
 
   const storagePath = await archiveHtmlToStorage(buffer, opts.contentType);
   const searchTermSource = parsed.searchTermFromHtml ? 'html' : 'form';

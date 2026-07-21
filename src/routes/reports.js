@@ -1476,7 +1476,8 @@ function shiftDateOnlyUtc(dateStr, deltaDays) {
 
 /**
  * POST /reports/import-google-serp
- * multipart/form-data: file (required .html) + optional searchTerm, optional date.
+ * multipart/form-data: file (required .html) + optional searchTerm.
+ * Capture date is always the Uruguay calendar day (server-side); body.date is ignored.
  * Thin pass-through into collectGoogleSerpImports.importGoogleSerpHtml.
  */
 router.post('/import-google-serp', (req, res) => {
@@ -1507,19 +1508,16 @@ router.post('/import-google-serp', (req, res) => {
 
       const searchTermFallback =
         req.body && req.body.searchTerm != null ? String(req.body.searchTerm) : null;
-      const date = req.body && req.body.date != null ? String(req.body.date) : null;
 
       logger.info('Reports import-google-serp requested', {
         bytes: req.file.buffer.length,
         hasSearchTermFallback: Boolean(searchTermFallback && searchTermFallback.trim()),
-        date: date || null,
       });
 
       const result = await importGoogleSerpHtml({
         buffer: req.file.buffer,
         contentType: req.file.mimetype,
         searchTermFallback,
-        date,
       });
 
       // Release multer buffer promptly after the insert/archive completes.
