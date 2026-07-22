@@ -3773,16 +3773,29 @@ init();
         const appeared = Number(e.appearedCaptureCount || 0);
         const totalForRow =
           e.totalCaptureCount != null ? Number(e.totalCaptureCount) : total;
-        const presenceText =
+        const ratio = totalForRow > 0 ? appeared / totalForRow : 0;
+        let levelClass = 'is-presence-low';
+        if (ratio >= 0.6) levelClass = 'is-presence-high';
+        else if (ratio >= 0.3) levelClass = 'is-presence-mid';
+
+        const fractionHtml =
+          '<strong class="serp-presence-fraction ' +
+          levelClass +
+          '">' +
+          escapeHtml(String(appeared)) +
+          ' de ' +
+          escapeHtml(String(totalForRow)) +
+          '</strong>';
+
+        const presenceHtml =
           appeared > 0
-            ? 'Apareció en ' +
-              appeared +
-              ' de ' +
-              totalForRow +
-              ' capturas realizadas.'
+            ? 'Apareció en ' + fractionHtml + ' capturas realizadas.'
             : 'No apareció en ninguna de las ' +
-              totalForRow +
+              '<strong class="serp-presence-fraction is-presence-low">' +
+              escapeHtml(String(totalForRow)) +
+              '</strong>' +
               ' capturas realizadas.';
+
         const lastText =
           'Última aparición: ' + formatPresenceDate(e.mostRecentAppearanceDate);
         return (
@@ -3796,7 +3809,7 @@ init();
           '</span>' +
           '</div>' +
           '<div class="serp-presence-copy">' +
-          escapeHtml(presenceText) +
+          presenceHtml +
           '</div>' +
           '<div class="serp-presence-last">' +
           escapeHtml(lastText) +

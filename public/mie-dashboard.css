@@ -2209,9 +2209,25 @@
 
 #mie-dashboard-app .serp-presence-copy,
 #mie-dashboard-app .serp-presence-last {
-  color: var(--text-muted);
+  color: rgba(232, 234, 237, 0.78);
   font-size: 0.85rem;
   line-height: 1.45;
+}
+
+#mie-dashboard-app .serp-presence-fraction {
+  font-weight: 700;
+}
+
+#mie-dashboard-app .serp-presence-fraction.is-presence-high {
+  color: var(--accent-success);
+}
+
+#mie-dashboard-app .serp-presence-fraction.is-presence-mid {
+  color: var(--accent-warn);
+}
+
+#mie-dashboard-app .serp-presence-fraction.is-presence-low {
+  color: var(--accent-danger);
 }
 
 #mie-dashboard-app .serp-batch-list {
