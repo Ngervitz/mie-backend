@@ -642,6 +642,23 @@
 }
 
 /* ---------- Intensity gauges (chip grid) ---------- */
+#mie-dashboard-app .gauge-section {
+  margin-bottom: 14px;
+}
+
+#mie-dashboard-app .gauge-section:last-child {
+  margin-bottom: 0;
+}
+
+#mie-dashboard-app .gauge-section-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 #mie-dashboard-app .gauge-chip-grid {
   display: grid;
   gap: 8px;
@@ -651,17 +668,25 @@
 #mie-dashboard-app .gauge-chip-grid.is-featured-row {
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 10px;
-  margin-bottom: 10px;
 }
 
 #mie-dashboard-app .gauge-chip-grid.is-ready-row {
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 8px;
-  margin-bottom: 8px;
+}
+
+#mie-dashboard-app .gauge-chip-grid.is-recent-row {
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
 }
 
 #mie-dashboard-app .gauge-chip-grid.is-compact-row {
   grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 6px;
+}
+
+#mie-dashboard-app .gauge-chip-grid.is-idle-row {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 6px;
 }
 
@@ -909,6 +934,48 @@
   border-color: rgba(120, 125, 140, 0.28);
 }
 
+/* Idle section — simple favicon + name rows */
+#mie-dashboard-app .gauge-chip.is-idle-row {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 36px;
+  height: auto;
+  padding: 6px 10px 6px 36px;
+  text-align: left;
+  opacity: 0.72;
+  border: 1px solid rgba(120, 125, 140, 0.32);
+  background: transparent;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-avatar {
+  top: 50%;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  transform: translateY(-50%);
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-initials {
+  font-size: 8px;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-name {
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row.is-paused {
+  opacity: 0.5;
+}
+
 #mie-dashboard-app .gauge-chip.is-paused {
   background: var(--surface-2);
   opacity: 0.55;
@@ -926,9 +993,15 @@
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 
+  #mie-dashboard-app .gauge-chip-grid.is-ready-row,
+  #mie-dashboard-app .gauge-chip-grid.is-recent-row,
   #mie-dashboard-app .gauge-chip-grid.is-compact-row,
   #mie-dashboard-app .gauge-chip-grid.is-mixed {
     grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  }
+
+  #mie-dashboard-app .gauge-chip-grid.is-idle-row {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 }
 

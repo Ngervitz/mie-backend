@@ -575,12 +575,24 @@ function renderGaugeAvatar(g) {
   `;
 }
 
-function renderIntensityChip(g, index) {
+function renderIntensityChip(g, index, variant) {
   const delay = `${(index * 0.04).toFixed(2)}s`;
   const fullName = g.entityName || '—';
   const titleAttr = escapeHtml(fullName);
   const entityAttr = escapeHtml(String(g.entityId || ''));
   const avatar = renderGaugeAvatar(g);
+
+  // Idle section: favicon + name only (no status emoji / día 0/7).
+  if (variant === 'idle') {
+    const pausedClass = g.active === false ? ' is-paused' : '';
+    return `
+      <button type="button" class="gauge-chip is-idle-row${pausedClass}" style="--gauge-delay:${delay}"
+        title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+        ${avatar}
+        <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+      </button>
+    `;
+  }
 
   if (g.active === false) {
     return `
@@ -596,9 +608,8 @@ function renderIntensityChip(g, index) {
 
   if (g.mode === 'collecting') {
     const n = Math.min(7, g.historicalDays || 0);
-    const idleClass = n === 0 ? ' is-idle' : '';
     return `
-      <button type="button" class="gauge-chip is-collecting is-compact${idleClass}" style="--gauge-delay:${delay}"
+      <button type="button" class="gauge-chip is-collecting is-compact" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
@@ -645,6 +656,16 @@ function renderIntensityChip(g, index) {
       <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
       <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
     </button>
+  `;
+}
+
+function renderGaugeSection(title, gridClass, chipsHtml) {
+  if (!chipsHtml) return '';
+  return `
+    <div class="gauge-section">
+      <h3 class="gauge-section-title">${escapeHtml(title)}</h3>
+      <div class="gauge-chip-grid ${gridClass}">${chipsHtml}</div>
+    </div>
   `;
 }
 
@@ -984,33 +1005,46 @@ function renderIntensityGauges() {
       body = `<div class="empty-state">Sin resultados</div>`;
     } else {
       const featured = [];
-      const ready = [];
-      const rest = [];
+      const recent = [];
+      const idle = [];
       sorted.forEach((g) => {
-        if (g.active !== false && g.mode === 'ready' && g.intensity && g.intensity.level === 'above') {
-          featured.push(g);
-        } else if (g.active !== false && g.mode === 'ready' && g.intensity) {
-          ready.push(g);
-        } else {
-          rest.push(g);
+        if (g.active === false) {
+          idle.push(g);
+          return;
         }
+        if (g.mode === 'ready' && g.intensity && g.intensity.level === 'above') {
+          featured.push(g);
+          return;
+        }
+        if (g.mode === 'collecting' && (Number(g.historicalDays) || 0) <= 0) {
+          idle.push(g);
+          return;
+        }
+        recent.push(g);
       });
       const parts = [];
       let idx = 0;
       if (featured.length) {
-        parts.push(`<div class="gauge-chip-grid is-featured-row">${featured
-          .map((g) => renderIntensityChip(g, idx++))
-          .join('')}</div>`);
+        parts.push(renderGaugeSection(
+          'Alta actividad',
+          'is-featured-row',
+          featured.map((g) => renderIntensityChip(g, idx++)).join(''),
+        ));
       }
-      if (ready.length) {
-        parts.push(`<div class="gauge-chip-grid is-ready-row">${ready
-          .map((g) => renderIntensityChip(g, idx++))
-          .join('')}</div>`);
+      if (recent.length) {
+        // Ready chips + collecting with día > 0/7 (keep día X/7 visible).
+        const recentHtml = recent.map((g) => renderIntensityChip(g, idx++)).join('');
+        const recentGrid = recent.every((g) => g.mode === 'ready' && g.intensity)
+          ? 'is-ready-row'
+          : 'is-recent-row';
+        parts.push(renderGaugeSection('Actividad reciente', recentGrid, recentHtml));
       }
-      if (rest.length) {
-        parts.push(`<div class="gauge-chip-grid is-compact-row">${rest
-          .map((g) => renderIntensityChip(g, idx++))
-          .join('')}</div>`);
+      if (idle.length) {
+        parts.push(renderGaugeSection(
+          'Sin movimiento (últimos 7 días)',
+          'is-idle-row',
+          idle.map((g) => renderIntensityChip(g, idx++, 'idle')).join(''),
+        ));
       }
       body = parts.join('');
     }
