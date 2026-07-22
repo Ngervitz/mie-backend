@@ -2768,8 +2768,8 @@ init();
             <td>
               <select class="cov-decision mcl-select" data-cov-idx="${idx}" ${covState.applying ? 'disabled' : ''}>
                 <option value="" ${selected === '' ? 'selected' : ''}>— Sin decisión —</option>
-                <option value="added_as_competitor" ${selected === 'added_as_competitor' ? 'selected' : ''}>Agregar como competidor</option>
-                <option value="monitor_trends" ${selected === 'monitor_trends' ? 'selected' : ''}>Agregar solo como término</option>
+                <option value="added_as_competitor" ${selected === 'added_as_competitor' ? 'selected' : ''}>Monitorear competidor</option>
+                <option value="monitor_trends" ${selected === 'monitor_trends' ? 'selected' : ''}>Generar landing SEO</option>
                 <option value="discarded" ${selected === 'discarded' ? 'selected' : ''}>Descartar</option>
               </select>
             </td>
