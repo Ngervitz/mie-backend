@@ -575,6 +575,22 @@ function renderGaugeAvatar(g) {
   `;
 }
 
+/** Presentation-only: color class for percentage value text. */
+function getPctValueColorClass(pctLabel, sortValue) {
+  const raw = String(pctLabel || '').trim();
+  if (/^día\s*0\s*\/\s*7$/i.test(raw) || raw === '0%') {
+    return 'is-pct-zero';
+  }
+  let n = Number(sortValue);
+  if (!Number.isFinite(n)) {
+    const m = raw.match(/^(\d+(?:\.\d+)?)\s*%/);
+    n = m ? Number(m[1]) : NaN;
+  }
+  if (!Number.isFinite(n) || n <= 0) return 'is-pct-zero';
+  if (n > 50) return 'is-pct-high';
+  return 'is-pct-mid';
+}
+
 function renderIntensityChip(g, index, variant) {
   const delay = `${(index * 0.04).toFixed(2)}s`;
   const fullName = g.entityName || '—';
@@ -608,36 +624,41 @@ function renderIntensityChip(g, index, variant) {
 
   if (g.mode === 'collecting') {
     const n = Math.min(7, g.historicalDays || 0);
+    const dayLabel = `día ${n}/7`;
+    const dayColor = n <= 0 ? ' is-pct-zero' : '';
     return `
       <button type="button" class="gauge-chip is-collecting is-compact" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
-        <span class="gauge-chip-value is-fallback-label">día ${escapeHtml(String(n))}/7</span>
+        <span class="gauge-chip-value is-fallback-label${dayColor}">${escapeHtml(dayLabel)}</span>
       </button>
     `;
   }
 
   const meta = getIntensityChipSortMeta(g);
   if (meta.group === 3) {
-    const pctLabel = g.intensity
-      ? getIntensityPctDisplay(g.intensity).pctLabel
-      : '—';
+    const pct = g.intensity
+      ? getIntensityPctDisplay(g.intensity)
+      : { pctLabel: '—', sortValue: 0 };
+    const colorClass = getPctValueColorClass(pct.pctLabel, pct.sortValue);
     return `
       <button type="button" class="gauge-chip is-unknown is-compact" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">❔</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
-        <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
+        <span class="gauge-chip-value ${colorClass}">${escapeHtml(pct.pctLabel)}</span>
       </button>
     `;
   }
 
   const intensity = g.intensity;
   const level = intensity.level;
-  const { pctLabel } = getIntensityPctDisplay(intensity);
+  const pct = getIntensityPctDisplay(intensity);
+  const { pctLabel } = pct;
+  const colorClass = getPctValueColorClass(pctLabel, pct.sortValue);
   let emoji = '✅';
   let chipClass = 'is-normal is-ready';
   if (level === 'above') {
@@ -654,7 +675,7 @@ function renderIntensityChip(g, index, variant) {
       ${avatar}
       <span class="gauge-chip-emoji" aria-hidden="true">${emoji}</span>
       <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
-      <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
+      <span class="gauge-chip-value ${colorClass}">${escapeHtml(pctLabel)}</span>
     </button>
   `;
 }

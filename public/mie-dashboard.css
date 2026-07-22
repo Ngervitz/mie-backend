@@ -798,6 +798,40 @@
   color: var(--text-muted);
 }
 
+/* Percentage text color by value (Actividad reciente / ready chips) */
+#mie-dashboard-app .gauge-chip-value.is-pct-high {
+  color: #e8912d;
+}
+
+#mie-dashboard-app .gauge-chip-value.is-pct-mid {
+  color: #c9a227;
+}
+
+#mie-dashboard-app .gauge-chip-value.is-pct-zero {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+#mie-dashboard-app .gauge-chip.is-below .gauge-chip-value.is-pct-high,
+#mie-dashboard-app .gauge-chip.is-ready .gauge-chip-value.is-pct-high,
+#mie-dashboard-app .gauge-chip.is-unknown .gauge-chip-value.is-pct-high {
+  color: #e8912d;
+}
+
+#mie-dashboard-app .gauge-chip.is-below .gauge-chip-value.is-pct-mid,
+#mie-dashboard-app .gauge-chip.is-ready .gauge-chip-value.is-pct-mid,
+#mie-dashboard-app .gauge-chip.is-unknown .gauge-chip-value.is-pct-mid {
+  color: #c9a227;
+}
+
+#mie-dashboard-app .gauge-chip.is-below .gauge-chip-value.is-pct-zero,
+#mie-dashboard-app .gauge-chip.is-ready .gauge-chip-value.is-pct-zero,
+#mie-dashboard-app .gauge-chip.is-unknown .gauge-chip-value.is-pct-zero,
+#mie-dashboard-app .gauge-chip-value.is-fallback-label.is-pct-zero {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
 /* Featured — high activity (above baseline): 3px warm border */
 #mie-dashboard-app .gauge-chip.is-featured {
   min-height: 112px;
@@ -907,16 +941,8 @@
   opacity: 0.72;
 }
 
-#mie-dashboard-app .gauge-chip.is-below .gauge-chip-value {
-  color: var(--text-muted);
-}
-
 #mie-dashboard-app .gauge-chip.is-unknown {
   background: var(--surface-2);
-}
-
-#mie-dashboard-app .gauge-chip.is-unknown .gauge-chip-value {
-  color: var(--text-muted);
 }
 
 #mie-dashboard-app .gauge-chip.is-collecting {
