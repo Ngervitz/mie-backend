@@ -2821,6 +2821,9 @@ init();
     draftsEl.innerHTML = drafts
       .map((d) => {
         const when = d.generatedAt ? String(d.generatedAt).slice(0, 16).replace('T', ' ') : '—';
+        const publishedWhen = d.publishedAt
+          ? String(d.publishedAt).slice(0, 16).replace('T', ' ')
+          : null;
         const downloadUrl = storagePublicUrl(d.storagePath);
         const previewLink =
           d.status !== 'failed'
@@ -2832,24 +2835,32 @@ init();
         const errorNote = d.generationError
           ? `<div class="cov-draft-error">${escapeHtml(d.generationError)}</div>`
           : '';
+        const publishedNote =
+          d.status === 'published' && publishedWhen
+            ? `<span class="cov-draft-date">Publicado ${escapeHtml(publishedWhen)}</span>`
+            : '';
+        let statusAction = '';
+        if (d.status === 'draft') {
+          statusAction = `<button type="button" class="btn cov-status-btn" data-draft-id="${escapeHtml(d.id)}" data-next-status="reviewed">Marcar revisado</button>`;
+        } else if (d.status === 'reviewed') {
+          statusAction = `<button type="button" class="btn btn-primary cov-status-btn" data-draft-id="${escapeHtml(d.id)}" data-next-status="published">Publicar</button>`;
+        }
         return `
           <div class="cov-draft-card">
             <div class="cov-draft-main">
               <span class="cov-draft-term">${escapeHtml(d.term || '(término desconocido)')}</span>
               ${draftStatusBadge(d)}
               <span class="cov-draft-date">${escapeHtml(when)}</span>
+              ${publishedNote}
             </div>
             ${errorNote}
             <div class="cov-draft-actions">
               ${previewLink}
               ${downloadLink}
+              ${statusAction}
               <button type="button" class="btn cov-regenerate-btn" data-draft-id="${escapeHtml(d.id)}"
                 title="Vuelve a generar el contenido con los prompts actuales (el borrador vuelve a revisión)">
                 Regenerar
-              </button>
-              <button type="button" class="btn cov-upload-btn" disabled
-                title="Publicación automática pendiente — subir manualmente por ahora">
-                Subir
               </button>
             </div>
           </div>`;
@@ -2858,6 +2869,9 @@ init();
 
     draftsEl.querySelectorAll('.cov-regenerate-btn').forEach((btn) => {
       btn.addEventListener('click', () => regenerateDraft(btn));
+    });
+    draftsEl.querySelectorAll('.cov-status-btn').forEach((btn) => {
+      btn.addEventListener('click', () => updateDraftStatus(btn));
     });
   }
 
@@ -2879,6 +2893,45 @@ init();
     } catch (err) {
       btn.disabled = false;
       btn.textContent = 'Regenerar';
+    }
+  }
+
+  async function updateDraftStatus(btn) {
+    const draftId = btn.getAttribute('data-draft-id');
+    const nextStatus = btn.getAttribute('data-next-status');
+    if (!draftId || !nextStatus || btn.disabled) return;
+
+    if (nextStatus === 'published') {
+      const ok = window.confirm(
+        '¿Publicar esta landing?\n\nPor ahora solo marca el estado como Publicado. La subida automática al hosting real se conectará cuando haya credenciales.',
+      );
+      if (!ok) return;
+    }
+
+    const prevLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = nextStatus === 'published' ? 'Publicando…' : 'Guardando…';
+    try {
+      const res = await fetch(
+        `${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(draftId)}/status`,
+        {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      await loadDrafts();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+      window.alert(err && err.message ? err.message : 'No se pudo actualizar el estado.');
     }
   }
 

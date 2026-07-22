@@ -1305,6 +1305,110 @@ router.get('/seo-landing-drafts/:id/html', async (req, res) => {
 });
 
 /**
+ * PATCH /reports/seo-landing-drafts/:id/status
+ * Human review/publish transitions only:
+ *   draft → reviewed  (sets reviewed_at)
+ *   reviewed → published (sets published_at)
+ * Other jumps return 400.
+ *
+ * TODO: when real hosting credentials exist, status='published' should also
+ * upload the HTML to the live site (cPanel/FTP/etc). For now this only
+ * updates the row status — Storage public URL remains the download source.
+ */
+router.patch('/seo-landing-drafts/:id/status', async (req, res) => {
+  const nextStatus = req.body && typeof req.body.status === 'string' ? req.body.status.trim() : '';
+  if (nextStatus !== 'reviewed' && nextStatus !== 'published') {
+    return res.status(400).json({
+      error: "status must be 'reviewed' or 'published'",
+    });
+  }
+
+  try {
+    const { data: rows, error: fetchError } = await supabase
+      .from('seo_landing_drafts')
+      .select(
+        'id, status, reviewed_at, published_at, confirmed_search_terms(term)',
+      )
+      .eq('id', req.params.id)
+      .limit(1);
+
+    if (fetchError) {
+      throw new Error(`Failed to fetch draft: ${fetchError.message}`);
+    }
+    if (!rows || !rows.length) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    const row = rows[0];
+    const current = row.status;
+    const allowed =
+      (current === 'draft' && nextStatus === 'reviewed') ||
+      (current === 'reviewed' && nextStatus === 'published');
+
+    if (!allowed) {
+      return res.status(400).json({
+        error: `Invalid transition: ${current} → ${nextStatus}. Allowed: draft→reviewed, reviewed→published.`,
+        currentStatus: current,
+        requestedStatus: nextStatus,
+      });
+    }
+
+    const now = new Date().toISOString();
+    const patch = { status: nextStatus };
+    if (nextStatus === 'reviewed') {
+      patch.reviewed_at = now;
+    }
+    if (nextStatus === 'published') {
+      // TODO: upload HTML to real hosting here once credentials are available.
+      // Currently only marks the draft as published in seo_landing_drafts.
+      patch.published_at = now;
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('seo_landing_drafts')
+      .update(patch)
+      .eq('id', row.id)
+      .select(
+        'id, term_id, status, generation_error, storage_path, generated_at, reviewed_at, published_at, created_at, confirmed_search_terms(term)',
+      )
+      .single();
+
+    if (updateError) {
+      throw new Error(`Failed to update draft status: ${updateError.message}`);
+    }
+
+    logger.info('SEO landing draft status updated', {
+      draftId: updated.id,
+      from: current,
+      to: nextStatus,
+    });
+
+    return res.json({
+      id: updated.id,
+      termId: updated.term_id,
+      term:
+        updated.confirmed_search_terms && updated.confirmed_search_terms.term
+          ? updated.confirmed_search_terms.term
+          : null,
+      status: updated.status,
+      generationError: updated.generation_error || null,
+      storagePath: updated.storage_path || null,
+      generatedAt: updated.generated_at,
+      reviewedAt: updated.reviewed_at,
+      publishedAt: updated.published_at,
+      createdAt: updated.created_at,
+      previousStatus: current,
+    });
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts/:id/status failed', {
+      id: req.params.id,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to update draft status' });
+  }
+});
+
+/**
  * POST /reports/seo-landing-drafts/:id/regenerate
  * Intentional manual regeneration of an existing draft (e.g. after a prompt
  * fix). Updates the SAME row in place — html_content, storage_path,
