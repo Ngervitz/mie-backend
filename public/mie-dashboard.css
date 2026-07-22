@@ -773,13 +773,13 @@
   color: var(--text-muted);
 }
 
-/* Featured — high activity (above baseline) */
+/* Featured — high activity (above baseline): 3px warm border */
 #mie-dashboard-app .gauge-chip.is-featured {
   min-height: 112px;
   padding: 14px 12px 12px;
   gap: 6px;
   background: linear-gradient(165deg, var(--accent-warn-soft) 0%, rgba(176, 137, 74, 0.18) 100%);
-  border-color: rgba(176, 137, 74, 0.55);
+  border: 3px solid rgba(217, 148, 48, 0.95);
   box-shadow: 0 1px 0 rgba(176, 137, 74, 0.12);
 }
 
@@ -807,7 +807,7 @@
 
 #mie-dashboard-app .gauge-chip.is-above {
   background: var(--accent-warn-soft);
-  border-color: rgba(176, 137, 74, 0.45);
+  border: 3px solid rgba(217, 148, 48, 0.95);
 }
 
 #mie-dashboard-app .gauge-chip.is-above .gauge-chip-value {
@@ -816,16 +816,18 @@
 
 #mie-dashboard-app .gauge-chip.is-above.is-featured {
   background: linear-gradient(165deg, var(--accent-warn-soft) 0%, rgba(176, 137, 74, 0.18) 100%);
-  border-color: rgba(176, 137, 74, 0.55);
+  border: 3px solid rgba(217, 148, 48, 0.95);
 }
 
 #mie-dashboard-app .gauge-chip.is-normal {
   background: var(--surface);
 }
 
+/* Ready — active but not top: 2px neutral-warm border */
 #mie-dashboard-app .gauge-chip.is-ready {
   min-height: 88px;
   padding: 12px 8px 10px;
+  border: 2px solid rgba(176, 137, 74, 0.55);
 }
 
 #mie-dashboard-app .gauge-chip.is-ready .gauge-chip-emoji {
@@ -840,11 +842,12 @@
   font-size: 15px;
 }
 
-/* Compact — collecting / paused / idle */
+/* Compact — collecting / paused / idle: 1px muted border */
 #mie-dashboard-app .gauge-chip.is-compact {
   min-height: 68px;
   padding: 8px 6px 6px;
   gap: 2px;
+  border: 1px solid rgba(120, 125, 140, 0.35);
 }
 
 #mie-dashboard-app .gauge-chip.is-compact .gauge-chip-avatar {
@@ -894,7 +897,8 @@
 #mie-dashboard-app .gauge-chip.is-collecting {
   background: transparent;
   border-style: dashed;
-  border-color: var(--border-strong);
+  border-width: 1px;
+  border-color: rgba(120, 125, 140, 0.4);
   opacity: 0.55;
 }
 
@@ -902,13 +906,15 @@
   opacity: 0.38;
   min-height: 58px;
   padding: 6px 4px 5px;
+  border-color: rgba(120, 125, 140, 0.28);
 }
 
 #mie-dashboard-app .gauge-chip.is-paused {
   background: var(--surface-2);
   opacity: 0.55;
   border-style: solid;
-  border-color: var(--border);
+  border-width: 1px;
+  border-color: rgba(120, 125, 140, 0.35);
 }
 
 #mie-dashboard-app .gauge-chip.is-paused .gauge-chip-value {

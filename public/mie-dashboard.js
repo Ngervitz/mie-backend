@@ -503,19 +503,18 @@ function getIntensityPctDisplay(intensity) {
 }
 
 /**
- * Sort groups (exact mode/level from buildIntensityGaugeModels / calculateEntityIntensity):
- * mode: 'ready' | 'collecting'
- * level: 'above' | 'normal' | 'below'
- * Unknown mode/level → group 3 (before collecting).
- * Paused (active === false) → group 5 (after collecting), alphabetical.
+ * Sort by intensity descending across all chips.
+ * Groups keep visual tiers (featured → ready → compact → paused).
+ * Within each tier: numeric intensity desc (pct or día N/7); name only as tiebreaker.
  */
 function getIntensityChipSortMeta(g) {
   const name = String(g.entityName || '');
   if (g.active === false) {
-    return { group: 5, sortValue: 0, name };
+    return { group: 5, sortValue: -1, name };
   }
   if (g.mode === 'collecting') {
-    return { group: 4, sortValue: 0, name };
+    const days = Math.min(7, Number(g.historicalDays) || 0);
+    return { group: 4, sortValue: days, name };
   }
   if (g.mode === 'ready' && g.intensity) {
     const level = g.intensity.level;
@@ -524,7 +523,6 @@ function getIntensityChipSortMeta(g) {
     if (level === 'normal') return { group: 1, sortValue, name };
     if (level === 'below') return { group: 2, sortValue, name };
   }
-  // Unrecognized mode/level (null, unexpected string, ready without intensity, etc.)
   const sortValue = g.intensity ? getIntensityPctDisplay(g.intensity).sortValue : 0;
   return { group: 3, sortValue, name };
 }
@@ -533,9 +531,6 @@ function compareIntensityChips(a, b) {
   const ma = getIntensityChipSortMeta(a);
   const mb = getIntensityChipSortMeta(b);
   if (ma.group !== mb.group) return ma.group - mb.group;
-  if (ma.group === 4 || ma.group === 5) {
-    return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
-  }
   if (mb.sortValue !== ma.sortValue) return mb.sortValue - ma.sortValue;
   return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
 }
