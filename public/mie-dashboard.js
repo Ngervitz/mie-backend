@@ -3103,7 +3103,7 @@ init();
   }
 
   const DECISION_BADGES = {
-    monitor_trends: ['Monitoreado', 'is-monitored'],
+    monitor_trends: ['Landing generada', 'is-monitored'],
     added_as_competitor: ['Competidor', 'is-competitor'],
     discarded: ['Descartado', 'is-discarded'],
     pending: ['Pendiente', 'is-pending'],
