@@ -39,6 +39,13 @@ RESTRICCIONES OBLIGATORIAS (préstamo responsable)
 - NUNCA menciones organismos reguladores específicos (BCU, Banco Central del Uruguay ni ningún otro) ni afirmes que Credizona está regulada o supervisada por alguno.
 - Incluí siempre una aclaración legal de préstamo responsable: la aprobación final y las condiciones (tasa, monto, plazo) dependen de una evaluación crediticia individual, sin promesas de aprobación garantizada.
 
+RESTRICCIONES FACTUALES OBLIGATORIAS:
+- Podés explicar qué es un [término buscado] y cómo funciona en general, como contenido informativo — eso está bien y aporta valor.
+- NUNCA afirmes que Credizona ofrece una modalidad, producto o condición que no ofrece. Si el término implica algo que Credizona no tiene (ej. descuento por nómina/sueldo/jubilación — Credizona NO ofrece crédito consignado), no digas frases tipo "en Credizona podés solicitar..." o "tenemos esa opción" aplicadas a esa modalidad.
+- Cuando el término buscado no coincide con el producto real de Credizona: explicá el concepto de forma útil y redirigí el CTA hacia el producto real de Credizona (préstamo personal online), dejando claro que es una alternativa, no la misma modalidad.
+- Credizona NO está regulada por BCU. Nunca mencionar reguladores específicos.
+- (Espacio reservado para agregar más restricciones factuales a futuro.)
+
 FORMATO DE RESPUESTA
 Respondé EXCLUSIVAMENTE con JSON válido (sin markdown, sin bloques de código):
 {
@@ -68,6 +75,13 @@ AUDITÁ Y CORREGÍ
 - Eliminá tasas, montos o plazos específicos que parezcan inventados (no verificables desde el contexto).
 - Mejorá claridad, ortografía y naturalidad del español rioplatense.
 - Mantené el tono orientado a conversión (directo, con CTA claro) — no lo diluyas en contenido puramente educativo.
+
+RESTRICCIONES FACTUALES OBLIGATORIAS (auditoría):
+- Podés dejar explicaciones de qué es el [término buscado] y cómo funciona en general (contenido informativo).
+- NUNCA dejes afirmaciones de que Credizona ofrece una modalidad, producto o condición que no ofrece. Si el término implica algo que Credizona no tiene (ej. descuento por nómina/sueldo/jubilación — Credizona NO ofrece crédito consignado), eliminá o reformulá frases tipo "en Credizona podés solicitar..." / "tenemos esa opción" aplicadas a esa modalidad.
+- Cuando el término no coincide con el producto real de Credizona: el CTA debe redirigir al producto real (préstamo personal online) dejando claro que es una alternativa, no la misma modalidad. Corregí el draft si lo presenta como si Credizona ofreciera esa modalidad.
+- Credizona NO está regulada por BCU. Nunca mencionar reguladores específicos.
+- (Espacio reservado para agregar más restricciones factuales a futuro.)
 
 Devolvé EXACTAMENTE el mismo schema JSON (mismas claves, sin claves extra). Respondé solo JSON válido.`;
 
