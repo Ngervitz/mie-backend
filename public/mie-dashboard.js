@@ -298,7 +298,7 @@ async function supabaseRestPost(pathAndQuery, payload) {
 /** Competitor entities (is_self = false). Includes paused (active=false) for the chip grid. */
 async function queryCompetitorEntities() {
   return supabaseRestGet(
-    'monitored_entities?select=id,name,is_self,active,segment,sector,ad_library_url,slug' +
+    'monitored_entities?select=id,name,is_self,active,segment,sector,ad_library_url,slug,website_domain' +
       '&is_self=eq.false&order=name.asc',
   );
 }
@@ -429,6 +429,7 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
       segment: entity.segment || null,
       sector: entity.sector || null,
       adLibraryUrl: entity.ad_library_url || null,
+      websiteDomain: entity.website_domain || null,
       lastMovementDate: lastMovement.get(entityId) || null,
     };
 
@@ -539,16 +540,58 @@ function compareIntensityChips(a, b) {
   return ma.name.localeCompare(mb.name, 'es', { sensitivity: 'base' });
 }
 
+/** Presentation-only: initials for favicon fallback. */
+function getEntityInitials(name) {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) {
+    const w = parts[0].replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9+]/g, '');
+    return (w.slice(0, 2) || '?').toUpperCase();
+  }
+  const a = parts[0].replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9+]/g, '').charAt(0);
+  const b = parts[1].replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9+]/g, '').charAt(0);
+  return ((a || '?') + (b || '')).toUpperCase();
+}
+
+/** Presentation-only: stable hue from entity name. */
+function getAvatarHue(name) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+/** Presentation-only: corner avatar (favicon or initials). */
+function renderGaugeAvatar(g) {
+  const initials = escapeHtml(getEntityInitials(g.entityName));
+  const hue = getAvatarHue(g.entityName);
+  const domain = String(g.websiteDomain || '').trim().replace(/^https?:\/\//i, '').split('/')[0];
+  const favicon = domain
+    ? `<img class="gauge-chip-favicon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64" alt="" loading="lazy" decoding="async" onerror="this.remove()" />`
+    : '';
+  return `
+    <span class="gauge-chip-avatar" style="--avatar-hue:${hue}" aria-hidden="true">
+      <span class="gauge-chip-initials">${initials}</span>
+      ${favicon}
+    </span>
+  `;
+}
+
 function renderIntensityChip(g, index) {
   const delay = `${(index * 0.04).toFixed(2)}s`;
   const fullName = g.entityName || '—';
   const titleAttr = escapeHtml(fullName);
   const entityAttr = escapeHtml(String(g.entityId || ''));
+  const avatar = renderGaugeAvatar(g);
 
   if (g.active === false) {
     return `
-      <button type="button" class="gauge-chip is-paused" style="--gauge-delay:${delay}"
+      <button type="button" class="gauge-chip is-paused is-compact" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+        ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">🚫</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value is-fallback-label">pausada</span>
@@ -558,9 +601,11 @@ function renderIntensityChip(g, index) {
 
   if (g.mode === 'collecting') {
     const n = Math.min(7, g.historicalDays || 0);
+    const idleClass = n === 0 ? ' is-idle' : '';
     return `
-      <button type="button" class="gauge-chip is-collecting" style="--gauge-delay:${delay}"
+      <button type="button" class="gauge-chip is-collecting is-compact${idleClass}" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+        ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value is-fallback-label">día ${escapeHtml(String(n))}/7</span>
@@ -574,8 +619,9 @@ function renderIntensityChip(g, index) {
       ? getIntensityPctDisplay(g.intensity).pctLabel
       : '—';
     return `
-      <button type="button" class="gauge-chip is-unknown" style="--gauge-delay:${delay}"
+      <button type="button" class="gauge-chip is-unknown is-compact" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+        ${avatar}
         <span class="gauge-chip-emoji" aria-hidden="true">❔</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
@@ -587,18 +633,19 @@ function renderIntensityChip(g, index) {
   const level = intensity.level;
   const { pctLabel } = getIntensityPctDisplay(intensity);
   let emoji = '✅';
-  let chipClass = 'is-normal';
+  let chipClass = 'is-normal is-ready';
   if (level === 'above') {
     emoji = '🔥';
-    chipClass = 'is-above';
+    chipClass = 'is-above is-featured';
   } else if (level === 'below') {
     emoji = '📉';
-    chipClass = 'is-below';
+    chipClass = 'is-below is-ready';
   }
 
   return `
     <button type="button" class="gauge-chip ${chipClass}" style="--gauge-delay:${delay}"
       title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
+      ${avatar}
       <span class="gauge-chip-emoji" aria-hidden="true">${emoji}</span>
       <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
       <span class="gauge-chip-value">${escapeHtml(pctLabel)}</span>
@@ -925,7 +972,7 @@ function renderIntensityGauges() {
     const skeletons = new Array(10)
       .fill('<div class="gauge-chip skeleton skeleton-gauge-chip"></div>')
       .join('');
-    body = `<div class="gauge-chip-grid">${skeletons}</div>`;
+    body = `<div class="gauge-chip-grid is-mixed">${skeletons}</div>`;
   } else if (state.gauge.error) {
     body = `<div class="empty-state">No se pudo cargar la intensidad: ${escapeHtml(state.gauge.error)}</div>`;
   } else if (!state.gauge.entities.length) {
@@ -941,9 +988,36 @@ function renderIntensityGauges() {
     if (!sorted.length) {
       body = `<div class="empty-state">Sin resultados</div>`;
     } else {
-      body = `<div class="gauge-chip-grid">${sorted
-        .map((g, index) => renderIntensityChip(g, index))
-        .join('')}</div>`;
+      const featured = [];
+      const ready = [];
+      const rest = [];
+      sorted.forEach((g) => {
+        if (g.active !== false && g.mode === 'ready' && g.intensity && g.intensity.level === 'above') {
+          featured.push(g);
+        } else if (g.active !== false && g.mode === 'ready' && g.intensity) {
+          ready.push(g);
+        } else {
+          rest.push(g);
+        }
+      });
+      const parts = [];
+      let idx = 0;
+      if (featured.length) {
+        parts.push(`<div class="gauge-chip-grid is-featured-row">${featured
+          .map((g) => renderIntensityChip(g, idx++))
+          .join('')}</div>`);
+      }
+      if (ready.length) {
+        parts.push(`<div class="gauge-chip-grid is-ready-row">${ready
+          .map((g) => renderIntensityChip(g, idx++))
+          .join('')}</div>`);
+      }
+      if (rest.length) {
+        parts.push(`<div class="gauge-chip-grid is-compact-row">${rest
+          .map((g) => renderIntensityChip(g, idx++))
+          .join('')}</div>`);
+      }
+      body = parts.join('');
     }
   }
 
