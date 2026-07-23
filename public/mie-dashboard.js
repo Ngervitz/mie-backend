@@ -3840,9 +3840,15 @@ init();
           '</div>' +
           '</div>';
 
+        const avatarHtml = renderGaugeAvatar({
+          entityName: e.entityName,
+          websiteDomain: e.websiteDomain,
+        });
+
         return (
           '<div class="serp-presence-row">' +
           '<div class="serp-presence-main">' +
+          avatarHtml +
           '<span class="serp-presence-name">' +
           escapeHtml(e.entityName || '—') +
           '</span>' +

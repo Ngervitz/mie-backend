@@ -2193,8 +2193,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
-  align-items: baseline;
+  align-items: center;
   margin-bottom: 6px;
+}
+
+#mie-dashboard-app .serp-presence-main .gauge-chip-avatar {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
 }
 
 #mie-dashboard-app .serp-presence-name {
