@@ -1,0 +1,6 @@
+loaded_h_0(function(_){var window=this;
+_.v("nHLHI");
+_.NUo=class extends _.yi{constructor(){super();this.oa=_.hZ({bHd:0});this.Aa=new Map}qLd(a){this.oa.subscribe(a)}Ba(){return this.Aa.get(this.oa.value.bHd)}Ca(a,b){this.Aa.has(a)?_.nf(new _.xg(`Attempted to register a corroboration model for draft id ${a}, which already has a model registered`)):(this.Aa.set(a,b),this.oa.value.bHd===a&&(this.oa.value=Object.assign({},this.oa.value,{kA:b})))}};_.ss(_.MUo,_.NUo);
+_.x();
+});
+// Google Inc.

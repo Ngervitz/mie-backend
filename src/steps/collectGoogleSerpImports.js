@@ -1044,16 +1044,21 @@ async function getGoogleSerpCompetitorPresence() {
     return Boolean(d);
   });
 
-  /** @type {Map<string, { captureIds: Set<string>, dates: string[] }>} */
+  /** @type {Map<string, { captureIds: Set<string>, adCaptureIds: Set<string>, organicCaptureIds: Set<string>, dates: string[] }>} */
   const appearanceByEntityId = new Map();
   for (const e of withDomain) {
-    appearanceByEntityId.set(e.id, { captureIds: new Set(), dates: [] });
+    appearanceByEntityId.set(e.id, {
+      captureIds: new Set(),
+      adCaptureIds: new Set(),
+      organicCaptureIds: new Set(),
+      dates: [],
+    });
   }
 
   if (captureIds.length && withDomain.length) {
     const { data: rows, error: rowErr } = await supabase
       .from('google_serp_ads_manual')
-      .select('capture_id, advertiser_domain')
+      .select('capture_id, advertiser_domain, result_type')
       .in('capture_id', captureIds);
     if (rowErr) {
       throw new Error(`Failed to load SERP rows for presence: ${rowErr.message}`);
@@ -1071,6 +1076,7 @@ async function getGoogleSerpCompetitorPresence() {
       if (!d) continue;
       const matched = domainToEntities.get(d);
       if (!matched) continue;
+      const resultType = String(row.result_type || '').toLowerCase();
       for (const e of matched) {
         const bucket = appearanceByEntityId.get(e.id);
         if (!bucket) continue;
@@ -1079,6 +1085,11 @@ async function getGoogleSerpCompetitorPresence() {
           const dt = dateByCapture.get(row.capture_id);
           if (dt) bucket.dates.push(dt);
         }
+        if (resultType === 'ad') {
+          bucket.adCaptureIds.add(row.capture_id);
+        } else if (resultType === 'organic') {
+          bucket.organicCaptureIds.add(row.capture_id);
+        }
       }
     }
   }
@@ -1086,6 +1097,8 @@ async function getGoogleSerpCompetitorPresence() {
   const entityRows = withDomain.map((e) => {
     const bucket = appearanceByEntityId.get(e.id);
     const appearedCaptureCount = bucket ? bucket.captureIds.size : 0;
+    const appearedAdsCaptureCount = bucket ? bucket.adCaptureIds.size : 0;
+    const appearedOrganicCaptureCount = bucket ? bucket.organicCaptureIds.size : 0;
     let mostRecentAppearanceDate = null;
     if (bucket && bucket.dates.length) {
       mostRecentAppearanceDate = bucket.dates.slice().sort().reverse()[0];
@@ -1095,6 +1108,8 @@ async function getGoogleSerpCompetitorPresence() {
       entityName: e.name,
       websiteDomain: normalizeDomain(e.website_domain),
       appearedCaptureCount,
+      appearedAdsCaptureCount,
+      appearedOrganicCaptureCount,
       totalCaptureCount: totalCaptures,
       mostRecentAppearanceDate,
     };

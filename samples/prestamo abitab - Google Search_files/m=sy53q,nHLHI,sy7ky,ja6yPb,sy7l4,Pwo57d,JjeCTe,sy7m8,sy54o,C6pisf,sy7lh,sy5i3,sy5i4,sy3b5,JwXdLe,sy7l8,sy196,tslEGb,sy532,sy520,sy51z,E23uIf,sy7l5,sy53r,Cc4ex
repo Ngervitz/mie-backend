@@ -1,0 +1,61 @@
+loaded_h_0(function(_){var window=this;
+_.wOo=_.y("nHLHI",[]);
+_.v("nHLHI");
+_.xOo=class extends _.wi{constructor(){super();this.oa=_.cZ({xHd:0});this.Aa=new Map}LLd(a){this.oa.subscribe(a)}Ba(){return this.Aa.get(this.oa.value.xHd)}Ca(a,b){this.Aa.has(a)?_.nf(new _.yg(`Attempted to register a corroboration model for draft id ${a}, which already has a model registered`)):(this.Aa.set(a,b),this.oa.value.xHd===a&&(this.oa.value=Object.assign({},this.oa.value,{hA:b})))}};_.ls(_.wOo,_.xOo);
+_.x();
+_.hAr=_.y("ja6yPb",[]);
+_.v("ja6yPb");
+_.Hht=class extends _.wi{constructor(){super();this.Ca=0;google.lfm||(google.lfm=[]);this.Aa=_.cZ({view:0});this.Ba=_.cZ(0)}subscribeToInputPlateState(a){this.Ba.subscribe(a)}expand(){var a;(a=this.oa)==null||a.expand()}collapse(a=!1,b,c=!1){var d;return(d=this.oa)==null?void 0:d.collapse(a,b,c)}};_.ls(_.hAr,_.Hht);
+_.x();
+_.nAr=_.y("Pwo57d",[_.wOo]);
+_.v("Pwo57d");
+var zms;zms=function(a,{hA:b}){if(b){var c;(c=a.oa)==null||c.unsubscribe();c=b.Oa(({count:d})=>{a.Aa.value={oTc:d}});a.oa={model:b,unsubscribe:c}}else{let d;(d=a.oa)==null||d.unsubscribe();a.oa=null}};_.Ams=class extends _.wi{static Ta(){return{model:{HIb:_.xOo}}}constructor(a){super();this.oa=null;this.Aa=_.cZ({oTc:void 0});a.model.HIb.LLd(b=>{zms(this,b)})}u$a(a){this.Aa.subscribe(a)}};_.ls(_.nAr,_.Ams);
+_.x();
+_.v("JjeCTe");
+var bht=class extends _.m{constructor(a){super(a)}Aa(){return _.B(this,2)}Ca(a){return _.Zh(this,2,a)}Ba(){return _.bf(this,2)}Da(){return _.Ck(this,2)}};bht.prototype.ob="ZoDrGf";var cht={Ku(){return["aof"]},Al(a,b){_.Ov(new _.Tv(a.oa,b),"aof",b.Ca,b.Ba)},Ml(a,b){_.Sv(new _.Tv(b.oa,a),a.Da,a.Aa,"aof")}};var dht=null,eht=class extends _.Yw{constructor(a,b){super(a);new _.Zw(this);this.wp=_.Ww(b,this,new _.Vw(cht))}static An(){return bht}static Fn(a){return dht?dht:dht=_.Uw().then(b=>{b=new eht(bht,b);b.initialize(a);return b})}};_.mp.ZoDrGf=_.lp;var hht,jht,iht;_.ght=async function(){var a=(0,_.Vf)(),b=a();a=a(1);try{if(_.fht()){try{a(await b(_.qOh()))}catch(c){a()}a(await b(new Promise(c=>{(0,_.qo)(c,450)})))}}finally{b()}};_.fht=function(){var a=document.querySelectorAll("[data-svs]");for(let b=0;b<a.length;b++){let c=a[b].getBoundingClientRect();if(c.width>0||c.height>0)return!0}if(a=document.getElementById("Sva75c"))if(a=a.getBoundingClientRect(),a.width>0||a.height>0)return!0;return!1};
+hht=function(a,b){var c;b=(c=b.Aa())!=null&&c?2:0;a.zua.value!==b&&(a.zua.value=b)};jht=async function(a,b){var c=(0,_.Vf)(),d=c();c=c(1);try{let e;if(((e=a.Li.get().Aa())!=null?e:!1)!==b){c(await d(iht()));a.oa=!0;try{let f=a.Li.transition(g=>{b?g.Ca(!0):g.Ba();return g});c(await d(f.run()));hht(a,a.Li.get())}finally{c(),a.oa=!1}}}finally{d()}};iht=async function(){return _.ght()};
+_.kht=class extends _.wi{static Ta(){return{service:{spa:_.k0o},Fe:{Kde:eht}}}constructor(a){super();this.hasSubmittedQuery=_.cZ(!1);this.zua=_.cZ(0);this.oa=!1;a.service.spa.MEd(_.lAr,this);this.Li=a.Fe.Kde;hht(this,this.Li.get());this.Li.listen(b=>{this.oa||hht(this,b)});this.zua.subscribe(this.Aa.bind(this))}Aa(a,b){if(a!==b)if(b===void 0)jht(this,!1);else switch(a){case 2:this.hasSubmittedQuery.value?jht(this,!0):jht(this,!1);break;default:jht(this,!1)}}};_.ls(_.lAr,_.kht);
+_.x();
+_.aBr=_.y("C6pisf",[]);
+var x_o=class extends _.m{constructor(a){super(a)}Aa(){return _.u(this,1)}Ba(){return _.u(this,2)}};var y_o=class extends _.m{constructor(a){super(a)}Aa(){return _.ph(this,x_o,1,_.qh())}};_.z_o=class extends _.m{constructor(a){super(a)}yb(){return _.p(this,y_o,1)}Ir(){return _.u(this,2)}Ma(){return _.Kj(this,3,_.qh())}Ca(){return _.ij(this,9)}Gb(){return _.Mk(this,9)}Va(){return _.Bia(_.ij(this,4))}wb(){return _.B(this,5)}Za(){return _.B(this,10)}Ua(){return _.u(this,17)}Pa(){return _.B(this,6,!0)}kb(){return _.B(this,7)}Sa(){return _.u(this,8,"#e2eeff")}Aa(){return _.u(this,14)}iU(){return _.u(this,15)}Ba(){return _.u(this,16)}Da(){return _.u(this,19)}Ha(){return _.u(this,22)}Oa(){return _.u(this,
+20)}Bb(){return _.u(this,21)}};_.z_o.prototype.ob="XDxzyc";
+_.v("C6pisf");
+_.qds=class extends _.m{constructor(a){super(a)}};_.qds.prototype.ob="U7pSpf";_.rds=class extends _.wi{static Ta(){return{Kf:{wqc:_.qds}}}constructor(a){super();this.oa=new Map;var b;if((b=a.Kf.wqc)==null?0:_.ph(b,_.z_o,1,_.qh()))for(let c of _.ph(a.Kf.wqc,_.z_o,1,_.qh()))this.oa.set(c.Ir(),_.cZ({bfa:c}))}Aa(a,b){var c=this.oa.get(b);c||(c=_.cZ({bfa:new _.z_o}),this.oa.set(b,c));c.subscribe((d,e)=>{a(d.bfa,e==null?void 0:e.bfa)})}};_.ls(_.aBr,_.rds);
+_.x();
+_.AAr=_.y("JwXdLe",[]);
+_.X7p=class extends _.m{constructor(a){super(a)}Sq(){return _.ak(this,1)}Ex(){return _.gh(this,3)}xH(){return _.gh(this,4)}getAttribute(){return _.gh(this,5)}setAttribute(a){return _.eh(this,5,a)}hasAttribute(){return _.rh(this,5)}xz(){return _.p(this,_.RG,8)}O0(){return _.ak(this,10)}yH(){return _.fk(this,12)}Iaa(){return _.gh(this,17)}oya(){return _.ak(this,19)}Hu(){return _.gh(this,21)}getViewerType(){return _.fk(this,23)}Sw(a){return _.Yh(this,23,a)}ule(){return _.gh(this,24)}jke(){return _.gh(this,
+25)}};_.X7p.prototype.ob="tkwAde";
+_.Y7p=function(a,b){return _.yi(a,1,b)};_.Z7p=function(a,b){return _.eh(a,3,b)};_.$7p=function(a,b){return _.eh(a,4,b)};_.a8p=function(a,b){return _.Fb(a,_.RG,8,b)};_.b8p=function(a,b){return _.Yh(a,12,b)};_.c8p=function(a,b){return _.eh(a,17,b)};_.d8p=function(a,b){return _.yi(a,19,b)};
+var Dsg;Dsg=class extends _.m{constructor(a){super(a)}mka(){return _.Cj(this,2)}getUrl(){return _.u(this,3)}jd(){return _.rh(this,3)}getTitle(){return _.u(this,4)}setTitle(a){return _.eh(this,4,a)}vd(){return _.rh(this,4)}jk(){return _.u(this,5)}getUniqueId(){return _.Ue(this,7)}};
+_.Esg=class extends _.m{constructor(a){super(a)}Z8(){return _.ij(this,27)}Wgb(){return _.Mk(this,27)}hPb(){return _.u(this,11)}yv(){return _.Cj(this,18)}GZ(){return _.ph(this,Dsg,24,_.qh())}noa(){return _.cj(this,Dsg,24)}X5(){return _.Cj(this,26)}};_.Fsg=function(a){return _.p(a,_.Esg,4)};
+_.v("JwXdLe");
+_.Jjt=class extends _.wi{constructor(){super();this.pP=!1;this.Aa=null;this.avb=_.cZ({Sn:new _.X7p});this.oa=_.cZ({element:null});this.Ca=_.cZ(0)}Ma(a){this.avb.subscribe((b,c)=>{a(b.Sn,c==null?void 0:c.Sn)})}Ha(a){this.oa.subscribe((b,c)=>{a(b.element,c==null?void 0:c.element)})}Ea(a){this.Ca.subscribe((b,c)=>{a(b,c)})}o$(a){this.pP&&this.oa.value!=null?this.Aa=a:this.oa.value={element:a}}Ba(a){this.pP=a;this.pP||this.Aa==null||(this.oa.value={element:this.Aa},this.Aa=null)}Da(a){this.Ca.value=a}};
+_.ls(_.AAr,_.Jjt);
+_.x();
+_.rAr=_.y("tslEGb",[]);
+_.OA=function(a){return _.u(a,6)};_.QA=function(a){var b=new _.PA;return _.Yh(b,3,a)};_.PA=class extends _.m{constructor(a){super(a)}};
+_.v("tslEGb");
+var Ckt=function(a){if(a){let b=a.parentElement;a.remove();b&&_.Vo(b)}},Ikt=function(a,b,c,d,e){var f=_.Rm("DIV");Dkt(a);var g="";a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService").get("log");g+="<div"+_.W(Ekt(a,5,b)+"")+_.X(Fkt(a,5,b)+"")+_.V(Gkt(a,5,b)+"")+">";b=Hkt(a,5);var h=a.Da();h!==""&&(g+=" <style>"+h+"</style>");g+=b+_.pA(a)+"</div>";a.Ea();a=_.z(g);_.Rc(f,a);f.setAttribute("jsname",c);e===1?_.Ym(f,d):_.Vm(f,d);_.Vo(f);return f},Ekt=function(a,b){a=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");
+b==0||a.get("log");return""},Fkt=function(a,b){a=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");b==0||a.get("log");return""},Gkt=function(a,b,c){var d="",e=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");e=b==0||e.get("log")>0;return d+=(e?"":' jscontroller="'+_.R("uUzMF")+'"')+(c?' data-c="'+_.R("5")+'"':"")+(e?"":' data-level="'+_.R(String(b==1||b==5?1:b==3?4:b==4?5:3))+'"')+(e?"":' jsaction="'+_.R("rcuQ6b:npT2md")+'"')+_.oA(a,{Jb:e?-1:246674,ze:[{Pd:_.Gb(745,_.vp,_.PA),
+value:_.QA(63)}]}).attributes},Hkt=function(a,b){var c=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");b==0||c.get("log");return _.pA(a)},Jkt=function(a,b){a=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");b==0||a.get("log");return!0},Kkt=function(a,b){a=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");b==0||a.get("log");return!1},Lkt=function(a,b){Dkt(a);return Hkt(a,b.policy)},Mkt=function(a,b){Dkt(a);var c=b.policy,d=b.WLe;b="";var e=a.Ca.oa("gws.common.api.jslayout.services.DebugLevelService");
+c==0||e.get("log");b+="<div"+_.W(Ekt(a,c,d)+"")+_.X(Fkt(a,c,d)+"")+_.V(Gkt(a,c,d)+"")+">";c=Hkt(a,c);b+=c+_.pA(a)+"</div>";return _.z(b)},Dkt=function(a){a.oa("t-lwwBO89gPPc")||a.Aa("t-lwwBO89gPPc",{policy:0,WLe:1},Lkt,Mkt,Jkt,Kkt,"",Gkt,"",Ekt,"",Fkt)},Nkt=null,Okt=null,Pkt=class extends _.As{static Ta(){return{}}constructor(a){super(a.Na)}Aa(){var a=new _.qB(document,(0,_.iD)()),b=this.getRoot().hb(),c=_.pm(this.getRoot().getData("rao"))!=null,d=document.querySelector('[jsname="txosbe"]'),e=_.Dm("appbar"),
+f=document.querySelector('[jsname="uLislf"]'),g=!1;c&&_.kAd&&e&&(d=e,g=!0);d&&f&&(b=_.Ve(b),b=_.jD({wg:b}),a.Oa=b,Nkt=Ikt(a,!1,"sWOvr",d,2),Okt=Ikt(a,!0,"DzXdWe",f,1),g&&_.kAd?Nkt.style.transform="translateY(8px)":_.kAd&&(Nkt.style.transform="translateY(-20px)"))}oa(){Ckt(Nkt);Ckt(Okt);Okt=Nkt=null}};Pkt.prototype.$wa$awTD3c=function(){return this.oa};Pkt.prototype.$wa$ncrzjb=function(){return this.Aa};_.Ds(_.rAr,Pkt);
+
+_.x();
+_.xJo=_.y("E23uIf",[_.a4a]);
+_.QHo=_.y("p8SIIc",[]);
+_.PHo={state:0,Vca:void 0,e_a:void 0,f5:void 0};
+_.v("E23uIf");
+var AJo,DJo,BJo;AJo=function(a,b,c){_.XLi&&a.AB.isAvailable()&&a.AB.Ca();a.oa.value={state:1,Vca:b,e_a:_.yJo(a,_.zJo(a,b)),f5:c}};_.yJo=function(a,b){return b.map(c=>a.Ha.has(c)?a.Ha.get(c):c).filter(c=>a.sourceMap.has(c)).map(c=>({html:a.sourceMap.get(c)}))};_.zJo=function(a,b){return b==="N5sdyd"?[...a.sourceMap.keys()]:a.Aa.has(b)?a.Aa.get(b):[]};
+_.CJo=class extends _.wi{static Ta(){return{service:{mcb:_.FIo},Gp:{Lge:_.QHo}}}constructor(a){super();this.Da=null;this.sourceMap=new Map;this.Aa=new Map;this.Ha=new Map;this.Ca=new Map;var b=a.Gp.Lge;this.oa=_.cZ(_.PHo);this.Ma=_.cZ({count:0});this.AB=a.service.mcb;b&&new BJo(b,this)}u$a(a){this.oa.subscribe(a)}Pa(a,b){if(!this.Ca.has(a)){let c=this.Aa.has(a);this.Ca.set(a,_.cZ({TQb:c}))}this.Ca.get(a).subscribe(b)}Oa(a){return this.Ma.subscribe(a)}Ea(a,b){this.oa.value.state===1&&this.oa.value.Vca===
+a?this.Ba(b):AJo(this,a,b)}Ba(a){this.oa.value.state!==0&&(_.XLi&&this.AB.isAvailable()&&this.AB.Da(),this.oa.value={state:0,Vca:void 0,e_a:void 0,f5:a})}};DJo=function(a,b){a.oa||(a.oa=!0,b(),a.oa=!1)};BJo=class{constructor(a,b){this.Ba=a;this.Aa=b;this.oa=!1;b.u$a(c=>{DJo(this,()=>{this.Ba.setState(c)})});a.Ooc(c=>{DJo(this,()=>{c.state===1&&c.Vca!==void 0?AJo(this.Aa,c.Vca,c.f5):this.Aa.Ba(c.f5)})})}};_.ls(_.xJo,_.CJo);
+_.x();
+_.oAr=_.y("Cc4ex",[]);
+_.yOo=!!(_.Ji[53]&2048);_.zOo=!!(_.Ji[53]&4096);
+_.v("Cc4ex");
+var Bms=async function(a){var b=a.getRoot().hb().closest(_.oNi);return b?(b=b.querySelector(_.NU("Y0vxu")))?a.getModel(_.xJo,b):null:null},Cms=function(a,b){a.oa=b;(a=a.getRoot().hb().querySelector(_.NU("NnAfwf")))&&b>0?a.textContent=`+${b}`:a&&(a.textContent="")},Fms=async function(a){var b=(0,_.Vf)(),c=b();b=b(1);try{if(a.hA=a.hA||b(await c(Bms(a))),a.hA){var d=_.zJo(a.hA,"N5sdyd"),e=d.length,f=a.hA,g=Dms(a),h=Ems(f,d);d=[];f=[];for(var k of h)k!==""&&(d.includes(k)?f.push(k):d.push(k));var l=d.concat(f);
+let q=Math.min(l.length,3);h=0;for(k=q-1;k>=0;k--){let r=g[k];r||(r=g[0].cloneNode(!0),g[0].parentElement.prepend(r));r.style.display="block";let t=r.firstElementChild;t.style.display="block";let A=l[k];t.tagName.toLowerCase()==="img"&&(t.src=A);h++}var n=Dms(a);l=3;for(g=0;g<n.length;g++){let r=n[g];g>=q&&(r.style.display="none");r.style.zIndex=l.toString();l--}Cms(a,e-h);a.Aa=!0}}finally{c()}},Dms=function(a){return Array.from(a.getRoot().hb().querySelectorAll(_.NU("i1Vy9")))},Ems=function(a,b){return _.yJo(a,
+b).map(c=>c.html).map(c=>(c=c.querySelector(".XNo5Ab"))?c.src||c.getAttribute("data-src")||"":"")};_.Ds(_.oAr,class extends _.As{static Ta(){return{Gp:{HIb:_.wOo,Zub:_.nAr}}}constructor(a){super(a.Na);this.Aa=!1;this.oa=_.Fd(this.getData("rc"),0);this.hA=null;var b;(b=a.Gp.Zub)==null||b.u$a(c=>{if(c.oTc){var d=Dms(this).length;c=c.oTc-d;c<=this.oa||Cms(this,c)}});if(_.zOo){let c;(c=a.Gp.HIb)==null||c.LLd(d=>{var e;(e=d.hA)==null||e.Oa(()=>{d.hA&&(this.hA=d.hA,Fms(this))})})}}});
+_.x();
+});
+// Google Inc.

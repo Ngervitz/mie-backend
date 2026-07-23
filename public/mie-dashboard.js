@@ -3787,9 +3787,20 @@ init();
           escapeHtml(String(totalForRow)) +
           '</strong>';
 
+        const adsCount = Number(e.appearedAdsCaptureCount || 0);
+        const organicCount = Number(e.appearedOrganicCaptureCount || 0);
+        const breakdownHtml =
+          appeared > 0
+            ? ' (' +
+              escapeHtml(String(adsCount)) +
+              ' en ads, ' +
+              escapeHtml(String(organicCount)) +
+              ' en orgánico — puede solaparse)'
+            : '';
+
         const presenceHtml =
           appeared > 0
-            ? 'Apareció en ' + fractionHtml + ' capturas realizadas.'
+            ? 'Apareció en ' + fractionHtml + ' capturas realizadas' + breakdownHtml + '.'
             : 'No apareció en ninguna de las ' +
               '<strong class="serp-presence-fraction is-presence-low">' +
               escapeHtml(String(totalForRow)) +
