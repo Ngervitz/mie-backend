@@ -2230,6 +2230,56 @@
   color: var(--accent-danger);
 }
 
+#mie-dashboard-app .serp-presence-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+  max-width: 420px;
+}
+
+#mie-dashboard-app .serp-presence-bar-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+#mie-dashboard-app .serp-presence-bar-label {
+  font-size: 0.75rem;
+  color: rgba(232, 234, 237, 0.7);
+  line-height: 1.2;
+}
+
+#mie-dashboard-app .serp-presence-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+#mie-dashboard-app .serp-presence-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 0;
+}
+
+#mie-dashboard-app .serp-presence-bar-fill.is-ads {
+  background: var(--accent-info);
+}
+
+#mie-dashboard-app .serp-presence-bar-fill.is-organic {
+  background: var(--accent-success);
+}
+
+#mie-dashboard-app .serp-presence-bar-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(232, 234, 237, 0.85);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 #mie-dashboard-app .serp-batch-list {
   margin: 12px 0 0;
   padding-left: 18px;

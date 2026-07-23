@@ -3809,6 +3809,37 @@ init();
 
         const lastText =
           'Última aparición: ' + formatPresenceDate(e.mostRecentAppearanceDate);
+
+        const adsPct =
+          totalForRow > 0 ? Math.min(100, Math.round((adsCount / totalForRow) * 100)) : 0;
+        const organicPct =
+          totalForRow > 0 ? Math.min(100, Math.round((organicCount / totalForRow) * 100)) : 0;
+        const barsHtml =
+          '<div class="serp-presence-bars" aria-hidden="true">' +
+          '<div class="serp-presence-bar-row">' +
+          '<span class="serp-presence-bar-label">Ads</span>' +
+          '<div class="serp-presence-bar-track">' +
+          '<div class="serp-presence-bar-fill is-ads" style="width:' +
+          adsPct +
+          '%"></div>' +
+          '</div>' +
+          '<span class="serp-presence-bar-count">' +
+          escapeHtml(String(adsCount)) +
+          '</span>' +
+          '</div>' +
+          '<div class="serp-presence-bar-row">' +
+          '<span class="serp-presence-bar-label">Orgánico</span>' +
+          '<div class="serp-presence-bar-track">' +
+          '<div class="serp-presence-bar-fill is-organic" style="width:' +
+          organicPct +
+          '%"></div>' +
+          '</div>' +
+          '<span class="serp-presence-bar-count">' +
+          escapeHtml(String(organicCount)) +
+          '</span>' +
+          '</div>' +
+          '</div>';
+
         return (
           '<div class="serp-presence-row">' +
           '<div class="serp-presence-main">' +
@@ -3825,6 +3856,7 @@ init();
           '<div class="serp-presence-last">' +
           escapeHtml(lastText) +
           '</div>' +
+          barsHtml +
           '</div>'
         );
       })
