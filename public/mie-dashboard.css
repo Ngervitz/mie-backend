@@ -2289,7 +2289,9 @@
 #mie-dashboard-app .serp-presence-bar-track {
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -2300,11 +2302,11 @@
 }
 
 #mie-dashboard-app .serp-presence-bar-fill.is-ads {
-  background: var(--accent-info);
+  background: #6ec1ff;
 }
 
 #mie-dashboard-app .serp-presence-bar-fill.is-organic {
-  background: var(--accent-success);
+  background: #55e09a;
 }
 
 #mie-dashboard-app .serp-presence-bar-count {
