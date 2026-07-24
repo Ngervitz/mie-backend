@@ -317,6 +317,7 @@
         cpc: null,
         cpm: null,
         reach: null,
+        frequency: null,
         qualityRanking: null,
         engagementRanking: null,
         conversionRanking: null,
@@ -327,6 +328,8 @@
     var impressions = null;
     var clicks = null;
     var reach = null;
+    var freqWeighted = 0;
+    var freqWeight = 0;
     var qualityRanking = null;
     var engagementRanking = null;
     var conversionRanking = null;
@@ -343,6 +346,12 @@
       if (!raw) return;
       var r = fmtN(raw.reach);
       if (r !== null) reach = (reach || 0) + r;
+      var f = fmtN(raw.frequency);
+      if (f !== null) {
+        var w = i !== null && i > 0 ? i : 1;
+        freqWeighted += f * w;
+        freqWeight += w;
+      }
       if (!qualityRanking && raw.quality_ranking) {
         qualityRanking = String(raw.quality_ranking);
       }
@@ -364,6 +373,7 @@
       impressions !== null && impressions > 0 && spend !== null
         ? (spend / impressions) * 1000
         : null;
+    var frequency = freqWeight > 0 ? freqWeighted / freqWeight : null;
 
     return {
       date: latestDate,
@@ -372,6 +382,7 @@
       cpc: cpc,
       cpm: cpm,
       reach: reach,
+      frequency: frequency,
       qualityRanking: qualityRanking,
       engagementRanking: engagementRanking,
       conversionRanking: conversionRanking,
@@ -835,6 +846,19 @@
             : 'sin datos',
         color: '#38bdf8',
         icon: '📢',
+      },
+      {
+        label: 'FRECUENCIA',
+        val:
+          latest.frequency !== null && latest.frequency !== undefined
+            ? fmt(latest.frequency)
+            : '—',
+        sub:
+          latest.frequency !== null && latest.frequency !== undefined
+            ? latestSub
+            : 'sin datos',
+        color: '#fb7185',
+        icon: '🔁',
       },
       (function () {
         var q = rankingLabel(latest.qualityRanking);
