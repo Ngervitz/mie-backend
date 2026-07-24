@@ -2309,6 +2309,7 @@ init();
   const dateLabel = document.getElementById('moa-date-label');
   const bodyEl = document.getElementById('moa-body');
   const footerEl = document.getElementById('moa-footer');
+  const auctionEl = document.getElementById('moa-auction-pressure');
 
   if (
     !landing ||
@@ -2319,6 +2320,7 @@ init();
     !dateLabel ||
     !bodyEl ||
     !footerEl ||
+    !auctionEl ||
     typeof window.__setMetaAdsView !== 'function'
   ) {
     return;
@@ -2339,7 +2341,116 @@ init();
   };
 
   let abortController = null;
+  let auctionAbortController = null;
   let requestSeq = 0;
+  let auctionRequestSeq = 0;
+
+  function formatPressurePercent(ratio) {
+    if (ratio === null || ratio === undefined) return '—';
+    const n = Number(ratio);
+    if (!Number.isFinite(n)) return '—';
+    return Math.round(n * 100) + '%';
+  }
+
+  function renderAuctionPressure(payload) {
+    if (!payload) {
+      auctionEl.innerHTML =
+        '<div class="moa-panel moa-auction-card">' +
+        '<p class="moa-panel-title">Presión de Subasta</p>' +
+        '<p class="moa-panel-text">No se pudo cargar la presión de subasta.</p>' +
+        '</div>';
+      return;
+    }
+
+    const status = payload.status || '';
+    const competitorRatio = payload.competitorPressureRatio;
+    const ownRatio = payload.ownCpmRatio;
+    const index = payload.auctionPressureIndex;
+    const competitorLabel = formatPressurePercent(competitorRatio);
+
+    let bodyHtml = '';
+    if (ownRatio == null) {
+      bodyHtml =
+        '<p class="moa-auction-metric">' +
+        '<span class="moa-auction-metric-label">Actividad de mercado</span>' +
+        '<span class="moa-auction-metric-value">' +
+        escapeHtml(competitorLabel) +
+        ' <span class="moa-auction-metric-vs">vs. promedio 30 días</span>' +
+        '</span>' +
+        '</p>' +
+        '<p class="moa-auction-note">Datos propios de CPM pendientes — se activa el índice completo con campañas activas</p>';
+      if (status === 'insufficient_own_data') {
+        bodyHtml +=
+          '<p class="moa-auction-status" data-status="insufficient_own_data">Estado: insufficient_own_data</p>';
+      }
+    } else {
+      bodyHtml =
+        '<div class="moa-auction-grid">' +
+        '<p class="moa-auction-metric">' +
+        '<span class="moa-auction-metric-label">Actividad de mercado</span>' +
+        '<span class="moa-auction-metric-value">' +
+        escapeHtml(formatPressurePercent(competitorRatio)) +
+        '</span>' +
+        '</p>' +
+        '<p class="moa-auction-metric">' +
+        '<span class="moa-auction-metric-label">CPM propio</span>' +
+        '<span class="moa-auction-metric-value">' +
+        escapeHtml(formatPressurePercent(ownRatio)) +
+        '</span>' +
+        '</p>' +
+        '<p class="moa-auction-metric moa-auction-metric-index">' +
+        '<span class="moa-auction-metric-label">Índice cruzado</span>' +
+        '<span class="moa-auction-metric-value">' +
+        escapeHtml(formatPressurePercent(index)) +
+        '</span>' +
+        '</p>' +
+        '</div>' +
+        '<p class="moa-auction-note">Ratios vs. promedio móvil 30 días (100% = en línea con el promedio).</p>';
+    }
+
+    auctionEl.innerHTML =
+      '<div class="moa-panel moa-auction-card">' +
+      '<p class="moa-panel-title">Presión de Subasta</p>' +
+      bodyHtml +
+      '</div>';
+  }
+
+  async function loadAuctionPressure(date) {
+    if (!date) return;
+    if (auctionAbortController) auctionAbortController.abort();
+    auctionAbortController = new AbortController();
+    const seq = ++auctionRequestSeq;
+    const signal = auctionAbortController.signal;
+
+    auctionEl.innerHTML =
+      '<div class="moa-panel moa-auction-card"><p class="moa-panel-text">Cargando presión de subasta…</p></div>';
+
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/reports/auction-pressure?date=' +
+          encodeURIComponent(date),
+        { headers: { Accept: 'application/json' }, signal },
+      );
+      if (seq !== auctionRequestSeq) return;
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (parseErr) {
+        body = null;
+      }
+      if (seq !== auctionRequestSeq) return;
+      if (!res.ok) {
+        renderAuctionPressure(null);
+        return;
+      }
+      renderAuctionPressure(body);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      if (seq !== auctionRequestSeq) return;
+      renderAuctionPressure(null);
+    }
+  }
 
   function maxReportingDate() {
     // Own Ads briefs are keyed by reporting date (= yesterday convention).
@@ -2733,6 +2844,7 @@ init();
     if (!target || target > maxDate) target = maxDate;
     moaState.date = target;
     updateDateChrome();
+    loadAuctionPressure(target);
 
     if (abortController) abortController.abort();
     abortController = new AbortController();
@@ -2803,6 +2915,7 @@ init();
 
   backBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
+    if (auctionAbortController) auctionAbortController.abort();
     window.__setMetaAdsView('agent');
   });
 

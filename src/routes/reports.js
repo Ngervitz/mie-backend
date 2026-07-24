@@ -19,6 +19,7 @@ const {
   getGoogleSerpCompetitorPresence,
   normalizeDomain,
 } = require('../steps/collectGoogleSerpImports');
+const { computeAuctionPressure } = require('../services/auction-pressure');
 
 const router = express.Router();
 
@@ -792,6 +793,32 @@ router.get('/next-economic-events', async (req, res) => {
 });
 
 // Distinct event_type values for Credizona — register before the list route.
+/**
+ * Auction pressure widget — competitor Ad Library activity vs own CPM.
+ * ownCpmRatio is explicitly null (never a fabricated 0) when own history
+ * is thin or there is no CPM for the requested date.
+ */
+router.get('/auction-pressure', async (req, res) => {
+  const rawDate = req.query?.date;
+  if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+    if (!isValidDateOnly(String(rawDate))) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+  }
+  const date = rawDate ? String(rawDate) : todayUtc();
+
+  try {
+    const payload = await computeAuctionPressure({ date });
+    return res.json(payload);
+  } catch (err) {
+    logger.error('Reports auction-pressure failed', {
+      date,
+      error: err && err.message,
+    });
+    return res.status(500).json({ error: 'Failed to compute auction pressure' });
+  }
+});
+
 router.get('/own-ad-changes/event-types', async (req, res) => {
   logger.info('Reports own-ad-changes/event-types requested');
 
