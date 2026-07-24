@@ -147,6 +147,10 @@ function buildInsightsUrl({ version, adAccountId, reportingRange, after }) {
       'actions',
       'action_values',
       'frequency',
+      'reach',
+      'quality_ranking',
+      'engagement_rate_ranking',
+      'conversion_rate_ranking',
       'date_start',
     ].join(','),
     time_range: JSON.stringify({
