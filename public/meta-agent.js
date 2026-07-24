@@ -42,6 +42,8 @@
     configMissing: false,
     // Read-only economic calendar card; null fields render "Sin datos".
     nextEvents: { nextHoliday: null, nextBpsPayment: null },
+    // Auction pressure from GET /reports/auction-pressure; null → "sin datos".
+    auctionPressure: null,
   };
 
   var root = null;
@@ -418,6 +420,42 @@
     );
   }
 
+  function formatPressurePercent(ratio) {
+    if (ratio === null || ratio === undefined) return null;
+    var n = Number(ratio);
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 100) + '%';
+  }
+
+  /**
+   * Map auction-pressure API payload → same KPI card shape as Gasto/CTR/etc.
+   * ownCpmRatio null keeps the market-only fallback (never hides the card).
+   */
+  function auctionPressureKpi(payload) {
+    var base = {
+      label: 'PRESIÓN DE SUBASTA',
+      color: '#f59e0b',
+      icon: '⚖️',
+    };
+    if (!payload) {
+      return Object.assign({}, base, { val: '—', sub: 'sin datos' });
+    }
+    if (payload.ownCpmRatio == null) {
+      var market = formatPressurePercent(payload.competitorPressureRatio);
+      return Object.assign({}, base, {
+        val: market || '—',
+        sub: market
+          ? 'actividad de mercado · CPM propio sin datos'
+          : 'sin datos',
+      });
+    }
+    var index = formatPressurePercent(payload.auctionPressureIndex);
+    return Object.assign({}, base, {
+      val: index || '—',
+      sub: 'índice cruzado vs promedio 30d',
+    });
+  }
+
   function renderKpis(derived, data) {
     var avgCPL = derived.avgCPL;
     var alertas = derived.alertas;
@@ -479,6 +517,7 @@
         color: '#f59e0b',
         icon: '📡',
       },
+      auctionPressureKpi(state.auctionPressure),
     ];
 
     return (
@@ -916,6 +955,7 @@
     state.loading = false;
     render();
     loadNextEvents();
+    loadAuctionPressure();
   }
 
   /**
@@ -941,6 +981,28 @@
       render();
     } catch (e) {
       // Keep nulls → "Sin datos".
+    }
+  }
+
+  /**
+   * Auction pressure KPI — same-origin backend. Failures leave null
+   * (card shows "sin datos"); never blocks the Own Ads panel.
+   */
+  async function loadAuctionPressure() {
+    var base = window.location.protocol === 'file:'
+      ? 'https://mie-backend-production.up.railway.app'
+      : '';
+    try {
+      var res = await fetch(base + '/reports/auction-pressure', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return;
+      var body = await res.json();
+      if (!body || typeof body !== 'object') return;
+      state.auctionPressure = body;
+      render();
+    } catch (e) {
+      // Keep null → "sin datos".
     }
   }
 
