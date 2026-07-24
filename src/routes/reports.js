@@ -1439,8 +1439,19 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       return res.status(422).json({ error: 'Draft has no associated term' });
     }
 
+    const rawInstructions =
+      req.body && typeof req.body.customInstructions === 'string'
+        ? req.body.customInstructions.trim()
+        : '';
+    const customInstructions = rawInstructions ? rawInstructions.slice(0, 4000) : null;
+
     // Fire-and-forget: the HTTP caller never waits for Claude+GPT.
-    regenerateSeoLandingDraft({ draftId: row.id, termId: row.term_id, term }).catch((err) => {
+    regenerateSeoLandingDraft({
+      draftId: row.id,
+      termId: row.term_id,
+      term,
+      customInstructions,
+    }).catch((err) => {
       logger.error('Async SEO landing regeneration crashed', {
         draftId: row.id,
         term,
@@ -1448,7 +1459,12 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       });
     });
 
-    return res.json({ draftId: row.id, term, regeneration: 'started' });
+    return res.json({
+      draftId: row.id,
+      term,
+      regeneration: 'started',
+      customInstructionsApplied: Boolean(customInstructions),
+    });
   } catch (err) {
     logger.error('Reports seo-landing-drafts/:id/regenerate failed', {
       id: req.params.id,

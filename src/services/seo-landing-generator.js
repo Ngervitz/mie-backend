@@ -82,8 +82,14 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function callClaudeDraft(term) {
+async function callClaudeDraft(term, customInstructions) {
   logger.info('SEO landing Claude request started', { term, model: MODEL_ARCHITECT });
+  let userContent = `Término de búsqueda objetivo (Google Uruguay): "${term}"\n\nGenerá el contenido JSON de la landing.`;
+  const extra = String(customInstructions || '').trim();
+  if (extra) {
+    userContent +=
+      `\n\nINSTRUCCIONES ADICIONALES PARA ESTA GENERACIÓN (no permanentes):\n${extra}`;
+  }
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -99,7 +105,7 @@ async function callClaudeDraft(term) {
       messages: [
         {
           role: 'user',
-          content: `Término de búsqueda objetivo (Google Uruguay): "${term}"\n\nGenerá el contenido JSON de la landing.`,
+          content: userContent,
         },
       ],
     }),
@@ -121,8 +127,15 @@ async function callClaudeDraft(term) {
   return parsed.value;
 }
 
-async function callGptAudit(term, claudeContent) {
+async function callGptAudit(term, claudeContent, customInstructions) {
   logger.info('SEO landing GPT request started', { term, model: MODEL_AUDITOR });
+  let userContent = `Término objetivo: "${term}"\n\nContenido a auditar:\n${JSON.stringify(claudeContent)}`;
+  const extra = String(customInstructions || '').trim();
+  if (extra) {
+    userContent +=
+      `\n\nINSTRUCCIONES ADICIONALES PARA ESTA GENERACIÓN (no permanentes):\n${extra}\n` +
+      'Respetá estas instrucciones al auditar, sin contradecir las restricciones factuales permanentes.';
+  }
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -138,7 +151,7 @@ async function callGptAudit(term, claudeContent) {
         { role: 'system', content: SEO_LANDING_GPT_SYSTEM_PROMPT },
         {
           role: 'user',
-          content: `Término objetivo: "${term}"\n\nContenido a auditar:\n${JSON.stringify(claudeContent)}`,
+          content: userContent,
         },
       ],
     }),
@@ -479,8 +492,13 @@ async function generateSeoLandingDraft({ termId, term }) {
  * 'reviewed' draft must go through review again after regeneration).
  * Never throws for generation failures; records status='failed' on the row.
  */
-async function regenerateSeoLandingDraft({ draftId, termId, term }) {
-  logger.info('SEO landing regeneration started', { draftId, termId, term });
+async function regenerateSeoLandingDraft({ draftId, termId, term, customInstructions }) {
+  logger.info('SEO landing regeneration started', {
+    draftId,
+    termId,
+    term,
+    hasCustomInstructions: Boolean(customInstructions && String(customInstructions).trim()),
+  });
 
   const recordRegenFailure = async (message) => {
     try {
@@ -510,8 +528,11 @@ async function regenerateSeoLandingDraft({ draftId, termId, term }) {
   }
 
   try {
-    const draft = await callClaudeDraft(term);
-    const audited = await callGptAudit(term, draft);
+    const instructions = customInstructions && String(customInstructions).trim()
+      ? String(customInstructions).trim()
+      : null;
+    const draft = await callClaudeDraft(term, instructions);
+    const audited = await callGptAudit(term, draft, instructions);
     const html = renderLandingHtml(term, audited);
 
     // Same slug+date naming convention: same-day regeneration overwrites the

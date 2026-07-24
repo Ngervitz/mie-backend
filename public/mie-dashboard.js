@@ -2970,7 +2970,7 @@ init();
           statusAction = `<button type="button" class="btn btn-primary cov-status-btn" data-draft-id="${escapeHtml(d.id)}" data-next-status="published">Publicar</button>`;
         }
         return `
-          <div class="cov-draft-card">
+          <div class="cov-draft-card" data-draft-card="${escapeHtml(d.id)}">
             <div class="cov-draft-main">
               <span class="cov-draft-term">${escapeHtml(d.term || '(término desconocido)')}</span>
               ${draftStatusBadge(d)}
@@ -2987,6 +2987,15 @@ init();
                 Regenerar
               </button>
             </div>
+            <label class="cov-regen-instructions">
+              <span class="cov-regen-instructions-label">Instrucciones para esta regeneración (opcional)</span>
+              <textarea
+                class="input cov-regen-instructions-input"
+                rows="5"
+                data-draft-id="${escapeHtml(d.id)}"
+                placeholder="Instrucciones para esta regeneración (opcional): describí los cambios específicos que necesitás"
+              ></textarea>
+            </label>
           </div>`;
       })
       .join('');
@@ -3005,12 +3014,28 @@ init();
   async function regenerateDraft(btn) {
     const draftId = btn.getAttribute('data-draft-id');
     if (!draftId || btn.disabled) return;
+    const card = btn.closest('.cov-draft-card');
+    const instructionsEl = card
+      ? card.querySelector('.cov-regen-instructions-input')
+      : null;
+    const customInstructions = instructionsEl
+      ? String(instructionsEl.value || '').trim()
+      : '';
     btn.disabled = true;
     btn.textContent = 'Regenerando…';
     try {
       const res = await fetch(
         `${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(draftId)}/regenerate`,
-        { method: 'POST', headers: { Accept: 'application/json' } },
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            customInstructions ? { customInstructions } : {},
+          ),
+        },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       schedulePoll();
