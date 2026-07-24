@@ -248,6 +248,50 @@
   color: var(--meta-agent-muted);
 }
 
+/* Denser Performance cards only — Contexto y Señales keep default .ma-card. */
+.ma-kpi-section-performance .ma-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ma-kpi-section-performance .ma-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+}
+
+.ma-kpi-section-performance .ma-card-top {
+  margin-bottom: 6px;
+}
+
+.ma-kpi-section-performance .ma-kpi-label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+}
+
+.ma-kpi-section-performance .ma-kpi-icon {
+  font-size: 14px;
+}
+
+.ma-kpi-section-performance .ma-kpi-value {
+  font-size: 24px;
+}
+
+.ma-kpi-section-performance .ma-kpi-value-compact {
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  line-height: 1.35;
+  font-family: inherit;
+}
+
+.ma-kpi-section-performance .ma-kpi-sub {
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+.ma-kpi-section-performance .ma-trend {
+  font-size: 11px;
+}
+
 .ma-kpi-value-row {
   display: flex;
   align-items: baseline;

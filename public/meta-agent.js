@@ -121,6 +121,8 @@
       impressions: toCsvCompatString(row.impressions),
       clicks: toCsvCompatString(row.clicks),
       metric_date: toCsvCompatString(row.metric_date),
+      raw_json:
+        row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null,
     };
   }
 
@@ -147,7 +149,7 @@
       encodeURIComponent(OWN_ENTITY_ID) +
       '&metric_date=gte.' +
       encodeURIComponent(since) +
-      '&select=entity_id,campaign_id,campaign_name,metric_date,spend,impressions,clicks,actions,actions_value,frequency,created_at' +
+      '&select=entity_id,campaign_id,campaign_name,metric_date,spend,impressions,clicks,actions,actions_value,frequency,raw_json,created_at' +
       '&order=metric_date.asc';
 
     var pageSize = 1000;
@@ -288,11 +290,17 @@
     );
   }
 
+  function rankingLabel(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return String(value);
+  }
+
   /**
    * Deterministic account-level aggregates for the latest available
    * metric_date. Null-safety: no rows / zero denominator → null (never 0,
    * Infinity or NaN). ctr is returned as a percentage for this panel's
    * existing display convention (fmt(x) + '%').
+   * reach / rankings are read from raw_json (Meta Insights payload).
    */
   function computeLatestDateStats(data) {
     var latestDate = null;
@@ -302,12 +310,26 @@
     });
 
     if (!latestDate) {
-      return { date: null, spend: null, ctr: null, cpc: null, cpm: null };
+      return {
+        date: null,
+        spend: null,
+        ctr: null,
+        cpc: null,
+        cpm: null,
+        reach: null,
+        qualityRanking: null,
+        engagementRanking: null,
+        conversionRanking: null,
+      };
     }
 
     var spend = null;
     var impressions = null;
     var clicks = null;
+    var reach = null;
+    var qualityRanking = null;
+    var engagementRanking = null;
+    var conversionRanking = null;
     data.forEach(function (row) {
       if ((row.metric_date || '') !== latestDate) return;
       var s = fmtN(row.spend);
@@ -316,6 +338,20 @@
       if (s !== null) spend = (spend || 0) + s;
       if (i !== null) impressions = (impressions || 0) + i;
       if (c !== null) clicks = (clicks || 0) + c;
+
+      var raw = row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null;
+      if (!raw) return;
+      var r = fmtN(raw.reach);
+      if (r !== null) reach = (reach || 0) + r;
+      if (!qualityRanking && raw.quality_ranking) {
+        qualityRanking = String(raw.quality_ranking);
+      }
+      if (!engagementRanking && raw.engagement_rate_ranking) {
+        engagementRanking = String(raw.engagement_rate_ranking);
+      }
+      if (!conversionRanking && raw.conversion_rate_ranking) {
+        conversionRanking = String(raw.conversion_rate_ranking);
+      }
     });
 
     var ctr =
@@ -329,7 +365,17 @@
         ? (spend / impressions) * 1000
         : null;
 
-    return { date: latestDate, spend: spend, ctr: ctr, cpc: cpc, cpm: cpm };
+    return {
+      date: latestDate,
+      spend: spend,
+      ctr: ctr,
+      cpc: cpc,
+      cpm: cpm,
+      reach: reach,
+      qualityRanking: qualityRanking,
+      engagementRanking: engagementRanking,
+      conversionRanking: conversionRanking,
+    };
   }
 
   function computeDerived(data) {
@@ -598,6 +644,8 @@
   function renderKpiCard(k) {
     var cardClass = 'ma-card';
     if (k.alertHighlight) cardClass += ' ma-card-signal-alert';
+    var valueClass = 'ma-mv ma-kpi-value';
+    if (k.compactValue) valueClass += ' ma-kpi-value-compact';
     return (
       '<div class="' +
       cardClass +
@@ -611,7 +659,9 @@
       '</span>' +
       '</div>' +
       '<div class="ma-kpi-value-row">' +
-      '<div class="ma-mv ma-kpi-value" style="color:' +
+      '<div class="' +
+      valueClass +
+      '" style="color:' +
       k.color +
       '">' +
       escapeHtml(k.val) +
@@ -625,9 +675,13 @@
     );
   }
 
-  function renderKpiSection(title, cards) {
+  function renderKpiSection(title, cards, sectionMod) {
+    var sectionClass = 'ma-kpi-section';
+    if (sectionMod) sectionClass += ' ' + sectionMod;
     return (
-      '<section class="ma-kpi-section">' +
+      '<section class="' +
+      sectionClass +
+      '">' +
       '<h2 class="ma-kpi-section-title">' +
       escapeHtml(title) +
       '</h2>' +
@@ -769,6 +823,42 @@
         icon: '📡',
         trend: trends.cpm,
       },
+      {
+        label: 'ALCANCE',
+        val:
+          latest.reach !== null && latest.reach !== undefined
+            ? fmt(latest.reach, 0)
+            : '—',
+        sub:
+          latest.reach !== null && latest.reach !== undefined
+            ? latestSub
+            : 'sin datos',
+        color: '#38bdf8',
+        icon: '📢',
+      },
+      (function () {
+        var q = rankingLabel(latest.qualityRanking);
+        var e = rankingLabel(latest.engagementRanking);
+        var c = rankingLabel(latest.conversionRanking);
+        var hasAny =
+          latest.qualityRanking ||
+          latest.engagementRanking ||
+          latest.conversionRanking;
+        return {
+          label: 'RANKING DE CALIDAD',
+          val:
+            'Calidad: ' +
+            q +
+            ' · Engagement: ' +
+            e +
+            ' · Conversión: ' +
+            c,
+          sub: hasAny ? latestSub : 'sin datos',
+          color: '#a78bfa',
+          icon: '🏆',
+          compactValue: true,
+        };
+      })(),
     ];
 
     var context = [
@@ -786,8 +876,11 @@
     ];
 
     return (
-      renderKpiSection('Performance Publicitaria', performance) +
-      renderKpiSection('Contexto y Señales', context)
+      renderKpiSection(
+        'Performance Publicitaria',
+        performance,
+        'ma-kpi-section-performance',
+      ) + renderKpiSection('Contexto y Señales', context)
     );
   }
 
