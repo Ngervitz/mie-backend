@@ -420,6 +420,224 @@
     );
   }
 
+  /**
+   * Display-only daily series for trend arrows. Does not change KPI totals
+   * or auction-pressure logic — only prior-period baselines for the UI.
+   */
+  function buildDailySeries(data) {
+    var byDate = {};
+    (data || []).forEach(function (row) {
+      var d = row.metric_date || '';
+      if (!d) return;
+      if (!byDate[d]) {
+        byDate[d] = {
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          conversions: 0,
+          hasSpend: false,
+          hasImpr: false,
+          hasClicks: false,
+          hasConv: false,
+        };
+      }
+      var bucket = byDate[d];
+      var s = fmtN(row.spend);
+      var i = fmtN(row.impressions);
+      var c = fmtN(row.clicks);
+      var v = fmtN(row.conversiones);
+      if (v === null) v = fmtN(row.conversions);
+      if (s !== null) {
+        bucket.spend += s;
+        bucket.hasSpend = true;
+      }
+      if (i !== null) {
+        bucket.impressions += i;
+        bucket.hasImpr = true;
+      }
+      if (c !== null) {
+        bucket.clicks += c;
+        bucket.hasClicks = true;
+      }
+      if (v !== null) {
+        bucket.conversions += v;
+        bucket.hasConv = true;
+      }
+    });
+
+    return Object.keys(byDate)
+      .sort()
+      .map(function (date) {
+        var b = byDate[date];
+        var spend = b.hasSpend ? b.spend : null;
+        var impressions = b.hasImpr ? b.impressions : null;
+        var clicks = b.hasClicks ? b.clicks : null;
+        var conversions = b.hasConv ? b.conversions : null;
+        var ctr =
+          impressions !== null && impressions > 0 && clicks !== null
+            ? (clicks / impressions) * 100
+            : null;
+        var cpc =
+          clicks !== null && clicks > 0 && spend !== null ? spend / clicks : null;
+        var cpm =
+          impressions !== null && impressions > 0 && spend !== null
+            ? (spend / impressions) * 1000
+            : null;
+        var cpl =
+          conversions !== null && conversions > 0 && spend !== null
+            ? spend / conversions
+            : null;
+        return {
+          date: date,
+          spend: spend,
+          ctr: ctr,
+          cpc: cpc,
+          cpm: cpm,
+          conversions: conversions,
+          cpl: cpl,
+        };
+      });
+  }
+
+  /**
+   * @param {'up_good'|'up_bad'} semantic
+   * @returns {{ arrow: string, label: string, tone: string }|null}
+   */
+  function buildTrendIndicator(current, priorValues, semantic) {
+    if (current === null || current === undefined || !Number.isFinite(Number(current))) {
+      return null;
+    }
+    var priors = (priorValues || []).filter(function (v) {
+      return v !== null && v !== undefined && Number.isFinite(Number(v));
+    });
+    if (!priors.length) return null;
+    var baseline = avg(priors);
+    if (baseline === null || !Number.isFinite(baseline) || baseline === 0) {
+      return null;
+    }
+    var deltaPct = ((Number(current) - baseline) / Math.abs(baseline)) * 100;
+    if (!Number.isFinite(deltaPct)) return null;
+    var rounded = Math.round(deltaPct);
+    if (rounded === 0) {
+      return { arrow: '–', label: '0%', tone: 'neutral' };
+    }
+    var up = rounded > 0;
+    var tone;
+    if (semantic === 'up_good') {
+      tone = up ? 'good' : 'bad';
+    } else {
+      tone = up ? 'bad' : 'good';
+    }
+    return {
+      arrow: up ? '↑' : '↓',
+      label: Math.abs(rounded) + '%',
+      tone: tone,
+    };
+  }
+
+  function trendsFromData(data, latest) {
+    var series = buildDailySeries(data);
+    if (!series.length || !latest || !latest.date) {
+      return {
+        spend: null,
+        conversions: null,
+        cpl: null,
+        ctr: null,
+        cpc: null,
+        cpm: null,
+      };
+    }
+    var priors = series.filter(function (d) {
+      return d.date < latest.date;
+    });
+    var latestDay = null;
+    for (var i = 0; i < series.length; i++) {
+      if (series[i].date === latest.date) latestDay = series[i];
+    }
+    function pick(key) {
+      return priors
+        .map(function (d) {
+          return d[key];
+        })
+        .filter(function (v) {
+          return v !== null && v !== undefined;
+        });
+    }
+    return {
+      spend: buildTrendIndicator(latest.spend, pick('spend'), 'up_bad'),
+      conversions: buildTrendIndicator(
+        latestDay ? latestDay.conversions : null,
+        pick('conversions'),
+        'up_good',
+      ),
+      cpl: buildTrendIndicator(latestDay ? latestDay.cpl : null, pick('cpl'), 'up_bad'),
+      ctr: buildTrendIndicator(latest.ctr, pick('ctr'), 'up_good'),
+      cpc: buildTrendIndicator(latest.cpc, pick('cpc'), 'up_bad'),
+      cpm: buildTrendIndicator(latest.cpm, pick('cpm'), 'up_bad'),
+    };
+  }
+
+  function renderTrendHtml(trend) {
+    if (!trend) return '';
+    return (
+      '<span class="ma-trend ma-trend-' +
+      trend.tone +
+      '" aria-label="Tendencia ' +
+      escapeHtml(trend.arrow + ' ' + trend.label) +
+      '">' +
+      '<span class="ma-trend-arrow">' +
+      escapeHtml(trend.arrow) +
+      '</span>' +
+      '<span class="ma-trend-delta">' +
+      escapeHtml(trend.label) +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  function renderKpiCard(k) {
+    var cardClass = 'ma-card';
+    if (k.alertHighlight) cardClass += ' ma-card-signal-alert';
+    return (
+      '<div class="' +
+      cardClass +
+      '">' +
+      '<div class="ma-card-top">' +
+      '<div class="ma-kpi-label">' +
+      escapeHtml(k.label) +
+      '</div>' +
+      '<span class="ma-kpi-icon">' +
+      k.icon +
+      '</span>' +
+      '</div>' +
+      '<div class="ma-kpi-value-row">' +
+      '<div class="ma-mv ma-kpi-value" style="color:' +
+      k.color +
+      '">' +
+      escapeHtml(k.val) +
+      '</div>' +
+      renderTrendHtml(k.trend) +
+      '</div>' +
+      '<div class="ma-kpi-sub">' +
+      escapeHtml(k.sub) +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderKpiSection(title, cards) {
+    return (
+      '<section class="ma-kpi-section">' +
+      '<h2 class="ma-kpi-section-title">' +
+      escapeHtml(title) +
+      '</h2>' +
+      '<div class="ma-kpi-grid">' +
+      cards.map(renderKpiCard).join('') +
+      '</div>' +
+      '</section>'
+    );
+  }
+
   function formatPressurePercent(ratio) {
     if (ratio === null || ratio === undefined) return null;
     var n = Number(ratio);
@@ -456,20 +674,46 @@
     });
   }
 
+  function renderEventKpi(label, icon, ev) {
+    var value = '—';
+    var sub = 'Sin datos';
+    if (ev && ev.date_start) {
+      var range = formatRangeEs(ev.date_start, ev.date_end);
+      if (range) {
+        value = range;
+        sub =
+          (ev.active ? 'En curso' : 'Próximo') +
+          (ev.title ? ' — ' + ev.title : '');
+      }
+    }
+    return {
+      label: label,
+      icon: icon,
+      val: value,
+      sub: sub,
+      color: '#e8eaed',
+    };
+  }
+
   function renderKpis(derived, data) {
     var avgCPL = derived.avgCPL;
     var alertas = derived.alertas;
     var latest = derived.latest || {};
     var latestSub = latest.date ? latest.date : 'sin datos';
-    var kpis = [
+    var trends = trendsFromData(data, latest);
+    var ev = state.nextEvents || {};
+
+    var performance = [
       {
         label: 'GASTO',
-        val: latest.spend !== null && latest.spend !== undefined
-          ? '$' + fmt(latest.spend, 0)
-          : '—',
+        val:
+          latest.spend !== null && latest.spend !== undefined
+            ? '$' + fmt(latest.spend, 0)
+            : '—',
         sub: latestSub,
         color: '#3b82f6',
         icon: '💰',
+        trend: trends.spend,
       },
       {
         label: 'CONVERSIONES',
@@ -477,76 +721,73 @@
         sub: derived.totalConv ? 'total acumulado' : 'sin datos',
         color: '#22c55e',
         icon: '🎯',
+        trend: trends.conversions,
       },
       {
         label: 'CPL PROMEDIO',
         val: avgCPL !== null ? '$' + fmt(avgCPL) : '—',
-        sub: avgCPL === null
-          ? 'sin datos'
-          : avgCPL <= 1
-            ? '✓ Bajo objetivo'
-            : '⚠ Sobre objetivo',
+        sub:
+          avgCPL === null
+            ? 'sin datos'
+            : avgCPL <= 1
+              ? '✓ Bajo objetivo'
+              : '⚠ Sobre objetivo',
         color: avgCPL !== null && avgCPL <= 1 ? '#22c55e' : '#f59e0b',
         icon: '📉',
+        trend: trends.cpl,
       },
+      {
+        label: 'CTR',
+        val:
+          latest.ctr !== null && latest.ctr !== undefined
+            ? fmt(latest.ctr) + '%'
+            : '—',
+        sub: latestSub,
+        color: '#3b82f6',
+        icon: '👁',
+        trend: trends.ctr,
+      },
+      {
+        label: 'CPC',
+        val:
+          latest.cpc !== null && latest.cpc !== undefined
+            ? '$' + fmt(latest.cpc)
+            : '—',
+        sub: latestSub,
+        color: '#8b5cf6',
+        icon: '🖱',
+        trend: trends.cpc,
+      },
+      {
+        label: 'CPM',
+        val:
+          latest.cpm !== null && latest.cpm !== undefined
+            ? '$' + fmt(latest.cpm)
+            : '—',
+        sub: latestSub,
+        color: '#f59e0b',
+        icon: '📡',
+        trend: trends.cpm,
+      },
+    ];
+
+    var context = [
+      renderEventKpi('FERIADO', '📅', ev.nextHoliday),
+      renderEventKpi('PAGO BPS', '🏦', ev.nextBpsPayment),
+      auctionPressureKpi(state.auctionPressure),
       {
         label: 'ALERTAS',
         val: String(alertas.length),
         sub: alertas.length === 0 ? 'Sin alertas' : 'Requieren atención',
         color: alertas.length === 0 ? '#22c55e' : '#ef4444',
         icon: alertas.length === 0 ? '✅' : '🚨',
+        alertHighlight: alertas.length > 0,
       },
-      {
-        label: 'CTR',
-        val: latest.ctr !== null && latest.ctr !== undefined ? fmt(latest.ctr) + '%' : '—',
-        sub: latestSub,
-        color: '#3b82f6',
-        icon: '👁',
-      },
-      {
-        label: 'CPC',
-        val: latest.cpc !== null && latest.cpc !== undefined ? '$' + fmt(latest.cpc) : '—',
-        sub: latestSub,
-        color: '#8b5cf6',
-        icon: '🖱',
-      },
-      {
-        label: 'CPM',
-        val: latest.cpm !== null && latest.cpm !== undefined ? '$' + fmt(latest.cpm) : '—',
-        sub: latestSub,
-        color: '#f59e0b',
-        icon: '📡',
-      },
-      auctionPressureKpi(state.auctionPressure),
     ];
 
     return (
-      '<div class="ma-kpi-grid ma-fade">' +
-      kpis
-        .map(function (k) {
-          return (
-            '<div class="ma-card">' +
-            '<div class="ma-card-top">' +
-            '<div class="ma-kpi-label">' +
-            escapeHtml(k.label) +
-            '</div>' +
-            '<span class="ma-kpi-icon">' +
-            k.icon +
-            '</span>' +
-            '</div>' +
-            '<div class="ma-mv ma-kpi-value" style="color:' +
-            k.color +
-            '">' +
-            escapeHtml(k.val) +
-            '</div>' +
-            '<div class="ma-kpi-sub">' +
-            escapeHtml(k.sub) +
-            '</div>' +
-            '</div>'
-          );
-        })
-        .join('') +
-      '</div>'
+      renderKpiSection('Performance Publicitaria', performance) +
+      renderKpiSection('Contexto y Señales', context)
     );
   }
 
@@ -827,41 +1068,6 @@
     return formatDateEs(startStr) + ' al ' + formatDateEs(endStr);
   }
 
-  function renderEventCard(label, icon, ev) {
-    var value = '—';
-    var sub = 'Sin datos';
-    if (ev && ev.date_start) {
-      var range = formatRangeEs(ev.date_start, ev.date_end);
-      if (range) {
-        value = range;
-        sub = (ev.active ? 'En curso' : 'Próximo') +
-          (ev.title ? ' — ' + ev.title : '');
-      }
-    }
-    return (
-      '<div class="ma-card">' +
-      '<div class="ma-card-top">' +
-      '<div class="ma-kpi-label">' + escapeHtml(label) + '</div>' +
-      '<span class="ma-kpi-icon">' + icon + '</span>' +
-      '</div>' +
-      '<div class="ma-mv ma-kpi-value ma-event-value">' +
-      escapeHtml(value) +
-      '</div>' +
-      '<div class="ma-kpi-sub">' + escapeHtml(sub) + '</div>' +
-      '</div>'
-    );
-  }
-
-  function renderNextEvents() {
-    var ev = state.nextEvents || {};
-    return (
-      '<div class="ma-kpi-grid ma-next-events">' +
-      renderEventCard('FERIADO', '📅', ev.nextHoliday) +
-      renderEventCard('PAGO BPS', '🏦', ev.nextBpsPayment) +
-      '</div>'
-    );
-  }
-
   function renderBody(derived) {
     var tabContent = '';
     if (state.tab === 'campaigns') {
@@ -875,7 +1081,6 @@
     return (
       '<div class="ma-body">' +
       renderKpis(derived, state.data) +
-      renderNextEvents() +
       renderSubTabs(derived.alertas.length) +
       tabContent +
       renderFooter(state.data) +
