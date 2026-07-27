@@ -106,7 +106,7 @@
 }
 
 /* Active-state accents per section, reusing each section's existing accent:
-   - Competidores + Términos descubiertos: --accent-info (the accent already
+   - Competidores + Tï¿½rminos descubiertos: --accent-info (the accent already
      used by entity selection, KPI cards and the disc-tab active state)
    - GA4: --accent-warn (the palette's amber, matching GA's orange identity
      and the kw growth badges)
@@ -1484,7 +1484,7 @@
   }
 }
 
-/* ---------- Meta Ads ? Análisis IA (Own Ads brief) ---------- */
+/* ---------- Meta Ads ? Anï¿½lisis IA (Own Ads brief) ---------- */
 #mie-dashboard-app .moa-landing {
   padding-top: 8px;
 }
