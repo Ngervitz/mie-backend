@@ -16,6 +16,7 @@ const {
   jsonSafe,
   NotifymeError,
   assertUniqueIdString,
+  DELIVERED_STATUS_VALUES,
 } = require('../services/notifyme-client');
 
 const router = express.Router();
@@ -193,6 +194,126 @@ router.get('/campaigns', async (req, res) => {
     }
 
     return res.json(jsonSafe({ campaigns: enriched }));
+  } catch (err) {
+    return mapServiceError(err, res);
+  }
+});
+
+/**
+ * Parse YYYY-MM; default to current UTC calendar month when omitted.
+ * Returns null when the value is present but invalid.
+ */
+function parseMonthParam(raw) {
+  if (raw == null || String(raw).trim() === '') {
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  }
+  const s = String(raw).trim();
+  if (!/^\d{4}-\d{2}$/.test(s)) return null;
+  const monthNum = Number(s.slice(5, 7));
+  if (monthNum < 1 || monthNum > 12) return null;
+  return s;
+}
+
+/**
+ * UTC month bounds for delivered_at filtering, plus YYYY-MM-DD as-of date
+ * for sms_cost_config (end of that calendar month).
+ */
+function monthBoundsUtc(yyyyMm) {
+  const y = Number(yyyyMm.slice(0, 4));
+  const m = Number(yyyyMm.slice(5, 7));
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+  const endExclusive = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
+  const lastDay = new Date(Date.UTC(y, m, 0));
+  return {
+    startIso: start.toISOString(),
+    endExclusiveIso: endExclusive.toISOString(),
+    costAsOfDate: lastDay.toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * Cost config with latest effective_from <= asOfDate (YYYY-MM-DD).
+ */
+async function loadCostConfigAsOf(asOfDate) {
+  const { data, error } = await supabase
+    .from('sms_cost_config')
+    .select('id, effective_from, cost_per_sms_ex_vat, vat_rate')
+    .lte('effective_from', asOfDate)
+    .order('effective_from', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new NotifymeError(`Failed to load sms_cost_config: ${error.message}`, {
+      kind: 'database',
+      status: 500,
+    });
+  }
+  return data && data[0] ? data[0] : null;
+}
+
+/**
+ * GET /sms/campaigns/summary/monthly?month=YYYY-MM
+ * Billing summary by delivery month (delivered_at), not campaign created_at.
+ * Must be registered before /campaigns/:id so "summary" is not captured as an id.
+ */
+router.get('/campaigns/summary/monthly', async (req, res) => {
+  const month = parseMonthParam(req.query.month);
+  if (!month) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+
+  try {
+    const { startIso, endExclusiveIso, costAsOfDate } = monthBoundsUtc(month);
+
+    // Same convention as per-campaign cost metrics: no delivered mapping → nulls.
+    if (!DELIVERED_STATUS_VALUES || DELIVERED_STATUS_VALUES.size === 0) {
+      return res.json(
+        jsonSafe({
+          month,
+          messages_delivered: null,
+          estimated_cost: null,
+        }),
+      );
+    }
+
+    const deliveredStatuses = Array.from(DELIVERED_STATUS_VALUES);
+    const { count, error: countError } = await supabase
+      .from('sms_messages')
+      .select('unique_id', { count: 'exact', head: true })
+      .not('delivered_at', 'is', null)
+      .gte('delivered_at', startIso)
+      .lt('delivered_at', endExclusiveIso)
+      .in('status', deliveredStatuses);
+
+    if (countError) {
+      throw new NotifymeError(
+        `Failed to count monthly delivered messages: ${countError.message}`,
+        { kind: 'database', status: 500 },
+      );
+    }
+
+    const messagesDelivered = count == null ? 0 : count;
+
+    const costConfig = await loadCostConfigAsOf(costAsOfDate);
+    let estimatedCost = null;
+    if (costConfig) {
+      const ex = Number(costConfig.cost_per_sms_ex_vat);
+      const vat = Number(costConfig.vat_rate);
+      if (Number.isFinite(ex) && Number.isFinite(vat)) {
+        estimatedCost = ex * (1 + vat) * messagesDelivered;
+      }
+    }
+
+    return res.json(
+      jsonSafe({
+        month,
+        messages_delivered: messagesDelivered,
+        estimated_cost: estimatedCost,
+      }),
+    );
   } catch (err) {
     return mapServiceError(err, res);
   }

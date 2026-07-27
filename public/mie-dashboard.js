@@ -4421,6 +4421,8 @@ init();
   const detailBackBtn = document.getElementById('sms-detail-back-btn');
   const detailStatus = document.getElementById('sms-detail-status');
   const detailBody = document.getElementById('sms-detail-body');
+  const monthlySummaryBody = document.getElementById('sms-monthly-summary-body');
+  const monthlySummaryStatus = document.getElementById('sms-monthly-summary-status');
 
   if (
     !panel ||
@@ -4432,7 +4434,8 @@ init();
     !listEl ||
     !reloadBtn ||
     !detailSection ||
-    !detailBody
+    !detailBody ||
+    !monthlySummaryBody
   ) {
     return;
   }
@@ -4440,6 +4443,7 @@ init();
   let createBusy = false;
   let listBusy = false;
   let pollBusy = false;
+  let monthlyBusy = false;
   let openedOnce = false;
   let activeCampaignId = null;
 
@@ -4469,6 +4473,29 @@ init();
     if (typeof value === 'number' && Number.isFinite(value)) return String(value);
     if (typeof value === 'string' && value !== '') return value;
     return '—';
+  }
+
+  function formatMonthLabel(yyyyMm) {
+    const m = String(yyyyMm || '');
+    const match = /^(\d{4})-(\d{2})$/.exec(m);
+    if (!match) return dash(m);
+    const monthNames = [
+      'Enero',
+      'Febrero',
+      'Marzo',
+      'Abril',
+      'Mayo',
+      'Junio',
+      'Julio',
+      'Agosto',
+      'Septiembre',
+      'Octubre',
+      'Noviembre',
+      'Diciembre',
+    ];
+    const idx = Number(match[2]) - 1;
+    if (idx < 0 || idx > 11) return dash(m);
+    return monthNames[idx] + ' ' + match[1];
   }
 
   function formatCost(value, currencyCode) {
@@ -4720,6 +4747,76 @@ init();
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>';
+  }
+
+  async function loadMonthlySummary() {
+    if (!monthlySummaryBody || monthlyBusy) return;
+    monthlyBusy = true;
+    if (monthlySummaryStatus) {
+      setStatus(monthlySummaryStatus, 'Cargando resumen del mes…', false);
+    }
+    try {
+      const res = await fetch(API_BASE + '/sms/campaigns/summary/monthly', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        if (monthlySummaryStatus) {
+          setStatus(
+            monthlySummaryStatus,
+            (body && (body.error || formatBackendPayload(body))) ||
+              'No se pudo cargar el resumen mensual.',
+            true,
+          );
+        }
+        monthlySummaryBody.innerHTML = '';
+        return;
+      }
+
+      const monthLabel = formatMonthLabel(body && body.month);
+      const delivered =
+        body && body.messages_delivered != null
+          ? formatCount(body.messages_delivered)
+          : '—';
+      const costNull =
+        !body || body.estimated_cost === null || body.estimated_cost === undefined;
+      const costValue = costNull
+        ? '—'
+        : formatCost(body.estimated_cost);
+      const costNote = costNull
+        ? '<div class="sms-monthly-cost-note">Costo pendiente de configurar</div>'
+        : '<div class="sms-monthly-cost-note">IVA incluido</div>';
+
+      monthlySummaryBody.innerHTML =
+        '<div class="kpi-card is-neutral">' +
+        '<div class="kpi-value">' +
+        escapeHtml(monthLabel) +
+        '</div>' +
+        '<div class="kpi-label">Mes (entregas)</div>' +
+        '</div>' +
+        '<div class="kpi-card is-accent">' +
+        '<div class="kpi-value">' +
+        escapeHtml(delivered) +
+        '</div>' +
+        '<div class="kpi-label">SMS entregados este mes</div>' +
+        '</div>' +
+        '<div class="kpi-card is-success">' +
+        '<div class="kpi-value">' +
+        escapeHtml(costValue) +
+        '</div>' +
+        '<div class="kpi-label">Costo estimado</div>' +
+        costNote +
+        '</div>';
+
+      if (monthlySummaryStatus) setStatus(monthlySummaryStatus, '', false);
+    } catch (err) {
+      if (monthlySummaryStatus) {
+        setStatus(monthlySummaryStatus, 'No se pudo conectar con el servidor.', true);
+      }
+      monthlySummaryBody.innerHTML = '';
+    } finally {
+      monthlyBusy = false;
+    }
   }
 
   async function loadCampaignList() {
@@ -5051,6 +5148,7 @@ init();
 
   window.__openSms = () => {
     showListView();
+    loadMonthlySummary();
     loadCampaignList();
     openedOnce = true;
   };

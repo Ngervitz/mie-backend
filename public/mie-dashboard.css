@@ -2460,7 +2460,32 @@
 }
 
 
-/* ---------- Campa?as SMS ---------- */
+/* ---------- Campañas SMS ---------- */
+#mie-dashboard-app .sms-monthly-summary {
+  margin-bottom: 24px;
+}
+
+#mie-dashboard-app .sms-monthly-kpi-grid {
+  grid-template-columns: repeat(3, 1fr);
+  max-width: 920px;
+}
+
+#mie-dashboard-app .sms-monthly-kpi-grid .kpi-value {
+  font-size: 1.45rem;
+}
+
+#mie-dashboard-app .sms-monthly-cost-note {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+@media (max-width: 720px) {
+  #mie-dashboard-app .sms-monthly-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 #mie-dashboard-app .sms-section-title {
   margin: 0 0 12px;
   font-size: 1rem;
