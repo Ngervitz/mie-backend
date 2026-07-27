@@ -4398,3 +4398,660 @@ init();
     loadPresence();
   };
 })();
+/* ----------------------------------------------------------------------------
+ * Campañas SMS — Notifyme via GET/POST /sms/*
+ * No CRM fields. unique_id and campaign IDs stay strings forever.
+ * ------------------------------------------------------------------------- */
+(function initSmsCampaigns() {
+  const panel = document.getElementById('sms-panel');
+  const form = document.getElementById('sms-create-form');
+  const nameInput = document.getElementById('sms-name');
+  const phonesInput = document.getElementById('sms-phones');
+  const messageInput = document.getElementById('sms-message');
+  const encodingHint = document.getElementById('sms-encoding-hint');
+  const batchWarn = document.getElementById('sms-batch-warn');
+  const submitBtn = document.getElementById('sms-submit-btn');
+  const createStatus = document.getElementById('sms-create-status');
+  const listStatus = document.getElementById('sms-list-status');
+  const listEl = document.getElementById('sms-list');
+  const reloadBtn = document.getElementById('sms-reload-list-btn');
+  const detailSection = document.getElementById('sms-detail-section');
+  const listSection = document.getElementById('sms-list-section');
+  const createSection = document.getElementById('sms-create-section');
+  const detailBackBtn = document.getElementById('sms-detail-back-btn');
+  const detailStatus = document.getElementById('sms-detail-status');
+  const detailBody = document.getElementById('sms-detail-body');
+
+  if (
+    !panel ||
+    !form ||
+    !nameInput ||
+    !phonesInput ||
+    !messageInput ||
+    !submitBtn ||
+    !listEl ||
+    !reloadBtn ||
+    !detailSection ||
+    !detailBody
+  ) {
+    return;
+  }
+
+  let createBusy = false;
+  let listBusy = false;
+  let pollBusy = false;
+  let openedOnce = false;
+  let activeCampaignId = null;
+
+  // GSM 03.38 basic character set (includes ñ/Ñ — does NOT force UCS-2 alone).
+  const GSM7_BASIC =
+    '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?' +
+    '¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
+  // Extension table (each costs 2 septets with escape).
+  const GSM7_EXT = '^{}\\[~]|€';
+
+  const gsm7BasicSet = new Set(GSM7_BASIC.split(''));
+  const gsm7ExtSet = new Set(GSM7_EXT.split(''));
+
+  function setStatus(el, text, isError) {
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function dash(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return String(value);
+  }
+
+  function formatCount(value) {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'string' && value !== '') return value;
+    return '—';
+  }
+
+  function formatCost(value, currencyCode) {
+    if (value === null || value === undefined) return '—';
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return '—';
+    const currency =
+      typeof currencyCode === 'string' && currencyCode.trim()
+        ? currencyCode.trim().toUpperCase()
+        : null;
+    try {
+      if (currency) {
+        return new Intl.NumberFormat('es-ES', {
+          style: 'currency',
+          currency: currency,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 4,
+        }).format(n);
+      }
+      return new Intl.NumberFormat('es-ES', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4,
+      }).format(n);
+    } catch (e) {
+      return String(n);
+    }
+  }
+
+  function campaignStatusClass(status) {
+    const s = String(status || '');
+    if (s === 'sending' || s === 'sent' || s === 'partial_error' || s === 'error') {
+      return ' is-' + s;
+    }
+    return '';
+  }
+
+  function parsePhones(raw) {
+    return String(raw || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  function estimateSmsSegments(text) {
+    const chars = Array.from(String(text || ''));
+    let gsmSeptets = 0;
+    let allGsm = true;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      if (gsm7BasicSet.has(ch)) {
+        gsmSeptets += 1;
+      } else if (gsm7ExtSet.has(ch)) {
+        gsmSeptets += 2;
+      } else {
+        allGsm = false;
+        break;
+      }
+    }
+
+    if (allGsm) {
+      const units = gsmSeptets;
+      let segments = 1;
+      if (units === 0) segments = 0;
+      else if (units <= 160) segments = 1;
+      else segments = Math.ceil(units / 153);
+      return {
+        encoding: 'GSM-7',
+        units: units,
+        unitLabel: 'septetos',
+        segments: segments,
+        chars: chars.length,
+      };
+    }
+
+    const units = chars.length;
+    let segments = 1;
+    if (units === 0) segments = 0;
+    else if (units <= 70) segments = 1;
+    else segments = Math.ceil(units / 67);
+    return {
+      encoding: 'UCS-2',
+      units: units,
+      unitLabel: 'caracteres',
+      segments: segments,
+      chars: chars.length,
+    };
+  }
+
+  function updateEncodingHint() {
+    const text = messageInput.value;
+    const phones = parsePhones(phonesInput.value);
+    const est = estimateSmsSegments(text);
+    encodingHint.textContent =
+      'Caracteres: ' +
+      est.chars +
+      ' · Estimación (informativa): ' +
+      est.segments +
+      ' segmento(s), encoding ' +
+      est.encoding +
+      ' (' +
+      est.units +
+      ' ' +
+      est.unitLabel +
+      '). El comportamiento del proveedor puede diferir.';
+
+    if (phones.length > 2000) {
+      batchWarn.hidden = false;
+      batchWarn.textContent =
+        'La campaña supera los 2000 mensajes. El backend la dividirá automáticamente en varios lotes del proveedor.';
+    } else {
+      batchWarn.hidden = true;
+      batchWarn.textContent = '';
+    }
+  }
+
+  async function readJsonSafe(res) {
+    try {
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function formatBackendPayload(body) {
+    if (body == null) return 'Respuesta vacía o no JSON.';
+    if (typeof body === 'string') return body;
+    try {
+      return JSON.stringify(body, null, 2);
+    } catch (e) {
+      return String(body);
+    }
+  }
+
+  function showListView() {
+    detailSection.classList.add('hidden');
+    detailSection.setAttribute('hidden', '');
+    if (listSection) listSection.hidden = false;
+    if (createSection) createSection.hidden = false;
+    activeCampaignId = null;
+  }
+
+  function showDetailView() {
+    detailSection.classList.remove('hidden');
+    detailSection.removeAttribute('hidden');
+    if (listSection) listSection.hidden = true;
+    if (createSection) createSection.hidden = true;
+  }
+
+  function pickAggregates(campaign) {
+    const agg = campaign && campaign.aggregates ? campaign.aggregates : {};
+    const cost = campaign && campaign.cost ? campaign.cost : {};
+    return {
+      total:
+        agg.total != null
+          ? agg.total
+          : campaign && campaign.total_messages != null
+            ? campaign.total_messages
+            : null,
+      delivered: agg.delivered != null ? agg.delivered : null,
+      failed: agg.failed != null ? agg.failed : null,
+      responded: agg.responded != null ? agg.responded : null,
+      pending: agg.pending != null ? agg.pending : null,
+      estimated_cost: cost.estimated_cost != null ? cost.estimated_cost : null,
+      currency:
+        cost.currency != null
+          ? cost.currency
+          : cost.currency_code != null
+            ? cost.currency_code
+            : null,
+      messages_sent: cost.messages_sent != null ? cost.messages_sent : null,
+      messages_delivered:
+        cost.messages_delivered != null ? cost.messages_delivered : null,
+      status_counts: agg.status_counts || null,
+    };
+  }
+
+  function renderCampaignList(campaigns) {
+    const rows = Array.isArray(campaigns) ? campaigns.slice() : [];
+    rows.sort((a, b) => {
+      const ca = String((a && a.created_at) || '');
+      const cb = String((b && b.created_at) || '');
+      if (ca === cb) return 0;
+      return ca < cb ? 1 : -1;
+    });
+
+    if (!rows.length) {
+      listEl.innerHTML =
+        '<div class="sms-empty">No hay campañas SMS todavía.</div>';
+      return;
+    }
+
+    const body = rows
+      .map((c) => {
+        const id = String((c && c.id) || '');
+        const agg = pickAggregates(c);
+        const status = dash(c && c.status);
+        const costCell =
+          agg.estimated_cost === null || agg.estimated_cost === undefined
+            ? '—<div class="sms-cost-note">Costo pendiente de configurar</div>'
+            : escapeHtml(formatCost(agg.estimated_cost, agg.currency));
+
+        return (
+          '<tr class="sms-row" tabindex="0" role="button" data-campaign-id="' +
+          escapeHtml(id) +
+          '" aria-label="Abrir detalle de campaña">' +
+          '<td>' +
+          escapeHtml(dash(c && c.name)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(dash(c && c.created_at)) +
+          '</td>' +
+          '<td><span class="sms-badge' +
+          campaignStatusClass(c && c.status) +
+          '">' +
+          escapeHtml(status) +
+          '</span></td>' +
+          '<td>' +
+          escapeHtml(formatCount(agg.total)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(formatCount(agg.delivered)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(formatCount(agg.failed)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(formatCount(agg.responded)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(formatCount(agg.pending)) +
+          '</td>' +
+          '<td>' +
+          costCell +
+          '</td>' +
+          '<td><button type="button" class="btn sms-open-btn" data-campaign-id="' +
+          escapeHtml(id) +
+          '">Ver</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    listEl.innerHTML =
+      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<thead><tr>' +
+      '<th>Nombre</th><th>Creada</th><th>Estado</th><th>Total</th>' +
+      '<th>Entregados</th><th>Fallidos</th><th>Respondidos</th><th>Pendientes</th>' +
+      '<th>Costo est.</th><th>Acciones</th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>';
+  }
+
+  async function loadCampaignList() {
+    if (listBusy) return;
+    listBusy = true;
+    setStatus(listStatus, 'Cargando campañas…', false);
+    try {
+      const res = await fetch(API_BASE + '/sms/campaigns', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        setStatus(
+          listStatus,
+          (body && (body.error || formatBackendPayload(body))) ||
+            'No se pudo cargar el listado.',
+          true,
+        );
+        listEl.innerHTML = '';
+        return;
+      }
+      const campaigns = Array.isArray(body && body.campaigns)
+        ? body.campaigns
+        : Array.isArray(body)
+          ? body
+          : [];
+      renderCampaignList(campaigns);
+      setStatus(listStatus, campaigns.length + ' campaña(s)', false);
+    } catch (err) {
+      setStatus(listStatus, 'No se pudo conectar con el servidor.', true);
+      listEl.innerHTML = '';
+    } finally {
+      listBusy = false;
+    }
+  }
+
+  function renderDetail(payload) {
+    const campaign = (payload && payload.campaign) || {};
+    const messages = Array.isArray(payload && payload.messages)
+      ? payload.messages.slice()
+      : [];
+    messages.sort((a, b) => {
+      const ao = a && a.submission_order != null ? a.submission_order : 0;
+      const bo = b && b.submission_order != null ? b.submission_order : 0;
+      return ao - bo;
+    });
+
+    const agg = pickAggregates(campaign);
+    const costNote =
+      agg.estimated_cost === null || agg.estimated_cost === undefined
+        ? '<p class="sms-cost-note">Costo pendiente de configurar</p>'
+        : '';
+
+    const metaCards = [
+      ['Nombre', dash(campaign.name)],
+      ['Creada', dash(campaign.created_at)],
+      ['Estado', dash(campaign.status)],
+      ['Total mensajes', formatCount(campaign.total_messages)],
+      ['ID', dash(campaign.id)],
+      ['Enviados (costo)', formatCount(agg.messages_sent)],
+      ['Entregados (costo)', formatCount(agg.messages_delivered)],
+      ['Costo estimado', formatCost(agg.estimated_cost, agg.currency)],
+    ]
+      .map(
+        (pair) =>
+          '<div class="sms-detail-card">' +
+          '<div class="sms-detail-card-label">' +
+          escapeHtml(pair[0]) +
+          '</div>' +
+          '<div class="sms-detail-card-value">' +
+          escapeHtml(pair[1]) +
+          '</div>' +
+          '</div>',
+      )
+      .join('');
+
+    const msgRows = messages
+      .map((m) => {
+        const uid = m && m.unique_id != null ? String(m.unique_id) : '';
+        return (
+          '<tr data-unique-id="' +
+          escapeHtml(uid) +
+          '">' +
+          '<td>' +
+          escapeHtml(formatCount(m && m.submission_order)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(dash(m && m.phone)) +
+          '</td>' +
+          '<td><span class="sms-badge">' +
+          escapeHtml(dash(m && m.status)) +
+          '</span></td>' +
+          '<td>' +
+          escapeHtml(dash(m && m.fail_reason)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(dash(m && m.delivered_at)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(dash(m && m.response_text)) +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    detailBody.innerHTML =
+      '<div class="sms-detail-actions">' +
+      '<button type="button" class="btn btn-primary" id="sms-poll-btn">Actualizar estado</button>' +
+      '</div>' +
+      costNote +
+      '<div class="sms-detail-meta">' +
+      metaCards +
+      '</div>' +
+      (messages.length
+        ? '<div class="sms-table-wrap"><table class="sms-table">' +
+          '<thead><tr>' +
+          '<th>#</th><th>Teléfono</th><th>Estado</th><th>Motivo</th>' +
+          '<th>Entregado</th><th>Respuesta</th>' +
+          '</tr></thead><tbody>' +
+          msgRows +
+          '</tbody></table></div>'
+        : '<div class="sms-empty">Esta campaña no tiene mensajes.</div>');
+
+    const pollBtn = document.getElementById('sms-poll-btn');
+    if (pollBtn) {
+      pollBtn.addEventListener('click', () => {
+        if (activeCampaignId) pollCampaign(activeCampaignId);
+      });
+    }
+  }
+
+  async function openCampaignDetail(campaignId) {
+    const id = String(campaignId || '');
+    if (!id) return;
+    activeCampaignId = id;
+    showDetailView();
+    setStatus(detailStatus, 'Cargando detalle…', false);
+    detailBody.innerHTML = '';
+    try {
+      const res = await fetch(
+        API_BASE + '/sms/campaigns/' + encodeURIComponent(id),
+        { headers: { Accept: 'application/json' } },
+      );
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        setStatus(
+          detailStatus,
+          (body && (body.error || formatBackendPayload(body))) ||
+            'No se pudo cargar el detalle.',
+          true,
+        );
+        return;
+      }
+      renderDetail(body);
+      setStatus(detailStatus, '', false);
+    } catch (err) {
+      setStatus(detailStatus, 'No se pudo conectar con el servidor.', true);
+    }
+  }
+
+  async function pollCampaign(campaignId) {
+    const id = String(campaignId || '');
+    if (!id || pollBusy) return;
+    pollBusy = true;
+    const pollBtn = document.getElementById('sms-poll-btn');
+    if (pollBtn) {
+      pollBtn.disabled = true;
+      pollBtn.textContent = 'Actualizando…';
+    }
+    setStatus(detailStatus, 'Consultando Notifyme…', false);
+    try {
+      const res = await fetch(
+        API_BASE + '/sms/campaigns/' + encodeURIComponent(id) + '/poll',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        },
+      );
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        setStatus(
+          detailStatus,
+          (body && (body.error || formatBackendPayload(body))) ||
+            'Falló la actualización de estado.',
+          true,
+        );
+        return;
+      }
+      // Refresh detail from GET so UI matches persisted state.
+      await openCampaignDetail(id);
+      await loadCampaignList();
+      setStatus(detailStatus, 'Estado actualizado.', false);
+    } catch (err) {
+      setStatus(detailStatus, 'No se pudo conectar con el servidor.', true);
+    } finally {
+      pollBusy = false;
+      const btn = document.getElementById('sms-poll-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Actualizar estado';
+      }
+    }
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (createBusy) return;
+
+    const name = String(nameInput.value || '').trim();
+    const phones = parsePhones(phonesInput.value);
+    const messageText = messageInput.value;
+
+    if (!name) {
+      setStatus(createStatus, 'El nombre de la campaña es obligatorio.', true);
+      return;
+    }
+    if (!phones.length) {
+      setStatus(createStatus, 'Ingresá al menos un teléfono (una línea no vacía).', true);
+      return;
+    }
+    if (!String(messageText || '').trim()) {
+      setStatus(createStatus, 'El mensaje no puede estar vacío.', true);
+      return;
+    }
+
+    const messages = phones.map((phone) => ({ phone: phone, text: messageText }));
+
+    createBusy = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando…';
+    setStatus(createStatus, 'Creando campaña…', false);
+
+    try {
+      const res = await fetch(API_BASE + '/sms/campaigns', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: name, messages: messages }),
+      });
+      const body = await readJsonSafe(res);
+
+      const campaign = (body && body.campaign) || null;
+      const statusText = campaign && campaign.status ? String(campaign.status) : '';
+      const idText = campaign && campaign.id != null ? String(campaign.id) : '';
+      const totalText =
+        campaign && campaign.total_messages != null
+          ? String(campaign.total_messages)
+          : body && body.summary && body.summary.total_messages != null
+            ? String(body.summary.total_messages)
+            : '';
+
+      if (!res.ok) {
+        // Business statuses like error/partial_error may arrive with non-2xx.
+        const bits = [];
+        if (idText) bits.push('ID: ' + idText);
+        if (statusText) bits.push('Estado: ' + statusText);
+        if (totalText) bits.push('Total: ' + totalText);
+        bits.push(formatBackendPayload(body));
+        setStatus(createStatus, bits.join('\n'), true);
+        if (idText) await loadCampaignList();
+        return;
+      }
+
+      const okBits = [];
+      if (idText) okBits.push('Campaña creada. ID: ' + idText);
+      if (statusText) okBits.push('Estado: ' + statusText);
+      if (totalText) okBits.push('Total: ' + totalText);
+      if (body && body.summary) {
+        okBits.push('Resumen: ' + formatBackendPayload(body.summary));
+      }
+      createStatus.classList.remove('mcl-error');
+      createStatus.innerHTML =
+        '<div class="sms-create-result">' +
+        escapeHtml(okBits.join('\n') || 'Campaña creada.') +
+        '</div>';
+
+      form.reset();
+      updateEncodingHint();
+      await loadCampaignList();
+      if (listSection && typeof listSection.scrollIntoView === 'function') {
+        listSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } catch (err) {
+      setStatus(createStatus, 'No se pudo conectar con el servidor.', true);
+    } finally {
+      createBusy = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar campaña';
+    }
+  });
+
+  listEl.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.sms-open-btn');
+    if (btn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openCampaignDetail(btn.getAttribute('data-campaign-id'));
+      return;
+    }
+    const row = ev.target.closest('tr.sms-row');
+    if (row) {
+      openCampaignDetail(row.getAttribute('data-campaign-id'));
+    }
+  });
+
+  listEl.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const row = ev.target.closest('tr.sms-row');
+    if (!row) return;
+    ev.preventDefault();
+    openCampaignDetail(row.getAttribute('data-campaign-id'));
+  });
+
+  reloadBtn.addEventListener('click', () => {
+    loadCampaignList();
+  });
+
+  detailBackBtn.addEventListener('click', () => {
+    showListView();
+    loadCampaignList();
+  });
+
+  messageInput.addEventListener('input', updateEncodingHint);
+  phonesInput.addEventListener('input', updateEncodingHint);
+  updateEncodingHint();
+
+  window.__openSms = () => {
+    showListView();
+    loadCampaignList();
+    openedOnce = true;
+  };
+})();

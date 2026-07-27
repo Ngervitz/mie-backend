@@ -107,6 +107,15 @@
         </svg>
         Meta Ads
       </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="sms"
+        id="tab-sms">
+        Campañas SMS
+      </button>
     </nav>
 
     <!-- Competidores: ONLY its own entities/activity content (Trends and GA4
@@ -443,6 +452,72 @@
         <footer id="moa-footer" class="moa-footer"></footer>
       </div>
     </div>
+
+    <!-- Campañas SMS: Notifyme campaigns via /sms/* (no CRM). -->
+    <div
+      class="dashboard-panel hidden"
+      id="sms-panel"
+      role="tabpanel"
+      aria-labelledby="tab-sms"
+      hidden>
+      <div id="sms-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Campañas SMS</h1>
+            <p class="mcl-subtitle">
+              Envío y seguimiento de campañas vía Notifyme (estados crudos del proveedor)
+            </p>
+          </div>
+        </header>
+
+        <section id="sms-create-section" class="sms-create-section" aria-label="Crear campaña">
+          <h2 class="sms-section-title">Nueva campaña</h2>
+          <form id="sms-create-form" class="sms-create-form">
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">Nombre de campaña</span>
+              <input type="text" id="sms-name" class="mcl-input" required autocomplete="off" />
+            </label>
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">Destinos (un teléfono por línea)</span>
+              <textarea id="sms-phones" class="mcl-input sms-textarea" rows="6" required></textarea>
+            </label>
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">Mensaje</span>
+              <textarea id="sms-message" class="mcl-input sms-textarea" rows="4" required></textarea>
+            </label>
+            <p id="sms-encoding-hint" class="sms-encoding-hint" aria-live="polite"></p>
+            <p id="sms-batch-warn" class="sms-batch-warn" hidden></p>
+            <div class="sms-form-actions">
+              <button type="submit" id="sms-submit-btn" class="btn btn-primary">Enviar campaña</button>
+            </div>
+          </form>
+          <div id="sms-create-status" class="mcl-status" aria-live="polite"></div>
+        </section>
+
+        <section id="sms-list-section" class="sms-list-section" aria-label="Listado de campañas">
+          <div class="sms-list-toolbar">
+            <h2 class="sms-section-title">Campañas</h2>
+            <button type="button" id="sms-reload-list-btn" class="btn">
+              Recargar lista
+            </button>
+          </div>
+          <p class="sms-toolbar-note">
+            «Recargar lista» solo vuelve a pedir el listado al backend.
+            Para consultar estados en Notifyme usá «Actualizar estado» en el detalle.
+          </p>
+          <div id="sms-list-status" class="mcl-status" aria-live="polite"></div>
+          <div id="sms-list" class="sms-list"></div>
+        </section>
+
+        <section id="sms-detail-section" class="sms-detail-section hidden" hidden aria-label="Detalle de campaña">
+          <button type="button" id="sms-detail-back-btn" class="mcl-back-btn">
+            ← Volver al listado
+          </button>
+          <div id="sms-detail-status" class="mcl-status" aria-live="polite"></div>
+          <div id="sms-detail-body" class="sms-detail-body"></div>
+        </section>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -463,8 +538,9 @@
         ga4: document.getElementById('ga4-panel'),
         searchconsole: document.getElementById('search-console-panel'),
         meta: document.getElementById('meta-ads-panel'),
+        sms: document.getElementById('sms-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !tabs.length) return;
 
       var current = 'market';
 
@@ -488,6 +564,7 @@
         }
         if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
+        if (name === 'sms' && window.__openSms) window.__openSms();
         current = name;
       }
 

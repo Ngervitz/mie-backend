@@ -2442,3 +2442,219 @@
   white-space: nowrap;
 }
 
+
+/* ---------- Campañas SMS ---------- */
+#mie-dashboard-app .sms-section-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .sms-create-section,
+#mie-dashboard-app .sms-list-section {
+  margin-bottom: 28px;
+}
+
+#mie-dashboard-app .sms-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+
+#mie-dashboard-app .sms-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#mie-dashboard-app .sms-textarea {
+  min-height: 96px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.45;
+}
+
+#mie-dashboard-app .sms-encoding-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .sms-batch-warn {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--accent-warn);
+}
+
+#mie-dashboard-app .sms-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+#mie-dashboard-app .sms-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+#mie-dashboard-app .sms-toolbar-note {
+  margin: 0 0 12px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+#mie-dashboard-app .sms-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+#mie-dashboard-app .sms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+#mie-dashboard-app .sms-table th,
+#mie-dashboard-app .sms-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#mie-dashboard-app .sms-table th {
+  color: var(--text-muted);
+  font-weight: var(--font-weight-medium);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#mie-dashboard-app .sms-table tr.sms-row {
+  cursor: pointer;
+}
+
+#mie-dashboard-app .sms-table tr.sms-row:hover {
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .sms-table tr.sms-row:focus-within {
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
+}
+
+#mie-dashboard-app .sms-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-medium);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  max-width: 100%;
+  word-break: break-word;
+}
+
+#mie-dashboard-app .sms-badge.is-sending {
+  color: var(--accent-info);
+  background: var(--accent-info-soft);
+  border-color: var(--accent-info);
+}
+
+#mie-dashboard-app .sms-badge.is-sent {
+  color: var(--accent-success);
+  background: var(--accent-success-soft);
+  border-color: var(--accent-success);
+}
+
+#mie-dashboard-app .sms-badge.is-partial_error {
+  color: var(--accent-warn);
+  background: var(--accent-warn-soft);
+  border-color: var(--accent-warn);
+}
+
+#mie-dashboard-app .sms-badge.is-error {
+  color: var(--accent-danger);
+  background: var(--accent-danger-soft);
+  border-color: var(--accent-danger);
+}
+
+#mie-dashboard-app .sms-cost-note {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+#mie-dashboard-app .sms-detail-section {
+  margin-top: 8px;
+}
+
+#mie-dashboard-app .sms-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+#mie-dashboard-app .sms-detail-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+#mie-dashboard-app .sms-detail-card-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+#mie-dashboard-app .sms-detail-card-value {
+  font-size: 0.95rem;
+  color: var(--text);
+  word-break: break-word;
+}
+
+#mie-dashboard-app .sms-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+#mie-dashboard-app .sms-empty {
+  padding: 18px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+#mie-dashboard-app .sms-create-result {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  #mie-dashboard-app .sms-table th,
+  #mie-dashboard-app .sms-table td {
+    padding: 8px;
+    font-size: 0.8rem;
+  }
+}
