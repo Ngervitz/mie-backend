@@ -114,6 +114,17 @@
         aria-selected="false"
         data-dashboard-tab="sms"
         id="tab-sms">
+        <!-- NotifyMe product logo (HubSpot CDN). Falls back to emoji if unreachable. -->
+        <img
+          class="tab-brand-icon"
+          src="https://t2company.com.uy/hs-fs/hubfs/Logos/NotifyMe.png"
+          width="16"
+          height="16"
+          alt=""
+          aria-hidden="true"
+          decoding="async"
+          onerror="this.hidden=true;var f=this.nextElementSibling;if(f)f.hidden=false;" />
+        <span class="tab-brand-icon tab-brand-icon-fallback" hidden aria-hidden="true">📱</span>
         Campañas SMS
       </button>
     </nav>
@@ -463,7 +474,7 @@
       <div id="sms-landing" class="mcl-landing">
         <header class="mcl-header">
           <div class="mcl-header-left">
-            <h1 class="mcl-title">Campañas SMS</h1>
+            <h1 class="mcl-title">📱 Campañas SMS</h1>
             <p class="mcl-subtitle">
               Envío y seguimiento de campañas vía Notifyme (estados crudos del proveedor)
             </p>

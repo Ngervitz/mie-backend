@@ -1,4 +1,4 @@
-/* MIE Dashboard — design system scoped under #mie-dashboard-app only.
+/* MIE Dashboard ? design system scoped under #mie-dashboard-app only.
    Does not style global html/body/table outside this root. */
 
 #mie-dashboard-app {
@@ -82,6 +82,18 @@
   flex-shrink: 0;
 }
 
+#mie-dashboard-app img.tab-brand-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
+}
+
+#mie-dashboard-app .tab-brand-icon-fallback {
+  font-size: 14px;
+  line-height: 1;
+}
+
 #mie-dashboard-app .dashboard-tab:hover {
   color: var(--text);
   border-color: var(--border-strong);
@@ -94,7 +106,7 @@
 }
 
 /* Active-state accents per section, reusing each section's existing accent:
-   - Competidores + Términos descubiertos: --accent-info (the accent already
+   - Competidores + T�rminos descubiertos: --accent-info (the accent already
      used by entity selection, KPI cards and the disc-tab active state)
    - GA4: --accent-warn (the palette's amber, matching GA's orange identity
      and the kw growth badges)
@@ -727,7 +739,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Corner avatar — does not displace status emoji */
+/* Corner avatar ? does not displace status emoji */
 #mie-dashboard-app .gauge-chip-avatar {
   position: absolute;
   top: 6px;
@@ -832,7 +844,7 @@
   opacity: 0.75;
 }
 
-/* Featured — high activity (above baseline): 3px warm border */
+/* Featured ? high activity (above baseline): 3px warm border */
 #mie-dashboard-app .gauge-chip.is-featured {
   min-height: 112px;
   padding: 14px 12px 12px;
@@ -882,7 +894,7 @@
   background: var(--surface);
 }
 
-/* Ready — active but not top: 2px neutral-warm border */
+/* Ready ? active but not top: 2px neutral-warm border */
 #mie-dashboard-app .gauge-chip.is-ready {
   min-height: 88px;
   padding: 12px 8px 10px;
@@ -901,7 +913,7 @@
   font-size: 15px;
 }
 
-/* Compact — collecting / paused / idle: 1px muted border */
+/* Compact ? collecting / paused / idle: 1px muted border */
 #mie-dashboard-app .gauge-chip.is-compact {
   min-height: 68px;
   padding: 8px 6px 6px;
@@ -960,7 +972,7 @@
   border-color: rgba(120, 125, 140, 0.28);
 }
 
-/* Idle section — simple favicon + name rows */
+/* Idle section ? simple favicon + name rows */
 #mie-dashboard-app .gauge-chip.is-idle-row {
   position: relative;
   display: flex;
@@ -1214,7 +1226,8 @@
 #mie-dashboard-app #meta-ads-panel,
 #mie-dashboard-app #discoveries-panel,
 #mie-dashboard-app #ga4-panel,
-#mie-dashboard-app #search-console-panel {
+#mie-dashboard-app #search-console-panel,
+#mie-dashboard-app #sms-panel {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 20px 64px;
@@ -1306,7 +1319,7 @@
   padding: 8px 14px;
 }
 
-/* Google "G" source icon inside chrome buttons: alignment/spacing only —
+/* Google "G" source icon inside chrome buttons: alignment/spacing only ?
    the artwork itself is the official asset and must stay untouched. */
 #mie-dashboard-app .mcl-btn-gicon {
   vertical-align: -3px;
@@ -1467,7 +1480,7 @@
   }
 }
 
-/* ---------- Meta Ads — Análisis IA (Own Ads brief) ---------- */
+/* ---------- Meta Ads ? An�lisis IA (Own Ads brief) ---------- */
 #mie-dashboard-app .moa-landing {
   padding-top: 8px;
 }
@@ -2443,7 +2456,7 @@
 }
 
 
-/* ---------- Campa�as SMS ---------- */
+/* ---------- Campa?as SMS ---------- */
 #mie-dashboard-app .sms-section-title {
   margin: 0 0 12px;
   font-size: 1rem;
