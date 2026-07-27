@@ -3,6 +3,8 @@
  * Isolated from Credizona CRM — never joins or queries CRM tables.
  */
 
+const { randomUUID } = require('crypto');
+const { BetaAnalyticsDataClient } = require('@google-analytics/data');
 const express = require('express');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
@@ -89,81 +91,239 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
     created_at: campaign.created_at,
     total_messages: campaign.total_messages,
     status: campaign.status,
+    destination_url:
+      campaign.destination_url != null ? campaign.destination_url : null,
+    utm_campaign_value:
+      campaign.utm_campaign_value != null ? campaign.utm_campaign_value : null,
     aggregates,
     cost,
   };
 }
 
+function looksLikeHttpUrl(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return false;
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Preserve existing query params; set/overwrite utm_source, utm_medium, utm_campaign.
+ */
+function composeFinalUrl(destinationUrl, campaignUuid) {
+  const url = new URL(String(destinationUrl).trim());
+  url.searchParams.set('utm_source', 'sms');
+  url.searchParams.set('utm_medium', 'sms');
+  url.searchParams.set('utm_campaign', String(campaignUuid));
+  return url.toString();
+}
+
+function buildGa4DataClient() {
+  const rawJson = process.env.GA4_SERVICE_ACCOUNT_JSON;
+  if (!rawJson) {
+    throw new Error('GA4_SERVICE_ACCOUNT_JSON is not configured');
+  }
+  let credentials;
+  try {
+    credentials = JSON.parse(rawJson);
+  } catch (err) {
+    throw new Error('GA4_SERVICE_ACCOUNT_JSON is not valid JSON');
+  }
+  if (!credentials.client_email || !credentials.private_key) {
+    throw new Error('GA4_SERVICE_ACCOUNT_JSON is missing client_email/private_key');
+  }
+  credentials.private_key = String(credentials.private_key).replace(/\\n/g, '\n');
+  return new BetaAnalyticsDataClient({ credentials });
+}
+
+function getGa4PropertyId() {
+  const id = String(process.env.GA4_PROPERTY_ID || '').trim();
+  if (!id) {
+    throw new Error('GA4_PROPERTY_ID is not configured');
+  }
+  return id;
+}
+
 /**
  * POST /sms/campaigns
- * Body: { name, messages: [{ phone, text, scheduledAt?, source_system?, source_record_id?, czuid? }] }
+ * Legacy: { name, messages: [{ phone, text, ... }] }
+ * New:    { name, destination_url, message_body, phones: ["..."] }
  */
 router.post('/campaigns', async (req, res) => {
   const name = req.body && req.body.name;
-  const messages = req.body && req.body.messages;
+  const legacyMessages = req.body && req.body.messages;
+  const phones = req.body && req.body.phones;
+  const messageBody = req.body && req.body.message_body;
+  const destinationUrlRaw = req.body && req.body.destination_url;
 
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'name must be a non-empty string' });
   }
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'messages must be a non-empty array' });
+
+  const useNewShape =
+    Array.isArray(phones) ||
+    messageBody != null ||
+    destinationUrlRaw != null;
+
+  // Prefer legacy when a non-empty messages array is provided (backward compatible).
+  const useLegacy =
+    Array.isArray(legacyMessages) && legacyMessages.length > 0;
+
+  if (!useLegacy && !useNewShape) {
+    return res.status(400).json({
+      error: 'Provide either messages[] or { destination_url, message_body, phones[] }',
+    });
   }
 
   let campaign;
-  try {
-    const { data, error } = await supabase
-      .from('sms_campaigns')
-      .insert({
-        name: name.trim(),
-        total_messages: messages.length,
-        status: 'sending',
-      })
-      .select('id, name, created_at, total_messages, status')
-      .limit(1);
+  let messages;
+  let finalUrl = null;
+  let storedDestinationUrl = null;
+  let utmCampaignValue = null;
 
-    if (error || !data || !data[0]) {
-      throw new NotifymeError(
-        `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
-        { kind: 'database', status: 500 },
-      );
+  try {
+    if (useLegacy) {
+      messages = legacyMessages;
+      const { data, error } = await supabase
+        .from('sms_campaigns')
+        .insert({
+          name: name.trim(),
+          total_messages: messages.length,
+          status: 'sending',
+        })
+        .select(
+          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+        )
+        .limit(1);
+
+      if (error || !data || !data[0]) {
+        throw new NotifymeError(
+          `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
+          { kind: 'database', status: 500 },
+        );
+      }
+      campaign = data[0];
+    } else {
+      if (!looksLikeHttpUrl(destinationUrlRaw)) {
+        return res.status(400).json({
+          error: 'destination_url must be a valid http(s) URL',
+        });
+      }
+      if (typeof messageBody !== 'string' || !messageBody.trim()) {
+        return res.status(400).json({
+          error: 'message_body must be a non-empty string',
+        });
+      }
+      if (!Array.isArray(phones) || phones.length === 0) {
+        return res.status(400).json({
+          error: 'phones must be a non-empty array',
+        });
+      }
+      const normalizedPhones = phones
+        .map((p) => (p == null ? '' : String(p).trim()))
+        .filter((p) => p.length > 0);
+      if (!normalizedPhones.length) {
+        return res.status(400).json({
+          error: 'phones must contain at least one non-empty value',
+        });
+      }
+
+      // Generate UUID first so UTM and DB row share the same id in one insert.
+      const campaignId = randomUUID();
+      storedDestinationUrl = String(destinationUrlRaw).trim();
+      utmCampaignValue = campaignId;
+      finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
+      const composedText = `${messageBody} ${finalUrl}`;
+      messages = normalizedPhones.map((phone) => ({
+        phone,
+        text: composedText,
+      }));
+
+      const { data, error } = await supabase
+        .from('sms_campaigns')
+        .insert({
+          id: campaignId,
+          name: name.trim(),
+          total_messages: messages.length,
+          status: 'sending',
+          destination_url: storedDestinationUrl,
+          utm_campaign_value: utmCampaignValue,
+        })
+        .select(
+          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+        )
+        .limit(1);
+
+      if (error || !data || !data[0]) {
+        throw new NotifymeError(
+          `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
+          { kind: 'database', status: 500 },
+        );
+      }
+      campaign = data[0];
     }
-    campaign = data[0];
   } catch (err) {
+    if (!(err instanceof NotifymeError) && err && err.message) {
+      return res.status(400).json({ error: err.message });
+    }
     return mapServiceError(err, res);
   }
 
   try {
     const summary = await sendBatch(campaign.id, messages);
-    return res.status(201).json(
-      jsonSafe({
+    const payload = {
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        created_at: campaign.created_at,
+        total_messages: campaign.total_messages,
+        status: summary.status,
+        destination_url:
+          campaign.destination_url != null ? campaign.destination_url : null,
+        utm_campaign_value:
+          campaign.utm_campaign_value != null
+            ? campaign.utm_campaign_value
+            : null,
+      },
+      summary,
+    };
+    if (finalUrl != null) {
+      payload.final_url = finalUrl;
+      payload.destination_url = storedDestinationUrl;
+      payload.utm_campaign_value = utmCampaignValue;
+    }
+    return res.status(201).json(jsonSafe(payload));
+  } catch (err) {
+    // Campaign + message rows preserved for auditability.
+    if (err instanceof NotifymeError && err.summary) {
+      const payload = {
         campaign: {
           id: campaign.id,
           name: campaign.name,
           created_at: campaign.created_at,
           total_messages: campaign.total_messages,
-          status: summary.status,
+          status: err.summary.status,
+          destination_url:
+            campaign.destination_url != null ? campaign.destination_url : null,
+          utm_campaign_value:
+            campaign.utm_campaign_value != null
+              ? campaign.utm_campaign_value
+              : null,
         },
-        summary,
-      }),
-    );
-  } catch (err) {
-    // Campaign + message rows preserved for auditability.
-    if (err instanceof NotifymeError && err.summary) {
-      return res.status(err.status === 400 ? 400 : 502).json(
-        jsonSafe({
-          campaign: {
-            id: campaign.id,
-            name: campaign.name,
-            created_at: campaign.created_at,
-            total_messages: campaign.total_messages,
-            status: err.summary.status,
-          },
-          error: err.message,
-          kind: err.kind,
-          code: err.code || null,
-          summary: err.summary,
-        }),
-      );
+        error: err.message,
+        kind: err.kind,
+        code: err.code || null,
+        summary: err.summary,
+      };
+      if (finalUrl != null) {
+        payload.final_url = finalUrl;
+        payload.destination_url = storedDestinationUrl;
+        payload.utm_campaign_value = utmCampaignValue;
+      }
+      return res.status(err.status === 400 ? 400 : 502).json(jsonSafe(payload));
     }
     return mapServiceError(err, res);
   }
@@ -176,7 +336,9 @@ router.get('/campaigns', async (req, res) => {
   try {
     const { data: campaigns, error } = await supabase
       .from('sms_campaigns')
-      .select('id, name, created_at, total_messages, status')
+      .select(
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+      )
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -231,6 +393,8 @@ function monthBoundsUtc(yyyyMm) {
     startIso: start.toISOString(),
     endExclusiveIso: endExclusive.toISOString(),
     costAsOfDate: lastDay.toISOString().slice(0, 10),
+    startDate: start.toISOString().slice(0, 10),
+    endDate: lastDay.toISOString().slice(0, 10),
   };
 }
 
@@ -320,6 +484,94 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
 });
 
 /**
+ * GET /sms/campaigns/summary/monthly/sessions?month=YYYY-MM
+ * GA4 sessions attributed to sessionSource=sms + sessionMedium=sms for the month.
+ * Registered before /campaigns/:id (static path).
+ */
+router.get('/campaigns/summary/monthly/sessions', async (req, res) => {
+  const month = parseMonthParam(req.query.month);
+  if (!month) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+
+  const { startDate, endDate } = monthBoundsUtc(month);
+
+  try {
+    const client = buildGa4DataClient();
+    const propertyId = getGa4PropertyId();
+    const property = propertyId.startsWith('properties/')
+      ? propertyId
+      : `properties/${propertyId}`;
+
+    const [response] = await client.runReport({
+      property,
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }],
+      metrics: [{ name: 'sessions' }],
+      dimensionFilter: {
+        andGroup: {
+          expressions: [
+            {
+              filter: {
+                fieldName: 'sessionSource',
+                stringFilter: {
+                  matchType: 'EXACT',
+                  value: 'sms',
+                  caseSensitive: true,
+                },
+              },
+            },
+            {
+              filter: {
+                fieldName: 'sessionMedium',
+                stringFilter: {
+                  matchType: 'EXACT',
+                  value: 'sms',
+                  caseSensitive: true,
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    let sessions = 0;
+    const rows = response && response.rows ? response.rows : [];
+    for (const row of rows) {
+      const metricValues = row.metricValues || [];
+      const raw = metricValues[0] && metricValues[0].value;
+      if (raw === null || raw === undefined || raw === '') continue;
+      const n = Number(raw);
+      if (Number.isFinite(n)) sessions += n;
+    }
+
+    return res.json(
+      jsonSafe({
+        month,
+        sessions,
+        query_status: 'success',
+      }),
+    );
+  } catch (err) {
+    const safeMessage =
+      err && err.message ? String(err.message) : 'GA4 query failed';
+    logger.error('SMS monthly GA4 sessions query failed', {
+      month,
+      error: safeMessage,
+    });
+    return res.json(
+      jsonSafe({
+        month,
+        sessions: null,
+        query_status: 'error',
+        error: safeMessage,
+      }),
+    );
+  }
+});
+
+/**
  * GET /sms/campaigns/:id
  */
 router.get('/campaigns/:id', async (req, res) => {
@@ -327,7 +579,9 @@ router.get('/campaigns/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('sms_campaigns')
-      .select('id, name, created_at, total_messages, status')
+      .select(
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+      )
       .eq('id', campaignId)
       .limit(1);
 
@@ -366,7 +620,9 @@ router.post('/campaigns/:id/poll', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('sms_campaigns')
-      .select('id, name, created_at, total_messages, status')
+      .select(
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+      )
       .eq('id', campaignId)
       .limit(1);
 

@@ -504,6 +504,21 @@
               <span class="mcl-field-label">✉️ Mensaje</span>
               <textarea id="sms-message" class="mcl-input sms-textarea" rows="4" required></textarea>
             </label>
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">🔗 URL de destino</span>
+              <input
+                type="url"
+                id="sms-destination-url"
+                class="mcl-input"
+                required
+                placeholder="https://ejemplo.com/landing"
+                autocomplete="off"
+              />
+            </label>
+            <div id="sms-compose-preview" class="sms-compose-preview" aria-live="polite">
+              <div class="sms-compose-preview-label">Vista previa del mensaje (cuerpo + URL con UTM)</div>
+              <pre id="sms-compose-preview-text" class="sms-compose-preview-text"></pre>
+            </div>
             <p id="sms-encoding-hint" class="sms-encoding-hint" aria-live="polite"></p>
             <p id="sms-batch-warn" class="sms-batch-warn" hidden></p>
             <div class="sms-form-actions">

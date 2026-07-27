@@ -2466,8 +2466,8 @@
 }
 
 #mie-dashboard-app .sms-monthly-kpi-grid {
-  grid-template-columns: repeat(3, 1fr);
-  max-width: 920px;
+  grid-template-columns: repeat(4, 1fr);
+  max-width: 1100px;
 }
 
 #mie-dashboard-app .sms-monthly-kpi-grid .kpi-value {
@@ -2478,6 +2478,31 @@
   margin-top: 6px;
   font-size: 0.75rem;
   color: var(--text-faint);
+}
+
+#mie-dashboard-app .sms-compose-preview {
+  margin-top: 4px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-width: 720px;
+}
+
+#mie-dashboard-app .sms-compose-preview-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+#mie-dashboard-app .sms-compose-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.45;
 }
 
 @media (max-width: 720px) {

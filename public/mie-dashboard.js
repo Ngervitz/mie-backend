@@ -4408,6 +4408,11 @@ init();
   const nameInput = document.getElementById('sms-name');
   const phonesInput = document.getElementById('sms-phones');
   const messageInput = document.getElementById('sms-message');
+  const destinationUrlInput = document.getElementById('sms-destination-url');
+  const composePreviewText = document.getElementById('sms-compose-preview-text');
+  const composePreviewLabel = document.querySelector(
+    '#sms-compose-preview .sms-compose-preview-label',
+  );
   const encodingHint = document.getElementById('sms-encoding-hint');
   const batchWarn = document.getElementById('sms-batch-warn');
   const submitBtn = document.getElementById('sms-submit-btn');
@@ -4430,6 +4435,8 @@ init();
     !nameInput ||
     !phonesInput ||
     !messageInput ||
+    !destinationUrlInput ||
+    !composePreviewText ||
     !submitBtn ||
     !listEl ||
     !reloadBtn ||
@@ -4584,14 +4591,66 @@ init();
     };
   }
 
-  function updateEncodingHint() {
-    const text = messageInput.value;
+  function looksLikeHttpUrl(raw) {
+    if (raw == null || String(raw).trim() === '') return false;
+    try {
+      const u = new URL(String(raw).trim());
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function composePreviewUrl(destinationUrl, utmCampaign) {
+    const raw = String(destinationUrl || '').trim();
+    if (!looksLikeHttpUrl(raw)) return null;
+    try {
+      const url = new URL(raw);
+      url.searchParams.set('utm_source', 'sms');
+      url.searchParams.set('utm_medium', 'sms');
+      url.searchParams.set('utm_campaign', String(utmCampaign || 'PENDING'));
+      return url.toString();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function buildComposedMessage(messageBody, finalUrl) {
+    const body = String(messageBody || '');
+    const url = String(finalUrl || '');
+    if (!url) return body;
+    if (!body) return url;
+    return body + ' ' + url;
+  }
+
+  function updateEncodingHint(options) {
+    const opts = options || {};
     const phones = parsePhones(phonesInput.value);
-    const est = estimateSmsSegments(text);
+    const messageBody = messageInput.value;
+    const destinationRaw = destinationUrlInput.value;
+    const overrideUrl = opts.finalUrl != null ? String(opts.finalUrl) : null;
+    const utmValue =
+      opts.utmCampaignValue != null ? String(opts.utmCampaignValue) : 'PENDING';
+    const previewUrl =
+      overrideUrl || composePreviewUrl(destinationRaw, utmValue);
+    const composed = buildComposedMessage(messageBody, previewUrl || '');
+    const est = estimateSmsSegments(composed);
+    const isFinal = Boolean(overrideUrl);
+
+    if (composePreviewText) {
+      composePreviewText.textContent = composed || '(escribí el mensaje y la URL de destino)';
+    }
+    if (composePreviewLabel) {
+      composePreviewLabel.textContent = isFinal
+        ? 'Mensaje definitivo enviado (cuerpo + URL final con UTM)'
+        : 'Vista previa del mensaje (cuerpo + URL con utm_campaign=PENDING)';
+    }
+
     encodingHint.textContent =
-      'Caracteres: ' +
+      (isFinal ? 'Segmentos definitivos' : 'Estimación sobre vista previa') +
+      ': ' +
       est.chars +
-      ' · Estimación (informativa): ' +
+      ' caracteres · ' +
       est.segments +
       ' segmento(s), encoding ' +
       est.encoding +
@@ -4756,11 +4815,18 @@ init();
       setStatus(monthlySummaryStatus, 'Cargando resumen del mes…', false);
     }
     try {
-      const res = await fetch(API_BASE + '/sms/campaigns/summary/monthly', {
-        headers: { Accept: 'application/json' },
-      });
-      const body = await readJsonSafe(res);
-      if (!res.ok) {
+      const [costRes, sessionsRes] = await Promise.all([
+        fetch(API_BASE + '/sms/campaigns/summary/monthly', {
+          headers: { Accept: 'application/json' },
+        }),
+        fetch(API_BASE + '/sms/campaigns/summary/monthly/sessions', {
+          headers: { Accept: 'application/json' },
+        }),
+      ]);
+      const body = await readJsonSafe(costRes);
+      const sessionsBody = await readJsonSafe(sessionsRes);
+
+      if (!costRes.ok) {
         if (monthlySummaryStatus) {
           setStatus(
             monthlySummaryStatus,
@@ -4787,6 +4853,20 @@ init();
         ? '<div class="sms-monthly-cost-note">Costo pendiente de configurar</div>'
         : '<div class="sms-monthly-cost-note">IVA incluido</div>';
 
+      let sessionsValue = '—';
+      let sessionsNote =
+        '<div class="sms-monthly-cost-note">No se pudo consultar GA4</div>';
+      if (sessionsRes.ok && sessionsBody) {
+        if (sessionsBody.query_status === 'success') {
+          sessionsValue = formatCount(sessionsBody.sessions);
+          sessionsNote = '';
+        } else if (sessionsBody.query_status === 'error') {
+          sessionsValue = '—';
+          sessionsNote =
+            '<div class="sms-monthly-cost-note">No se pudo consultar GA4</div>';
+        }
+      }
+
       monthlySummaryBody.innerHTML =
         '<div class="kpi-card is-neutral">' +
         '<div class="kpi-value">' +
@@ -4806,6 +4886,13 @@ init();
         '</div>' +
         '<div class="kpi-label">Costo estimado</div>' +
         costNote +
+        '</div>' +
+        '<div class="kpi-card is-neutral">' +
+        '<div class="kpi-value">' +
+        escapeHtml(sessionsValue) +
+        '</div>' +
+        '<div class="kpi-label">Sesiones desde SMS</div>' +
+        sessionsNote +
         '</div>';
 
       if (monthlySummaryStatus) setStatus(monthlySummaryStatus, '', false);
@@ -5028,7 +5115,8 @@ init();
 
     const name = String(nameInput.value || '').trim();
     const phones = parsePhones(phonesInput.value);
-    const messageText = messageInput.value;
+    const messageBody = messageInput.value;
+    const destinationUrl = String(destinationUrlInput.value || '').trim();
 
     if (!name) {
       setStatus(createStatus, 'El nombre de la campaña es obligatorio.', true);
@@ -5038,12 +5126,18 @@ init();
       setStatus(createStatus, 'Ingresá al menos un teléfono (una línea no vacía).', true);
       return;
     }
-    if (!String(messageText || '').trim()) {
+    if (!String(messageBody || '').trim()) {
       setStatus(createStatus, 'El mensaje no puede estar vacío.', true);
       return;
     }
-
-    const messages = phones.map((phone) => ({ phone: phone, text: messageText }));
+    if (!looksLikeHttpUrl(destinationUrl)) {
+      setStatus(
+        createStatus,
+        'La URL de destino debe ser una URL http(s) válida.',
+        true,
+      );
+      return;
+    }
 
     createBusy = true;
     submitBtn.disabled = true;
@@ -5057,7 +5151,12 @@ init();
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name: name, messages: messages }),
+        body: JSON.stringify({
+          name: name,
+          destination_url: destinationUrl,
+          message_body: messageBody,
+          phones: phones,
+        }),
       });
       const body = await readJsonSafe(res);
 
@@ -5070,23 +5169,43 @@ init();
           : body && body.summary && body.summary.total_messages != null
             ? String(body.summary.total_messages)
             : '';
+      const finalUrl =
+        body && body.final_url != null ? String(body.final_url) : '';
+      const utmValue =
+        body && body.utm_campaign_value != null
+          ? String(body.utm_campaign_value)
+          : campaign && campaign.utm_campaign_value != null
+            ? String(campaign.utm_campaign_value)
+            : '';
 
       if (!res.ok) {
-        // Business statuses like error/partial_error may arrive with non-2xx.
         const bits = [];
         if (idText) bits.push('ID: ' + idText);
         if (statusText) bits.push('Estado: ' + statusText);
         if (totalText) bits.push('Total: ' + totalText);
+        if (finalUrl) bits.push('URL final: ' + finalUrl);
         bits.push(formatBackendPayload(body));
         setStatus(createStatus, bits.join('\n'), true);
-        if (idText) await loadCampaignList();
+        if (idText) {
+          await loadCampaignList();
+          await loadMonthlySummary();
+        }
         return;
+      }
+
+      if (finalUrl) {
+        updateEncodingHint({
+          finalUrl: finalUrl,
+          utmCampaignValue: utmValue || idText,
+        });
       }
 
       const okBits = [];
       if (idText) okBits.push('Campaña creada. ID: ' + idText);
       if (statusText) okBits.push('Estado: ' + statusText);
       if (totalText) okBits.push('Total: ' + totalText);
+      if (utmValue) okBits.push('utm_campaign: ' + utmValue);
+      if (finalUrl) okBits.push('URL final: ' + finalUrl);
       if (body && body.summary) {
         okBits.push('Resumen: ' + formatBackendPayload(body.summary));
       }
@@ -5096,9 +5215,25 @@ init();
         escapeHtml(okBits.join('\n') || 'Campaña creada.') +
         '</div>';
 
+      // Keep preview showing definitive URL; clear inputs for a new campaign after a beat.
       form.reset();
-      updateEncodingHint();
+      if (finalUrl) {
+        // Restore definitive preview after reset for confirmation.
+        updateEncodingHint({
+          finalUrl: finalUrl,
+          utmCampaignValue: utmValue || idText,
+        });
+        if (composePreviewText) {
+          composePreviewText.textContent = buildComposedMessage(
+            messageBody,
+            finalUrl,
+          );
+        }
+      } else {
+        updateEncodingHint();
+      }
       await loadCampaignList();
+      await loadMonthlySummary();
       if (listSection && typeof listSection.scrollIntoView === 'function') {
         listSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
@@ -5142,8 +5277,9 @@ init();
     loadCampaignList();
   });
 
-  messageInput.addEventListener('input', updateEncodingHint);
-  phonesInput.addEventListener('input', updateEncodingHint);
+  messageInput.addEventListener('input', () => updateEncodingHint());
+  phonesInput.addEventListener('input', () => updateEncodingHint());
+  destinationUrlInput.addEventListener('input', () => updateEncodingHint());
   updateEncodingHint();
 
   window.__openSms = () => {
