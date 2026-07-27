@@ -13,15 +13,19 @@ const {
   pollStatus,
   pollResponses,
   loadActiveCostConfig,
-  buildCostMetrics,
-  aggregateMessageStats,
   jsonSafe,
   NotifymeError,
   assertUniqueIdString,
-  DELIVERED_STATUS_VALUES,
 } = require('../services/notifyme-client');
 
 const router = express.Router();
+
+/**
+ * Empirically confirmed Notifyme raw delivered statuses (case-sensitive).
+ * Extend this array as additional delivered values are observed in real polls.
+ */
+const DELIVERED_STATUS_VALUES = ['DELIVERED'];
+const deliveredStatusSet = new Set(DELIVERED_STATUS_VALUES);
 
 function mapServiceError(err, res) {
   if (err instanceof NotifymeError) {
@@ -76,6 +80,83 @@ async function loadCampaignMessages(campaignId) {
     });
   }
   return data || [];
+}
+
+/**
+ * Aggregate message stats using local DELIVERED_STATUS_VALUES mapping.
+ * Mirrors notifyme-client aggregateMessageStats but with configured delivered set.
+ */
+function aggregateMessageStats(rows) {
+  const status_counts = {};
+  let delivered = null;
+  let failed = null;
+  let pending = 0;
+  let responded = 0;
+
+  for (const row of rows || []) {
+    const st = row.status == null ? 'pending' : String(row.status);
+    status_counts[st] = (status_counts[st] || 0) + 1;
+    if (st === 'pending') pending += 1;
+    if (
+      row.response_received_at != null ||
+      (row.response_text != null && row.response_text !== '')
+    ) {
+      responded += 1;
+    }
+  }
+
+  if (deliveredStatusSet.size > 0) {
+    delivered = 0;
+    for (const [st, n] of Object.entries(status_counts)) {
+      if (deliveredStatusSet.has(st)) delivered += n;
+    }
+  }
+
+  return {
+    total: (rows || []).length,
+    delivered,
+    failed,
+    pending,
+    responded,
+    status_counts,
+  };
+}
+
+function buildCostMetrics({ totalMessages, statusCounts, costConfig }) {
+  const messages_sent = totalMessages;
+  let messages_delivered = null;
+  let estimated_cost = null;
+  let cost_per_sms_with_vat = null;
+
+  if (costConfig) {
+    const ex = Number(costConfig.cost_per_sms_ex_vat);
+    const vat = Number(costConfig.vat_rate);
+    if (Number.isFinite(ex) && Number.isFinite(vat)) {
+      cost_per_sms_with_vat = ex * (1 + vat);
+    }
+  }
+
+  if (deliveredStatusSet.size > 0) {
+    messages_delivered = 0;
+    for (const [status, count] of Object.entries(statusCounts || {})) {
+      if (deliveredStatusSet.has(status)) {
+        messages_delivered += count;
+      }
+    }
+    if (cost_per_sms_with_vat != null) {
+      estimated_cost = cost_per_sms_with_vat * messages_delivered;
+    }
+  }
+
+  return {
+    messages_sent,
+    messages_delivered,
+    cost_per_sms_ex_vat: costConfig ? Number(costConfig.cost_per_sms_ex_vat) : null,
+    vat_rate: costConfig ? Number(costConfig.vat_rate) : null,
+    cost_per_sms_with_vat,
+    estimated_cost,
+    delivered_status_mapping_configured: deliveredStatusSet.size > 0,
+  };
 }
 
 async function enrichCampaign(campaign, messageRows, costConfig) {
@@ -498,7 +579,7 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
     const { startIso, endExclusiveIso, costAsOfDate } = monthBoundsUtc(month);
 
     // Same convention as per-campaign cost metrics: no delivered mapping → nulls.
-    if (!DELIVERED_STATUS_VALUES || DELIVERED_STATUS_VALUES.size === 0) {
+    if (deliveredStatusSet.size === 0) {
       return res.json(
         jsonSafe({
           month,
@@ -508,7 +589,7 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
       );
     }
 
-    const deliveredStatuses = Array.from(DELIVERED_STATUS_VALUES);
+    const deliveredStatuses = Array.from(deliveredStatusSet);
     const { count, error: countError } = await supabase
       .from('sms_messages')
       .select('unique_id', { count: 'exact', head: true })
@@ -724,6 +805,9 @@ router.post('/campaigns/:id/poll', async (req, res) => {
     return res.json(
       jsonSafe({
         campaign: enriched,
+        // Include fresh message rows so the UI can re-render the per-message
+        // table without relying on a possibly-cached GET.
+        messages: refreshedRows.map(mapMessageRow),
         status_poll: statusSummary,
         response_poll: responseSummary,
       }),

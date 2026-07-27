@@ -5046,7 +5046,10 @@ init();
     try {
       const res = await fetch(
         API_BASE + '/sms/campaigns/' + encodeURIComponent(id),
-        { headers: { Accept: 'application/json' } },
+        {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        },
       );
       const body = await readJsonSafe(res);
       if (!res.ok) {
@@ -5081,6 +5084,7 @@ init();
         {
           method: 'POST',
           headers: { Accept: 'application/json' },
+          cache: 'no-store',
         },
       );
       const body = await readJsonSafe(res);
@@ -5093,8 +5097,16 @@ init();
         );
         return;
       }
-      // Refresh detail from GET so UI matches persisted state.
-      await openCampaignDetail(id);
+
+      // Re-render full detail (summary cards + per-message table) from poll
+      // payload when messages are included; otherwise re-fetch GET.
+      if (body && body.campaign && Array.isArray(body.messages)) {
+        activeCampaignId = id;
+        showDetailView();
+        renderDetail(body);
+      } else {
+        await openCampaignDetail(id);
+      }
       await loadCampaignList();
       setStatus(detailStatus, 'Estado actualizado.', false);
     } catch (err) {
