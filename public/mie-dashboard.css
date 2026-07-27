@@ -128,6 +128,10 @@
 #mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="meta"] {
   box-shadow: inset 0 -2px 0 #60a5fa;
 }
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="sms"] {
+  /* T2Company brand accent (pink from the tab icon gradient). */
+  box-shadow: inset 0 -2px 0 #ec4899;
+}
 
 #mie-dashboard-app .dashboard-panel.hidden,
 #mie-dashboard-app .dashboard-panel[hidden] {
