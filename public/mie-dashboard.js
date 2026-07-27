@@ -4505,26 +4505,16 @@ init();
     return monthNames[idx] + ' ' + match[1];
   }
 
-  function formatCost(value, currencyCode) {
+  function formatCost(value) {
     if (value === null || value === undefined) return '—';
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) return '—';
-    const currency =
-      typeof currencyCode === 'string' && currencyCode.trim()
-        ? currencyCode.trim().toUpperCase()
-        : null;
     try {
-      if (currency) {
-        return new Intl.NumberFormat('es-ES', {
-          style: 'currency',
-          currency: currency,
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 4,
-        }).format(n);
-      }
-      return new Intl.NumberFormat('es-ES', {
+      return new Intl.NumberFormat('es-UY', {
+        style: 'currency',
+        currency: 'UYU',
         minimumFractionDigits: 2,
-        maximumFractionDigits: 4,
+        maximumFractionDigits: 2,
       }).format(n);
     } catch (e) {
       return String(n);
