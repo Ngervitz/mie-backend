@@ -95,6 +95,7 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
       campaign.destination_url != null ? campaign.destination_url : null,
     utm_campaign_value:
       campaign.utm_campaign_value != null ? campaign.utm_campaign_value : null,
+    short_url: campaign.short_url != null ? campaign.short_url : null,
     aggregates,
     cost,
   };
@@ -119,6 +120,51 @@ function composeFinalUrl(destinationUrl, campaignUuid) {
   url.searchParams.set('utm_medium', 'sms');
   url.searchParams.set('utm_campaign', String(campaignUuid));
   return url.toString();
+}
+
+const TINYURL_TIMEOUT_MS = 4000;
+
+/**
+ * Shorten a URL via TinyURL public API.
+ * Returns { shortUrl } on success, or { shortUrl: null, reason } on any failure.
+ * Never throws — callers must fall back to the long URL.
+ */
+async function shortenWithTinyUrl(longUrl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TINYURL_TIMEOUT_MS);
+  try {
+    const endpoint =
+      'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { Accept: 'text/plain' },
+    });
+    if (!res.ok) {
+      return {
+        shortUrl: null,
+        reason: `TinyURL HTTP ${res.status}`,
+      };
+    }
+    const text = String((await res.text()) || '').trim();
+    if (!text || !/^https?:\/\//i.test(text)) {
+      return {
+        shortUrl: null,
+        reason: 'TinyURL returned empty or non-URL body',
+      };
+    }
+    return { shortUrl: text, reason: null };
+  } catch (err) {
+    const reason =
+      err && err.name === 'AbortError'
+        ? `TinyURL timeout after ${TINYURL_TIMEOUT_MS}ms`
+        : err && err.message
+          ? String(err.message)
+          : 'TinyURL request failed';
+    return { shortUrl: null, reason };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function buildGa4DataClient() {
@@ -183,6 +229,7 @@ router.post('/campaigns', async (req, res) => {
   let finalUrl = null;
   let storedDestinationUrl = null;
   let utmCampaignValue = null;
+  let shortUrl = null;
 
   try {
     if (useLegacy) {
@@ -195,7 +242,7 @@ router.post('/campaigns', async (req, res) => {
           status: 'sending',
         })
         .select(
-          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
         )
         .limit(1);
 
@@ -236,7 +283,20 @@ router.post('/campaigns', async (req, res) => {
       storedDestinationUrl = String(destinationUrlRaw).trim();
       utmCampaignValue = campaignId;
       finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
-      const composedText = `${messageBody} ${finalUrl}`;
+
+      const shortened = await shortenWithTinyUrl(finalUrl);
+      if (shortened.shortUrl) {
+        shortUrl = shortened.shortUrl;
+      } else {
+        shortUrl = null;
+        logger.warn('TinyURL shorten failed; falling back to final_url', {
+          reason: shortened.reason,
+          campaign_id: campaignId,
+        });
+      }
+
+      const linkForMessage = shortUrl || finalUrl;
+      const composedText = `${messageBody} ${linkForMessage}`;
       messages = normalizedPhones.map((phone) => ({
         phone,
         text: composedText,
@@ -251,9 +311,10 @@ router.post('/campaigns', async (req, res) => {
           status: 'sending',
           destination_url: storedDestinationUrl,
           utm_campaign_value: utmCampaignValue,
+          short_url: shortUrl,
         })
         .select(
-          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
         )
         .limit(1);
 
@@ -287,6 +348,7 @@ router.post('/campaigns', async (req, res) => {
           campaign.utm_campaign_value != null
             ? campaign.utm_campaign_value
             : null,
+        short_url: campaign.short_url != null ? campaign.short_url : null,
       },
       summary,
     };
@@ -294,6 +356,7 @@ router.post('/campaigns', async (req, res) => {
       payload.final_url = finalUrl;
       payload.destination_url = storedDestinationUrl;
       payload.utm_campaign_value = utmCampaignValue;
+      payload.short_url = shortUrl;
     }
     return res.status(201).json(jsonSafe(payload));
   } catch (err) {
@@ -312,6 +375,7 @@ router.post('/campaigns', async (req, res) => {
             campaign.utm_campaign_value != null
               ? campaign.utm_campaign_value
               : null,
+          short_url: campaign.short_url != null ? campaign.short_url : null,
         },
         error: err.message,
         kind: err.kind,
@@ -322,6 +386,7 @@ router.post('/campaigns', async (req, res) => {
         payload.final_url = finalUrl;
         payload.destination_url = storedDestinationUrl;
         payload.utm_campaign_value = utmCampaignValue;
+        payload.short_url = shortUrl;
       }
       return res.status(err.status === 400 ? 400 : 502).json(jsonSafe(payload));
     }
@@ -337,7 +402,7 @@ router.get('/campaigns', async (req, res) => {
     const { data: campaigns, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
       )
       .order('created_at', { ascending: false });
 
@@ -580,7 +645,7 @@ router.get('/campaigns/:id', async (req, res) => {
     const { data, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
       )
       .eq('id', campaignId)
       .limit(1);
@@ -621,7 +686,7 @@ router.post('/campaigns/:id/poll', async (req, res) => {
     const { data, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value',
+        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
       )
       .eq('id', campaignId)
       .limit(1);

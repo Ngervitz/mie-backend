@@ -5171,6 +5171,13 @@ init();
             : '';
       const finalUrl =
         body && body.final_url != null ? String(body.final_url) : '';
+      const shortUrl =
+        body && body.short_url != null
+          ? String(body.short_url)
+          : campaign && campaign.short_url != null
+            ? String(campaign.short_url)
+            : '';
+      const sentUrl = shortUrl || finalUrl;
       const utmValue =
         body && body.utm_campaign_value != null
           ? String(body.utm_campaign_value)
@@ -5184,6 +5191,7 @@ init();
         if (statusText) bits.push('Estado: ' + statusText);
         if (totalText) bits.push('Total: ' + totalText);
         if (finalUrl) bits.push('URL final: ' + finalUrl);
+        if (shortUrl) bits.push('URL corta enviada: ' + shortUrl);
         bits.push(formatBackendPayload(body));
         setStatus(createStatus, bits.join('\n'), true);
         if (idText) {
@@ -5193,9 +5201,9 @@ init();
         return;
       }
 
-      if (finalUrl) {
+      if (sentUrl) {
         updateEncodingHint({
-          finalUrl: finalUrl,
+          finalUrl: sentUrl,
           utmCampaignValue: utmValue || idText,
         });
       }
@@ -5205,7 +5213,15 @@ init();
       if (statusText) okBits.push('Estado: ' + statusText);
       if (totalText) okBits.push('Total: ' + totalText);
       if (utmValue) okBits.push('utm_campaign: ' + utmValue);
-      if (finalUrl) okBits.push('URL final: ' + finalUrl);
+      if (finalUrl) okBits.push('URL final (con UTM): ' + finalUrl);
+      if (shortUrl) {
+        okBits.push('URL corta enviada en el SMS: ' + shortUrl);
+      } else if (finalUrl) {
+        okBits.push(
+          'No se pudo acortar el link, se envió la URL completa',
+        );
+        okBits.push('URL enviada en el SMS: ' + finalUrl);
+      }
       if (body && body.summary) {
         okBits.push('Resumen: ' + formatBackendPayload(body.summary));
       }
@@ -5215,19 +5231,23 @@ init();
         escapeHtml(okBits.join('\n') || 'Campaña creada.') +
         '</div>';
 
-      // Keep preview showing definitive URL; clear inputs for a new campaign after a beat.
+      // Keep preview showing the URL actually sent; clear inputs after.
       form.reset();
-      if (finalUrl) {
-        // Restore definitive preview after reset for confirmation.
+      if (sentUrl) {
         updateEncodingHint({
-          finalUrl: finalUrl,
+          finalUrl: sentUrl,
           utmCampaignValue: utmValue || idText,
         });
         if (composePreviewText) {
           composePreviewText.textContent = buildComposedMessage(
             messageBody,
-            finalUrl,
+            sentUrl,
           );
+        }
+        if (composePreviewLabel) {
+          composePreviewLabel.textContent = shortUrl
+            ? 'Mensaje definitivo enviado (cuerpo + URL corta)'
+            : 'Mensaje definitivo enviado (cuerpo + URL completa; acortado no disponible)';
         }
       } else {
         updateEncodingHint();
