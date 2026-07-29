@@ -15,6 +15,9 @@ const {
 const { buildDiscoveryRows } = require('../lib/discovery-rows');
 const { runOwnAdsBrief } = require('../services/own-ads-brief');
 const { isValidDateOnly, todayUtc } = require('../activity/dates');
+const { runInstagramPostsSync } = require('../jobs/instagramPostsSync');
+const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
+const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -966,6 +969,88 @@ const runGa4MetricsHandler = (req, res) => {
 
 router.post('/run-ga4-metrics', runGa4MetricsHandler);
 router.get('/run-ga4-metrics', runGa4MetricsHandler);
+
+// --- Instagram comments (Credizona @credizonauy) — cron-job.org triggers ---
+// Synchronous: one full run per request, then respond. No in-process scheduler.
+// Overlap protection is job_locks (DB), not an in-memory singleton.
+
+function sendInstagramJobResult(res, result) {
+  if (result && result.code === 'MISSING_IG_TOKEN') {
+    return res.status(503).json(result);
+  }
+  if (result && result.reason === 'lock_not_acquired') {
+    return res.status(409).json(result);
+  }
+  return res.status(200).json(result);
+}
+
+router.post('/run-instagram-posts-sync', async (req, res) => {
+  logger.info('POST /jobs/run-instagram-posts-sync — started');
+  try {
+    const result = await runInstagramPostsSync();
+    logger.info('instagram_posts_sync finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      mediaFetched: result.mediaFetched,
+    });
+    return sendInstagramJobResult(res, result);
+  } catch (err) {
+    logger.error('instagram_posts_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-instagram-comments-poll', async (req, res) => {
+  logger.info('POST /jobs/run-instagram-comments-poll — started');
+  try {
+    const result = await runInstagramCommentsPoll();
+    logger.info('instagram_comments_poll finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      postsEligible: result.postsEligible,
+      postsSuccess: result.postsSuccess,
+    });
+    return sendInstagramJobResult(res, result);
+  } catch (err) {
+    logger.error('instagram_comments_poll failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-instagram-reply-recovery', async (req, res) => {
+  logger.info('POST /jobs/run-instagram-reply-recovery — started');
+  try {
+    const result = await runInstagramReplyRecovery();
+    logger.info('instagram_reply_recovery finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      stuckFound: result.stuckFound,
+      recovered: result.recovered,
+    });
+    return sendInstagramJobResult(res, result);
+  } catch (err) {
+    logger.error('instagram_reply_recovery failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
 
 // --- Search Console (Phase 1 audit only for now) ---
 // Read-only diagnostic: sites.list (exact siteUrl + permission), data-latency
