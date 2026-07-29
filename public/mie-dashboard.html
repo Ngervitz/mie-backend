@@ -127,6 +127,50 @@
         <span class="tab-brand-icon tab-brand-icon-fallback" hidden aria-hidden="true">📱</span>
         Campañas SMS
       </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="inbox"
+        id="tab-inbox"
+        title="Inbox">
+        <span class="inbox-tab-brands" aria-hidden="true">
+          <!-- Instagram glyph -->
+          <svg class="tab-brand-icon inbox-brand-ig" viewBox="0 0 24 24" width="14" height="14" focusable="false">
+            <defs>
+              <radialGradient id="mie-ig-grad" cx="30%" cy="107%" r="150%">
+                <stop offset="0%" stop-color="#fdf497"/>
+                <stop offset="5%" stop-color="#fdf497"/>
+                <stop offset="45%" stop-color="#fd5949"/>
+                <stop offset="60%" stop-color="#d6249f"/>
+                <stop offset="90%" stop-color="#285AEB"/>
+              </radialGradient>
+            </defs>
+            <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#mie-ig-grad)"/>
+            <circle cx="12" cy="12" r="4.2" fill="none" stroke="#fff" stroke-width="1.6"/>
+            <circle cx="17.2" cy="6.8" r="1.2" fill="#fff"/>
+          </svg>
+          <!-- Facebook glyph -->
+          <svg class="tab-brand-icon inbox-brand-fb" viewBox="0 0 24 24" width="14" height="14" focusable="false">
+            <rect x="2" y="2" width="20" height="20" rx="4" fill="#1877F2"/>
+            <path fill="#fff" d="M13.5 20v-7h2.3l.4-2.8h-2.7V8.4c0-.8.2-1.4 1.4-1.4H16V4.5c-.3 0-1.2-.1-2.3-.1-2.3 0-3.8 1.4-3.8 3.9v2.2H7.5V13h2.4v7h3.6z"/>
+          </svg>
+          <!-- Messenger glyph -->
+          <svg class="tab-brand-icon inbox-brand-msg" viewBox="0 0 24 24" width="14" height="14" focusable="false">
+            <defs>
+              <linearGradient id="mie-msg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00B2FF"/>
+                <stop offset="50%" stop-color="#006AFF"/>
+                <stop offset="100%" stop-color="#A033FF"/>
+              </linearGradient>
+            </defs>
+            <path fill="url(#mie-msg-grad)" d="M12 2C6.5 2 2 6.1 2 11.2c0 2.9 1.4 5.4 3.7 7.1V22l3.4-1.9c.9.2 1.9.4 2.9.4 5.5 0 10-4.1 10-9.3S17.5 2 12 2z"/>
+            <path fill="#fff" d="M6.8 14.2l3.3-3.5 1.9 2 3.5-2.1-3.3 3.5-1.9-2-3.5 2.1z"/>
+          </svg>
+        </span>
+        Inbox
+      </button>
     </nav>
 
     <!-- Competidores: ONLY its own entities/activity content (Trends and GA4
@@ -552,6 +596,104 @@
         </section>
       </div>
     </div>
+
+    <!-- Inbox: Instagram comments + DMs (FB/Messenger placeholders). -->
+    <div
+      class="dashboard-panel hidden"
+      id="inbox-panel"
+      role="tabpanel"
+      aria-labelledby="tab-inbox"
+      hidden>
+      <div id="inbox-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Inbox</h1>
+            <p class="mcl-subtitle">
+              Comentarios y DMs de Credizona — responder desde MetaDash
+            </p>
+          </div>
+          <label class="mcl-field inbox-actor-field">
+            <span class="mcl-field-label">Quién responde</span>
+            <input
+              type="text"
+              id="inbox-actor"
+              class="mcl-input"
+              value="user:dashboard"
+              autocomplete="username"
+              placeholder="user:nicolas"
+            />
+          </label>
+        </header>
+
+        <div id="inbox-chrome" class="meta-subnav" role="tablist" aria-label="Canales del inbox">
+          <button
+            type="button"
+            id="inbox-ig-tab-btn"
+            class="meta-subnav-btn active"
+            role="tab"
+            aria-selected="true"
+            data-inbox-channel="instagram">
+            Instagram
+          </button>
+          <button
+            type="button"
+            id="inbox-fb-tab-btn"
+            class="meta-subnav-btn is-disabled"
+            role="tab"
+            aria-selected="false"
+            aria-disabled="true"
+            disabled
+            data-inbox-channel="facebook"
+            title="Próximamente">
+            Facebook
+          </button>
+          <button
+            type="button"
+            id="inbox-msg-tab-btn"
+            class="meta-subnav-btn is-disabled"
+            role="tab"
+            aria-selected="false"
+            aria-disabled="true"
+            disabled
+            data-inbox-channel="messenger"
+            title="Próximamente">
+            Messenger
+          </button>
+        </div>
+
+        <div id="inbox-pane-instagram" class="inbox-channel-pane" data-inbox-pane="instagram">
+          <div class="inbox-toolbar">
+            <button type="button" id="inbox-reload-btn" class="btn">Recargar</button>
+            <div id="inbox-status" class="mcl-status" aria-live="polite"></div>
+          </div>
+
+          <section class="inbox-section" aria-label="Comentarios pendientes">
+            <h2 class="sms-section-title">Comentarios pendientes</h2>
+            <div id="inbox-comments-list" class="inbox-list"></div>
+          </section>
+
+          <section class="inbox-section" aria-label="Conversaciones DM pendientes">
+            <h2 class="sms-section-title">DMs pendientes</h2>
+            <div id="inbox-dms-list" class="inbox-list"></div>
+          </section>
+        </div>
+
+        <div
+          id="inbox-pane-facebook"
+          class="inbox-channel-pane hidden"
+          data-inbox-pane="facebook"
+          hidden>
+          <div class="inbox-soon mcl-empty">Próximamente</div>
+        </div>
+        <div
+          id="inbox-pane-messenger"
+          class="inbox-channel-pane hidden"
+          data-inbox-pane="messenger"
+          hidden>
+          <div class="inbox-soon mcl-empty">Próximamente</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -573,8 +715,9 @@
         searchconsole: document.getElementById('search-console-panel'),
         meta: document.getElementById('meta-ads-panel'),
         sms: document.getElementById('sms-panel'),
+        inbox: document.getElementById('inbox-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.inbox || !tabs.length) return;
 
       var current = 'market';
 
@@ -599,6 +742,7 @@
         if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
         if (name === 'sms' && window.__openSms) window.__openSms();
+        if (name === 'inbox' && window.__openInbox) window.__openInbox();
         current = name;
       }
 

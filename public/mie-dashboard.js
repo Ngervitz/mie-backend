@@ -5311,3 +5311,377 @@ init();
     openedOnce = true;
   };
 })();
+
+/* ----------------------------------------------------------------------------
+ * Inbox — Instagram comments + DMs (FB/Messenger placeholders)
+ * ------------------------------------------------------------------------- */
+(function initInbox() {
+  const panel = document.getElementById('inbox-panel');
+  const statusEl = document.getElementById('inbox-status');
+  const commentsEl = document.getElementById('inbox-comments-list');
+  const dmsEl = document.getElementById('inbox-dms-list');
+  const reloadBtn = document.getElementById('inbox-reload-btn');
+  const actorInput = document.getElementById('inbox-actor');
+  const igPane = document.getElementById('inbox-pane-instagram');
+  const fbPane = document.getElementById('inbox-pane-facebook');
+  const msgPane = document.getElementById('inbox-pane-messenger');
+  const igTab = document.getElementById('inbox-ig-tab-btn');
+  const fbTab = document.getElementById('inbox-fb-tab-btn');
+  const msgTab = document.getElementById('inbox-msg-tab-btn');
+
+  if (!panel || !statusEl || !commentsEl || !dmsEl || !reloadBtn) return;
+
+  let busy = false;
+  let openedOnce = false;
+
+  function setStatus(message, isError) {
+    statusEl.textContent = message || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function actorId() {
+    const v = actorInput && typeof actorInput.value === 'string'
+      ? actorInput.value.trim()
+      : '';
+    return v || 'user:dashboard';
+  }
+
+  async function readJsonSafe(res) {
+    try {
+      return await res.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function formatWhen(iso) {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('es-UY', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      });
+    } catch (_) {
+      return String(iso);
+    }
+  }
+
+  function showChannel(name) {
+    const map = {
+      instagram: { pane: igPane, tab: igTab },
+      facebook: { pane: fbPane, tab: fbTab },
+      messenger: { pane: msgPane, tab: msgTab },
+    };
+    Object.keys(map).forEach((key) => {
+      const show = key === name;
+      const { pane, tab } = map[key];
+      if (pane) {
+        pane.classList.toggle('hidden', !show);
+        if (show) pane.removeAttribute('hidden');
+        else pane.setAttribute('hidden', '');
+      }
+      if (tab && !tab.disabled) {
+        tab.classList.toggle('active', show);
+        tab.setAttribute('aria-selected', show ? 'true' : 'false');
+      }
+    });
+  }
+
+  function renderComments(comments) {
+    commentsEl.innerHTML = '';
+    if (!comments.length) {
+      commentsEl.innerHTML =
+        '<div class="inbox-empty">No hay comentarios pendientes.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    comments.forEach((c) => {
+      const card = document.createElement('article');
+      card.className = 'inbox-card';
+      card.setAttribute('data-comment-id', String(c.id));
+      card.innerHTML =
+        '<div class="inbox-card-meta">' +
+        '<span class="inbox-badge is-pending">' +
+        escapeHtml(c.status || 'pending') +
+        '</span>' +
+        '<span>@' +
+        escapeHtml(c.from_username || 'desconocido') +
+        '</span>' +
+        '<span>' +
+        escapeHtml(formatWhen(c.comment_timestamp)) +
+        '</span>' +
+        '<span class="mono">#' +
+        escapeHtml(String(c.id)) +
+        '</span>' +
+        '</div>' +
+        '<p class="inbox-card-text">' +
+        escapeHtml(c.text || '(sin texto)') +
+        '</p>' +
+        '<div class="inbox-reply-row">' +
+        '<textarea class="mcl-input inbox-reply-text" rows="2" placeholder="Escribí la respuesta…"></textarea>' +
+        '<div class="inbox-reply-actions">' +
+        '<button type="button" class="btn btn-primary inbox-reply-btn" data-kind="comment" data-id="' +
+        escapeHtml(String(c.id)) +
+        '">Responder</button>' +
+        '<span class="inbox-card-feedback" data-feedback></span>' +
+        '</div></div>';
+      frag.appendChild(card);
+    });
+    commentsEl.appendChild(frag);
+  }
+
+  function renderDms(conversations) {
+    dmsEl.innerHTML = '';
+    if (!conversations.length) {
+      dmsEl.innerHTML =
+        '<div class="inbox-empty">No hay conversaciones pendientes.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    conversations.forEach((c) => {
+      const windowCls =
+        c.response_window_status === 'expiring'
+          ? ' is-expiring'
+          : c.response_window_status === 'open'
+            ? ' is-pending'
+            : '';
+      const card = document.createElement('article');
+      card.className = 'inbox-card';
+      card.setAttribute('data-conversation-id', String(c.id));
+      card.innerHTML =
+        '<div class="inbox-card-meta">' +
+        '<span class="inbox-badge is-pending">' +
+        escapeHtml(c.status || 'pending') +
+        '</span>' +
+        (c.response_window_status
+          ? '<span class="inbox-badge' +
+            windowCls +
+            '">' +
+            escapeHtml(c.response_window_status) +
+            '</span>'
+          : '') +
+        '<span>@' +
+        escapeHtml(c.ig_username || c.recipient_ig_scoped_id || 'cliente') +
+        '</span>' +
+        '<span>Último inbound: ' +
+        escapeHtml(formatWhen(c.last_inbound_at)) +
+        '</span>' +
+        '<span class="mono">#' +
+        escapeHtml(String(c.id)) +
+        '</span>' +
+        '</div>' +
+        '<p class="inbox-card-text">Ventana vence: ' +
+        escapeHtml(formatWhen(c.response_window_expires_at)) +
+        '</p>' +
+        '<div class="inbox-reply-row">' +
+        '<textarea class="mcl-input inbox-reply-text" rows="2" placeholder="Escribí el DM…"></textarea>' +
+        '<div class="inbox-reply-actions">' +
+        '<button type="button" class="btn btn-primary inbox-reply-btn" data-kind="dm" data-id="' +
+        escapeHtml(String(c.id)) +
+        '">Responder</button>' +
+        '<span class="inbox-card-feedback" data-feedback></span>' +
+        '</div></div>';
+      frag.appendChild(card);
+    });
+    dmsEl.appendChild(frag);
+  }
+
+  async function loadInbox() {
+    if (busy) return;
+    busy = true;
+    setStatus('Cargando inbox…', false);
+    try {
+      const [commentsRes, dmsRes] = await Promise.all([
+        fetch(API_BASE + '/api/social-comments?status=pending&limit=50', {
+          headers: { Accept: 'application/json' },
+        }),
+        fetch(API_BASE + '/api/social-conversations?status=pending&limit=50', {
+          headers: { Accept: 'application/json' },
+        }),
+      ]);
+      const commentsBody = await readJsonSafe(commentsRes);
+      const dmsBody = await readJsonSafe(dmsRes);
+
+      if (!commentsRes.ok || !dmsRes.ok) {
+        const errMsg =
+          (commentsBody && commentsBody.error) ||
+          (dmsBody && dmsBody.error) ||
+          'No se pudo cargar el inbox.';
+        setStatus(errMsg, true);
+        return;
+      }
+
+      const comments = Array.isArray(commentsBody && commentsBody.comments)
+        ? commentsBody.comments
+        : [];
+      const conversations = Array.isArray(dmsBody && dmsBody.conversations)
+        ? dmsBody.conversations
+        : [];
+
+      renderComments(comments);
+      renderDms(conversations);
+      setStatus(
+        comments.length +
+          ' comentario(s), ' +
+          conversations.length +
+          ' DM(s)',
+        false,
+      );
+    } catch (err) {
+      setStatus('No se pudo conectar con el servidor.', true);
+      commentsEl.innerHTML = '';
+      dmsEl.innerHTML = '';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function sendReply(kind, id, card) {
+    const textarea = card.querySelector('.inbox-reply-text');
+    const feedback = card.querySelector('[data-feedback]');
+    const btn = card.querySelector('.inbox-reply-btn');
+    const text = textarea ? String(textarea.value || '').trim() : '';
+    if (!text) {
+      if (feedback) {
+        feedback.textContent = 'Escribí un mensaje.';
+        feedback.className = 'inbox-card-feedback is-error';
+      }
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Enviando…';
+    }
+    if (feedback) {
+      feedback.textContent = '';
+      feedback.className = 'inbox-card-feedback';
+    }
+
+    const actor = actorId();
+    let url;
+    let payload;
+    if (kind === 'comment') {
+      url = API_BASE + '/api/social-comments/' + encodeURIComponent(id) + '/reply';
+      payload = { replyText: text, repliedBy: actor };
+    } else {
+      url =
+        API_BASE +
+        '/api/social-conversations/' +
+        encodeURIComponent(id) +
+        '/send';
+      payload = { messageText: text, sentBy: actor };
+    }
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = await readJsonSafe(res);
+
+      if (res.status === 409 && body && body.requiresConfirmation) {
+        const ok = window.confirm(
+          'Este mensaje dispara un guardrail de confirmación.\n\n' +
+            ((body.matches &&
+              body.matches.map((m) => m.phrase_or_pattern).join(', ')) ||
+              '') +
+            '\n\n¿Enviar de todos modos?',
+        );
+        if (ok) {
+          payload.guardrailConfirmed = true;
+          const res2 = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+          const body2 = await readJsonSafe(res2);
+          if (!res2.ok) {
+            if (feedback) {
+              feedback.textContent =
+                (body2 && body2.error) || 'Error al enviar.';
+              feedback.className = 'inbox-card-feedback is-error';
+            }
+            return;
+          }
+          if (feedback) {
+            feedback.textContent = body2 && body2.alreadyReplied
+              ? 'Ya estaba respondido.'
+              : 'Enviado.';
+            feedback.className = 'inbox-card-feedback is-ok';
+          }
+          if (textarea) textarea.value = '';
+          await loadInbox();
+          return;
+        }
+        if (feedback) {
+          feedback.textContent = 'Envío cancelado.';
+          feedback.className = 'inbox-card-feedback';
+        }
+        return;
+      }
+
+      if (!res.ok) {
+        if (feedback) {
+          feedback.textContent = (body && body.error) || 'Error al enviar.';
+          feedback.className = 'inbox-card-feedback is-error';
+        }
+        return;
+      }
+
+      if (feedback) {
+        feedback.textContent =
+          body && body.alreadyReplied
+            ? 'Ya estaba respondido.'
+            : 'Enviado.';
+        feedback.className = 'inbox-card-feedback is-ok';
+      }
+      if (textarea) textarea.value = '';
+      await loadInbox();
+    } catch (err) {
+      if (feedback) {
+        feedback.textContent = 'No se pudo conectar con el servidor.';
+        feedback.className = 'inbox-card-feedback is-error';
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Responder';
+      }
+    }
+  }
+
+  reloadBtn.addEventListener('click', () => {
+    loadInbox();
+  });
+
+  if (igTab) {
+    igTab.addEventListener('click', () => {
+      showChannel('instagram');
+    });
+  }
+
+  panel.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.inbox-reply-btn');
+    if (!btn) return;
+    const card = btn.closest('.inbox-card');
+    if (!card) return;
+    const kind = btn.getAttribute('data-kind');
+    const id = btn.getAttribute('data-id');
+    if (!kind || !id) return;
+    sendReply(kind, id, card);
+  });
+
+  window.__openInbox = () => {
+    showChannel('instagram');
+    loadInbox();
+    openedOnce = true;
+  };
+})();
