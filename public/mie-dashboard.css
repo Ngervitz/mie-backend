@@ -80,18 +80,26 @@
 
 #mie-dashboard-app .tab-brand-icon {
   flex-shrink: 0;
+  display: block;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+
+/* Meta infinity is wider/shorter by design — keep its intrinsic tab size. */
+#mie-dashboard-app .dashboard-tab[data-dashboard-tab="meta"] > .tab-brand-icon {
+  width: 22px;
+  height: 15px;
 }
 
 #mie-dashboard-app img.tab-brand-icon {
-  width: 16px;
-  height: 16px;
   object-fit: contain;
-  display: block;
 }
 
 #mie-dashboard-app .tab-brand-icon-fallback {
   font-size: 14px;
   line-height: 1;
+  display: block;
 }
 
 #mie-dashboard-app .dashboard-tab:hover {
@@ -147,6 +155,8 @@
 #mie-dashboard-app .inbox-tab-brands .tab-brand-icon {
   display: block;
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
 }
 
 #mie-dashboard-app .meta-subnav-btn.is-disabled,
