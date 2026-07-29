@@ -225,6 +225,11 @@ async function paginate(path, query, { shouldStop } = {}) {
     const data = Array.isArray(payload.data) ? payload.data : [];
     items.push(...data);
 
+    // Empty page: stop even if Meta still returns paging.next (avoids loops / junk cursors).
+    if (data.length === 0) {
+      break;
+    }
+
     if (typeof shouldStop === 'function' && shouldStop(payload, data, items)) {
       break;
     }
