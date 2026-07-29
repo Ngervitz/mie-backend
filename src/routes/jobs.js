@@ -1024,10 +1024,19 @@ router.post('/run-instagram-dms-sync', async (req, res) => {
   } catch (err) {
     logger.error('instagram_dms_sync failed', {
       error: err && err.message ? err.message : 'unknown',
+      stack: err && err.stack ? err.stack : null,
+      metaCode: err && err.metaCode != null ? err.metaCode : null,
+      httpStatus: err && err.httpStatus != null ? err.httpStatus : null,
+      body: err && err.body != null ? err.body : null,
     });
     return res.status(500).json({
       ok: false,
       error: err && err.message ? err.message : 'unknown',
+      // TEMP: surface Meta diagnostics until Railway log access is confirmed
+      metaCode: err && err.metaCode != null ? err.metaCode : null,
+      httpStatus: err && err.httpStatus != null ? err.httpStatus : null,
+      body: err && err.body != null ? err.body : null,
+      stack: err && err.stack ? err.stack : null,
     });
   }
 });

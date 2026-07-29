@@ -73,6 +73,13 @@ async function runInstagramDmsSync() {
         summary.message = err.message;
         return summary;
       }
+      logger.error('instagram_dms_sync listConversations failed', {
+        error: err && err.message ? err.message : 'unknown',
+        stack: err && err.stack ? err.stack : null,
+        metaCode: err instanceof InstagramGraphError ? err.metaCode : null,
+        httpStatus: err instanceof InstagramGraphError ? err.httpStatus : null,
+        body: err instanceof InstagramGraphError ? err.body : null,
+      });
       throw err;
     }
 
@@ -103,12 +110,37 @@ async function runInstagramDmsSync() {
         logger.error('instagram_dms_sync conversation failed', {
           igConversationId,
           error: err && err.message ? err.message : 'unknown',
+          stack: err && err.stack ? err.stack : null,
+          metaCode: err instanceof InstagramGraphError ? err.metaCode : null,
+          httpStatus: err instanceof InstagramGraphError ? err.httpStatus : null,
+          body: err instanceof InstagramGraphError ? err.body : null,
         });
       }
     }
 
     logger.info('instagram_dms_sync completed', summary);
     return summary;
+  } catch (err) {
+    // TEMP diagnostics — remove after Meta "unknown error" root cause is known
+    const diagnostic = {
+      message: err && err.message ? err.message : 'unknown',
+      name: err && err.name ? err.name : null,
+      stack: err && err.stack ? err.stack : null,
+      metaCode: err instanceof InstagramGraphError ? err.metaCode : null,
+      httpStatus: err instanceof InstagramGraphError ? err.httpStatus : null,
+      isRateLimited:
+        err instanceof InstagramGraphError ? err.isRateLimited : null,
+      isNotFound: err instanceof InstagramGraphError ? err.isNotFound : null,
+      isTransient:
+        err instanceof InstagramGraphError ? err.isTransient : null,
+      body: err instanceof InstagramGraphError ? err.body : null,
+    };
+    console.log(
+      '[TEMP] instagram_dms_sync catch diagnostic:',
+      JSON.stringify(diagnostic),
+    );
+    logger.error('instagram_dms_sync failed', diagnostic);
+    throw err;
   } finally {
     await releaseJobLock(jobName, lockedBy);
   }
