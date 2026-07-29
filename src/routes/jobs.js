@@ -18,6 +18,7 @@ const { isValidDateOnly, todayUtc } = require('../activity/dates');
 const { runInstagramPostsSync } = require('../jobs/instagramPostsSync');
 const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
 const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
+const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -970,9 +971,11 @@ const runGa4MetricsHandler = (req, res) => {
 router.post('/run-ga4-metrics', runGa4MetricsHandler);
 router.get('/run-ga4-metrics', runGa4MetricsHandler);
 
-// --- Instagram comments (Credizona @credizonauy) — cron-job.org triggers ---
+// --- Instagram (Credizona @credizonauy) — cron-job.org triggers ---
 // Synchronous: one full run per request, then respond. No in-process scheduler.
 // Overlap protection is job_locks (DB), not an in-memory singleton.
+// Shared Meta rate budget: bucket_key instagram_credizonauy.
+// cron-job.org: schedule run-instagram-dms-sync BEFORE run-instagram-comments-poll.
 
 function sendInstagramJobResult(res, result) {
   if (result && result.code === 'MISSING_IG_TOKEN') {
@@ -997,6 +1000,29 @@ router.post('/run-instagram-posts-sync', async (req, res) => {
     return sendInstagramJobResult(res, result);
   } catch (err) {
     logger.error('instagram_posts_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-instagram-dms-sync', async (req, res) => {
+  logger.info('POST /jobs/run-instagram-dms-sync — started');
+  try {
+    const result = await runInstagramDmsSync();
+    logger.info('instagram_dms_sync finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      conversationsListed: result.conversationsListed,
+      conversationsSynced: result.conversationsSynced,
+    });
+    return sendInstagramJobResult(res, result);
+  } catch (err) {
+    logger.error('instagram_dms_sync failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({
