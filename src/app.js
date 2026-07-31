@@ -4,6 +4,8 @@ const reportsRouter = require('./routes/reports');
 const hugoRouter = require('./routes/hugo');
 const socialCommentsRouter = require('./routes/social-comments');
 const socialConversationsRouter = require('./routes/social-conversations');
+const liquidityCycleRouter = require('./routes/liquidity-cycle');
+const bcuUsuraRateRouter = require('./routes/bcu-usura-rate');
 const logger = require('./lib/logger');
 
 const app = express();
@@ -15,6 +17,8 @@ app.use('/reports', reportsRouter);
 app.use('/hugo', hugoRouter);
 app.use('/api/social-comments', socialCommentsRouter);
 app.use('/api/social-conversations', socialConversationsRouter);
+app.use('/api/liquidity-cycle', liquidityCycleRouter);
+app.use('/api/bcu-usura-rate', bcuUsuraRateRouter);
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error', { error: err.message });

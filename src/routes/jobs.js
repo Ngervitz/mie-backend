@@ -19,6 +19,7 @@ const { runInstagramPostsSync } = require('../jobs/instagramPostsSync');
 const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
 const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
+const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -1078,6 +1079,31 @@ router.post('/run-instagram-reply-recovery', async (req, res) => {
     return sendInstagramJobResult(res, result);
   } catch (err) {
     logger.error('instagram_reply_recovery failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-liquidity-cycle-sync', async (req, res) => {
+  logger.info('POST /jobs/run-liquidity-cycle-sync — started');
+  try {
+    const logDate =
+      typeof req.query.date === 'string' ? req.query.date.trim() : undefined;
+    const result = await runLiquidityCycleSync(
+      logDate ? { logDate } : {},
+    );
+    logger.info('liquidity_cycle_sync finished', {
+      logDate: result.logDate,
+      cyclePhase: result.cyclePhase,
+      metaSpendDay: result.metaSpendDay,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('liquidity_cycle_sync failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({

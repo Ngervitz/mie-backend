@@ -44,6 +44,10 @@
     nextEvents: { nextHoliday: null, nextBpsPayment: null },
     // Auction pressure from GET /reports/auction-pressure; null → "sin datos".
     auctionPressure: null,
+    // Liquidity cycle: { today, history } from GET /api/liquidity-cycle/history.
+    liquidityCycle: null,
+    // Current BCU usura rate from GET /api/bcu-usura-rate/current.
+    bcuUsuraRate: null,
   };
 
   var root = null;
@@ -739,6 +743,91 @@
     });
   }
 
+  var LIQUIDITY_PHASE_LABELS = {
+    alta_demanda: 'Alta demanda',
+    mitad_mes: 'Mitad de mes',
+    cierre_mes: 'Cierre de mes',
+  };
+
+  function liquidityPhaseLabel(phase) {
+    return LIQUIDITY_PHASE_LABELS[phase] || phase || '—';
+  }
+
+  function liquidityCycleKpi(payload) {
+    var base = {
+      label: 'SEMANA DE ZAFRA',
+      color: '#38bdf8',
+      icon: '🌾',
+    };
+    if (!payload || !payload.today || !payload.today.cyclePhase) {
+      return Object.assign({}, base, { val: '—', sub: 'sin datos' });
+    }
+    var day = payload.today.dayOfMonth;
+    return Object.assign({}, base, {
+      val: liquidityPhaseLabel(payload.today.cyclePhase),
+      sub: day ? 'día ' + day + ' del mes' : 'fase de hoy',
+    });
+  }
+
+  function bcuUsuraKpi(rate) {
+    var base = {
+      label: 'TASA USURA BCU',
+      color: '#c084fc',
+      icon: '📉',
+    };
+    if (!rate || rate.rate_percent == null) {
+      return Object.assign({}, base, { val: '—', sub: 'sin datos' });
+    }
+    var from = formatDateEs(rate.effective_from);
+    return Object.assign({}, base, {
+      val: fmt(rate.rate_percent) + '%',
+      sub: from ? 'rige desde ' + from : 'tasa vigente',
+    });
+  }
+
+  function renderLiquidityHistory(payload) {
+    var rows = payload && Array.isArray(payload.history) ? payload.history : [];
+    if (rows.length === 0) {
+      return (
+        '<section class="ma-kpi-section ma-liquidity-history">' +
+        '<h2 class="ma-kpi-section-title">Historial ciclo de liquidez (30 días)</h2>' +
+        '<div class="ma-empty">Sin registros todavía — el job diario irá llenando este historial</div>' +
+        '</section>'
+      );
+    }
+    return (
+      '<section class="ma-kpi-section ma-liquidity-history">' +
+      '<h2 class="ma-kpi-section-title">Historial ciclo de liquidez (30 días)</h2>' +
+      '<div class="ma-table-wrap">' +
+      '<table class="ma-table">' +
+      '<thead><tr><th>Fecha</th><th>Fase</th><th>Gasto Meta</th></tr></thead>' +
+      '<tbody>' +
+      rows
+        .map(function (r) {
+          var dateLabel = formatDateEs(r.log_date) || r.log_date || '—';
+          var spend =
+            r.meta_spend_day !== null && r.meta_spend_day !== undefined
+              ? '$' + fmt(r.meta_spend_day)
+              : '—';
+          return (
+            '<tr>' +
+            '<td>' +
+            escapeHtml(dateLabel) +
+            '</td>' +
+            '<td>' +
+            escapeHtml(liquidityPhaseLabel(r.cycle_phase)) +
+            '</td>' +
+            '<td>' +
+            escapeHtml(spend) +
+            '</td>' +
+            '</tr>'
+          );
+        })
+        .join('') +
+      '</tbody></table></div></section>'
+    );
+  }
+
   function renderEventKpi(label, icon, ev) {
     var value = '—';
     var sub = 'Sin datos';
@@ -889,6 +978,8 @@
       renderEventKpi('FERIADO', '📅', ev.nextHoliday),
       renderEventKpi('PAGO BPS', '🏦', ev.nextBpsPayment),
       auctionPressureKpi(state.auctionPressure),
+      liquidityCycleKpi(state.liquidityCycle),
+      bcuUsuraKpi(state.bcuUsuraRate),
       {
         label: 'ALERTAS',
         val: String(alertas.length),
@@ -904,7 +995,9 @@
         'Performance Publicitaria',
         performance,
         'ma-kpi-section-performance',
-      ) + renderKpiSection('Contexto y Señales', context)
+      ) +
+      renderKpiSection('Contexto y Señales', context) +
+      renderLiquidityHistory(state.liquidityCycle)
     );
   }
 
@@ -1278,6 +1371,8 @@
     render();
     loadNextEvents();
     loadAuctionPressure();
+    loadLiquidityCycle();
+    loadBcuUsuraRate();
   }
 
   /**
@@ -1322,6 +1417,49 @@
       var body = await res.json();
       if (!body || typeof body !== 'object') return;
       state.auctionPressure = body;
+      render();
+    } catch (e) {
+      // Keep null → "sin datos".
+    }
+  }
+
+  /**
+   * Liquidity cycle — today's phase + 30-day spend history. Failures leave
+   * null (card/historial show sin datos); never blocks Own Ads panel.
+   */
+  async function loadLiquidityCycle() {
+    var base = window.location.protocol === 'file:'
+      ? 'https://mie-backend-production.up.railway.app'
+      : '';
+    try {
+      var res = await fetch(base + '/api/liquidity-cycle/history', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return;
+      var body = await res.json();
+      if (!body || typeof body !== 'object') return;
+      state.liquidityCycle = body;
+      render();
+    } catch (e) {
+      // Keep null → "sin datos".
+    }
+  }
+
+  /**
+   * Current BCU usura rate — informational only. 404 / failures → "sin datos".
+   */
+  async function loadBcuUsuraRate() {
+    var base = window.location.protocol === 'file:'
+      ? 'https://mie-backend-production.up.railway.app'
+      : '';
+    try {
+      var res = await fetch(base + '/api/bcu-usura-rate/current', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return;
+      var body = await res.json();
+      if (!body || typeof body !== 'object' || !body.rate) return;
+      state.bcuUsuraRate = body.rate;
       render();
     } catch (e) {
       // Keep null → "sin datos".
