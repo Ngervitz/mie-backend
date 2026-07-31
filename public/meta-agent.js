@@ -996,7 +996,11 @@
         performance,
         'ma-kpi-section-performance',
       ) +
-      renderKpiSection('Contexto y Señales', context) +
+      renderKpiSection(
+        'Contexto y Señales',
+        context,
+        'ma-kpi-section-context',
+      ) +
       renderLiquidityHistory(state.liquidityCycle)
     );
   }

@@ -248,7 +248,7 @@
   color: var(--meta-agent-muted);
 }
 
-/* Denser Performance cards only — Contexto y Señales keep default .ma-card. */
+/* Denser Performance cards only. */
 .ma-kpi-section-performance .ma-kpi-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -290,6 +290,56 @@
 
 .ma-kpi-section-performance .ma-trend {
   font-size: 11px;
+}
+
+/* Contexto y Señales — compact cards + stronger contrast vs page bg. */
+.ma-kpi-section-context .ma-kpi-grid {
+  gap: 10px;
+}
+
+.ma-kpi-section-context .ma-card {
+  padding: 10px 12px;
+  min-height: 0;
+  border-radius: 10px;
+  background: #22262f;
+  border: 1px solid #3d4452;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.ma-kpi-section-context .ma-card-top {
+  margin-bottom: 4px;
+}
+
+.ma-kpi-section-context .ma-kpi-label {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+
+.ma-kpi-section-context .ma-kpi-icon {
+  font-size: 13px;
+}
+
+.ma-kpi-section-context .ma-kpi-value {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.ma-kpi-section-context .ma-kpi-value-compact {
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  line-height: 1.3;
+  font-family: inherit;
+}
+
+.ma-kpi-section-context .ma-kpi-sub {
+  font-size: 9px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.ma-kpi-section-context .ma-card-signal-alert {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: #ef4444;
 }
 
 .ma-kpi-value-row {
@@ -676,4 +726,16 @@
   background: var(--meta-agent-surface);
   border-color: var(--meta-agent-border);
   box-shadow: none;
+}
+
+/* Keep Contexto contrast when embedded in the unified MIC shell. */
+#mie-dashboard-app #meta-ads-root .ma-kpi-section-context .ma-card {
+  background: #22262f;
+  border-color: #3d4452;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#mie-dashboard-app #meta-ads-root .ma-kpi-section-context .ma-card-signal-alert {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: #ef4444;
 }
