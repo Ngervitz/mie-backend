@@ -1,14 +1,16 @@
 /**
- * MetaDash Instagram comment replies + list.
+ * MetaDash social comment replies + list (Instagram + Facebook).
  * GET  /api/social-comments?status=pending&limit=&offset=
- * POST /api/social-comments/:id/reply
+ * POST /api/social-comments/:id/reply  — dispatches by comment.platform
  */
 
 const express = require('express');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
-const { getAccessToken } = require('../services/instagram-comments/config');
-const { runReplyFlow } = require('../services/instagram-comments/reply-flow');
+const { getAccessToken: getIgAccessToken } = require('../services/instagram-comments/config');
+const { runReplyFlow: runIgReplyFlow } = require('../services/instagram-comments/reply-flow');
+const { getAccessToken: getFbAccessToken } = require('../services/facebook-comments/config');
+const { runReplyFlow: runFbReplyFlow } = require('../services/facebook-comments/reply-flow');
 
 const router = express.Router();
 
@@ -87,13 +89,6 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/:id/reply', async (req, res) => {
-  if (!getAccessToken()) {
-    return res.status(503).json({
-      error: 'IG_CREDIZONAUY_ACCESS_TOKEN is not configured',
-      code: 'MISSING_IG_TOKEN',
-    });
-  }
-
   const idRaw = req.params.id;
   const commentId = Number(idRaw);
   if (!Number.isFinite(commentId) || commentId < 1) {
@@ -122,12 +117,56 @@ router.post('/:id/reply', async (req, res) => {
   });
 
   try {
-    const result = await runReplyFlow({
-      commentId,
-      replyText,
-      repliedBy,
-      skipOptimisticLock: false,
-    });
+    const { data: commentRow, error: loadErr } = await supabase
+      .from('social_comments')
+      .select('*')
+      .eq('id', commentId)
+      .maybeSingle();
+
+    if (loadErr) {
+      return res.status(500).json({ error: loadErr.message });
+    }
+    if (!commentRow) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    const platform = commentRow.platform;
+    let result;
+
+    if (platform === 'facebook') {
+      if (!getFbAccessToken()) {
+        return res.status(503).json({
+          error: 'FB_CREDIZONAUY_PAGE_ACCESS_TOKEN is not configured',
+          code: 'MISSING_FB_TOKEN',
+        });
+      }
+      result = await runFbReplyFlow({
+        commentId,
+        replyText,
+        repliedBy,
+        skipOptimisticLock: false,
+        commentRow,
+      });
+    } else if (platform === 'instagram') {
+      if (!getIgAccessToken()) {
+        return res.status(503).json({
+          error: 'IG_CREDIZONAUY_ACCESS_TOKEN is not configured',
+          code: 'MISSING_IG_TOKEN',
+        });
+      }
+      result = await runIgReplyFlow({
+        commentId,
+        replyText,
+        repliedBy,
+        skipOptimisticLock: false,
+        commentRow,
+      });
+    } else {
+      return res.status(400).json({
+        error: `Unsupported comment platform: ${platform || 'unknown'}`,
+      });
+    }
+
     return res.status(result.httpStatus).json(result.body);
   } catch (err) {
     logger.error('social-comments reply failed', {

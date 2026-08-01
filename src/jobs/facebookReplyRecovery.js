@@ -6,23 +6,23 @@ const {
   JOB_LOCK_TTL_SECONDS,
   REPLY_STUCK_MINUTES,
   getAccessToken,
-} = require('../services/instagram-comments/config');
+} = require('../services/facebook-comments/config');
 const {
   acquireJobLock,
   releaseJobLock,
-} = require('../services/instagram-comments/locks');
-const { runReplyFlow } = require('../services/instagram-comments/reply-flow');
+} = require('../services/facebook-comments/locks');
+const { runReplyFlow } = require('../services/facebook-comments/reply-flow');
 
 /**
- * Job 3: recover stuck 'replying' comments via the same reconcile-first reply flow.
+ * Job 3: recover stuck Facebook 'replying' comments via reconcile-first reply flow.
  * Independent of the comments poll job.
  */
-async function runInstagramReplyRecovery() {
+async function runFacebookReplyRecovery() {
   if (!getAccessToken()) {
     return {
       ok: false,
-      error: 'IG_CREDIZONAUY_ACCESS_TOKEN is not configured',
-      code: 'MISSING_IG_TOKEN',
+      error: 'FB_CREDIZONAUY_PAGE_ACCESS_TOKEN is not configured',
+      code: 'MISSING_FB_TOKEN',
     };
   }
 
@@ -58,7 +58,6 @@ async function runInstagramReplyRecovery() {
   };
 
   try {
-    // Budget is reserved atomically inside each graph.instagram.com call.
     const cutoff = new Date(
       Date.now() - REPLY_STUCK_MINUTES * 60 * 1000,
     ).toISOString();
@@ -66,7 +65,7 @@ async function runInstagramReplyRecovery() {
     const { data: stuck, error } = await supabase
       .from('social_comments')
       .select('*')
-      .eq('platform', 'instagram')
+      .eq('platform', 'facebook')
       .eq('status', 'replying')
       .lt('reply_started_at', cutoff);
 
@@ -115,18 +114,18 @@ async function runInstagramReplyRecovery() {
         }
       } catch (err) {
         summary.errors += 1;
-        logger.error('instagram_reply_recovery item failed', {
+        logger.error('facebook_reply_recovery item failed', {
           commentId: row.id,
           error: err && err.message ? err.message : 'unknown',
         });
       }
     }
 
-    logger.info('instagram_reply_recovery completed', summary);
+    logger.info('facebook_reply_recovery completed', summary);
     return summary;
   } finally {
     await releaseJobLock(jobName, lockedBy);
   }
 }
 
-module.exports = { runInstagramReplyRecovery };
+module.exports = { runFacebookReplyRecovery };

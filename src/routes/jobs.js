@@ -20,6 +20,9 @@ const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
 const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
 const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
+const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
+const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
+const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -1079,6 +1082,87 @@ router.post('/run-instagram-reply-recovery', async (req, res) => {
     return sendInstagramJobResult(res, result);
   } catch (err) {
     logger.error('instagram_reply_recovery failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+// --- Facebook Page comments (Credizona) — cron-job.org triggers ---
+// Bucket: facebook_credizona (separate from Instagram).
+
+function sendFacebookJobResult(res, result) {
+  if (result && result.code === 'MISSING_FB_TOKEN') {
+    return res.status(503).json(result);
+  }
+  if (result && result.reason === 'lock_not_acquired') {
+    return res.status(409).json(result);
+  }
+  return res.status(200).json(result);
+}
+
+router.post('/run-facebook-posts-sync', async (req, res) => {
+  logger.info('POST /jobs/run-facebook-posts-sync — started');
+  try {
+    const result = await runFacebookPostsSync();
+    logger.info('facebook_posts_sync finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      mediaFetched: result.mediaFetched,
+    });
+    return sendFacebookJobResult(res, result);
+  } catch (err) {
+    logger.error('facebook_posts_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-facebook-comments-poll', async (req, res) => {
+  logger.info('POST /jobs/run-facebook-comments-poll — started');
+  try {
+    const result = await runFacebookCommentsPoll();
+    logger.info('facebook_comments_poll finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      postsEligible: result.postsEligible,
+      postsSuccess: result.postsSuccess,
+    });
+    return sendFacebookJobResult(res, result);
+  } catch (err) {
+    logger.error('facebook_comments_poll failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-facebook-reply-recovery', async (req, res) => {
+  logger.info('POST /jobs/run-facebook-reply-recovery — started');
+  try {
+    const result = await runFacebookReplyRecovery();
+    logger.info('facebook_reply_recovery finished', {
+      ok: result.ok,
+      skipped: result.skipped,
+      rateLimited: result.rateLimited,
+      stuckFound: result.stuckFound,
+      recovered: result.recovered,
+    });
+    return sendFacebookJobResult(res, result);
+  } catch (err) {
+    logger.error('facebook_reply_recovery failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({
