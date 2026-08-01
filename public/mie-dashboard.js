@@ -1372,9 +1372,6 @@ function renderHeader() {
   return `
     <header class="header">
       <div class="brand">
-        <div class="brand-mark">
-          <img src="/assets/janus-logo.svg" alt="Janus - Market Intelligence" class="logo-img">
-        </div>
         <div class="brand-sub">Monitoreo competitivo de anuncios</div>
       </div>
       <div class="header-right">
