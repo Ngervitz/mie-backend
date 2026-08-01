@@ -23,6 +23,7 @@ const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
 const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
+const { runCzSync } = require('../jobs/czSync');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -1163,6 +1164,40 @@ router.post('/run-facebook-reply-recovery', async (req, res) => {
     return sendFacebookJobResult(res, result);
   } catch (err) {
     logger.error('facebook_reply_recovery failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+router.post('/run-cz-sync', async (req, res) => {
+  logger.info('POST /jobs/run-cz-sync — started');
+  try {
+    const result = await runCzSync();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('cz_sync finished', {
+      ok: result.ok,
+      grantedLoans: result.grantedLoans && {
+        status: result.grantedLoans.status,
+        notConfigured: result.grantedLoans.notConfigured,
+        pages: result.grantedLoans.pages,
+        itemsUpserted: result.grantedLoans.itemsUpserted,
+      },
+      solicitudes: result.solicitudes && {
+        status: result.solicitudes.status,
+        notConfigured: result.solicitudes.notConfigured,
+        pages: result.solicitudes.pages,
+        itemsUpserted: result.solicitudes.itemsUpserted,
+      },
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('cz_sync failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({
