@@ -1435,6 +1435,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  overflow: hidden;
 }
 
 #mie-dashboard-app .meta-subnav-btn:hover {
