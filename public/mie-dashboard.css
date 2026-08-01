@@ -2880,3 +2880,61 @@
     font-size: 0.8rem;
   }
 }
+
+/* ---------- Campañas Email (mock UI) ---------- */
+#mie-dashboard-app .email-landing-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+#mie-dashboard-app .provider-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-medium);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app #email-create-btn {
+  margin-bottom: 18px;
+}
+
+#mie-dashboard-app #email-list {
+  margin-top: 4px;
+}
+
+#mie-dashboard-app .email-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-medium);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .email-badge.is-completed {
+  color: var(--accent-success);
+  background: var(--accent-success-soft);
+  border-color: var(--accent-success);
+}
+
+#mie-dashboard-app .email-badge.is-sending {
+  color: var(--accent-warn);
+  background: var(--accent-warn-soft);
+  border-color: var(--accent-warn);
+}
+
+#mie-dashboard-app .email-badge.is-error,
+#mie-dashboard-app .email-badge.is-partial_error {
+  color: var(--accent-danger);
+  background: var(--accent-danger-soft);
+  border-color: var(--accent-danger);
+}

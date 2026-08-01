@@ -133,6 +133,16 @@
         class="dashboard-tab"
         role="tab"
         aria-selected="false"
+        data-dashboard-tab="email"
+        id="tab-email">
+        <i class="ti ti-mail" aria-hidden="true"></i>
+        Campañas Email
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
         data-dashboard-tab="inbox"
         id="tab-inbox"
         title="Inbox">
@@ -598,6 +608,23 @@
       </div>
     </div>
 
+    <!-- Campañas Email: UI mock (Resend) — sin backend todavía. -->
+    <div
+      class="dashboard-panel hidden"
+      id="email-panel"
+      role="tabpanel"
+      aria-labelledby="tab-email"
+      hidden>
+      <div id="email-landing" class="mcl-landing">
+        <header class="email-landing-header">
+          <h2 class="mcl-title">Campañas Email</h2>
+          <span class="provider-badge">Envíos vía Resend</span>
+        </header>
+        <button type="button" id="email-create-btn" class="btn btn-primary">+ Nueva campaña</button>
+        <div id="email-list"></div>
+      </div>
+    </div>
+
     <!-- Inbox: Instagram comments + DMs (FB/Messenger placeholders). -->
     <div
       class="dashboard-panel hidden"
@@ -716,9 +743,10 @@
         searchconsole: document.getElementById('search-console-panel'),
         meta: document.getElementById('meta-ads-panel'),
         sms: document.getElementById('sms-panel'),
+        email: document.getElementById('email-panel'),
         inbox: document.getElementById('inbox-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.inbox || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !tabs.length) return;
 
       var current = 'market';
 
@@ -743,6 +771,7 @@
         if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
         if (name === 'sms' && window.__openSms) window.__openSms();
+        if (name === 'email' && window.__openEmail) window.__openEmail();
         if (name === 'inbox' && window.__openInbox) window.__openInbox();
         current = name;
       }

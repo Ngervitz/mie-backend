@@ -5681,3 +5681,83 @@ init();
     openedOnce = true;
   };
 })();
+
+/* ----------------------------------------------------------------------------
+ * Campañas Email — UI mock (Resend). Sin red / sin backend.
+ * ------------------------------------------------------------------------- */
+(function initEmailCampaigns() {
+  const panel = document.getElementById('email-panel');
+  if (!panel) return;
+
+  const list = document.getElementById('email-list');
+  const createButton = document.getElementById('email-create-btn');
+  let listenerAttached = false;
+
+  const mockCampaigns = [
+    { name: 'Bienvenida encuesta alta', status: 'completed', recipient_count: 42, created_at: '2026-07-20' },
+    { name: 'Recordatorio julio', status: 'scheduled', recipient_count: 118, created_at: '2026-07-28' },
+    { name: 'Prueba segmento score>70', status: 'draft', recipient_count: 0, created_at: '2026-08-01' },
+  ];
+
+  function emailStatusClass(status) {
+    const s = String(status || '');
+    if (
+      s === 'completed' ||
+      s === 'scheduled' ||
+      s === 'draft' ||
+      s === 'sending' ||
+      s === 'partial_error' ||
+      s === 'error'
+    ) {
+      return ' is-' + s;
+    }
+    return '';
+  }
+
+  function renderList() {
+    if (!list) return;
+    if (!mockCampaigns.length) {
+      list.innerHTML = '<div class="sms-empty">No hay campañas email todavía.</div>';
+      return;
+    }
+    const body = mockCampaigns
+      .map(function (c) {
+        return (
+          '<tr class="sms-row">' +
+          '<td>' +
+          escapeHtml(c.name) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(c.created_at) +
+          '</td>' +
+          '<td><span class="email-badge' +
+          emailStatusClass(c.status) +
+          '">' +
+          escapeHtml(c.status) +
+          '</span></td>' +
+          '<td>' +
+          escapeHtml(String(c.recipient_count)) +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    list.innerHTML =
+      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<thead><tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>Destinatarios</th></tr></thead>' +
+      '<tbody>' +
+      body +
+      '</tbody></table></div>';
+  }
+
+  if (createButton && !listenerAttached) {
+    createButton.addEventListener('click', function () {
+      alert('Módulo de creación de campañas en desarrollo.');
+    });
+    listenerAttached = true;
+  }
+
+  window.__openEmail = function () {
+    renderList();
+  };
+})();
