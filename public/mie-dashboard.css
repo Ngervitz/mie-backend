@@ -324,6 +324,11 @@
   color: var(--text);
 }
 
+#mie-dashboard-app .brand-mark .logo-img {
+  height: 32px;
+  width: auto;
+}
+
 #mie-dashboard-app .brand-mark .product {
   font-size: 1.05rem;
   font-weight: var(--font-weight-medium);

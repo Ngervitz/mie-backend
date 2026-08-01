@@ -1373,8 +1373,7 @@ function renderHeader() {
     <header class="header">
       <div class="brand">
         <div class="brand-mark">
-          <span class="logo">MIE</span>
-          <span class="product">Market Intelligence Center</span>
+          <img src="/assets/janus-logo.svg" alt="Janus - Market Intelligence" class="logo-img">
         </div>
         <div class="brand-sub">Monitoreo competitivo de anuncios</div>
       </div>
