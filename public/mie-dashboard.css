@@ -82,7 +82,17 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   line-height: 1.2;
-  padding: 0 2px;
+  padding: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font-family: inherit;
 }
 
 #mie-dashboard-app .dashboard-tab-group[data-group="inteligencia"] .dashboard-tab-group-label {
@@ -98,9 +108,27 @@
 }
 
 #mie-dashboard-app .dashboard-tab-group-buttons {
-  display: flex;
+  display: none;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+#mie-dashboard-app .dashboard-tab-group.open .dashboard-tab-group-buttons {
+  display: flex;
+}
+
+#mie-dashboard-app .dashboard-tab-group-label:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+#mie-dashboard-app .dashboard-tab-group-chevron {
+  display: inline-block;
+  transition: transform 160ms ease;
+}
+
+#mie-dashboard-app .dashboard-tab-group-label[aria-expanded='true'] .dashboard-tab-group-chevron {
+  transform: rotate(90deg);
 }
 
 #mie-dashboard-app .dashboard-tab {

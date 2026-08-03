@@ -24,7 +24,14 @@
          top-level here (no longer nested inside Competidores). -->
     <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
       <div class="dashboard-tab-group" data-group="inteligencia">
-        <span class="dashboard-tab-group-label">Inteligencia</span>
+        <button
+          type="button"
+          class="dashboard-tab-group-label"
+          aria-expanded="false"
+          data-group-toggle="inteligencia">
+          <span>Inteligencia</span>
+          <span class="dashboard-tab-group-chevron" aria-hidden="true">▸</span>
+        </button>
         <div class="dashboard-tab-group-buttons">
       <button
         type="button"
@@ -54,7 +61,14 @@
         </div>
       </div>
       <div class="dashboard-tab-group" data-group="analisis">
-        <span class="dashboard-tab-group-label">Análisis</span>
+        <button
+          type="button"
+          class="dashboard-tab-group-label"
+          aria-expanded="false"
+          data-group-toggle="analisis">
+          <span>Análisis</span>
+          <span class="dashboard-tab-group-chevron" aria-hidden="true">▸</span>
+        </button>
         <div class="dashboard-tab-group-buttons">
       <button
         type="button"
@@ -121,7 +135,14 @@
         </div>
       </div>
       <div class="dashboard-tab-group" data-group="marketing">
-        <span class="dashboard-tab-group-label">Marketing</span>
+        <button
+          type="button"
+          class="dashboard-tab-group-label"
+          aria-expanded="false"
+          data-group-toggle="marketing">
+          <span>Marketing</span>
+          <span class="dashboard-tab-group-chevron" aria-hidden="true">▸</span>
+        </button>
         <div class="dashboard-tab-group-buttons">
       <button
         type="button"
@@ -838,6 +859,68 @@
       tabs.forEach(function (btn) {
         btn.addEventListener('click', function () {
           activate(btn.getAttribute('data-dashboard-tab'));
+        });
+      });
+    })();
+  </script>
+  <script>
+    (function initDashboardTabGroupsAccordion() {
+      'use strict';
+
+      var groups = document.querySelectorAll(
+        '#mie-dashboard-app .dashboard-tab-group'
+      );
+
+      var toggles = document.querySelectorAll(
+        '#mie-dashboard-app [data-group-toggle]'
+      );
+
+      if (!groups.length || !toggles.length) return;
+
+      function openGroup(groupName) {
+        groups.forEach(function (group) {
+          var isTarget =
+            group.getAttribute('data-group') === groupName;
+
+          group.classList.toggle('open', isTarget);
+        });
+
+        toggles.forEach(function (toggle) {
+          var isTarget =
+            toggle.getAttribute('data-group-toggle') === groupName;
+
+          toggle.setAttribute(
+            'aria-expanded',
+            isTarget ? 'true' : 'false'
+          );
+        });
+      }
+
+      var activeTab = document.querySelector(
+        '#mie-dashboard-app .dashboard-tab.active'
+      );
+
+      if (activeTab) {
+        var parentGroup = activeTab.closest(
+          '.dashboard-tab-group'
+        );
+
+        if (parentGroup) {
+          openGroup(
+            parentGroup.getAttribute('data-group')
+          );
+        }
+      } else if (groups[0]) {
+        openGroup(
+          groups[0].getAttribute('data-group')
+        );
+      }
+
+      toggles.forEach(function (toggle) {
+        toggle.addEventListener('click', function () {
+          openGroup(
+            toggle.getAttribute('data-group-toggle')
+          );
         });
       });
     })();
