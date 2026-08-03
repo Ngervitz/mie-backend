@@ -97,21 +97,21 @@
 }
 
 #mie-dashboard-app .dashboard-tab-group[data-group="inteligencia"] .dashboard-tab-group-label {
-  color: #1D9E75;
-  border-color: rgba(29, 158, 117, 0.45);
-  background: rgba(29, 158, 117, 0.12);
+  color: #5DCAA5;
+  border-color: rgba(29, 158, 117, 0.7);
+  background: rgba(29, 158, 117, 0.22);
 }
 
 #mie-dashboard-app .dashboard-tab-group[data-group="analisis"] .dashboard-tab-group-label {
-  color: var(--accent-info);
-  border-color: rgba(91, 127, 173, 0.45);
-  background: var(--accent-info-soft);
+  color: #7FA8D9;
+  border-color: rgba(91, 127, 173, 0.7);
+  background: rgba(91, 127, 173, 0.22);
 }
 
 #mie-dashboard-app .dashboard-tab-group[data-group="marketing"] .dashboard-tab-group-label {
-  color: #D4537E;
-  border-color: rgba(212, 83, 126, 0.45);
-  background: rgba(212, 83, 126, 0.12);
+  color: #ED93B1;
+  border-color: rgba(212, 83, 126, 0.7);
+  background: rgba(212, 83, 126, 0.22);
 }
 
 #mie-dashboard-app .dashboard-tab-group-buttons {
