@@ -894,6 +894,11 @@
             isTarget ? 'true' : 'false'
           );
         });
+
+        var marketChrome = document.getElementById('market-chrome');
+        if (marketChrome) {
+          marketChrome.classList.toggle('hidden', groupName !== 'inteligencia');
+        }
       }
 
       var activeTab = document.querySelector(
