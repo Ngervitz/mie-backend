@@ -58,14 +58,49 @@
 }
 
 /* ---------- Tabs / nav ---------- */
-/* Primary row: 4 equal top-level sections in a single row. */
 #mie-dashboard-app .dashboard-tabs {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 12px 20px 0;
   display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+#mie-dashboard-app .dashboard-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+#mie-dashboard-app .dashboard-tab-group-label {
+  font-size: 0.7rem;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  padding: 0 2px;
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="inteligencia"] .dashboard-tab-group-label {
+  color: #1D9E75;
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="analisis"] .dashboard-tab-group-label {
+  color: var(--accent-info);
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="marketing"] .dashboard-tab-group-label {
+  color: #D4537E;
+}
+
+#mie-dashboard-app .dashboard-tab-group-buttons {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  flex-wrap: nowrap;
 }
 
 #mie-dashboard-app .dashboard-tab {
