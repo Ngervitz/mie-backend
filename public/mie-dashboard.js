@@ -5683,7 +5683,7 @@ init();
 })();
 
 /* ----------------------------------------------------------------------------
- * Campañas Email — UI mock (Resend). Sin red / sin backend.
+ * Campañas Email — integración /email/*
  * ------------------------------------------------------------------------- */
 (function initEmailCampaigns() {
   const panel = document.getElementById('email-panel');
@@ -5691,70 +5691,249 @@ init();
 
   const list = document.getElementById('email-list');
   const createButton = document.getElementById('email-create-btn');
-  let listenerAttached = false;
+  const form = document.getElementById('email-create-form');
+  const formSubmit = document.getElementById('email-form-submit');
+  const formCancel = document.getElementById('email-form-cancel');
+  const processQueueBtn = document.getElementById('email-process-queue-btn');
 
-  const mockCampaigns = [
-    { name: 'Bienvenida encuesta alta', status: 'completed', recipient_count: 42, created_at: '2026-07-20' },
-    { name: 'Recordatorio julio', status: 'scheduled', recipient_count: 118, created_at: '2026-07-28' },
-    { name: 'Prueba segmento score>70', status: 'draft', recipient_count: 0, created_at: '2026-08-01' },
-  ];
+  const nameInput = document.getElementById('email-form-name');
+  const subjectInput = document.getElementById('email-form-subject');
+  const bodyInput = document.getElementById('email-form-body');
+  const scoreInput = document.getElementById('email-form-score');
+
+  let listenersAttached = false;
 
   function emailStatusClass(status) {
-    const s = String(status || '');
-    if (
-      s === 'completed' ||
-      s === 'scheduled' ||
-      s === 'draft' ||
-      s === 'sending' ||
-      s === 'partial_error' ||
-      s === 'error'
-    ) {
-      return ' is-' + s;
-    }
-    return '';
+    const allowedStatuses = [
+      'draft', 'scheduled', 'sending', 'completed', 'partial_error', 'error',
+    ];
+    return allowedStatuses.includes(status) ? ' email-badge--' + status : '';
   }
 
-  function renderList() {
-    if (!list) return;
-    if (!mockCampaigns.length) {
-      list.innerHTML = '<div class="sms-empty">No hay campañas email todavía.</div>';
-      return;
+  async function readJsonSafe(response) {
+    return response.json().catch(function () { return {}; });
+  }
+
+  function getErrorMessage(data, fallback) {
+    return data.error || data.message || data.msg || fallback;
+  }
+
+  async function fetchCampaigns() {
+    const response = await fetch('/email/campaigns');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, 'No se pudieron cargar las campañas.'));
     }
-    const body = mockCampaigns
-      .map(function (c) {
+    return Array.isArray(data.campaigns) ? data.campaigns : [];
+  }
+
+  async function createCampaign({ name, subject, bodyHtml, minScore }) {
+    const segmentResponse = await fetch('/email/segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Segmento para ' + name,
+        rules: [{ field: 'encuesta_score', operator: '>=', value: minScore }],
+      }),
+    });
+    const segmentData = await readJsonSafe(segmentResponse);
+    if (!segmentResponse.ok) {
+      throw new Error(getErrorMessage(segmentData, 'No se pudo crear el segmento.'));
+    }
+    if (!segmentData.segment || !segmentData.segment.id) {
+      throw new Error('El servidor creó el segmento pero no devolvió un ID válido.');
+    }
+
+    const campaignResponse = await fetch('/email/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        subject,
+        body_html: bodyHtml,
+        segment_id: segmentData.segment.id,
+        scheduled_at: new Date().toISOString(),
+      }),
+    });
+    const campaignData = await readJsonSafe(campaignResponse);
+    if (!campaignResponse.ok) {
+      throw new Error(getErrorMessage(campaignData, 'El segmento fue creado, pero no se pudo crear la campaña.'));
+    }
+    return campaignData;
+  }
+
+  async function materializeCampaign(id) {
+    const response = await fetch('/email/campaigns/' + encodeURIComponent(id) + '/materialize', {
+      method: 'POST',
+    });
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, 'No se pudo materializar la campaña.'));
+    }
+    return data;
+  }
+
+  async function processQueue() {
+    const response = await fetch('/email/process-queue', { method: 'POST' });
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, 'No se pudo procesar la cola.'));
+    }
+    return data;
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+    });
+  }
+
+  function formatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('es-UY');
+  }
+
+  function formatRecipientCount(value) {
+    const count = Number(value);
+    return Number.isFinite(count) ? String(count) : '0';
+  }
+
+  function resetForm() {
+    if (nameInput) nameInput.value = '';
+    if (subjectInput) subjectInput.value = '';
+    if (bodyInput) bodyInput.value = '';
+    if (scoreInput) scoreInput.value = '70';
+  }
+
+  async function renderList() {
+    if (!list) return;
+    list.innerHTML = '<div class="sms-empty">Cargando…</div>';
+    try {
+      const campaigns = await fetchCampaigns();
+      if (!campaigns.length) {
+        list.innerHTML = '<div class="sms-empty">No hay campañas email todavía.</div>';
+        return;
+      }
+      const rows = campaigns.map(function (campaign) {
+        const materializeButton = campaign.status === 'draft'
+          ? '<button type="button" class="btn email-materialize-btn" data-id="' + escapeHtml(campaign.id) + '">Materializar</button>'
+          : '';
         return (
           '<tr class="sms-row">' +
-          '<td>' +
-          escapeHtml(c.name) +
-          '</td>' +
-          '<td>' +
-          escapeHtml(c.created_at) +
-          '</td>' +
-          '<td><span class="email-badge' +
-          emailStatusClass(c.status) +
-          '">' +
-          escapeHtml(c.status) +
-          '</span></td>' +
-          '<td>' +
-          escapeHtml(String(c.recipient_count)) +
-          '</td>' +
+            '<td>' + escapeHtml(campaign.name) + '</td>' +
+            '<td>' + escapeHtml(formatDate(campaign.created_at)) + '</td>' +
+            '<td><span class="email-badge' + emailStatusClass(campaign.status) + '">' + escapeHtml(campaign.status) + '</span></td>' +
+            '<td>' + escapeHtml(formatRecipientCount(campaign.recipient_count)) + '</td>' +
+            '<td>' + materializeButton + '</td>' +
           '</tr>'
         );
-      })
-      .join('');
-    list.innerHTML =
-      '<div class="sms-table-wrap"><table class="sms-table">' +
-      '<thead><tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>Destinatarios</th></tr></thead>' +
-      '<tbody>' +
-      body +
-      '</tbody></table></div>';
+      }).join('');
+
+      list.innerHTML =
+        '<div class="sms-table-wrap"><table class="sms-table">' +
+          '<thead><tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>Destinatarios</th><th></th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table></div>';
+
+      list.querySelectorAll('.email-materialize-btn').forEach(function (button) {
+        button.addEventListener('click', async function () {
+          const id = button.getAttribute('data-id');
+          if (!id) return;
+          button.disabled = true;
+          const origText = button.textContent;
+          button.textContent = 'Procesando...';
+          try {
+            const result = await materializeCampaign(id);
+            alert('Materializada: ' + Number(result.recipientCount || 0) + ' destinatarios.');
+            await renderList();
+          } catch (error) {
+            alert('Error: ' + error.message);
+            button.disabled = false;
+            button.textContent = origText;
+          }
+        });
+      });
+    } catch (error) {
+      list.innerHTML = '<div class="sms-empty">Error cargando campañas: ' + escapeHtml(error.message) + '</div>';
+    }
   }
 
-  if (createButton && !listenerAttached) {
-    createButton.addEventListener('click', function () {
-      alert('Módulo de creación de campañas en desarrollo.');
-    });
-    listenerAttached = true;
+  if (!listenersAttached) {
+    if (createButton && form) {
+      createButton.addEventListener('click', function () {
+        form.classList.toggle('hidden');
+      });
+    }
+    if (formCancel && form) {
+      formCancel.addEventListener('click', function () {
+        form.classList.add('hidden');
+      });
+    }
+    if (formSubmit) {
+      formSubmit.addEventListener('click', async function () {
+        const name = nameInput ? nameInput.value.trim() : '';
+        const subject = subjectInput ? subjectInput.value.trim() : '';
+        const bodyHtml = bodyInput ? bodyInput.value.trim() : '';
+        const rawMinScore = scoreInput ? scoreInput.value.trim() : '';
+        const minScore = Number(rawMinScore);
+
+        if (!name || !subject || !bodyHtml) {
+          alert('Completá nombre, asunto y cuerpo.');
+          return;
+        }
+        if (rawMinScore === '' || !Number.isFinite(minScore) || minScore < 0) {
+          alert('Ingresá un puntaje mínimo válido.');
+          return;
+        }
+
+        formSubmit.disabled = true;
+        const origText = formSubmit.textContent;
+        formSubmit.textContent = 'Creando...';
+        try {
+          await createCampaign({ name, subject, bodyHtml, minScore });
+          if (form) form.classList.add('hidden');
+          resetForm();
+          await renderList();
+        } catch (error) {
+          alert('Error: ' + error.message);
+        } finally {
+          formSubmit.disabled = false;
+          formSubmit.textContent = origText;
+        }
+      });
+    }
+    if (processQueueBtn) {
+      processQueueBtn.addEventListener('click', async function () {
+        const confirmed = window.confirm(
+          '¿Confirmás procesar la cola de envío? Esto puede enviar emails reales a destinatarios.'
+        );
+        if (!confirmed) return;
+
+        processQueueBtn.disabled = true;
+        const origText = processQueueBtn.textContent;
+        processQueueBtn.textContent = 'Procesando...';
+        try {
+          const result = await processQueue();
+          if (result && result.skipped === true) {
+            alert('Ya hay otra ejecución procesando la cola.');
+          } else {
+            alert(
+              'Procesado: ' + Number(result.sent || 0) + ' enviados, ' +
+              Number(result.failed || 0) + ' fallidos, ' +
+              Number(result.deferred || 0) + ' pospuestos.'
+            );
+          }
+          await renderList();
+        } catch (error) {
+          alert('Error: ' + error.message);
+        } finally {
+          processQueueBtn.disabled = false;
+          processQueueBtn.textContent = origText;
+        }
+      });
+    }
+    listenersAttached = true;
   }
 
   window.__openEmail = function () {
