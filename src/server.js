@@ -3,11 +3,14 @@ const env = require('./config/env');
 const logger = require('./lib/logger');
 const smsRouter = require('./routes/sms');
 const smsContactsRouter = require('./routes/sms-contacts');
+const emailRouter = require('./routes/email');
 
 // SMS campaigns (Notifyme) — registered here per module isolation scope.
 app.use('/sms', smsRouter);
 // SMS contacts import (Credizona CSV sync via IT) — /sms/contacts*
 app.use('/sms', smsContactsRouter);
+// Email campaigns — registered here per module isolation scope.
+app.use('/email', emailRouter);
 
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });
