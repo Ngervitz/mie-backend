@@ -617,44 +617,53 @@
       <div id="email-landing" class="mcl-landing">
         <h2 class="mcl-title">Campañas Email</h2>
 
-        <button type="button" id="email-create-btn" class="btn btn-primary">
-          + Nueva campaña
-        </button>
+        <div class="email-action-block">
+          <button type="button" id="email-create-btn" class="btn btn-primary">
+            + Nueva campaña
+          </button>
+          <p class="text-muted">Armá un envío segmentado por puntaje de encuesta</p>
+        </div>
 
         <div id="email-create-form" class="hidden">
           <label class="mcl-field">
-            <span class="mcl-field-label">Nombre de la campaña</span>
+            <span class="mcl-field-label">🏷️ Nombre de la campaña</span>
             <input type="text" id="email-form-name" class="mcl-input" autocomplete="off" />
           </label>
 
           <label class="mcl-field">
-            <span class="mcl-field-label">Asunto</span>
+            <span class="mcl-field-label">✉️ Asunto</span>
             <input type="text" id="email-form-subject" class="mcl-input" autocomplete="off" />
           </label>
 
           <label class="mcl-field">
-            <span class="mcl-field-label">Cuerpo (HTML)</span>
+            <span class="mcl-field-label">📄 Cuerpo (HTML)</span>
             <textarea id="email-form-body" class="mcl-input sms-textarea" rows="8"></textarea>
           </label>
 
           <label class="mcl-field">
-            <span class="mcl-field-label">Puntaje mínimo de encuesta</span>
+            <span class="mcl-field-label">🎯 Puntaje mínimo de encuesta</span>
             <input type="number" id="email-form-score" class="mcl-input" value="70" min="0" step="1" />
           </label>
 
           <div class="sms-form-actions">
-            <button type="button" id="email-form-submit" class="btn btn-primary">
-              Crear campaña
-            </button>
+            <div class="email-form-submit-wrap">
+              <button type="button" id="email-form-submit" class="btn btn-primary">
+                Crear campaña
+              </button>
+              <p class="text-muted">Se guarda como borrador, no se envía todavía</p>
+            </div>
             <button type="button" id="email-form-cancel" class="btn">
               Cancelar
             </button>
           </div>
         </div>
 
-        <button type="button" id="email-process-queue-btn" class="btn">
-          Procesar cola de envío
-        </button>
+        <div class="email-action-block">
+          <button type="button" id="email-process-queue-btn" class="btn">
+            Procesar cola de envío
+          </button>
+          <p class="text-muted">Envía los emails pendientes ahora mismo — no se puede deshacer</p>
+        </div>
 
         <div id="email-list"></div>
       </div>

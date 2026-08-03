@@ -2887,7 +2887,20 @@
 
 /* ---------- Campañas Email ---------- */
 #mie-dashboard-app #email-create-btn {
+  margin-bottom: 0;
+}
+
+#mie-dashboard-app #email-landing .email-action-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   margin-bottom: 18px;
+}
+
+#mie-dashboard-app #email-landing .email-action-block .text-muted {
+  margin: 0;
+  max-width: 36rem;
 }
 
 #mie-dashboard-app #email-create-form {
@@ -2902,12 +2915,27 @@
   background: var(--surface);
 }
 
+#mie-dashboard-app #email-create-form .mcl-field-label {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app #email-create-form .email-form-submit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#mie-dashboard-app #email-create-form .email-form-submit-wrap .text-muted {
+  margin: 0;
+  max-width: 20rem;
+}
+
 #mie-dashboard-app #email-create-form.hidden {
   display: none;
 }
 
 #mie-dashboard-app #email-process-queue-btn {
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 #mie-dashboard-app #email-list {
