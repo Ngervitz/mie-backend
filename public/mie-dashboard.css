@@ -114,6 +114,26 @@
   background: rgba(212, 83, 126, 0.22);
 }
 
+#mie-dashboard-app .dashboard-tab-group.open .dashboard-tab-group-label {
+  background: rgba(255, 255, 255, 0.08);
+  border-width: 2px;
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="inteligencia"].open .dashboard-tab-group-label {
+  background: rgba(29, 158, 117, 0.35);
+  border-color: #1D9E75;
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="analisis"].open .dashboard-tab-group-label {
+  background: rgba(91, 127, 173, 0.35);
+  border-color: #5b7fad;
+}
+
+#mie-dashboard-app .dashboard-tab-group[data-group="marketing"].open .dashboard-tab-group-label {
+  background: rgba(212, 83, 126, 0.35);
+  border-color: #D4537E;
+}
+
 #mie-dashboard-app .dashboard-tab-group-buttons {
   display: none;
   gap: 8px;
