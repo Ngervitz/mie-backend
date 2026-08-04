@@ -6448,7 +6448,7 @@ init();
     );
   }
 
-  function renderSummaryBucketRow(count, label, badgeClass, sources) {
+  function renderSummaryBucketRow(count, label, badgeClass, sources, emoji) {
     const n = Number(count) || 0;
     if (!(n > 0)) return '';
     return (
@@ -6458,6 +6458,7 @@ init();
       '<span class="email-badge' +
       (badgeClass || '') +
       '">' +
+      (emoji ? emoji + ' ' : '') +
       escapeHtml(String(n)) +
       ' ' +
       escapeHtml(label) +
@@ -6482,6 +6483,11 @@ init();
       positivo: 'positivo',
       neutral: 'neutral',
       negativo: 'negativo',
+    };
+    const sentEmojis = {
+      positivo: '😊',
+      neutral: '😐',
+      negativo: '😟',
     };
 
     const classRows = (Array.isArray(summary.classification_counts)
@@ -6512,6 +6518,7 @@ init();
           sentLabels[value] || value,
           sentimentBadgeClass(value),
           item.sources,
+          sentEmojis[value] || '',
         );
       })
       .join('');

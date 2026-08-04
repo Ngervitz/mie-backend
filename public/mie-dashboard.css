@@ -3049,16 +3049,28 @@
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-section {
   margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
 }
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-section-label {
   font-size: 0.8rem;
   margin-bottom: 4px;
   color: var(--text);
+  flex: 0 0 100%;
 }
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-row {
-  margin-top: 6px;
+  margin-top: 0;
+  flex: 0 1 auto;
+}
+
+#mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-row:has(
+  [data-ai-vis-sources]:not([hidden])
+) {
+  flex: 1 1 100%;
 }
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-toggle {
