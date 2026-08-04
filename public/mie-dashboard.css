@@ -1484,7 +1484,8 @@
 #mie-dashboard-app #ga4-panel,
 #mie-dashboard-app #search-console-panel,
 #mie-dashboard-app #sms-panel,
-#mie-dashboard-app #email-panel {
+#mie-dashboard-app #email-panel,
+#mie-dashboard-app #ai-visibility-panel {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 20px 64px;
