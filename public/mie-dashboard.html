@@ -776,6 +776,28 @@
         </div>
 
         <div id="ai-visibility-summary"></div>
+
+        <div id="ai-visibility-evolution" class="mcl-landing">
+          <h3 class="mcl-title">Evolución por competidor</h3>
+          <div id="ai-visibility-evolution-status" class="text-muted"></div>
+          <div style="position:relative;height:320px;width:100%">
+            <canvas
+              id="ai-visibility-evolution-chart"
+              aria-label="Evolución semanal de menciones por competidor"
+              role="img"></canvas>
+          </div>
+          <p class="text-muted" style="font-size:0.85rem;margin-top:6px">
+            El tamaño de cada punto indica cuántos proveedores mencionaron a
+            esa entidad esa semana.
+          </p>
+          <label class="mcl-field">
+            <span class="mcl-field-label">Prompt</span>
+            <select
+              id="ai-visibility-evolution-prompt"
+              class="mcl-input"></select>
+          </label>
+        </div>
+
         <div id="ai-visibility-prompts"></div>
         <div id="ai-visibility-list"></div>
       </div>
@@ -886,6 +908,7 @@
       supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzZXp6dGxtd2ZnamNpZGNycmRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTYzOTQsImV4cCI6MjA5NzI5MjM5NH0.qZMZoXsGmMvsxqxWN6sX8JT3ZpUhKc4vZrbYyJXUiJ0'
     };
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <script src="mie-dashboard.js"></script>
   <script src="meta-agent.js"></script>
   <script>

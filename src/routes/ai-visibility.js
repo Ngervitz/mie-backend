@@ -55,6 +55,208 @@ async function createPromptRow({ text, category }) {
 }
 
 /**
+ * Strict positive integer id from path/query (digits only).
+ * @param {unknown} raw
+ * @returns {number|null}
+ */
+function parsePositiveIntId(raw) {
+  if (raw == null) return null;
+  const s = String(raw);
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function formatWeekOf(value) {
+  if (value == null) return null;
+  const s = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
+}
+
+/**
+ * Keep newest row per (week_of, provider): max fetched_at, then max id.
+ * @param {object[]} rows
+ * @returns {Map<string, Map<string, object>>}
+ */
+function dedupeRowsByWeekProvider(rows) {
+  /** @type {Map<string, Map<string, object>>} */
+  const byWeek = new Map();
+  for (const row of rows || []) {
+    const week = formatWeekOf(row && row.week_of);
+    const provider = row && row.provider != null ? String(row.provider) : '';
+    if (!week || !provider) continue;
+    if (!byWeek.has(week)) byWeek.set(week, new Map());
+    const byProv = byWeek.get(week);
+    const prev = byProv.get(provider);
+    if (!prev) {
+      byProv.set(provider, row);
+      continue;
+    }
+    const tNew = new Date(row.fetched_at).getTime();
+    const tOld = new Date(prev.fetched_at).getTime();
+    const idNew = Number(row.id) || 0;
+    const idOld = Number(prev.id) || 0;
+    if (
+      tNew > tOld ||
+      (tNew === tOld && idNew > idOld) ||
+      (Number.isNaN(tOld) && !Number.isNaN(tNew))
+    ) {
+      byProv.set(provider, row);
+    }
+  }
+  return byWeek;
+}
+
+/**
+ * First occurrence of each entity_id (or name fallback) in array order.
+ * @param {unknown} mentioned
+ * @returns {{ entity_id: string, name: string, key: string }[]}
+ */
+function dedupeMentionsInRow(mentioned) {
+  if (!Array.isArray(mentioned)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of mentioned) {
+    if (!item || typeof item !== 'object') continue;
+    const rawId =
+      item.entity_id != null ? String(item.entity_id).trim() : '';
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    let key;
+    let entityId;
+    if (rawId) {
+      key = rawId;
+      entityId = rawId;
+    } else if (name) {
+      const normalized = name.toLowerCase().replace(/\s+/g, ' ').trim();
+      key = 'name:' + normalized;
+      entityId = key;
+      logger.warn('AI Visibility history mention missing entity_id', {
+        name,
+      });
+    } else {
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ entity_id: entityId, name: name || entityId, key });
+  }
+  return out;
+}
+
+/**
+ * @param {{ id: number|string, text: string }} prompt
+ * @param {object[]} rows
+ */
+function buildHistoryPayload(prompt, rows) {
+  const byWeek = dedupeRowsByWeekProvider(rows);
+  const weeks = Array.from(byWeek.keys()).sort();
+
+  if (!weeks.length) {
+    return {
+      prompt: { id: prompt.id, text: prompt.text },
+      weeks: [],
+      coverage: [],
+      entities: [],
+      credizona: { series: [] },
+    };
+  }
+
+  /** @type {Map<string, { entity_id: string, name: string, total: number, byWeek: Map<string, number[]> }>} */
+  const entityMap = new Map();
+  /** @type {Map<string, number>} */
+  const credizonaByWeek = new Map();
+  const coverage = [];
+
+  for (const week of weeks) {
+    const providers = byWeek.get(week);
+    coverage.push({
+      week_of: week,
+      successful_providers: providers.size,
+    });
+    let credCount = 0;
+
+    for (const row of providers.values()) {
+      if (row.mentions_credizona === true) credCount += 1;
+      const mentions = dedupeMentionsInRow(row.mentioned_entities);
+      mentions.forEach((mention, index) => {
+        const rank = index + 1;
+        if (!entityMap.has(mention.key)) {
+          entityMap.set(mention.key, {
+            entity_id: mention.entity_id,
+            name: mention.name,
+            total: 0,
+            byWeek: new Map(),
+          });
+        }
+        const ent = entityMap.get(mention.key);
+        if (
+          mention.name &&
+          (!ent.name || String(ent.entity_id).startsWith('name:'))
+        ) {
+          ent.name = mention.name;
+        }
+        if (!ent.byWeek.has(week)) ent.byWeek.set(week, []);
+        ent.byWeek.get(week).push(rank);
+        ent.total += 1;
+      });
+    }
+    credizonaByWeek.set(week, credCount);
+  }
+
+  const entities = Array.from(entityMap.values())
+    .map((ent) => {
+      const series = weeks.map((week) => {
+        const ranks = ent.byWeek.get(week);
+        if (!ranks || !ranks.length) {
+          return { week_of: week, mention_count: 0, avg_rank: null };
+        }
+        const sum = ranks.reduce((a, b) => a + b, 0);
+        const avg = Math.round((sum / ranks.length) * 100) / 100;
+        return {
+          week_of: week,
+          mention_count: ranks.length,
+          avg_rank: avg,
+        };
+      });
+      const totalMentions = series.reduce((s, p) => s + p.mention_count, 0);
+      return {
+        entity_id: String(ent.entity_id),
+        name: ent.name,
+        series,
+        _sortTotal: totalMentions,
+      };
+    })
+    .sort((a, b) => {
+      if (b._sortTotal !== a._sortTotal) return b._sortTotal - a._sortTotal;
+      return String(a.name).localeCompare(String(b.name), 'es');
+    })
+    .map((ent) => ({
+      entity_id: ent.entity_id,
+      name: ent.name,
+      series: ent.series,
+    }));
+
+  return {
+    prompt: { id: prompt.id, text: prompt.text },
+    weeks,
+    coverage,
+    entities,
+    credizona: {
+      series: weeks.map((week) => ({
+        week_of: week,
+        mention_count: credizonaByWeek.get(week) || 0,
+      })),
+    },
+  };
+}
+
+/**
  * GET /ai-visibility/prompts
  * Active prompts for the dashboard list.
  */
@@ -98,6 +300,76 @@ router.post('/prompts', async (req, res) => {
     const status = err && err.statusCode ? err.statusCode : 500;
     logger.error('POST /ai-visibility/prompts failed', { error: message });
     return res.status(status).json({ error: message });
+  }
+});
+
+/**
+ * GET /ai-visibility/prompts/:promptId/history
+ * Weekly mention evolution for one prompt (success rows only, deduped).
+ */
+router.get('/prompts/:promptId/history', async (req, res) => {
+  const promptId = parsePositiveIntId(req.params.promptId);
+  if (promptId == null) {
+    return res
+      .status(400)
+      .json({ error: 'promptId must be a positive integer' });
+  }
+
+  try {
+    const { data: prompt, error: promptError } = await supabase
+      .from('ai_visibility_prompts')
+      .select('id, text')
+      .eq('id', promptId)
+      .maybeSingle();
+
+    if (promptError) {
+      logger.error('GET /ai-visibility/prompts/:promptId/history prompt failed', {
+        promptId,
+        error: promptError.message,
+      });
+      return res.status(500).json({ error: promptError.message });
+    }
+
+    if (!prompt) {
+      return res.status(404).json({ error: 'Prompt not found' });
+    }
+
+    const { data: rows, error: rowsError } = await supabase
+      .from('ai_visibility_responses')
+      .select(
+        [
+          'id',
+          'provider',
+          'model_name',
+          'week_of',
+          'status',
+          'mentioned_entities',
+          'mentions_credizona',
+          'fetched_at',
+        ].join(','),
+      )
+      .eq('prompt_id', promptId)
+      .eq('status', 'success')
+      .order('week_of', { ascending: true })
+      .order('fetched_at', { ascending: false });
+
+    if (rowsError) {
+      logger.error('GET /ai-visibility/prompts/:promptId/history rows failed', {
+        promptId,
+        error: rowsError.message,
+      });
+      return res.status(500).json({ error: rowsError.message });
+    }
+
+    const payload = buildHistoryPayload(prompt, rows || []);
+    return res.status(200).json(payload);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('GET /ai-visibility/prompts/:promptId/history unexpected', {
+      promptId,
+      error: message,
+    });
+    return res.status(500).json({ error: message });
   }
 });
 

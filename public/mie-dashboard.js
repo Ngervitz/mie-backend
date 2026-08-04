@@ -6132,6 +6132,7 @@ init();
         try {
           await runSinglePrompt(promptId);
           await refresh();
+          await refreshEvolution({ force: true });
         } catch (error) {
           alert('Error: ' + error.message);
         } finally {
@@ -6155,6 +6156,375 @@ init();
         escapeHtml(error.message) +
         '</div>';
     }
+  }
+
+  /* ---- Evolución por competidor (Chart.js) ---- */
+  let evolutionChart = null;
+  let evolutionRequestId = 0;
+  let evolutionPromptsLoaded = false;
+  let evolutionListenerAttached = false;
+  let evolutionLoadedPromptId = null;
+
+  const evolutionSelect = document.getElementById(
+    'ai-visibility-evolution-prompt',
+  );
+  const evolutionCanvas = document.getElementById(
+    'ai-visibility-evolution-chart',
+  );
+  const evolutionStatus = document.getElementById(
+    'ai-visibility-evolution-status',
+  );
+  const evolutionEnabled = !!(
+    evolutionSelect &&
+    evolutionCanvas &&
+    evolutionStatus
+  );
+
+  const CREDIZONA_COLOR = '#5DCAA5';
+  const ENTITY_COLORS = [
+    '#7FA8D9',
+    '#ED93B1',
+    '#e8912d',
+    '#60a5fa',
+    '#c9a227',
+    '#4285f4',
+    '#D4537E',
+    '#8b5cf6',
+    '#14b8a6',
+    '#f97316',
+  ];
+
+  function colorForEntity(entityId) {
+    let hash = 0;
+    const s = String(entityId || '');
+    for (let i = 0; i < s.length; i += 1) {
+      hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return ENTITY_COLORS[hash % ENTITY_COLORS.length];
+  }
+
+  function bubbleRadius(mentionCount) {
+    return mentionCount > 0 ? Math.max(3, mentionCount * 4) : 0;
+  }
+
+  function destroyEvolutionChart() {
+    if (evolutionChart) {
+      evolutionChart.destroy();
+      evolutionChart = null;
+    }
+  }
+
+  async function fetchHistory(promptId) {
+    const response = await fetch(
+      '/ai-visibility/prompts/' + encodeURIComponent(promptId) + '/history',
+    );
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo cargar el histórico del prompt.'),
+      );
+    }
+    return data;
+  }
+
+  function setEvolutionStatus(message) {
+    if (evolutionStatus) evolutionStatus.textContent = message || '';
+  }
+
+  function renderEvolutionChart(data) {
+    if (!evolutionEnabled) return;
+
+    destroyEvolutionChart();
+
+    if (typeof window.Chart !== 'function') {
+      setEvolutionStatus(
+        'No se pudo cargar Chart.js. Revisá la conexión o el CDN.',
+      );
+      return;
+    }
+
+    const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
+    if (!weeks.length) {
+      setEvolutionStatus(
+        'Todavía no hay respuestas exitosas para este prompt.',
+      );
+      return;
+    }
+
+    setEvolutionStatus('');
+
+    const coverageByWeek = {};
+    (Array.isArray(data.coverage) ? data.coverage : []).forEach(function (c) {
+      if (c && c.week_of) {
+        coverageByWeek[c.week_of] = Number(c.successful_providers) || 0;
+      }
+    });
+
+    let maxRank = 1;
+    const datasets = [];
+
+    (Array.isArray(data.entities) ? data.entities : []).forEach(function (
+      entity,
+    ) {
+      const seriesByWeek = {};
+      (Array.isArray(entity.series) ? entity.series : []).forEach(function (p) {
+        if (p && p.week_of) seriesByWeek[p.week_of] = p;
+      });
+
+      const points = weeks.map(function (week, index) {
+        const point = seriesByWeek[week];
+        if (!point || !(point.mention_count > 0) || point.avg_rank == null) {
+          return null;
+        }
+        if (point.avg_rank > maxRank) maxRank = point.avg_rank;
+        return {
+          x: index,
+          y: point.avg_rank,
+          r: bubbleRadius(point.mention_count),
+          week_of: week,
+          mention_count: point.mention_count,
+          avg_rank: point.avg_rank,
+          successful_providers: coverageByWeek[week] || 0,
+        };
+      });
+
+      if (!points.some(Boolean)) return;
+
+      datasets.push({
+        label: entity.name || entity.entity_id || 'Entidad',
+        data: points,
+        showLine: true,
+        spanGaps: false,
+        borderColor: colorForEntity(entity.entity_id),
+        backgroundColor: colorForEntity(entity.entity_id),
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: function (context) {
+          return context.raw && context.raw.r ? context.raw.r : 0;
+        },
+        pointHoverRadius: function (context) {
+          const base = context.raw && context.raw.r ? context.raw.r : 0;
+          return base ? base + 2 : 0;
+        },
+      });
+    });
+
+    const credSeriesByWeek = {};
+    const credSeries =
+      data.credizona && Array.isArray(data.credizona.series)
+        ? data.credizona.series
+        : [];
+    credSeries.forEach(function (p) {
+      if (p && p.week_of) credSeriesByWeek[p.week_of] = p;
+    });
+
+    const credPoints = weeks.map(function (week, index) {
+      const point = credSeriesByWeek[week];
+      if (!point || !(point.mention_count > 0)) return null;
+      return {
+        x: index,
+        y: 0,
+        r: bubbleRadius(point.mention_count),
+        week_of: week,
+        mention_count: point.mention_count,
+        avg_rank: null,
+        successful_providers: coverageByWeek[week] || 0,
+        isCredizona: true,
+      };
+    });
+
+    if (credPoints.some(Boolean)) {
+      datasets.push({
+        label: 'Credizona',
+        data: credPoints,
+        showLine: true,
+        spanGaps: false,
+        borderColor: CREDIZONA_COLOR,
+        backgroundColor: CREDIZONA_COLOR,
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: function (context) {
+          return context.raw && context.raw.r ? context.raw.r : 0;
+        },
+        pointHoverRadius: function (context) {
+          const base = context.raw && context.raw.r ? context.raw.r : 0;
+          return base ? base + 2 : 0;
+        },
+      });
+    }
+
+    if (!datasets.length) {
+      setEvolutionStatus(
+        'Todavía no hay respuestas exitosas para este prompt.',
+      );
+      return;
+    }
+
+    const ctx = evolutionCanvas.getContext('2d');
+    evolutionChart = new window.Chart(ctx, {
+      type: 'line',
+      data: { datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+          },
+          tooltip: {
+            callbacks: {
+              title: function (items) {
+                if (!items || !items.length || !items[0].raw) return '';
+                return String(items[0].raw.week_of || '');
+              },
+              label: function (item) {
+                const raw = item.raw || {};
+                const name = item.dataset.label || '';
+                const yProviders = Number(raw.successful_providers) || 0;
+                if (raw.isCredizona) {
+                  return (
+                    name +
+                    ': ' +
+                    raw.mention_count +
+                    ' de ' +
+                    yProviders +
+                    ' proveedores'
+                  );
+                }
+                const avg =
+                  raw.avg_rank != null
+                    ? String(raw.avg_rank).replace('.', ',')
+                    : '—';
+                return [
+                  name,
+                  'Menciones: ' +
+                    raw.mention_count +
+                    ' de ' +
+                    yProviders +
+                    ' proveedores',
+                  'Posición promedio: ' + avg,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: -0.5,
+            max: weeks.length - 0.5,
+            ticks: {
+              stepSize: 1,
+              callback: function (value) {
+                if (!Number.isInteger(value)) return '';
+                return weeks[value] || '';
+              },
+            },
+            title: {
+              display: true,
+              text: 'Semana',
+            },
+          },
+          y: {
+            reverse: true,
+            min: 0,
+            suggestedMax: maxRank + 1,
+            grace: '5%',
+            ticks: {
+              stepSize: 1,
+              callback: function (value) {
+                if (!Number.isInteger(value)) return '';
+                if (value === 0) return 'Credizona';
+                return value + '.º';
+              },
+            },
+            title: {
+              display: true,
+              text: 'Credizona / posición promedio',
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async function ensureEvolutionPrompts() {
+    if (!evolutionEnabled) return [];
+    if (evolutionPromptsLoaded && evolutionSelect.options.length) {
+      return Array.from(evolutionSelect.options).map(function (opt) {
+        return { id: opt.value, text: opt.textContent };
+      });
+    }
+
+    try {
+      const prompts = await fetchPrompts();
+      const previous = evolutionSelect.value;
+      evolutionSelect.innerHTML = '';
+      prompts.forEach(function (p) {
+        const opt = document.createElement('option');
+        opt.value = String(p.id);
+        opt.textContent = p.text || 'Prompt #' + p.id;
+        evolutionSelect.appendChild(opt);
+      });
+      if (
+        previous &&
+        Array.from(evolutionSelect.options).some(function (o) {
+          return o.value === previous;
+        })
+      ) {
+        evolutionSelect.value = previous;
+      } else if (prompts.length) {
+        evolutionSelect.value = String(prompts[0].id);
+      }
+      evolutionPromptsLoaded = true;
+      return prompts;
+    } catch (error) {
+      setEvolutionStatus('Error cargando prompts: ' + error.message);
+      return [];
+    }
+  }
+
+  async function refreshEvolution(opts) {
+    if (!evolutionEnabled) return;
+    const force = !!(opts && opts.force);
+    const promptId = evolutionSelect.value;
+    if (!promptId) {
+      destroyEvolutionChart();
+      evolutionLoadedPromptId = null;
+      setEvolutionStatus('No hay prompts activos.');
+      return;
+    }
+
+    if (
+      !force &&
+      evolutionLoadedPromptId === promptId &&
+      evolutionChart
+    ) {
+      return;
+    }
+
+    const requestId = ++evolutionRequestId;
+    setEvolutionStatus('Cargando evolución…');
+    try {
+      const data = await fetchHistory(promptId);
+      if (requestId !== evolutionRequestId) return;
+      renderEvolutionChart(data);
+      evolutionLoadedPromptId = promptId;
+    } catch (error) {
+      if (requestId !== evolutionRequestId) return;
+      destroyEvolutionChart();
+      evolutionLoadedPromptId = null;
+      setEvolutionStatus('Error: ' + error.message);
+    }
+  }
+
+  if (evolutionEnabled && !evolutionListenerAttached) {
+    evolutionSelect.addEventListener('change', function () {
+      refreshEvolution({ force: true });
+    });
+    evolutionListenerAttached = true;
   }
 
   function renderProviderRows(responses) {
@@ -6301,6 +6671,7 @@ init();
         const result = await runNow();
         renderSummary(result);
         await refresh();
+        await refreshEvolution({ force: true });
       } catch (error) {
         if (summaryEl) {
           summaryEl.innerHTML =
@@ -6311,6 +6682,7 @@ init();
         // HTTP may have timed out while the server kept writing rows — refresh later.
         setTimeout(function () {
           refresh();
+          refreshEvolution({ force: true });
         }, 3000);
       } finally {
         runBtn.disabled = false;
@@ -6391,8 +6763,11 @@ init();
             adhocResult.innerHTML =
               '<p class="text-muted">Prompt guardado y corrido. Resultados abajo.</p>';
           }
+          evolutionPromptsLoaded = false;
           await loadPrompts();
+          await ensureEvolutionPrompts();
           await refresh();
+          await refreshEvolution({ force: true });
         } else {
           const results = Array.isArray(data.results) ? data.results : [];
           if (adhocResult) {
@@ -6420,5 +6795,8 @@ init();
   window.__openAiVisibility = function () {
     loadPrompts();
     refresh();
+    ensureEvolutionPrompts().then(function () {
+      return refreshEvolution({ force: false });
+    });
   };
 })();
