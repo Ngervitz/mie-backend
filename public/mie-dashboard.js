@@ -6623,7 +6623,7 @@ init();
       .map(function (group) {
         return (
           '<section style="margin-top:20px">' +
-          '<h3 style="margin:0 0 10px;font-size:1rem;font-weight:600;line-height:1.4">' +
+          '<h3 class="ai-vis-section-title">' +
           escapeHtml(group.promptText) +
           '</h3>' +
           renderProviderTable(group.responses) +

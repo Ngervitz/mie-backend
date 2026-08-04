@@ -1374,7 +1374,7 @@
 
 #mie-dashboard-app .text-muted {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 /* ---------- Ad detail modal ---------- */
@@ -3014,6 +3014,13 @@
 #mie-dashboard-app #ai-visibility-landing .email-action-block .text-muted {
   margin: 0;
   max-width: 36rem;
+}
+
+#mie-dashboard-app #ai-visibility-panel .ai-vis-section-title {
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 8px;
 }
 
 #mie-dashboard-app #email-create-form {
