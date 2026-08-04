@@ -7104,6 +7104,25 @@ init();
     evolutionFiltersAttached = true;
   }
 
+  function formatUnknownCandidatesCell(response) {
+    const unknownCandidates = Array.isArray(response.unknown_candidates)
+      ? response.unknown_candidates
+      : [];
+    const title =
+      'Posibles entidades detectadas por formato en negrita. Requieren revisión manual.';
+    if (!unknownCandidates.length) {
+      return '<td title="' + escapeHtml(title) + '">—</td>';
+    }
+    const joined = unknownCandidates
+      .map(function (c) {
+        return escapeHtml(String(c));
+      })
+      .join(', ');
+    return (
+      '<td title="' + escapeHtml(title) + '">⚠️ ' + joined + '</td>'
+    );
+  }
+
   function renderProviderRows(responses) {
     return (responses || [])
       .map(function (response) {
@@ -7171,6 +7190,7 @@ init();
           '>' +
           (entitiesHtml || '—') +
           '</td>' +
+          formatUnknownCandidatesCell(response) +
           '<td>' +
           rawResponse +
           '</td>' +
@@ -7184,7 +7204,8 @@ init();
     return (
       '<div class="sms-table-wrap"><table class="sms-table">' +
       '<thead><tr><th>Proveedor / modelo</th><th>Estado</th>' +
-      '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
+      '<th>Credizona</th><th>Competidores detectados</th>' +
+      '<th>Posibles nuevos</th><th>Respuesta</th></tr></thead>' +
       '<tbody>' +
       renderProviderRows(responses) +
       '</tbody></table></div>'

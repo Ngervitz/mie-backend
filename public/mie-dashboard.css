@@ -3098,7 +3098,7 @@
 
 #mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(1),
 #mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(1) {
-  width: 22%;
+  width: 15%;
 }
 
 #mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(2),
@@ -3108,12 +3108,12 @@
 
 #mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(3),
 #mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(3) {
-  width: 8%;
+  width: 12%;
 }
 
 #mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(4),
 #mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(4) {
-  width: 30%;
+  width: 18%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3121,7 +3121,14 @@
 
 #mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(5),
 #mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(5) {
-  width: 30%;
+  width: 18%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(6),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(6) {
+  width: 27%;
 }
 
 #mie-dashboard-app #ai-visibility-prompts.hidden {

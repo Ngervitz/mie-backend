@@ -4,7 +4,7 @@
 
 const supabase = require('../../clients/supabase');
 const logger = require('../../lib/logger');
-const { detectMentions, detectCredizona } = require('./detector');
+const { detectMentions, detectCredizona, extractBoldCandidates } = require('./detector');
 const { OpenAiVisibilityProvider } = require('./providers/openai');
 const { AnthropicVisibilityProvider } = require('./providers/anthropic');
 const { GeminiVisibilityProvider } = require('./providers/gemini');
@@ -241,10 +241,12 @@ async function processProviderJobs(jobs, week_of, entityList) {
     const status = result.status;
     let mentions_credizona = false;
     let mentioned_entities = [];
+    let unknown_candidates = [];
 
     if (status === 'success' && result.rawText) {
       mentions_credizona = detectCredizona(result.rawText);
       mentioned_entities = detectMentions(result.rawText, entityList);
+      unknown_candidates = extractBoldCandidates(result.rawText, entityList);
     }
 
     const row = {
@@ -264,6 +266,7 @@ async function processProviderJobs(jobs, week_of, entityList) {
       http_status: result.httpStatus != null ? result.httpStatus : null,
       mentions_credizona,
       mentioned_entities,
+      unknown_candidates,
       latency_ms: result.latencyMs != null ? result.latencyMs : null,
       input_tokens: result.inputTokens != null ? result.inputTokens : null,
       output_tokens: result.outputTokens != null ? result.outputTokens : null,
@@ -480,10 +483,12 @@ async function runAdHocCheck({ text } = {}) {
       const status = result.status;
       let mentions_credizona = false;
       let mentioned_entities = [];
+      let unknown_candidates = [];
 
       if (status === 'success' && result.rawText) {
         mentions_credizona = detectCredizona(result.rawText);
         mentioned_entities = detectMentions(result.rawText, entityList);
+        unknown_candidates = extractBoldCandidates(result.rawText, entityList);
       }
 
       return {
@@ -498,6 +503,7 @@ async function runAdHocCheck({ text } = {}) {
               (status === 'not_configured' ? 'not configured' : 'error'),
         mentions_credizona,
         mentioned_entities,
+        unknown_candidates,
         latency_ms: result.latencyMs != null ? result.latencyMs : null,
       };
     }),

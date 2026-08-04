@@ -162,8 +162,121 @@ function detectCredizona(text) {
   return false;
 }
 
+const GENERIC_BOLD_HEADERS = [
+  'opciones',
+  'otras opciones',
+  'alternativas',
+  'recomendaciones',
+  'requisitos',
+  'ventajas',
+  'desventajas',
+  'conclusion',
+  'conclusión',
+  'advertencia',
+  'importante',
+  'resumen',
+  'consideraciones',
+  'comparacion',
+  'comparación',
+  'tasas',
+  'costos',
+  'plazos',
+  'documentacion',
+  'documentación',
+];
+
+const BOLD_MD_RE = /(?:\*{2,3}|_{2})([^*\r\n_]+?)(?:\*{2,3}|_{2})/g;
+
+function collapseInternalSpaces(value) {
+  return String(value).trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * @param {EntityInput[]|unknown} entityList
+ * @returns {string[]}
+ */
+function buildKnownNameTerms(entityList) {
+  const terms = ['Credizona', 'Credi Zona'];
+  const list = Array.isArray(entityList) ? entityList : [];
+  for (const entity of list) {
+    if (!entity || typeof entity !== 'object') continue;
+    if (typeof entity.name === 'string' && entity.name.trim()) {
+      terms.push(entity.name.trim());
+    }
+    const aliases = normalizeAliases(entity.aliases);
+    for (const alias of aliases) terms.push(alias);
+  }
+  return terms;
+}
+
+/**
+ * True if candidate matches a known brand (equality) or appears as a
+ * whole word inside a longer known name. Does NOT discard merely because
+ * a short known name is a whole-word prefix of a longer candidate
+ * (e.g. keep "Itaú Personal" when "Itaú" is tracked).
+ * @param {string} candidate
+ * @param {string[]} knownTerms
+ * @returns {boolean}
+ */
+function isKnownEntityCandidate(candidate, knownTerms) {
+  const normCand = normalizeForMatching(candidate).toLowerCase();
+  if (!normCand) return true;
+  for (const known of knownTerms) {
+    const normKnown = normalizeForMatching(known).toLowerCase();
+    if (!normKnown) continue;
+    if (normCand === normKnown) return true;
+    if (findEarliestMatch(known, candidate)) return true;
+  }
+  return false;
+}
+
+/**
+ * Heuristic: bold/emphasis Markdown spans that may be untracked brand names.
+ * Returns original-cased strings in first-seen order. No I/O.
+ * @param {unknown} text
+ * @param {EntityInput[]|unknown} entityList
+ * @returns {string[]}
+ */
+function extractBoldCandidates(text, entityList) {
+  if (typeof text !== 'string' || !text) return [];
+
+  const knownTerms = buildKnownNameTerms(entityList);
+  const genericNorm = new Set(
+    GENERIC_BOLD_HEADERS.map((h) =>
+      normalizeForMatching(h).toLowerCase(),
+    ),
+  );
+  const seen = new Set();
+  /** @type {string[]} */
+  const out = [];
+
+  BOLD_MD_RE.lastIndex = 0;
+  let match;
+  while ((match = BOLD_MD_RE.exec(text)) !== null) {
+    const cleaned = collapseInternalSpaces(match[1] || '');
+    if (!cleaned) continue;
+    if (/\d/.test(cleaned)) continue;
+    if (cleaned.length < 3 || cleaned.length > 60) continue;
+    if (/[\r\n]/.test(cleaned)) continue;
+    if (cleaned.endsWith(':')) continue;
+    if (genericNorm.has(normalizeForMatching(cleaned).toLowerCase())) continue;
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (words.length > 8) continue;
+    if (/[?!]/.test(cleaned)) continue;
+    if (isKnownEntityCandidate(cleaned, knownTerms)) continue;
+
+    const dedupeKey = normalizeForMatching(cleaned).toLowerCase();
+    if (!dedupeKey || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push(cleaned);
+  }
+
+  return out;
+}
+
 module.exports = {
   detectMentions,
   detectCredizona,
   findEarliestMatch,
+  extractBoldCandidates,
 };

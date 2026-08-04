@@ -659,6 +659,7 @@ router.get('/responses', async (req, res) => {
           'error_code',
           'mentions_credizona',
           'mentioned_entities',
+          'unknown_candidates',
           'fetched_at',
           'ai_visibility_credizona_analysis ( status, classification, sentiment, attributes, error, error_code, model_name, analysis_version, analyzed_at )',
         ].join(', '),
@@ -684,6 +685,9 @@ router.get('/responses', async (req, res) => {
       return {
         ...rest,
         credizona_analysis: analysis,
+        unknown_candidates: Array.isArray(row.unknown_candidates)
+          ? row.unknown_candidates
+          : [],
       };
     });
 
@@ -1008,7 +1012,13 @@ router.post('/run-adhoc', async (req, res) => {
     }
 
     const results = await runAdHocCheck({ text });
-    return res.status(200).json({ saved: false, results });
+    const sanitized = (Array.isArray(results) ? results : []).map((row) => ({
+      ...row,
+      unknown_candidates: Array.isArray(row.unknown_candidates)
+        ? row.unknown_candidates
+        : [],
+    }));
+    return res.status(200).json({ saved: false, results: sanitized });
   } catch (err) {
     const message = err && err.message ? err.message : 'Internal error';
     const status = err && err.statusCode ? err.statusCode : 500;
