@@ -251,6 +251,10 @@
 #mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="email"] {
   box-shadow: inset 0 -2px 0 var(--accent-success);
 }
+#mie-dashboard-app .dashboard-tab.active[data-dashboard-tab="ai-visibility"] {
+  /* Inteligencia group teal (#1D9E75). */
+  box-shadow: inset 0 -2px 0 #1D9E75;
+}
 
 #mie-dashboard-app .inbox-tab-brands {
   display: inline-flex;

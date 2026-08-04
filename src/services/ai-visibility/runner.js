@@ -436,9 +436,80 @@ async function runSinglePromptCheck({ promptId, weekOf } = {}) {
   return summary;
 }
 
+/**
+ * Ephemeral 4-provider ask + detect (no Supabase writes).
+ * @param {{ text: string }} opts
+ * @returns {Promise<object[]>}
+ */
+async function runAdHocCheck({ text } = {}) {
+  const promptText = typeof text === 'string' ? text.trim() : '';
+  if (!promptText) {
+    throw new Error('text must be a non-empty string');
+  }
+
+  const entityList = await loadActiveEntities();
+  const providers = createProviderInstances();
+
+  const results = await Promise.all(
+    providers.map(async (provider) => {
+      let result;
+      try {
+        result = await provider.instance.ask(promptText);
+      } catch (err) {
+        result = {
+          status: 'error',
+          rawText: null,
+          error:
+            err && err.message ? String(err.message) : 'Unexpected adapter error',
+          modelName:
+            (provider.instance && provider.instance.modelName) || 'unknown',
+          latencyMs: 0,
+        };
+      }
+
+      if (!result || typeof result !== 'object') {
+        result = {
+          status: 'error',
+          rawText: null,
+          error: 'Adapter returned invalid result',
+          modelName: 'unknown',
+          latencyMs: 0,
+        };
+      }
+
+      const status = result.status;
+      let mentions_credizona = false;
+      let mentioned_entities = [];
+
+      if (status === 'success' && result.rawText) {
+        mentions_credizona = detectCredizona(result.rawText);
+        mentioned_entities = detectMentions(result.rawText, entityList);
+      }
+
+      return {
+        provider: provider.id,
+        model_name: result.modelName || 'unknown',
+        status,
+        raw_response: status === 'success' ? result.rawText : null,
+        error:
+          status === 'success'
+            ? null
+            : result.error ||
+              (status === 'not_configured' ? 'not configured' : 'error'),
+        mentions_credizona,
+        mentioned_entities,
+        latency_ms: result.latencyMs != null ? result.latencyMs : null,
+      };
+    }),
+  );
+
+  return results;
+}
+
 module.exports = {
   runWeeklyVisibilityCheck,
   runSinglePromptCheck,
+  runAdHocCheck,
   resolveWeekOf,
   formatYmdMontevideo,
 };

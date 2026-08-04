@@ -742,6 +742,39 @@
           </p>
         </div>
 
+        <div class="email-action-block" id="ai-visibility-adhoc-block">
+          <label class="mcl-field">
+            <span class="mcl-field-label">🧪 Probar un prompt nuevo</span>
+            <textarea
+              id="ai-visibility-adhoc-text"
+              class="mcl-input"
+              rows="3"
+              placeholder="Escribí una pregunta..."></textarea>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+            <input type="checkbox" id="ai-visibility-adhoc-save">
+            Guardar en la lista de seguimiento (se va a correr todas las semanas)
+          </label>
+          <div id="ai-visibility-adhoc-category-wrap" class="hidden">
+            <label class="mcl-field">
+              <span class="mcl-field-label">Categoría</span>
+              <select id="ai-visibility-adhoc-category" class="mcl-input">
+                <option value="descubrimiento">Descubrimiento</option>
+                <option value="elegibilidad">Elegibilidad</option>
+                <option value="comparacion">Comparación</option>
+                <option value="marca">Marca</option>
+              </select>
+            </label>
+          </div>
+          <button
+            type="button"
+            id="ai-visibility-adhoc-run-btn"
+            class="btn btn-primary">
+            Correr prompt
+          </button>
+          <div id="ai-visibility-adhoc-result"></div>
+        </div>
+
         <div id="ai-visibility-summary"></div>
         <div id="ai-visibility-prompts"></div>
         <div id="ai-visibility-list"></div>

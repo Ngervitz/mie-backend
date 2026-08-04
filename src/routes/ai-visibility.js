@@ -10,9 +10,49 @@ const supabase = require('../clients/supabase');
 const {
   runWeeklyVisibilityCheck,
   runSinglePromptCheck,
+  runAdHocCheck,
 } = require('../services/ai-visibility/runner');
 
 const router = express.Router();
+
+const ALLOWED_CATEGORIES = [
+  'descubrimiento',
+  'elegibilidad',
+  'comparacion',
+  'marca',
+];
+
+/**
+ * @param {{ text: unknown, category: unknown }} opts
+ */
+async function createPromptRow({ text, category }) {
+  const promptText = typeof text === 'string' ? text.trim() : '';
+  if (!promptText) {
+    const err = new Error('text must be a non-empty string');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!ALLOWED_CATEGORIES.includes(category)) {
+    const err = new Error(
+      'category must be one of: ' + ALLOWED_CATEGORIES.join(', '),
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { data, error } = await supabase
+    .from('ai_visibility_prompts')
+    .insert({ text: promptText, category, active: true })
+    .select('id, text, category, active, created_at, updated_at')
+    .single();
+
+  if (error) {
+    const err = new Error(error.message || 'Failed to create prompt');
+    err.statusCode = 500;
+    throw err;
+  }
+  return data;
+}
 
 /**
  * GET /ai-visibility/prompts
@@ -38,6 +78,26 @@ router.get('/prompts', async (req, res) => {
     const message = err && err.message ? err.message : 'Internal error';
     logger.error('GET /ai-visibility/prompts unexpected', { error: message });
     return res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /ai-visibility/prompts
+ * Body: { text, category }
+ */
+router.post('/prompts', async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const prompt = await createPromptRow({
+      text: body.text,
+      category: body.category,
+    });
+    return res.status(201).json({ prompt });
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    const status = err && err.statusCode ? err.statusCode : 500;
+    logger.error('POST /ai-visibility/prompts failed', { error: message });
+    return res.status(status).json({ error: message });
   }
 });
 
@@ -108,6 +168,49 @@ router.get('/responses', async (req, res) => {
     const message = err && err.message ? err.message : 'Internal error';
     logger.error('GET /ai-visibility/responses unexpected', { error: message });
     return res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /ai-visibility/run-adhoc
+ * Body: { text, save?: boolean, category? }
+ * Must be registered before /run/:promptId so "adhoc" is not parsed as an id.
+ */
+router.post('/run-adhoc', async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) {
+      return res.status(400).json({ error: 'text must be a non-empty string' });
+    }
+
+    const save = body.save === true;
+
+    if (save) {
+      if (!body.category) {
+        return res
+          .status(400)
+          .json({ error: 'category is required when save is true' });
+      }
+      const prompt = await createPromptRow({
+        text,
+        category: body.category,
+      });
+      const result = await runSinglePromptCheck({ promptId: prompt.id });
+      return res.status(200).json({ saved: true, prompt, result });
+    }
+
+    const results = await runAdHocCheck({ text });
+    return res.status(200).json({ saved: false, results });
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    const status = err && err.statusCode ? err.statusCode : 500;
+    const isValidation =
+      /week_of|YYYY-MM-DD|Monday|calendar date|promptId must be|text must be|category must be/i.test(
+        message,
+      );
+    logger.error('POST /ai-visibility/run-adhoc failed', { error: message });
+    return res.status(isValidation ? 400 : status).json({ error: message });
   }
 });
 

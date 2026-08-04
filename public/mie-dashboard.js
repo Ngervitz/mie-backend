@@ -6157,6 +6157,79 @@ init();
     }
   }
 
+  function renderProviderRows(responses) {
+    return (responses || [])
+      .map(function (response) {
+        const entities = Array.isArray(response.mentioned_entities)
+          ? response.mentioned_entities
+              .map(function (entity) {
+                return escapeHtml(entity && entity.name);
+              })
+              .filter(Boolean)
+              .join(', ')
+          : '';
+
+        const provider = providerLabel(response.provider);
+        const logo = providerLogoHtml(response.provider);
+        const model = response.model_name
+          ? provider + ' / ' + response.model_name
+          : provider;
+
+        const providerCell = logo
+          ? '<span style="display:inline-flex;align-items:center;gap:6px">' +
+            logo +
+            ' ' +
+            escapeHtml(model) +
+            '</span>'
+          : escapeHtml(model);
+
+        const rawResponse = response.raw_response
+          ? '<details>' +
+            '<summary>Ver respuesta</summary>' +
+            '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
+            escapeHtml(response.raw_response) +
+            '</div>' +
+            '</details>'
+          : response.error
+            ? escapeHtml(response.error)
+            : '—';
+
+        return (
+          '<tr class="sms-row">' +
+          '<td>' +
+          providerCell +
+          '</td>' +
+          '<td><span class="email-badge' +
+          statusBadgeClass(response.status) +
+          '">' +
+          escapeHtml(statusLabel(response.status)) +
+          '</span></td>' +
+          '<td>' +
+          (response.mentions_credizona ? 'Sí' : 'No') +
+          '</td>' +
+          '<td>' +
+          (entities || '—') +
+          '</td>' +
+          '<td>' +
+          rawResponse +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+  }
+
+  function renderProviderTable(responses) {
+    return (
+      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<thead><tr><th>Proveedor / modelo</th><th>Estado</th>' +
+      '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
+      '<tbody>' +
+      renderProviderRows(responses) +
+      '</tbody></table></div>'
+    );
+  }
+
   function renderList(weekOf, responses) {
     if (!listEl) return;
     if (!responses.length) {
@@ -6178,77 +6251,12 @@ init();
 
     const sections = Array.from(groups.values())
       .map(function (group) {
-        const rows = group.responses
-          .map(function (response) {
-            const entities = Array.isArray(response.mentioned_entities)
-              ? response.mentioned_entities
-                  .map(function (entity) {
-                    return escapeHtml(entity && entity.name);
-                  })
-                  .filter(Boolean)
-                  .join(', ')
-              : '';
-
-            const provider = providerLabel(response.provider);
-            const logo = providerLogoHtml(response.provider);
-            const model = response.model_name
-              ? provider + ' / ' + response.model_name
-              : provider;
-
-            const providerCell = logo
-              ? '<span style="display:inline-flex;align-items:center;gap:6px">' +
-                logo +
-                ' ' +
-                escapeHtml(model) +
-                '</span>'
-              : escapeHtml(model);
-
-            const rawResponse = response.raw_response
-              ? '<details>' +
-                '<summary>Ver respuesta</summary>' +
-                '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
-                escapeHtml(response.raw_response) +
-                '</div>' +
-                '</details>'
-              : response.error
-                ? escapeHtml(response.error)
-                : '—';
-
-            return (
-              '<tr class="sms-row">' +
-              '<td>' +
-              providerCell +
-              '</td>' +
-              '<td><span class="email-badge' +
-              statusBadgeClass(response.status) +
-              '">' +
-              escapeHtml(statusLabel(response.status)) +
-              '</span></td>' +
-              '<td>' +
-              (response.mentions_credizona ? 'Sí' : 'No') +
-              '</td>' +
-              '<td>' +
-              (entities || '—') +
-              '</td>' +
-              '<td>' +
-              rawResponse +
-              '</td>' +
-              '</tr>'
-            );
-          })
-          .join('');
-
         return (
           '<section style="margin-top:20px">' +
           '<h3 style="margin:0 0 10px;font-size:1rem;font-weight:600;line-height:1.4">' +
           escapeHtml(group.promptText) +
           '</h3>' +
-          '<div class="sms-table-wrap"><table class="sms-table">' +
-          '<thead><tr><th>Proveedor / modelo</th><th>Estado</th>' +
-          '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
-          '<tbody>' +
-          rows +
-          '</tbody></table></div>' +
+          renderProviderTable(group.responses) +
           '</section>'
         );
       })
@@ -6307,6 +6315,104 @@ init();
       } finally {
         runBtn.disabled = false;
         runBtn.textContent = originalText;
+      }
+    });
+  }
+
+  const adhocSave = document.getElementById('ai-visibility-adhoc-save');
+  const adhocCategoryWrap = document.getElementById(
+    'ai-visibility-adhoc-category-wrap',
+  );
+  const adhocText = document.getElementById('ai-visibility-adhoc-text');
+  const adhocCategory = document.getElementById('ai-visibility-adhoc-category');
+  const adhocRunBtn = document.getElementById('ai-visibility-adhoc-run-btn');
+  const adhocResult = document.getElementById('ai-visibility-adhoc-result');
+
+  if (adhocSave && adhocCategoryWrap) {
+    adhocSave.addEventListener('change', function () {
+      if (adhocSave.checked) {
+        adhocCategoryWrap.classList.remove('hidden');
+      } else {
+        adhocCategoryWrap.classList.add('hidden');
+      }
+    });
+  }
+
+  if (adhocRunBtn) {
+    adhocRunBtn.addEventListener('click', async function () {
+      const text = adhocText ? String(adhocText.value || '').trim() : '';
+      if (!text) {
+        alert('Escribí un prompt para correr.');
+        return;
+      }
+
+      const save = !!(adhocSave && adhocSave.checked);
+      const category = adhocCategory ? adhocCategory.value : '';
+      if (save && !category) {
+        alert('Elegí una categoría para guardar el prompt.');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        save
+          ? '¿Guardar este prompt y correrlo ahora con los 4 proveedores? Se consultarán las APIs (llamadas pagas).'
+          : '¿Correr este prompt una vez con los 4 proveedores? Se consultarán las APIs (llamadas pagas).',
+      );
+      if (!confirmed) return;
+
+      const originalText = adhocRunBtn.textContent;
+      adhocRunBtn.disabled = true;
+      adhocRunBtn.textContent = 'Corriendo…';
+      if (adhocResult) adhocResult.innerHTML = '';
+
+      try {
+        const body = { text: text, save: save };
+        if (save) body.category = category;
+
+        const response = await fetch('/ai-visibility/run-adhoc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await readJsonSafe(response);
+        if (!response.ok) {
+          throw new Error(
+            getErrorMessage(data, 'No se pudo correr el prompt ad-hoc.'),
+          );
+        }
+
+        if (data.saved) {
+          if (adhocText) adhocText.value = '';
+          if (adhocSave) {
+            adhocSave.checked = false;
+            if (adhocCategoryWrap) adhocCategoryWrap.classList.add('hidden');
+          }
+          if (adhocResult) {
+            adhocResult.innerHTML =
+              '<p class="text-muted">Prompt guardado y corrido. Resultados abajo.</p>';
+          }
+          await loadPrompts();
+          await refresh();
+        } else {
+          const results = Array.isArray(data.results) ? data.results : [];
+          if (adhocResult) {
+            adhocResult.innerHTML =
+              '<p class="text-muted" style="margin-top:12px">Resultado de prueba (no guardado)</p>' +
+              renderProviderTable(results);
+          }
+        }
+      } catch (error) {
+        if (adhocResult) {
+          adhocResult.innerHTML =
+            '<div class="sms-empty">Error: ' +
+            escapeHtml(error.message) +
+            '</div>';
+        } else {
+          alert('Error: ' + error.message);
+        }
+      } finally {
+        adhocRunBtn.disabled = false;
+        adhocRunBtn.textContent = originalText;
       }
     });
   }
