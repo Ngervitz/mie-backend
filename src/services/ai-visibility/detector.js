@@ -20,8 +20,39 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizeForMatching(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Build accent-stripped view + map from normalized index → original index.
+ * @param {string} original
+ * @returns {{ normalized: string, indexMap: number[] }}
+ */
+function buildNormalizedView(original) {
+  let normalized = '';
+  /** @type {number[]} */
+  const indexMap = [];
+  for (let i = 0; i < original.length; ) {
+    const cp = original.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    const adv = ch.length;
+    const nfd = ch.normalize('NFD');
+    for (let j = 0; j < nfd.length; j += 1) {
+      const c = nfd[j];
+      if (c >= '\u0300' && c <= '\u036f') continue;
+      indexMap.push(i);
+      normalized += c;
+    }
+    i += adv;
+  }
+  return { normalized, indexMap };
+}
+
 /**
  * Earliest Unicode-aware whole-token match (no \b).
+ * Accent-insensitive: compare on NFD-stripped strings; report indices
+ * into the original text.
  * @param {string} text
  * @param {string} term
  * @returns {{ matched_text: string, first_index: number }|null}
@@ -31,21 +62,31 @@ function findEarliestMatch(text, term) {
   const trimmed = term.trim();
   if (!trimmed) return null;
 
+  const view = buildNormalizedView(text);
+  const normTerm = normalizeForMatching(trimmed);
+  if (!normTerm) return null;
+
   let re;
   try {
     re = new RegExp(
-      `(?<!\\p{L}|\\p{N})${escapeRegExp(trimmed)}(?!\\p{L}|\\p{N})`,
+      `(?<!\\p{L}|\\p{N})${escapeRegExp(normTerm)}(?!\\p{L}|\\p{N})`,
       'ui',
     );
   } catch {
     return null;
   }
 
-  const match = re.exec(text);
+  const match = re.exec(view.normalized);
   if (!match) return null;
+
+  const startOrig = view.indexMap[match.index];
+  const endNorm = match.index + match[0].length;
+  const endOrig =
+    endNorm < view.indexMap.length ? view.indexMap[endNorm] : text.length;
+
   return {
-    matched_text: match[0],
-    first_index: match.index,
+    matched_text: text.slice(startOrig, endOrig),
+    first_index: startOrig,
   };
 }
 
