@@ -5940,3 +5940,350 @@ init();
     renderList();
   };
 })();
+
+/* ----------------------------------------------------------------------------
+ * AI Visibility — integración /ai-visibility/*
+ * ------------------------------------------------------------------------- */
+(function initAiVisibility() {
+  const panel = document.getElementById('ai-visibility-panel');
+  if (!panel) return;
+
+  const runBtn = document.getElementById('ai-visibility-run-btn');
+  const summaryEl = document.getElementById('ai-visibility-summary');
+  const listEl = document.getElementById('ai-visibility-list');
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(
+      /[&<>"']/g,
+      function (character) {
+        return {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[character];
+      },
+    );
+  }
+
+  async function readJsonSafe(response) {
+    return response.json().catch(function () {
+      return {};
+    });
+  }
+
+  function getErrorMessage(data, fallback) {
+    return data && (data.error || data.message)
+      ? data.error || data.message
+      : fallback;
+  }
+
+  function providerLabel(provider) {
+    const labels = {
+      openai: 'ChatGPT',
+      anthropic: 'Claude',
+      gemini: 'Gemini',
+      perplexity: 'Perplexity',
+    };
+    return labels[provider] || provider || '—';
+  }
+
+  function providerLogoHtml(provider) {
+    // Official provider logomarks pending verification — text label fallback.
+    void provider;
+    return '';
+  }
+
+  function statusLabel(status) {
+    const labels = {
+      success: 'Correcto',
+      error: 'Error',
+      not_configured: 'Sin configurar',
+      pending: 'Pendiente',
+    };
+    return labels[status] || status || '—';
+  }
+
+  function statusBadgeClass(status) {
+    if (status === 'success') return ' email-badge--completed';
+    if (status === 'error') return ' email-badge--error';
+    return '';
+  }
+
+  async function fetchLatestResponses() {
+    const response = await fetch('/ai-visibility/responses');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudieron cargar los resultados.'),
+      );
+    }
+    return {
+      weekOf: data.week_of || null,
+      responses: Array.isArray(data.responses) ? data.responses : [],
+    };
+  }
+
+  async function fetchPrompts() {
+    const response = await fetch('/ai-visibility/prompts');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudieron cargar los prompts.'),
+      );
+    }
+    return Array.isArray(data.prompts) ? data.prompts : [];
+  }
+
+  async function runNow() {
+    const response = await fetch('/ai-visibility/run', { method: 'POST' });
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo correr la verificación.'),
+      );
+    }
+    return data;
+  }
+
+  async function runSinglePrompt(promptId) {
+    const response = await fetch(
+      '/ai-visibility/run/' + encodeURIComponent(promptId),
+      { method: 'POST' },
+    );
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo correr ese prompt.'),
+      );
+    }
+    return data;
+  }
+
+  function renderSummary(data) {
+    if (!summaryEl) return;
+    if (!data || !data.week_of) {
+      summaryEl.innerHTML = '';
+      return;
+    }
+    summaryEl.innerHTML =
+      '<p class="text-muted">' +
+      'Semana ' +
+      escapeHtml(data.week_of) +
+      ' — ' +
+      escapeHtml(data.success) +
+      ' correctas, ' +
+      escapeHtml(data.error) +
+      ' con error, ' +
+      escapeHtml(data.not_configured) +
+      ' sin configurar ' +
+      '(de ' +
+      escapeHtml(data.attempted) +
+      ' intentos)' +
+      '</p>';
+  }
+
+  function renderPrompts(prompts) {
+    const el = document.getElementById('ai-visibility-prompts');
+    if (!el) return;
+    if (!prompts.length) {
+      el.innerHTML = '<div class="sms-empty">No hay prompts activos.</div>';
+      return;
+    }
+    const rows = prompts
+      .map(function (p) {
+        return (
+          '<tr class="sms-row">' +
+          '<td>' +
+          escapeHtml(p.text) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(p.category) +
+          '</td>' +
+          '<td><button type="button" class="btn ai-visibility-run-single-btn" data-prompt-id="' +
+          escapeHtml(p.id) +
+          '">Correr</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    el.innerHTML =
+      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<thead><tr><th>Prompt</th><th>Categoría</th><th></th></tr></thead>' +
+      '<tbody>' +
+      rows +
+      '</tbody></table></div>';
+
+    el.querySelectorAll('.ai-visibility-run-single-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const promptId = btn.getAttribute('data-prompt-id');
+        if (!promptId) return;
+        btn.disabled = true;
+        const origText = btn.textContent;
+        btn.textContent = 'Corriendo…';
+        try {
+          await runSinglePrompt(promptId);
+          await refresh();
+        } catch (error) {
+          alert('Error: ' + error.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+      });
+    });
+  }
+
+  async function loadPrompts() {
+    const el = document.getElementById('ai-visibility-prompts');
+    if (!el) return;
+    el.innerHTML = '<div class="sms-empty">Cargando prompts…</div>';
+    try {
+      const prompts = await fetchPrompts();
+      renderPrompts(prompts);
+    } catch (error) {
+      el.innerHTML =
+        '<div class="sms-empty">Error: ' +
+        escapeHtml(error.message) +
+        '</div>';
+    }
+  }
+
+  function renderList(weekOf, responses) {
+    if (!listEl) return;
+    if (!responses.length) {
+      listEl.innerHTML =
+        '<div class="sms-empty">Todavía no hay corridas. Tocá "Correr esta semana".</div>';
+      return;
+    }
+    const rows = responses
+      .map(function (response) {
+        const entities = Array.isArray(response.mentioned_entities)
+          ? response.mentioned_entities
+              .map(function (entity) {
+                return escapeHtml(entity && entity.name);
+              })
+              .filter(Boolean)
+              .join(', ')
+          : '';
+
+        const provider = providerLabel(response.provider);
+        const logo = providerLogoHtml(response.provider);
+        const model = response.model_name
+          ? provider + ' / ' + response.model_name
+          : provider;
+
+        const providerCell = logo
+          ? '<span style="display:inline-flex;align-items:center;gap:6px">' +
+            logo +
+            ' ' +
+            escapeHtml(model) +
+            '</span>'
+          : escapeHtml(model);
+
+        const rawResponse = response.raw_response
+          ? '<details>' +
+            '<summary>Ver respuesta</summary>' +
+            '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
+            escapeHtml(response.raw_response) +
+            '</div>' +
+            '</details>'
+          : response.error
+            ? escapeHtml(response.error)
+            : '—';
+
+        return (
+          '<tr class="sms-row">' +
+          '<td>' +
+          escapeHtml(response.prompt_text_snapshot) +
+          '</td>' +
+          '<td>' +
+          providerCell +
+          '</td>' +
+          '<td><span class="email-badge' +
+          statusBadgeClass(response.status) +
+          '">' +
+          escapeHtml(statusLabel(response.status)) +
+          '</span></td>' +
+          '<td>' +
+          (response.mentions_credizona ? 'Sí' : 'No') +
+          '</td>' +
+          '<td>' +
+          (entities || '—') +
+          '</td>' +
+          '<td>' +
+          rawResponse +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    listEl.innerHTML =
+      '<p class="text-muted">Semana ' +
+      escapeHtml(weekOf) +
+      '</p>' +
+      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<thead><tr><th>Prompt</th><th>Proveedor / modelo</th><th>Estado</th>' +
+      '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
+      '<tbody>' +
+      rows +
+      '</tbody></table></div>';
+  }
+
+  async function refresh() {
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="sms-empty">Cargando…</div>';
+    try {
+      const result = await fetchLatestResponses();
+      renderList(result.weekOf, result.responses);
+    } catch (error) {
+      listEl.innerHTML =
+        '<div class="sms-empty">Error: ' +
+        escapeHtml(error.message) +
+        '</div>';
+    }
+  }
+
+  if (runBtn) {
+    runBtn.addEventListener('click', async function () {
+      const confirmed = window.confirm(
+        '¿Correr la verificación ahora? Se consultarán las APIs configuradas.',
+      );
+      if (!confirmed) return;
+
+      const originalText = runBtn.textContent;
+      runBtn.disabled = true;
+      runBtn.textContent = 'Corriendo…';
+      if (summaryEl) {
+        summaryEl.innerHTML =
+          '<div class="sms-empty">Consultando los proveedores configurados…</div>';
+      }
+      try {
+        const result = await runNow();
+        renderSummary(result);
+        await refresh();
+      } catch (error) {
+        if (summaryEl) {
+          summaryEl.innerHTML =
+            '<div class="sms-empty">Error: ' +
+            escapeHtml(error.message) +
+            '</div>';
+        }
+        // HTTP may have timed out while the server kept writing rows — refresh later.
+        setTimeout(function () {
+          refresh();
+        }, 3000);
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = originalText;
+      }
+    });
+  }
+
+  window.__openAiVisibility = function () {
+    loadPrompts();
+    refresh();
+  };
+})();

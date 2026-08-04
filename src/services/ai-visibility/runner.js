@@ -101,6 +101,7 @@ function daysBackToMonday(weekdayShort) {
 }
 
 /**
+ * Shared week resolution for weekly and single-prompt runs.
  * @param {string|undefined|null} weekOf
  * @returns {string} YYYY-MM-DD Monday
  */
@@ -163,37 +164,8 @@ async function upsertResponse(row) {
   }
 }
 
-/**
- * @param {{ weekOf?: string }} [opts]
- */
-async function runWeeklyVisibilityCheck({ weekOf } = {}) {
-  const week_of = resolveWeekOf(weekOf);
-
-  logger.info('AI Visibility weekly check started', {
-    week_of,
-    providers: PROVIDER_SPECS.length,
-  });
-
-  const {
-    data: prompts,
-    error: promptsError,
-  } = await supabase
-    .from('ai_visibility_prompts')
-    .select('id, text, category')
-    .eq('active', true)
-    .order('id', { ascending: true });
-
-  if (promptsError) {
-    logger.error('AI Visibility prompts query failed', {
-      error: promptsError.message,
-    });
-    throw new Error(`Failed to load prompts: ${promptsError.message}`);
-  }
-
-  const {
-    data: entities,
-    error: entitiesError,
-  } = await supabase
+async function loadActiveEntities() {
+  const { data: entities, error: entitiesError } = await supabase
     .from('monitored_entities')
     .select('id, name, aliases')
     .eq('is_self', false)
@@ -207,33 +179,23 @@ async function runWeeklyVisibilityCheck({ weekOf } = {}) {
     throw new Error(`Failed to load entities: ${entitiesError.message}`);
   }
 
-  const promptList = Array.isArray(prompts) ? prompts : [];
-  const entityList = Array.isArray(entities) ? entities : [];
+  return Array.isArray(entities) ? entities : [];
+}
 
-  const providers = PROVIDER_SPECS.map((spec) => ({
+function createProviderInstances() {
+  return PROVIDER_SPECS.map((spec) => ({
     id: spec.id,
     instance: spec.create(),
   }));
+}
 
-  /** @type {{ prompt: object, providerId: string, instance: object }[]} */
-  const jobs = [];
-  for (const prompt of promptList) {
-    for (const provider of providers) {
-      jobs.push({
-        prompt,
-        providerId: provider.id,
-        instance: provider.instance,
-      });
-    }
-  }
-
-  logger.info('AI Visibility jobs queued', {
-    week_of,
-    prompts: promptList.length,
-    providers: providers.length,
-    jobs: jobs.length,
-  });
-
+/**
+ * Shared per-job ask → detect → upsert path (weekly and single-prompt).
+ * @param {{ prompt: object, providerId: string, instance: object }[]} jobs
+ * @param {string} week_of
+ * @param {object[]} entityList
+ */
+async function processProviderJobs(jobs, week_of, entityList) {
   let success = 0;
   let errorCount = 0;
   let not_configured = 0;
@@ -255,8 +217,7 @@ async function runWeeklyVisibilityCheck({ weekOf } = {}) {
         error: err && err.message ? String(err.message) : 'Unexpected adapter error',
         errorCode: 'ADAPTER_THROW',
         httpStatus: null,
-        modelName:
-          (job.instance && job.instance.modelName) || 'unknown',
+        modelName: (job.instance && job.instance.modelName) || 'unknown',
         latencyMs: 0,
         inputTokens: null,
         outputTokens: null,
@@ -297,7 +258,8 @@ async function runWeeklyVisibilityCheck({ weekOf } = {}) {
       error:
         status === 'success'
           ? null
-          : result.error || (status === 'not_configured' ? 'not configured' : 'error'),
+          : result.error ||
+            (status === 'not_configured' ? 'not configured' : 'error'),
       error_code: status === 'success' ? null : result.errorCode || null,
       http_status: result.httpStatus != null ? result.httpStatus : null,
       mentions_credizona,
@@ -321,7 +283,8 @@ async function runWeeklyVisibilityCheck({ weekOf } = {}) {
         model_name: row.model_name,
         error_code: 'UPSERT_FAILED',
         http_status: null,
-        error: upsertErr && upsertErr.message ? upsertErr.message : 'upsert failed',
+        error:
+          upsertErr && upsertErr.message ? upsertErr.message : 'upsert failed',
       });
     }
 
@@ -337,22 +300,145 @@ async function runWeeklyVisibilityCheck({ weekOf } = {}) {
     }
   });
 
-  const summary = {
-    week_of,
-    prompts: promptList.length,
-    providers: PROVIDER_SPECS.length,
+  return {
     attempted,
     success,
     error: errorCount,
     not_configured,
+  };
+}
+
+/**
+ * @param {{ weekOf?: string }} [opts]
+ */
+async function runWeeklyVisibilityCheck({ weekOf } = {}) {
+  const week_of = resolveWeekOf(weekOf);
+
+  logger.info('AI Visibility weekly check started', {
+    week_of,
+    providers: PROVIDER_SPECS.length,
+  });
+
+  const {
+    data: prompts,
+    error: promptsError,
+  } = await supabase
+    .from('ai_visibility_prompts')
+    .select('id, text, category')
+    .eq('active', true)
+    .order('id', { ascending: true });
+
+  if (promptsError) {
+    logger.error('AI Visibility prompts query failed', {
+      error: promptsError.message,
+    });
+    throw new Error(`Failed to load prompts: ${promptsError.message}`);
+  }
+
+  const promptList = Array.isArray(prompts) ? prompts : [];
+  const entityList = await loadActiveEntities();
+  const providers = createProviderInstances();
+
+  /** @type {{ prompt: object, providerId: string, instance: object }[]} */
+  const jobs = [];
+  for (const prompt of promptList) {
+    for (const provider of providers) {
+      jobs.push({
+        prompt,
+        providerId: provider.id,
+        instance: provider.instance,
+      });
+    }
+  }
+
+  logger.info('AI Visibility jobs queued', {
+    week_of,
+    prompts: promptList.length,
+    providers: providers.length,
+    jobs: jobs.length,
+  });
+
+  const counts = await processProviderJobs(jobs, week_of, entityList);
+
+  const summary = {
+    week_of,
+    prompts: promptList.length,
+    providers: PROVIDER_SPECS.length,
+    attempted: counts.attempted,
+    success: counts.success,
+    error: counts.error,
+    not_configured: counts.not_configured,
   };
 
   logger.info('AI Visibility weekly check finished', summary);
   return summary;
 }
 
+/**
+ * Run all 4 providers for a single active prompt.
+ * @param {{ promptId: number|string, weekOf?: string }} [opts]
+ */
+async function runSinglePromptCheck({ promptId, weekOf } = {}) {
+  const numericId = Number(promptId);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    throw new Error('promptId must be a positive integer');
+  }
+
+  const week_of = resolveWeekOf(weekOf);
+
+  const { data: prompt, error: promptError } = await supabase
+    .from('ai_visibility_prompts')
+    .select('id, text, category, active')
+    .eq('id', numericId)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (promptError) {
+    logger.error('AI Visibility single-prompt load failed', {
+      prompt_id: numericId,
+      error: promptError.message,
+    });
+    throw new Error(`Failed to load prompt: ${promptError.message}`);
+  }
+
+  if (!prompt) {
+    const err = new Error('Prompt not found or inactive');
+    err.code = 'PROMPT_NOT_FOUND';
+    throw err;
+  }
+
+  logger.info('AI Visibility single-prompt check started', {
+    week_of,
+    prompt_id: prompt.id,
+    providers: PROVIDER_SPECS.length,
+  });
+
+  const entityList = await loadActiveEntities();
+  const providers = createProviderInstances();
+  const jobs = providers.map((provider) => ({
+    prompt,
+    providerId: provider.id,
+    instance: provider.instance,
+  }));
+
+  const counts = await processProviderJobs(jobs, week_of, entityList);
+
+  const summary = {
+    week_of,
+    prompt_id: prompt.id,
+    attempted: counts.attempted,
+    success: counts.success,
+    error: counts.error,
+    not_configured: counts.not_configured,
+  };
+
+  logger.info('AI Visibility single-prompt check finished', summary);
+  return summary;
+}
+
 module.exports = {
   runWeeklyVisibilityCheck,
+  runSinglePromptCheck,
   resolveWeekOf,
   formatYmdMontevideo,
 };

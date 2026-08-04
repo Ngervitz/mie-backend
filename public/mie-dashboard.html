@@ -58,6 +58,15 @@
         </svg>
         Términos descubiertos
       </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="ai-visibility"
+        id="tab-ai-visibility">
+        🤖 AI Visibility
+      </button>
         </div>
       </div>
       <div class="dashboard-tab-group" data-group="analisis">
@@ -705,6 +714,40 @@
       </div>
     </div>
 
+    <!-- AI Visibility (Janus). -->
+    <div
+      class="dashboard-panel hidden"
+      id="ai-visibility-panel"
+      role="tabpanel"
+      aria-labelledby="tab-ai-visibility"
+      hidden>
+      <div id="ai-visibility-landing" class="mcl-landing">
+        <h2 class="mcl-title">AI Visibility</h2>
+
+        <p class="text-muted">
+          Qué dicen ChatGPT, Claude, Gemini y Perplexity sobre préstamos
+          personales en Uruguay — corrida semanal.
+        </p>
+
+        <div class="email-action-block">
+          <button
+            type="button"
+            id="ai-visibility-run-btn"
+            class="btn btn-primary">
+            Correr esta semana
+          </button>
+
+          <p class="text-muted">
+            Consulta los proveedores configurados con los prompts activos.
+          </p>
+        </div>
+
+        <div id="ai-visibility-summary"></div>
+        <div id="ai-visibility-prompts"></div>
+        <div id="ai-visibility-list"></div>
+      </div>
+    </div>
+
     <!-- Inbox: Instagram comments + DMs (FB/Messenger placeholders). -->
     <div
       class="dashboard-panel hidden"
@@ -825,8 +868,9 @@
         sms: document.getElementById('sms-panel'),
         email: document.getElementById('email-panel'),
         inbox: document.getElementById('inbox-panel'),
+        'ai-visibility': document.getElementById('ai-visibility-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !tabs.length) return;
 
       var current = 'market';
 
@@ -853,6 +897,12 @@
         if (name === 'sms' && window.__openSms) window.__openSms();
         if (name === 'email' && window.__openEmail) window.__openEmail();
         if (name === 'inbox' && window.__openInbox) window.__openInbox();
+        if (
+          name === 'ai-visibility' &&
+          typeof window.__openAiVisibility === 'function'
+        ) {
+          window.__openAiVisibility();
+        }
         current = name;
       }
 
