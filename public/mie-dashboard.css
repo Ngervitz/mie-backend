@@ -3023,6 +3023,53 @@
   margin: 0 0 8px;
 }
 
+#mie-dashboard-app #ai-visibility-list .sms-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(1),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(1) {
+  width: 22%;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(2),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(2) {
+  width: 10%;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(3),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(3) {
+  width: 8%;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(4),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(4) {
+  width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#mie-dashboard-app #ai-visibility-list .sms-table th:nth-child(5),
+#mie-dashboard-app #ai-visibility-list .sms-table td:nth-child(5) {
+  width: 30%;
+}
+
+#mie-dashboard-app #ai-visibility-prompts.hidden {
+  display: none !important;
+}
+
+#mie-dashboard-app #ai-visibility-prompts-chevron {
+  display: inline-block;
+  transition: transform 160ms ease;
+}
+
+#mie-dashboard-app #ai-visibility-prompts-toggle[aria-expanded='true']
+  #ai-visibility-prompts-chevron {
+  transform: rotate(90deg);
+}
+
 #mie-dashboard-app #email-create-form {
   display: flex;
   flex-direction: column;

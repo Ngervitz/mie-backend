@@ -6279,13 +6279,33 @@ init();
     return 'hsl(' + Math.round(hue) + ', 65%, 60%)';
   }
 
-  function bubbleRadius(mentionCount) {
-    const n = Number(mentionCount) || 0;
-    if (n <= 0) return 0;
-    if (n === 1) return 4;
-    if (n === 2) return 6;
-    if (n === 3) return 8;
-    return 10;
+  function computeMaxMentionCount(data) {
+    let max = 0;
+    (Array.isArray(data && data.entities) ? data.entities : []).forEach(
+      function (entity) {
+        (Array.isArray(entity.series) ? entity.series : []).forEach(
+          function (point) {
+            if (point && point.mention_count > max) max = point.mention_count;
+          },
+        );
+      },
+    );
+    const credSeries =
+      data && data.credizona && Array.isArray(data.credizona.series)
+        ? data.credizona.series
+        : [];
+    credSeries.forEach(function (point) {
+      if (point && point.mention_count > max) max = point.mention_count;
+    });
+    return max || 1;
+  }
+
+  function bubbleRadius(mentionCount, maxMentionCount) {
+    if (!mentionCount || mentionCount <= 0) return 0;
+    var minR = 4;
+    var maxR = 16;
+    var ratio = mentionCount / maxMentionCount;
+    return Math.round(minR + ratio * (maxR - minR));
   }
 
   function destroyEvolutionChart() {
@@ -6375,6 +6395,7 @@ init();
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
     let maxRank = 1;
     const datasets = [];
+    const maxMentionCount = computeMaxMentionCount(data);
     const visibleEntities = getVisibleEntities(data);
     const totalVisible = visibleEntities.length;
     const xJitter = 0.12;
@@ -6400,7 +6421,7 @@ init();
         return {
           x: index + xOffset,
           y: point.avg_rank,
-          r: bubbleRadius(point.mention_count),
+          r: bubbleRadius(point.mention_count, maxMentionCount),
           week_index: index,
           week_of: week,
           mention_count: point.mention_count,
@@ -6588,13 +6609,16 @@ init();
   function renderProviderRows(responses) {
     return (responses || [])
       .map(function (response) {
-        const entities = Array.isArray(response.mentioned_entities)
+        const entityNamesPlain = Array.isArray(response.mentioned_entities)
           ? response.mentioned_entities
               .map(function (entity) {
-                return escapeHtml(entity && entity.name);
+                return entity && entity.name ? String(entity.name) : '';
               })
               .filter(Boolean)
               .join(', ')
+          : '';
+        const entitiesHtml = entityNamesPlain
+          ? escapeHtml(entityNamesPlain)
           : '';
 
         const provider = providerLabel(response.provider);
@@ -6635,8 +6659,12 @@ init();
           '<td>' +
           (response.mentions_credizona ? 'Sí' : 'No') +
           '</td>' +
-          '<td>' +
-          (entities || '—') +
+          '<td' +
+          (entityNamesPlain
+            ? ' title="' + escapeHtml(entityNamesPlain) + '"'
+            : '') +
+          '>' +
+          (entitiesHtml || '—') +
           '</td>' +
           '<td>' +
           rawResponse +
