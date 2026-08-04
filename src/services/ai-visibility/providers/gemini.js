@@ -1,5 +1,5 @@
 /**
- * Gemini adapter — HTTP generateContent + google_search grounding (no SDK).
+ * Gemini adapter — HTTP generateContent (no SDK, no google_search grounding).
  * Key convention: GEMINI_API_KEY (no prior project convention).
  */
 
@@ -105,7 +105,6 @@ class GeminiVisibilityProvider {
               parts: [{ text: promptText.trim() }],
             },
           ],
-          tools: [{ google_search: {} }],
           generationConfig: {
             temperature: 0.2,
           },
