@@ -784,12 +784,6 @@
             competidor. Con varias semanas, el tamaño de cada punto indica
             cuántos proveedores lo mencionaron esa semana.
           </p>
-          <label class="mcl-field">
-            <span class="mcl-field-label">Prompt</span>
-            <select
-              id="ai-visibility-evolution-prompt"
-              class="mcl-input"></select>
-          </label>
           <div id="ai-visibility-evolution-credizona-card" class="sms-empty"></div>
           <div id="ai-visibility-evolution-status" class="text-muted"></div>
           <button
@@ -807,7 +801,16 @@
           </div>
         </div>
 
-        <div id="ai-visibility-prompts"></div>
+        <button
+          type="button"
+          id="ai-visibility-prompts-toggle"
+          class="ai-vis-section-title"
+          aria-expanded="false"
+          style="width:100%;text-align:left;cursor:pointer;background:transparent;border:0;display:flex;align-items:center;justify-content:space-between">
+          <span>Prompts trackeados</span>
+          <span id="ai-visibility-prompts-chevron" aria-hidden="true">▸</span>
+        </button>
+        <div id="ai-visibility-prompts" class="hidden"></div>
         <div id="ai-visibility-list"></div>
       </div>
     </div>

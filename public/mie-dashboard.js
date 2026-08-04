@@ -5952,6 +5952,33 @@ init();
   const summaryEl = document.getElementById('ai-visibility-summary');
   const listEl = document.getElementById('ai-visibility-list');
 
+  const WEEKLY_ALREADY_RUN_MSG =
+    '💡 Ya se corrió esta semana. Próxima corrida disponible la semana que viene.';
+
+  function setWeeklyRunLocked(locked) {
+    if (runBtn) {
+      runBtn.disabled = !!locked;
+    }
+    if (locked && summaryEl) {
+      summaryEl.innerHTML =
+        '<div class="sms-empty">' + WEEKLY_ALREADY_RUN_MSG + '</div>';
+    }
+  }
+
+  async function fetchRunStatus() {
+    const response = await fetch('/ai-visibility/run-status');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo consultar el estado de la corrida.'),
+      );
+    }
+    return {
+      week_of: data.week_of || null,
+      already_run: !!data.already_run,
+    };
+  }
+
   function escapeHtml(value) {
     return String(value == null ? '' : value).replace(
       /[&<>"']/g,
@@ -6046,6 +6073,16 @@ init();
   async function runNow() {
     const response = await fetch('/ai-visibility/run', { method: 'POST' });
     const data = await readJsonSafe(response);
+    if (response.status === 409) {
+      const err = new Error(
+        getErrorMessage(
+          data,
+          'Ya se corrió la verificación esta semana. Próxima corrida disponible la semana que viene.',
+        ),
+      );
+      err.status = 409;
+      throw err;
+    }
     if (!response.ok) {
       throw new Error(
         getErrorMessage(data, 'No se pudo correr la verificación.'),
@@ -6158,19 +6195,27 @@ init();
     }
   }
 
+  let promptsToggleAttached = false;
+  const promptsToggle = document.getElementById('ai-visibility-prompts-toggle');
+  const promptsPanel = document.getElementById('ai-visibility-prompts');
+
+  if (promptsToggle && promptsPanel && !promptsToggleAttached) {
+    promptsToggle.addEventListener('click', function () {
+      const expanded = promptsToggle.getAttribute('aria-expanded') === 'true';
+      const next = !expanded;
+      promptsToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+      promptsPanel.classList.toggle('hidden', !next);
+    });
+    promptsToggleAttached = true;
+  }
+
   /* ---- Posición en respuestas de IA (Chart.js) ---- */
   let evolutionChart = null;
   let evolutionRequestId = 0;
-  let evolutionPromptsLoaded = false;
-  let evolutionListenerAttached = false;
-  let evolutionLoadedPromptId = null;
   let evolutionLastData = null;
   let evolutionShowAll = false;
   let evolutionToggleAttached = false;
 
-  const evolutionSelect = document.getElementById(
-    'ai-visibility-evolution-prompt',
-  );
   const evolutionCanvas = document.getElementById(
     'ai-visibility-evolution-chart',
   );
@@ -6183,11 +6228,7 @@ init();
   const evolutionToggle = document.getElementById(
     'ai-visibility-evolution-toggle',
   );
-  const evolutionEnabled = !!(
-    evolutionSelect &&
-    evolutionCanvas &&
-    evolutionStatus
-  );
+  const evolutionEnabled = !!(evolutionCanvas && evolutionStatus);
 
   const ENTITY_COLORS = [
     '#7FA8D9',
@@ -6227,14 +6268,12 @@ init();
     }
   }
 
-  async function fetchHistory(promptId) {
-    const response = await fetch(
-      '/ai-visibility/prompts/' + encodeURIComponent(promptId) + '/history',
-    );
+  async function fetchEvolutionSummary() {
+    const response = await fetch('/ai-visibility/evolution-summary');
     const data = await readJsonSafe(response);
     if (!response.ok) {
       throw new Error(
-        getErrorMessage(data, 'No se pudo cargar el histórico del prompt.'),
+        getErrorMessage(data, 'No se pudo cargar el resumen de evolución.'),
       );
     }
     return data;
@@ -6249,7 +6288,10 @@ init();
     (Array.isArray(data && data.coverage) ? data.coverage : []).forEach(
       function (c) {
         if (c && c.week_of) {
-          coverageByWeek[c.week_of] = Number(c.successful_providers) || 0;
+          coverageByWeek[c.week_of] =
+            Number(
+              c.total_combos != null ? c.total_combos : c.successful_providers,
+            ) || 0;
         }
       },
     );
@@ -6282,7 +6324,7 @@ init();
         : [];
     if (!series.length) {
       evolutionCredizonaCard.textContent =
-        '💡 Sin datos de Credizona todavía para este prompt.';
+        '💡 Sin datos de Credizona todavía.';
       return;
     }
     const last = series[series.length - 1];
@@ -6356,9 +6398,7 @@ init();
     });
 
     if (!datasets.length) {
-      setEvolutionStatus(
-        'Todavía no hay respuestas exitosas para este prompt.',
-      );
+      setEvolutionStatus('Todavía no hay respuestas exitosas.');
       return;
     }
 
@@ -6408,6 +6448,10 @@ init();
             type: 'linear',
             min: -0.5 - maxOffset,
             max: weeks.length - 0.5 + maxOffset,
+            grid: {
+              color: '#2a2f3a',
+              drawTicks: false,
+            },
             ticks: {
               stepSize: 1,
               callback: function (value) {
@@ -6426,6 +6470,10 @@ init();
             min: 0.5,
             suggestedMax: maxRank + 1,
             grace: '5%',
+            grid: {
+              color: '#2a2f3a',
+              drawTicks: false,
+            },
             ticks: {
               stepSize: 1,
               callback: function (value) {
@@ -6463,94 +6511,35 @@ init();
 
     const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
     if (!weeks.length) {
-      setEvolutionStatus(
-        'Todavía no hay respuestas exitosas para este prompt.',
-      );
+      setEvolutionStatus('Todavía no hay respuestas exitosas.');
       return;
     }
 
     renderEvolutionLineChart(data, weeks, buildCoverageByWeek(data));
   }
 
-  async function ensureEvolutionPrompts() {
-    if (!evolutionEnabled) return [];
-    if (evolutionPromptsLoaded && evolutionSelect.options.length) {
-      return Array.from(evolutionSelect.options).map(function (opt) {
-        return { id: opt.value, text: opt.textContent };
-      });
-    }
-
-    try {
-      const prompts = await fetchPrompts();
-      const previous = evolutionSelect.value;
-      evolutionSelect.innerHTML = '';
-      prompts.forEach(function (p) {
-        const opt = document.createElement('option');
-        opt.value = String(p.id);
-        opt.textContent = p.text || 'Prompt #' + p.id;
-        evolutionSelect.appendChild(opt);
-      });
-      if (
-        previous &&
-        Array.from(evolutionSelect.options).some(function (o) {
-          return o.value === previous;
-        })
-      ) {
-        evolutionSelect.value = previous;
-      } else if (prompts.length) {
-        evolutionSelect.value = String(prompts[0].id);
-      }
-      evolutionPromptsLoaded = true;
-      return prompts;
-    } catch (error) {
-      setEvolutionStatus('Error cargando prompts: ' + error.message);
-      return [];
-    }
-  }
-
   async function refreshEvolution(opts) {
     if (!evolutionEnabled) return;
     const force = !!(opts && opts.force);
-    const promptId = evolutionSelect.value;
-    if (!promptId) {
-      destroyEvolutionChart();
-      evolutionLastData = null;
-      evolutionLoadedPromptId = null;
-      setEvolutionStatus('No hay prompts activos.');
-      return;
-    }
 
-    if (
-      !force &&
-      evolutionLoadedPromptId === promptId &&
-      evolutionChart
-    ) {
+    if (!force && evolutionLastData && evolutionChart) {
       return;
     }
 
     const requestId = ++evolutionRequestId;
     setEvolutionStatus('Cargando evolución…');
     try {
-      const data = await fetchHistory(promptId);
+      const data = await fetchEvolutionSummary();
       if (requestId !== evolutionRequestId) return;
       evolutionShowAll = false;
       evolutionLastData = data;
       renderEvolutionChart(data);
-      evolutionLoadedPromptId = promptId;
     } catch (error) {
       if (requestId !== evolutionRequestId) return;
       destroyEvolutionChart();
       evolutionLastData = null;
-      evolutionLoadedPromptId = null;
       setEvolutionStatus('Error: ' + error.message);
     }
-  }
-
-  if (evolutionEnabled && !evolutionListenerAttached) {
-    evolutionSelect.addEventListener('change', function () {
-      refreshEvolution({ force: true });
-    });
-    evolutionListenerAttached = true;
   }
 
   if (evolutionToggle && !evolutionToggleAttached) {
@@ -6695,6 +6684,7 @@ init();
       if (!confirmed) return;
 
       const originalText = runBtn.textContent;
+      let lockWeeklyButton = false;
       runBtn.disabled = true;
       runBtn.textContent = 'Corriendo…';
       if (summaryEl) {
@@ -6704,23 +6694,29 @@ init();
       try {
         const result = await runNow();
         renderSummary(result);
+        lockWeeklyButton = true;
         await refresh();
         await refreshEvolution({ force: true });
       } catch (error) {
-        if (summaryEl) {
-          summaryEl.innerHTML =
-            '<div class="sms-empty">Error: ' +
-            escapeHtml(error.message) +
-            '</div>';
+        if (error && error.status === 409) {
+          lockWeeklyButton = true;
+          setWeeklyRunLocked(true);
+        } else {
+          if (summaryEl) {
+            summaryEl.innerHTML =
+              '<div class="sms-empty">Error: ' +
+              escapeHtml(error.message) +
+              '</div>';
+          }
+          // HTTP may have timed out while the server kept writing rows — refresh later.
+          setTimeout(function () {
+            refresh();
+            refreshEvolution({ force: true });
+          }, 3000);
         }
-        // HTTP may have timed out while the server kept writing rows — refresh later.
-        setTimeout(function () {
-          refresh();
-          refreshEvolution({ force: true });
-        }, 3000);
       } finally {
-        runBtn.disabled = false;
         runBtn.textContent = originalText;
+        runBtn.disabled = lockWeeklyButton;
       }
     });
   }
@@ -6797,9 +6793,7 @@ init();
             adhocResult.innerHTML =
               '<p class="text-muted">Prompt guardado y corrido. Resultados abajo.</p>';
           }
-          evolutionPromptsLoaded = false;
           await loadPrompts();
-          await ensureEvolutionPrompts();
           await refresh();
           await refreshEvolution({ force: true });
         } else {
@@ -6829,8 +6823,17 @@ init();
   window.__openAiVisibility = function () {
     loadPrompts();
     refresh();
-    ensureEvolutionPrompts().then(function () {
-      return refreshEvolution({ force: false });
-    });
+    fetchRunStatus()
+      .then(function (status) {
+        if (status.already_run) {
+          setWeeklyRunLocked(true);
+        } else if (runBtn) {
+          runBtn.disabled = false;
+        }
+      })
+      .catch(function () {
+        /* no bloquear el tab si falla el status */
+      });
+    refreshEvolution({ force: true });
   };
 })();
