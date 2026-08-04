@@ -5990,17 +5990,16 @@ init();
   }
 
   function providerLogoHtml(provider) {
-    const logoIds = {
-      openai: 'ai-vis-logo-openai',
-      anthropic: 'ai-vis-logo-anthropic',
+    const domains = {
+      openai: 'chatgpt.com',
+      anthropic: 'claude.ai',
+      gemini: 'gemini.google.com',
+      perplexity: 'perplexity.ai',
     };
-    const id = logoIds[provider];
-    if (!id) return '';
-    const el = document.getElementById(id);
-    if (!el) return '';
-    const clone = el.cloneNode(true);
-    clone.removeAttribute('id');
-    return clone.outerHTML;
+    const domain = domains[provider];
+    if (!domain) return '';
+    return '<img src="https://www.google.com/s2/favicons?sz=32&domain=' +
+      domain + '" width="16" height="16" alt="" style="vertical-align:middle;border-radius:3px">';
   }
 
   function statusLabel(status) {
@@ -6165,65 +6164,92 @@ init();
         '<div class="sms-empty">Todavía no hay corridas. Tocá "Correr esta semana".</div>';
       return;
     }
-    const rows = responses
-      .map(function (response) {
-        const entities = Array.isArray(response.mentioned_entities)
-          ? response.mentioned_entities
-              .map(function (entity) {
-                return escapeHtml(entity && entity.name);
-              })
-              .filter(Boolean)
-              .join(', ')
-          : '';
+    const groups = new Map();
+    responses.forEach(function (response) {
+      const key = response.prompt_id || response.prompt_text_snapshot || '';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          promptText: response.prompt_text_snapshot || '',
+          responses: [],
+        });
+      }
+      groups.get(key).responses.push(response);
+    });
 
-        const provider = providerLabel(response.provider);
-        const logo = providerLogoHtml(response.provider);
-        const model = response.model_name
-          ? provider + ' / ' + response.model_name
-          : provider;
+    const sections = Array.from(groups.values())
+      .map(function (group) {
+        const rows = group.responses
+          .map(function (response) {
+            const entities = Array.isArray(response.mentioned_entities)
+              ? response.mentioned_entities
+                  .map(function (entity) {
+                    return escapeHtml(entity && entity.name);
+                  })
+                  .filter(Boolean)
+                  .join(', ')
+              : '';
 
-        const providerCell = logo
-          ? '<span style="display:inline-flex;align-items:center;gap:6px">' +
-            logo +
-            ' ' +
-            escapeHtml(model) +
-            '</span>'
-          : escapeHtml(model);
+            const provider = providerLabel(response.provider);
+            const logo = providerLogoHtml(response.provider);
+            const model = response.model_name
+              ? provider + ' / ' + response.model_name
+              : provider;
 
-        const rawResponse = response.raw_response
-          ? '<details>' +
-            '<summary>Ver respuesta</summary>' +
-            '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
-            escapeHtml(response.raw_response) +
-            '</div>' +
-            '</details>'
-          : response.error
-            ? escapeHtml(response.error)
-            : '—';
+            const providerCell = logo
+              ? '<span style="display:inline-flex;align-items:center;gap:6px">' +
+                logo +
+                ' ' +
+                escapeHtml(model) +
+                '</span>'
+              : escapeHtml(model);
+
+            const rawResponse = response.raw_response
+              ? '<details>' +
+                '<summary>Ver respuesta</summary>' +
+                '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
+                escapeHtml(response.raw_response) +
+                '</div>' +
+                '</details>'
+              : response.error
+                ? escapeHtml(response.error)
+                : '—';
+
+            return (
+              '<tr class="sms-row">' +
+              '<td>' +
+              providerCell +
+              '</td>' +
+              '<td><span class="email-badge' +
+              statusBadgeClass(response.status) +
+              '">' +
+              escapeHtml(statusLabel(response.status)) +
+              '</span></td>' +
+              '<td>' +
+              (response.mentions_credizona ? 'Sí' : 'No') +
+              '</td>' +
+              '<td>' +
+              (entities || '—') +
+              '</td>' +
+              '<td>' +
+              rawResponse +
+              '</td>' +
+              '</tr>'
+            );
+          })
+          .join('');
 
         return (
-          '<tr class="sms-row">' +
-          '<td>' +
-          escapeHtml(response.prompt_text_snapshot) +
-          '</td>' +
-          '<td>' +
-          providerCell +
-          '</td>' +
-          '<td><span class="email-badge' +
-          statusBadgeClass(response.status) +
-          '">' +
-          escapeHtml(statusLabel(response.status)) +
-          '</span></td>' +
-          '<td>' +
-          (response.mentions_credizona ? 'Sí' : 'No') +
-          '</td>' +
-          '<td>' +
-          (entities || '—') +
-          '</td>' +
-          '<td>' +
-          rawResponse +
-          '</td>' +
-          '</tr>'
+          '<section style="margin-top:20px">' +
+          '<h3 style="margin:0 0 10px;font-size:1rem;font-weight:600;line-height:1.4">' +
+          escapeHtml(group.promptText) +
+          '</h3>' +
+          '<div class="sms-table-wrap"><table class="sms-table">' +
+          '<thead><tr><th>Proveedor / modelo</th><th>Estado</th>' +
+          '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
+          '<tbody>' +
+          rows +
+          '</tbody></table></div>' +
+          '</section>'
         );
       })
       .join('');
@@ -6232,12 +6258,7 @@ init();
       '<p class="text-muted">Semana ' +
       escapeHtml(weekOf) +
       '</p>' +
-      '<div class="sms-table-wrap"><table class="sms-table">' +
-      '<thead><tr><th>Prompt</th><th>Proveedor / modelo</th><th>Estado</th>' +
-      '<th>Credizona</th><th>Competidores detectados</th><th>Respuesta</th></tr></thead>' +
-      '<tbody>' +
-      rows +
-      '</tbody></table></div>';
+      sections;
   }
 
   async function refresh() {
