@@ -713,6 +713,21 @@ router.post('/run/:promptId', async (req, res) => {
   }
 
   try {
+    const week_of = resolveWeekOf();
+    const { count, error: countError } = await supabase
+      .from('ai_visibility_responses')
+      .select('id', { count: 'exact', head: true })
+      .eq('prompt_id', promptId)
+      .eq('week_of', week_of);
+    if (countError) throw countError;
+    if ((count || 0) > 0) {
+      return res.status(409).json({
+        error: 'Este prompt ya se corrió esta semana.',
+        week_of,
+        already_run: true,
+      });
+    }
+
     const summary = await runSinglePromptCheck({ promptId });
     return res.status(200).json(summary);
   } catch (err) {

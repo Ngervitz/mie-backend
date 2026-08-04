@@ -6097,6 +6097,13 @@ init();
       { method: 'POST' },
     );
     const data = await readJsonSafe(response);
+    if (response.status === 409) {
+      const err = new Error(
+        getErrorMessage(data, 'Este prompt ya se corrió esta semana.'),
+      );
+      err.status = 409;
+      throw err;
+    }
     if (!response.ok) {
       throw new Error(
         getErrorMessage(data, 'No se pudo correr ese prompt.'),
@@ -6128,15 +6135,30 @@ init();
       '</p>';
   }
 
+  let cachedPromptsList = [];
+  let ranPromptIdsThisWeek = new Set();
+
+  function buildRanPromptIds(responses) {
+    const set = new Set();
+    (responses || []).forEach(function (row) {
+      if (row && row.prompt_id != null) set.add(String(row.prompt_id));
+    });
+    return set;
+  }
+
   function renderPrompts(prompts) {
     const el = document.getElementById('ai-visibility-prompts');
     if (!el) return;
-    if (!prompts.length) {
+    cachedPromptsList = Array.isArray(prompts) ? prompts : [];
+    if (!cachedPromptsList.length) {
       el.innerHTML = '<div class="sms-empty">No hay prompts activos.</div>';
       return;
     }
-    const rows = prompts
+    const rows = cachedPromptsList
       .map(function (p) {
+        const already = ranPromptIdsThisWeek.has(String(p.id));
+        const btnLabel = already ? 'Ya corrido' : 'Correr';
+        const btnDisabled = already ? ' disabled' : '';
         return (
           '<tr class="sms-row">' +
           '<td>' +
@@ -6147,7 +6169,11 @@ init();
           '</td>' +
           '<td><button type="button" class="btn ai-visibility-run-single-btn" data-prompt-id="' +
           escapeHtml(p.id) +
-          '">Correr</button></td>' +
+          '"' +
+          btnDisabled +
+          '>' +
+          btnLabel +
+          '</button></td>' +
           '</tr>'
         );
       })
@@ -6160,21 +6186,35 @@ init();
       '</tbody></table></div>';
 
     el.querySelectorAll('.ai-visibility-run-single-btn').forEach(function (btn) {
+      if (btn.disabled) return;
       btn.addEventListener('click', async function () {
         const promptId = btn.getAttribute('data-prompt-id');
         if (!promptId) return;
         btn.disabled = true;
         const origText = btn.textContent;
         btn.textContent = 'Corriendo…';
+        let stayDisabled = false;
         try {
           await runSinglePrompt(promptId);
+          stayDisabled = true;
           await refresh();
           await refreshEvolution({ force: true });
         } catch (error) {
-          alert('Error: ' + error.message);
+          if (error && error.status === 409) {
+            stayDisabled = true;
+            btn.disabled = true;
+            btn.textContent = 'Ya corrido';
+          } else {
+            alert('Error: ' + error.message);
+          }
         } finally {
-          btn.disabled = false;
-          btn.textContent = origText;
+          if (!stayDisabled) {
+            btn.disabled = false;
+            btn.textContent = origText;
+          } else {
+            btn.disabled = true;
+            btn.textContent = 'Ya corrido';
+          }
         }
       });
     });
@@ -6204,7 +6244,10 @@ init();
       const expanded = promptsToggle.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       promptsToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-      promptsPanel.classList.toggle('hidden', !next);
+      if (next) promptsPanel.classList.remove('hidden');
+      else promptsPanel.classList.add('hidden');
+      const chevron = document.getElementById('ai-visibility-prompts-chevron');
+      if (chevron) chevron.textContent = next ? '▾' : '▸';
     });
     promptsToggleAttached = true;
   }
@@ -6230,26 +6273,10 @@ init();
   );
   const evolutionEnabled = !!(evolutionCanvas && evolutionStatus);
 
-  const ENTITY_COLORS = [
-    '#7FA8D9',
-    '#ED93B1',
-    '#e8912d',
-    '#60a5fa',
-    '#c9a227',
-    '#4285f4',
-    '#D4537E',
-    '#8b5cf6',
-    '#14b8a6',
-    '#f97316',
-  ];
-
-  function colorForEntity(entityId) {
-    let hash = 0;
-    const s = String(entityId || '');
-    for (let i = 0; i < s.length; i += 1) {
-      hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-    }
-    return ENTITY_COLORS[hash % ENTITY_COLORS.length];
+  function getEntityColor(index) {
+    const goldenAngle = 137.5;
+    const hue = (index * goldenAngle) % 360;
+    return 'hsl(' + Math.round(hue) + ', 65%, 60%)';
   }
 
   function bubbleRadius(mentionCount) {
@@ -6383,8 +6410,8 @@ init();
         data: points,
         showLine: true,
         spanGaps: false,
-        borderColor: colorForEntity(entity.entity_id),
-        backgroundColor: colorForEntity(entity.entity_id),
+        borderColor: getEntityColor(entityIndex),
+        backgroundColor: getEntityColor(entityIndex),
         borderWidth: 2,
         tension: 0.25,
         pointRadius: function (context) {
@@ -6667,7 +6694,9 @@ init();
     listEl.innerHTML = '<div class="sms-empty">Cargando…</div>';
     try {
       const result = await fetchLatestResponses();
+      ranPromptIdsThisWeek = buildRanPromptIds(result.responses);
       renderList(result.weekOf, result.responses);
+      if (cachedPromptsList.length) renderPrompts(cachedPromptsList);
     } catch (error) {
       listEl.innerHTML =
         '<div class="sms-empty">Error: ' +
