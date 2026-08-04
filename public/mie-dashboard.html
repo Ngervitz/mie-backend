@@ -778,24 +778,33 @@
         <div id="ai-visibility-summary"></div>
 
         <div id="ai-visibility-evolution" class="mcl-landing">
-          <h3 class="ai-vis-section-title">Evolución por competidor</h3>
+          <h3 class="ai-vis-section-title">Posición en respuestas de IA</h3>
+          <p class="text-muted" style="margin-top:0;margin-bottom:12px">
+            💡 Posición promedio entre los modelos que mencionaron a cada
+            competidor. Con varias semanas, el tamaño de cada punto indica
+            cuántos proveedores lo mencionaron esa semana.
+          </p>
           <label class="mcl-field">
             <span class="mcl-field-label">Prompt</span>
             <select
               id="ai-visibility-evolution-prompt"
               class="mcl-input"></select>
           </label>
+          <div id="ai-visibility-evolution-credizona-card" class="sms-empty"></div>
           <div id="ai-visibility-evolution-status" class="text-muted"></div>
+          <button
+            type="button"
+            id="ai-visibility-evolution-toggle"
+            class="btn btn-secondary"
+            style="display:none;margin:8px 0">
+            Mostrar todos
+          </button>
           <div style="position:relative;height:320px;width:100%">
             <canvas
               id="ai-visibility-evolution-chart"
-              aria-label="Evolución semanal de menciones por competidor"
+              aria-label="Posición promedio de competidores en respuestas de IA"
               role="img"></canvas>
           </div>
-          <p class="text-muted" style="margin-top:6px">
-            💡 El tamaño de cada punto indica cuántos proveedores mencionaron a
-            esa entidad esa semana.
-          </p>
         </div>
 
         <div id="ai-visibility-prompts"></div>
