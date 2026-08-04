@@ -3138,3 +3138,9 @@
   background: var(--accent-danger-soft);
   border-color: var(--accent-danger);
 }
+
+#mie-dashboard-app .email-badge--faint {
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}

@@ -5951,6 +5951,19 @@ init();
   const runBtn = document.getElementById('ai-visibility-run-btn');
   const summaryEl = document.getElementById('ai-visibility-summary');
   const listEl = document.getElementById('ai-visibility-list');
+  const analyzeBtn = document.getElementById(
+    'ai-visibility-analyze-credizona-btn',
+  );
+  const retryAnalysisBtn = document.getElementById(
+    'ai-visibility-retry-analysis-btn',
+  );
+  const analysisStatusEl = document.getElementById(
+    'ai-visibility-analysis-status',
+  );
+
+  let analysisPendingCount = 0;
+  let analysisFailedCount = 0;
+  let analyzeListenersAttached = false;
 
   const WEEKLY_ALREADY_RUN_MSG =
     '💡 Ya se corrió esta semana. Próxima corrida disponible la semana que viene.';
@@ -6043,6 +6056,125 @@ init();
     if (status === 'success') return ' email-badge--completed';
     if (status === 'error') return ' email-badge--error';
     return '';
+  }
+
+  function classificationLabel(value) {
+    const labels = {
+      recomendada: 'Recomendada',
+      mencionada: 'Mencionada',
+      comparada: 'Comparada',
+      desaconsejada: 'Desaconsejada',
+      informacion_insuficiente: 'Información insuficiente',
+    };
+    return labels[value] || value || '—';
+  }
+
+  function sentimentLabel(value) {
+    const labels = {
+      positivo: 'Positivo',
+      neutral: 'Neutral',
+      negativo: 'Negativo',
+    };
+    return labels[value] || value || '—';
+  }
+
+  function classificationBadgeClass(value) {
+    if (value === 'recomendada') return ' email-badge--completed';
+    if (value === 'desaconsejada') return ' email-badge--error';
+    if (value === 'informacion_insuficiente') return ' email-badge--faint';
+    return '';
+  }
+
+  function renderCredizonaAnalysisBlock(response) {
+    if (!response || response.mentions_credizona !== true) return '';
+    const analysis = response.credizona_analysis;
+    if (!analysis) {
+      return (
+        '<div class="text-muted" style="margin-top:10px">' +
+        'Análisis pendiente' +
+        '</div>'
+      );
+    }
+    if (analysis.status === 'error') {
+      const errMsg = analysis.error ? String(analysis.error) : 'Error de análisis';
+      return (
+        '<div class="text-muted" style="margin-top:10px" title="' +
+        escapeHtml(errMsg) +
+        '">Error de análisis</div>'
+      );
+    }
+    const attrs = Array.isArray(analysis.attributes)
+      ? analysis.attributes
+          .map(function (a) {
+            return escapeHtml(a);
+          })
+          .filter(Boolean)
+          .join(', ')
+      : '';
+    return (
+      '<div style="margin-top:10px">' +
+      '<span class="email-badge' +
+      classificationBadgeClass(analysis.classification) +
+      '">' +
+      escapeHtml(classificationLabel(analysis.classification)) +
+      '</span> ' +
+      '<span class="text-muted">' +
+      escapeHtml(sentimentLabel(analysis.sentiment)) +
+      '</span>' +
+      (attrs
+        ? '<div class="text-muted" style="margin-top:4px">' +
+          attrs +
+          '</div>'
+        : '') +
+      '</div>'
+    );
+  }
+
+  async function fetchAnalysisPending() {
+    const response = await fetch('/ai-visibility/credizona-analysis/pending');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo consultar análisis pendientes.'),
+      );
+    }
+    return {
+      pending: Number(data.pending) || 0,
+      failed: Number(data.failed) || 0,
+    };
+  }
+
+  function applyAnalysisStatusUi(pending, failed) {
+    analysisPendingCount = pending;
+    analysisFailedCount = failed;
+    if (analysisStatusEl) {
+      analysisStatusEl.textContent =
+        pending +
+        ' respuestas pendientes de análisis · ' +
+        failed +
+        ' con error';
+    }
+    if (analyzeBtn) {
+      analyzeBtn.disabled = pending <= 0;
+    }
+    if (retryAnalysisBtn) {
+      if (failed > 0) {
+        retryAnalysisBtn.hidden = false;
+        retryAnalysisBtn.disabled = false;
+      } else {
+        retryAnalysisBtn.hidden = true;
+        retryAnalysisBtn.disabled = true;
+      }
+    }
+  }
+
+  async function refreshAnalysisStatus() {
+    try {
+      const status = await fetchAnalysisPending();
+      applyAnalysisStatusUi(status.pending, status.failed);
+    } catch (_err) {
+      /* no bloquear el tab */
+    }
   }
 
   async function fetchLatestResponses() {
@@ -6199,6 +6331,7 @@ init();
           stayDisabled = true;
           await refresh();
           await refreshEvolution({ force: true });
+          await refreshAnalysisStatus();
         } catch (error) {
           if (error && error.status === 409) {
             stayDisabled = true;
@@ -6635,12 +6768,14 @@ init();
             '</span>'
           : escapeHtml(model);
 
+        const analysisBlock = renderCredizonaAnalysisBlock(response);
         const rawResponse = response.raw_response
           ? '<details>' +
             '<summary>Ver respuesta</summary>' +
             '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
             escapeHtml(response.raw_response) +
             '</div>' +
+            analysisBlock +
             '</details>'
           : response.error
             ? escapeHtml(response.error)
@@ -6741,6 +6876,152 @@ init();
     }
   }
 
+  if (!analyzeListenersAttached) {
+    if (analyzeBtn) {
+      analyzeBtn.addEventListener('click', async function () {
+        let pending = analysisPendingCount;
+        try {
+          const status = await fetchAnalysisPending();
+          applyAnalysisStatusUi(status.pending, status.failed);
+          pending = status.pending;
+        } catch (error) {
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              'Error: ' + (error && error.message ? error.message : 'unknown');
+          }
+          return;
+        }
+        if (pending <= 0) {
+          applyAnalysisStatusUi(0, analysisFailedCount);
+          return;
+        }
+        const confirmed = window.confirm(
+          '¿Analizar ' +
+            pending +
+            ' respuestas pendientes? Esta acción realizará hasta ' +
+            pending +
+            ' llamadas pagas a OpenAI.',
+        );
+        if (!confirmed) return;
+
+        const origAnalyze = analyzeBtn.textContent;
+        const origRetry = retryAnalysisBtn
+          ? retryAnalysisBtn.textContent
+          : '';
+        analyzeBtn.disabled = true;
+        if (retryAnalysisBtn) retryAnalysisBtn.disabled = true;
+        analyzeBtn.textContent = 'Analizando…';
+        if (analysisStatusEl) {
+          analysisStatusEl.textContent = 'Analizando menciones de Credizona…';
+        }
+        try {
+          const response = await fetch(
+            '/ai-visibility/analyze-credizona-mentions',
+            { method: 'POST' },
+          );
+          const data = await readJsonSafe(response);
+          if (!response.ok) {
+            throw new Error(
+              getErrorMessage(data, 'No se pudo completar el análisis.'),
+            );
+          }
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              (data.attempted != null ? data.attempted : 0) +
+              ' procesadas: ' +
+              (data.success != null ? data.success : 0) +
+              ' correctas, ' +
+              (data.error != null ? data.error : 0) +
+              ' con error.';
+          }
+          await refresh();
+          await refreshAnalysisStatus();
+        } catch (error) {
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              'Error: ' + (error && error.message ? error.message : 'unknown');
+          }
+          await refreshAnalysisStatus();
+        } finally {
+          analyzeBtn.textContent = origAnalyze;
+          if (retryAnalysisBtn) retryAnalysisBtn.textContent = origRetry;
+        }
+      });
+    }
+
+    if (retryAnalysisBtn) {
+      retryAnalysisBtn.addEventListener('click', async function () {
+        let failed = analysisFailedCount;
+        try {
+          const status = await fetchAnalysisPending();
+          applyAnalysisStatusUi(status.pending, status.failed);
+          failed = status.failed;
+        } catch (error) {
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              'Error: ' + (error && error.message ? error.message : 'unknown');
+          }
+          return;
+        }
+        if (failed <= 0) {
+          applyAnalysisStatusUi(analysisPendingCount, 0);
+          return;
+        }
+        const confirmed = window.confirm(
+          '¿Reintentar ' +
+            failed +
+            ' análisis con error? Esta acción realizará hasta ' +
+            failed +
+            ' llamadas pagas a OpenAI.',
+        );
+        if (!confirmed) return;
+
+        const origRetry = retryAnalysisBtn.textContent;
+        const origAnalyze = analyzeBtn ? analyzeBtn.textContent : '';
+        retryAnalysisBtn.disabled = true;
+        if (analyzeBtn) analyzeBtn.disabled = true;
+        retryAnalysisBtn.textContent = 'Reintentando…';
+        if (analysisStatusEl) {
+          analysisStatusEl.textContent = 'Reintentando análisis con error…';
+        }
+        try {
+          const response = await fetch(
+            '/ai-visibility/retry-credizona-analysis-errors',
+            { method: 'POST' },
+          );
+          const data = await readJsonSafe(response);
+          if (!response.ok) {
+            throw new Error(
+              getErrorMessage(data, 'No se pudo reintentar el análisis.'),
+            );
+          }
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              (data.attempted != null ? data.attempted : 0) +
+              ' procesadas: ' +
+              (data.success != null ? data.success : 0) +
+              ' correctas, ' +
+              (data.error != null ? data.error : 0) +
+              ' con error.';
+          }
+          await refresh();
+          await refreshAnalysisStatus();
+        } catch (error) {
+          if (analysisStatusEl) {
+            analysisStatusEl.textContent =
+              'Error: ' + (error && error.message ? error.message : 'unknown');
+          }
+          await refreshAnalysisStatus();
+        } finally {
+          retryAnalysisBtn.textContent = origRetry;
+          if (analyzeBtn) analyzeBtn.textContent = origAnalyze;
+        }
+      });
+    }
+
+    analyzeListenersAttached = true;
+  }
+
   if (runBtn) {
     runBtn.addEventListener('click', async function () {
       const confirmed = window.confirm(
@@ -6762,6 +7043,7 @@ init();
         lockWeeklyButton = true;
         await refresh();
         await refreshEvolution({ force: true });
+        await refreshAnalysisStatus();
       } catch (error) {
         if (error && error.status === 409) {
           lockWeeklyButton = true;
@@ -6777,6 +7059,7 @@ init();
           setTimeout(function () {
             refresh();
             refreshEvolution({ force: true });
+            refreshAnalysisStatus();
           }, 3000);
         }
       } finally {
@@ -6861,6 +7144,7 @@ init();
           await loadPrompts();
           await refresh();
           await refreshEvolution({ force: true });
+          await refreshAnalysisStatus();
         } else {
           const results = Array.isArray(data.results) ? data.results : [];
           if (adhocResult) {
@@ -6888,6 +7172,7 @@ init();
   window.__openAiVisibility = function () {
     loadPrompts();
     refresh();
+    refreshAnalysisStatus();
     fetchRunStatus()
       .then(function (status) {
         if (status.already_run) {

@@ -13,6 +13,10 @@ const {
   runAdHocCheck,
   resolveWeekOf,
 } = require('../services/ai-visibility/runner');
+const {
+  analyzeAllPendingCredizonaMentions,
+  retryFailedCredizonaAnalyses,
+} = require('../services/ai-visibility/credizona-analysis');
 
 const router = express.Router();
 
@@ -558,6 +562,31 @@ router.get('/evolution-summary', async (req, res) => {
 });
 
 /**
+ * Normalize PostgREST nested relation (object | array | null) to flat analysis.
+ * @param {unknown} rel
+ * @returns {object|null}
+ */
+function normalizeCredizonaAnalysis(rel) {
+  let row = rel;
+  if (Array.isArray(rel)) {
+    row = rel.length ? rel[0] : null;
+  }
+  if (!row || typeof row !== 'object') return null;
+  return {
+    status: row.status != null ? row.status : null,
+    classification: row.classification != null ? row.classification : null,
+    sentiment: row.sentiment != null ? row.sentiment : null,
+    attributes: Array.isArray(row.attributes) ? row.attributes : [],
+    error: row.error != null ? row.error : null,
+    error_code: row.error_code != null ? row.error_code : null,
+    model_name: row.model_name != null ? row.model_name : null,
+    analysis_version:
+      row.analysis_version != null ? row.analysis_version : null,
+    analyzed_at: row.analyzed_at != null ? row.analyzed_at : null,
+  };
+}
+
+/**
  * GET /ai-visibility/responses
  * Latest week_of present in ai_visibility_responses + all rows for that week.
  */
@@ -590,6 +619,7 @@ router.get('/responses', async (req, res) => {
       .from('ai_visibility_responses')
       .select(
         [
+          'id',
           'prompt_id',
           'prompt_text_snapshot',
           'provider',
@@ -602,7 +632,8 @@ router.get('/responses', async (req, res) => {
           'mentions_credizona',
           'mentioned_entities',
           'fetched_at',
-        ].join(','),
+          'ai_visibility_credizona_analysis ( status, classification, sentiment, attributes, error, error_code, model_name, analysis_version, analyzed_at )',
+        ].join(', '),
       )
       .eq('week_of', latestWeek)
       .order('prompt_id', { ascending: true })
@@ -616,13 +647,120 @@ router.get('/responses', async (req, res) => {
       return res.status(500).json({ error: listErr.message });
     }
 
+    const normalized = (responses || []).map((row) => {
+      const analysis = normalizeCredizonaAnalysis(
+        row.ai_visibility_credizona_analysis,
+      );
+      const rest = { ...row };
+      delete rest.ai_visibility_credizona_analysis;
+      return {
+        ...rest,
+        credizona_analysis: analysis,
+      };
+    });
+
     return res.status(200).json({
       week_of: latestWeek,
-      responses: responses || [],
+      responses: normalized,
     });
   } catch (err) {
     const message = err && err.message ? err.message : 'Internal error';
     logger.error('GET /ai-visibility/responses unexpected', { error: message });
+    return res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /ai-visibility/credizona-analysis/pending
+ */
+router.get('/credizona-analysis/pending', async (req, res) => {
+  try {
+    const { data: candidates, error: candErr } = await supabase
+      .from('ai_visibility_responses')
+      .select('id')
+      .eq('mentions_credizona', true)
+      .eq('status', 'success')
+      .not('raw_response', 'is', null);
+
+    if (candErr) {
+      logger.error('GET /credizona-analysis/pending candidates failed', {
+        error: candErr.message,
+      });
+      return res.status(500).json({ error: candErr.message });
+    }
+
+    const ids = (candidates || []).map((r) => r.id);
+    let pending = 0;
+    if (ids.length) {
+      const { data: existing, error: existErr } = await supabase
+        .from('ai_visibility_credizona_analysis')
+        .select('response_id')
+        .in('response_id', ids);
+      if (existErr) {
+        logger.error('GET /credizona-analysis/pending existing failed', {
+          error: existErr.message,
+        });
+        return res.status(500).json({ error: existErr.message });
+      }
+      const done = new Set(
+        (existing || []).map((r) => String(r.response_id)),
+      );
+      pending = ids.filter((id) => !done.has(String(id))).length;
+    }
+
+    const { count: failedCount, error: failErr } = await supabase
+      .from('ai_visibility_credizona_analysis')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'error');
+
+    if (failErr) {
+      logger.error('GET /credizona-analysis/pending failed count failed', {
+        error: failErr.message,
+      });
+      return res.status(500).json({ error: failErr.message });
+    }
+
+    return res.status(200).json({
+      pending,
+      failed: failedCount || 0,
+    });
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('GET /credizona-analysis/pending unexpected', {
+      error: message,
+    });
+    return res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /ai-visibility/analyze-credizona-mentions
+ */
+router.post('/analyze-credizona-mentions', async (req, res) => {
+  try {
+    const summary = await analyzeAllPendingCredizonaMentions();
+    return res.status(200).json(summary);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('POST /analyze-credizona-mentions failed', {
+      error: message,
+    });
+    return res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /ai-visibility/retry-credizona-analysis-errors
+ */
+router.post('/retry-credizona-analysis-errors', async (req, res) => {
+  try {
+    const summary = await retryFailedCredizonaAnalyses();
+    return res.status(200).json(summary);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('POST /retry-credizona-analysis-errors failed', {
+      error: message,
+    });
     return res.status(500).json({ error: message });
   }
 });
