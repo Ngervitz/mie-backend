@@ -6297,111 +6297,20 @@ init();
       ' modelos esta semana';
   }
 
-  function renderEvolutionBarChart(data, weeks, coverageByWeek) {
-    const week = weeks[0];
-    const yProviders = coverageByWeek[week] || 0;
-    const rows = [];
-
-    getVisibleEntities(data).forEach(function (entity) {
-      const point = (Array.isArray(entity.series) ? entity.series : []).find(
-        function (p) {
-          return p && p.week_of === week;
-        },
-      );
-      if (!point || !(point.mention_count > 0) || point.avg_rank == null) {
-        return;
-      }
-      rows.push({
-        name: entity.name || entity.entity_id || 'Entidad',
-        entity_id: entity.entity_id,
-        avg_rank: point.avg_rank,
-        mention_count: point.mention_count,
-        successful_providers: yProviders,
-      });
-    });
-
-    rows.sort(function (a, b) {
-      return a.avg_rank - b.avg_rank;
-    });
-
-    if (!rows.length) {
-      setEvolutionStatus(
-        'Todavía no hay respuestas exitosas para este prompt.',
-      );
-      return;
-    }
-
-    setEvolutionStatus('');
-    const ctx = evolutionCanvas.getContext('2d');
-    evolutionChart = new window.Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: rows.map(function (r) {
-          return r.name;
-        }),
-        datasets: [
-          {
-            label: 'Posición promedio',
-            data: rows.map(function (r) {
-              return r.avg_rank;
-            }),
-            backgroundColor: rows.map(function (r) {
-              return colorForEntity(r.entity_id);
-            }),
-            borderColor: rows.map(function (r) {
-              return colorForEntity(r.entity_id);
-            }),
-            borderWidth: 1,
-          },
-        ],
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (item) {
-                const row = rows[item.dataIndex];
-                if (!row) return '';
-                const avg = String(row.avg_rank).replace('.', ',');
-                return [
-                  'Menciones: ' +
-                    row.mention_count +
-                    ' de ' +
-                    row.successful_providers +
-                    ' proveedores',
-                  'Posición promedio: ' + avg,
-                ];
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            reverse: true,
-            beginAtZero: false,
-            grace: '5%',
-            title: {
-              display: true,
-              text: 'Posición promedio',
-            },
-          },
-          y: {
-            ticks: { autoSkip: false },
-          },
-        },
-      },
-    });
-  }
-
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
     let maxRank = 1;
     const datasets = [];
+    const visibleEntities = getVisibleEntities(data);
+    const totalVisible = visibleEntities.length;
+    const xJitter = 0.12;
+    const maxOffset =
+      totalVisible > 1 ? ((totalVisible - 1) / 2) * xJitter : 0;
 
-    getVisibleEntities(data).forEach(function (entity) {
+    visibleEntities.forEach(function (entity, entityIndex) {
+      const xOffset =
+        totalVisible > 1
+          ? (entityIndex - (totalVisible - 1) / 2) * xJitter
+          : 0;
       const seriesByWeek = {};
       (Array.isArray(entity.series) ? entity.series : []).forEach(function (p) {
         if (p && p.week_of) seriesByWeek[p.week_of] = p;
@@ -6414,9 +6323,10 @@ init();
         }
         if (point.avg_rank > maxRank) maxRank = point.avg_rank;
         return {
-          x: index,
+          x: index + xOffset,
           y: point.avg_rank,
           r: bubbleRadius(point.mention_count),
+          week_index: index,
           week_of: week,
           mention_count: point.mention_count,
           avg_rank: point.avg_rank,
@@ -6496,13 +6406,14 @@ init();
         scales: {
           x: {
             type: 'linear',
-            min: -0.5,
-            max: weeks.length - 0.5,
+            min: -0.5 - maxOffset,
+            max: weeks.length - 0.5 + maxOffset,
             ticks: {
               stepSize: 1,
               callback: function (value) {
-                if (!Number.isInteger(value)) return '';
-                return weeks[value] || '';
+                const weekIndex = Math.round(value);
+                if (Math.abs(value - weekIndex) > 1e-6) return '';
+                return weeks[weekIndex] || '';
               },
             },
             title: {
@@ -6558,12 +6469,7 @@ init();
       return;
     }
 
-    const coverageByWeek = buildCoverageByWeek(data);
-    if (weeks.length <= 1) {
-      renderEvolutionBarChart(data, weeks, coverageByWeek);
-    } else {
-      renderEvolutionLineChart(data, weeks, coverageByWeek);
-    }
+    renderEvolutionLineChart(data, weeks, buildCoverageByWeek(data));
   }
 
   async function ensureEvolutionPrompts() {
