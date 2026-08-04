@@ -807,6 +807,34 @@
             cuántos proveedores lo mencionaron esa semana.
           </p>
           <div id="ai-visibility-evolution-credizona-card" class="sms-empty"></div>
+          <div
+            id="ai-visibility-evolution-filters"
+            style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+            <label class="mcl-field">
+              <span class="mcl-field-label">Proveedor</span>
+              <select id="ai-visibility-filter-provider" class="mcl-input">
+                <option value="">Todos</option>
+                <option value="openai">ChatGPT</option>
+                <option value="anthropic">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="perplexity">Perplexity</option>
+              </select>
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Competidor</span>
+              <select id="ai-visibility-filter-entity" class="mcl-input">
+                <option value="">Todos (top 5 / mostrar todos)</option>
+              </select>
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Desde</span>
+              <select id="ai-visibility-filter-week-from" class="mcl-input"></select>
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Hasta</span>
+              <select id="ai-visibility-filter-week-to" class="mcl-input"></select>
+            </label>
+          </div>
           <div id="ai-visibility-evolution-status" class="text-muted"></div>
           <button
             type="button"

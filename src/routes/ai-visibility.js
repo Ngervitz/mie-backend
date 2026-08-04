@@ -27,6 +27,13 @@ const ALLOWED_CATEGORIES = [
   'marca',
 ];
 
+const ALLOWED_EVOLUTION_PROVIDERS = [
+  'openai',
+  'anthropic',
+  'gemini',
+  'perplexity',
+];
+
 /**
  * @param {{ text: unknown, category: unknown }} opts
  */
@@ -523,10 +530,25 @@ router.get('/prompts/:promptId/history', async (req, res) => {
 /**
  * GET /ai-visibility/evolution-summary
  * Aggregated weekly mention evolution across all prompts (success rows only).
+ * Optional ?provider=openai|anthropic|gemini|perplexity
  */
 router.get('/evolution-summary', async (req, res) => {
   try {
-    const { data: rows, error: rowsError } = await supabase
+    const rawProvider =
+      req.query && req.query.provider != null
+        ? String(req.query.provider).trim()
+        : '';
+    if (
+      rawProvider &&
+      !ALLOWED_EVOLUTION_PROVIDERS.includes(rawProvider)
+    ) {
+      return res.status(400).json({
+        error:
+          'provider must be one of: ' + ALLOWED_EVOLUTION_PROVIDERS.join(', '),
+      });
+    }
+
+    let query = supabase
       .from('ai_visibility_responses')
       .select(
         [
@@ -540,7 +562,13 @@ router.get('/evolution-summary', async (req, res) => {
           'fetched_at',
         ].join(','),
       )
-      .eq('status', 'success')
+      .eq('status', 'success');
+
+    if (rawProvider) {
+      query = query.eq('provider', rawProvider);
+    }
+
+    const { data: rows, error: rowsError } = await query
       .order('week_of', { ascending: true })
       .order('fetched_at', { ascending: false });
 

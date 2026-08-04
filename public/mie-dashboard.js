@@ -6391,6 +6391,8 @@ init();
   let evolutionLastData = null;
   let evolutionShowAll = false;
   let evolutionToggleAttached = false;
+  let evolutionFiltersAttached = false;
+  let evolutionFilterEntityId = '';
 
   const evolutionCanvas = document.getElementById(
     'ai-visibility-evolution-chart',
@@ -6404,6 +6406,14 @@ init();
   const evolutionToggle = document.getElementById(
     'ai-visibility-evolution-toggle',
   );
+  const filterProvider = document.getElementById(
+    'ai-visibility-filter-provider',
+  );
+  const filterEntity = document.getElementById('ai-visibility-filter-entity');
+  const filterWeekFrom = document.getElementById(
+    'ai-visibility-filter-week-from',
+  );
+  const filterWeekTo = document.getElementById('ai-visibility-filter-week-to');
   const evolutionEnabled = !!(evolutionCanvas && evolutionStatus);
 
   function getEntityColor(index) {
@@ -6412,13 +6422,18 @@ init();
     return 'hsl(' + Math.round(hue) + ', 65%, 60%)';
   }
 
-  function computeMaxMentionCount(data) {
+  function computeMaxMentionCount(data, weeks) {
+    const weekSet = Array.isArray(weeks)
+      ? new Set(weeks)
+      : null;
     let max = 0;
     (Array.isArray(data && data.entities) ? data.entities : []).forEach(
       function (entity) {
         (Array.isArray(entity.series) ? entity.series : []).forEach(
           function (point) {
-            if (point && point.mention_count > max) max = point.mention_count;
+            if (!point || !(point.mention_count > 0)) return;
+            if (weekSet && !weekSet.has(point.week_of)) return;
+            if (point.mention_count > max) max = point.mention_count;
           },
         );
       },
@@ -6428,7 +6443,9 @@ init();
         ? data.credizona.series
         : [];
     credSeries.forEach(function (point) {
-      if (point && point.mention_count > max) max = point.mention_count;
+      if (!point || !(point.mention_count > 0)) return;
+      if (weekSet && !weekSet.has(point.week_of)) return;
+      if (point.mention_count > max) max = point.mention_count;
     });
     return max || 1;
   }
@@ -6448,8 +6465,12 @@ init();
     }
   }
 
-  async function fetchEvolutionSummary() {
-    const response = await fetch('/ai-visibility/evolution-summary');
+  async function fetchEvolutionSummary(provider) {
+    let url = '/ai-visibility/evolution-summary';
+    if (provider) {
+      url += '?provider=' + encodeURIComponent(provider);
+    }
+    const response = await fetch(url);
     const data = await readJsonSafe(response);
     if (!response.ok) {
       throw new Error(
@@ -6480,13 +6501,101 @@ init();
 
   function getVisibleEntities(data) {
     const entities = Array.isArray(data && data.entities) ? data.entities : [];
+    if (evolutionFilterEntityId) {
+      return entities.filter(function (entity) {
+        return String(entity.entity_id) === evolutionFilterEntityId;
+      });
+    }
     if (evolutionShowAll || entities.length <= 5) return entities;
     return entities.slice(0, 5);
   }
 
+  function getFilteredWeeks(data) {
+    const weeks = Array.isArray(data && data.weeks) ? data.weeks.slice() : [];
+    const from = filterWeekFrom ? filterWeekFrom.value : '';
+    const to = filterWeekTo ? filterWeekTo.value : '';
+    if (!from && !to) return { weeks: weeks, error: null };
+    if (from && to && from > to) {
+      return {
+        weeks: null,
+        error: '💡 "Desde" no puede ser posterior a "Hasta".',
+      };
+    }
+    const start = from || weeks[0] || '';
+    const end = to || weeks[weeks.length - 1] || '';
+    return {
+      weeks: weeks.filter(function (w) {
+        return (!start || w >= start) && (!end || w <= end);
+      }),
+      error: null,
+    };
+  }
+
+  function populateSelectOptions(select, values, previous, emptyLabel) {
+    if (!select) return;
+    select.innerHTML = '';
+    if (emptyLabel != null) {
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.textContent = emptyLabel;
+      select.appendChild(emptyOpt);
+    }
+    (values || []).forEach(function (value) {
+      const opt = document.createElement('option');
+      opt.value = String(value.value);
+      opt.textContent = value.label;
+      select.appendChild(opt);
+    });
+    if (
+      previous &&
+      Array.from(select.options).some(function (o) {
+        return o.value === previous;
+      })
+    ) {
+      select.value = previous;
+    } else if (emptyLabel != null) {
+      select.value = '';
+    } else if (select.options.length) {
+      select.value = select.options[0].value;
+    }
+  }
+
+  function populateEvolutionFilters(data) {
+    const entities = Array.isArray(data && data.entities) ? data.entities : [];
+    const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
+
+    const prevEntity = filterEntity ? filterEntity.value : '';
+    populateSelectOptions(
+      filterEntity,
+      entities.map(function (e) {
+        return {
+          value: e.entity_id,
+          label: e.name || e.entity_id || 'Entidad',
+        };
+      }),
+      prevEntity,
+      'Todos (top 5 / mostrar todos)',
+    );
+    evolutionFilterEntityId = filterEntity ? filterEntity.value : '';
+
+    const prevFrom = filterWeekFrom ? filterWeekFrom.value : '';
+    const prevTo = filterWeekTo ? filterWeekTo.value : '';
+    const weekOptions = weeks.map(function (w) {
+      return { value: w, label: w };
+    });
+    populateSelectOptions(filterWeekFrom, weekOptions, prevFrom, null);
+    populateSelectOptions(filterWeekTo, weekOptions, prevTo, null);
+    if (filterWeekFrom && !filterWeekFrom.value && weeks.length) {
+      filterWeekFrom.value = weeks[0];
+    }
+    if (filterWeekTo && !filterWeekTo.value && weeks.length) {
+      filterWeekTo.value = weeks[weeks.length - 1];
+    }
+  }
+
   function syncEvolutionToggle(entityCount) {
     if (!evolutionToggle) return;
-    if (!(entityCount > 5)) {
+    if (evolutionFilterEntityId || !(entityCount > 5)) {
       evolutionToggle.style.display = 'none';
       return;
     }
@@ -6528,7 +6637,10 @@ init();
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
     let maxRank = 1;
     const datasets = [];
-    const maxMentionCount = computeMaxMentionCount(data);
+    const maxMentionCount = computeMaxMentionCount(data, weeks);
+    const allEntities = Array.isArray(data && data.entities)
+      ? data.entities
+      : [];
     const visibleEntities = getVisibleEntities(data);
     const totalVisible = visibleEntities.length;
     const xJitter = 0.12;
@@ -6536,6 +6648,12 @@ init();
       totalVisible > 1 ? ((totalVisible - 1) / 2) * xJitter : 0;
 
     visibleEntities.forEach(function (entity, entityIndex) {
+      const colorIndex = Math.max(
+        0,
+        allEntities.findIndex(function (e) {
+          return String(e.entity_id) === String(entity.entity_id);
+        }),
+      );
       const xOffset =
         totalVisible > 1
           ? (entityIndex - (totalVisible - 1) / 2) * xJitter
@@ -6570,8 +6688,8 @@ init();
         data: points,
         showLine: true,
         spanGaps: false,
-        borderColor: getEntityColor(entityIndex),
-        backgroundColor: getEntityColor(entityIndex),
+        borderColor: getEntityColor(colorIndex),
+        backgroundColor: getEntityColor(colorIndex),
         borderWidth: 2,
         tension: 0.25,
         pointRadius: function (context) {
@@ -6685,6 +6803,7 @@ init();
 
     destroyEvolutionChart();
     renderCredizonaCard(data);
+    populateEvolutionFilters(data);
 
     const entityCount = Array.isArray(data && data.entities)
       ? data.entities.length
@@ -6698,7 +6817,12 @@ init();
       return;
     }
 
-    const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
+    const weekResult = getFilteredWeeks(data);
+    if (weekResult.error) {
+      setEvolutionStatus(weekResult.error);
+      return;
+    }
+    const weeks = weekResult.weeks || [];
     if (!weeks.length) {
       setEvolutionStatus('Todavía no hay respuestas exitosas.');
       return;
@@ -6715,13 +6839,23 @@ init();
       return;
     }
 
+    const provider =
+      filterProvider && filterProvider.value ? filterProvider.value : '';
     const requestId = ++evolutionRequestId;
     setEvolutionStatus('Cargando evolución…');
     try {
-      const data = await fetchEvolutionSummary();
+      const data = await fetchEvolutionSummary(provider);
       if (requestId !== evolutionRequestId) return;
       evolutionShowAll = false;
       evolutionLastData = data;
+      if (
+        evolutionFilterEntityId &&
+        !(Array.isArray(data.entities) ? data.entities : []).some(function (e) {
+          return String(e.entity_id) === evolutionFilterEntityId;
+        })
+      ) {
+        evolutionFilterEntityId = '';
+      }
       renderEvolutionChart(data);
     } catch (error) {
       if (requestId !== evolutionRequestId) return;
@@ -6737,6 +6871,30 @@ init();
       if (evolutionLastData) renderEvolutionChart(evolutionLastData);
     });
     evolutionToggleAttached = true;
+  }
+
+  if (!evolutionFiltersAttached) {
+    if (filterProvider) {
+      filterProvider.addEventListener('change', function () {
+        refreshEvolution({ force: true });
+      });
+    }
+    if (filterEntity) {
+      filterEntity.addEventListener('change', function () {
+        evolutionFilterEntityId = filterEntity.value || '';
+        if (evolutionLastData) renderEvolutionChart(evolutionLastData);
+      });
+    }
+    function onWeekFilterChange() {
+      if (evolutionLastData) renderEvolutionChart(evolutionLastData);
+    }
+    if (filterWeekFrom) {
+      filterWeekFrom.addEventListener('change', onWeekFilterChange);
+    }
+    if (filterWeekTo) {
+      filterWeekTo.addEventListener('change', onWeekFilterChange);
+    }
+    evolutionFiltersAttached = true;
   }
 
   function renderProviderRows(responses) {
@@ -6778,7 +6936,12 @@ init();
             analysisBlock +
             '</details>'
           : response.error
-            ? escapeHtml(response.error)
+            ? '<details>' +
+              '<summary>Ver error</summary>' +
+              '<div class="text-muted" style="white-space:pre-wrap;word-break:break-word">' +
+              escapeHtml(response.error) +
+              '</div>' +
+              '</details>'
             : '—';
 
         return (
