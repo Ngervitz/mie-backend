@@ -6343,6 +6343,11 @@ init();
       : 'Mostrar todos';
   }
 
+  function mentionSharePctSuffix(count, total) {
+    if (!(total > 0)) return '';
+    return ' (' + Math.round((count / total) * 100) + '%)';
+  }
+
   function renderCredizonaCard(data) {
     if (!evolutionCredizonaCard) return;
     const series =
@@ -6359,11 +6364,12 @@ init();
     const coverageByWeek = buildCoverageByWeek(data);
     const m = (last && last.week_of && coverageByWeek[last.week_of]) || 0;
     evolutionCredizonaCard.textContent =
-      '💡 Credizona: mencionada por ' +
+      '💡 Credizona: mencionada en ' +
       n +
       ' de ' +
       m +
-      ' modelos esta semana';
+      ' respuestas exitosas esta semana' +
+      mentionSharePctSuffix(n, m);
   }
 
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
@@ -6452,7 +6458,8 @@ init();
               label: function (item) {
                 const raw = item.raw || {};
                 const name = item.dataset.label || '';
-                const yProviders = Number(raw.successful_providers) || 0;
+                const yTotal = Number(raw.successful_providers) || 0;
+                const mentionCount = Number(raw.mention_count) || 0;
                 const avg =
                   raw.avg_rank != null
                     ? String(raw.avg_rank).replace('.', ',')
@@ -6460,10 +6467,11 @@ init();
                 return [
                   name,
                   'Menciones: ' +
-                    raw.mention_count +
+                    mentionCount +
                     ' de ' +
-                    yProviders +
-                    ' proveedores',
+                    yTotal +
+                    ' respuestas' +
+                    mentionSharePctSuffix(mentionCount, yTotal),
                   'Posición promedio: ' + avg,
                 ];
               },
