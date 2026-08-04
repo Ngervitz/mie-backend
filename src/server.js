@@ -4,6 +4,7 @@ const logger = require('./lib/logger');
 const smsRouter = require('./routes/sms');
 const smsContactsRouter = require('./routes/sms-contacts');
 const emailRouter = require('./routes/email');
+const aiVisibilityRouter = require('./routes/ai-visibility');
 
 // SMS campaigns (Notifyme) — registered here per module isolation scope.
 app.use('/sms', smsRouter);
@@ -11,6 +12,8 @@ app.use('/sms', smsRouter);
 app.use('/sms', smsContactsRouter);
 // Email campaigns — registered here per module isolation scope.
 app.use('/email', emailRouter);
+// AI Visibility (weekly LLM prompts) — registered here per module isolation scope.
+app.use('/ai-visibility', aiVisibilityRouter);
 
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });
