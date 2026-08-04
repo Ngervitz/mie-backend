@@ -774,12 +774,43 @@ const SENTIMENT_KEYS = ['positivo', 'neutral', 'negativo'];
 function emptyCredizonaAnalysisSummary() {
   return {
     total_analyzed: 0,
-    classification_counts: Object.fromEntries(
-      CLASSIFICATION_KEYS.map((k) => [k, 0]),
-    ),
-    sentiment_counts: Object.fromEntries(SENTIMENT_KEYS.map((k) => [k, 0])),
+    classification_counts: [],
+    sentiment_counts: [],
     top_attributes: [],
   };
+}
+
+function truncatePromptSnapshot(text, maxLen) {
+  const s = text == null ? '' : String(text).trim();
+  if (!s) return '';
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen);
+}
+
+function sourceFromJoinedRow(row) {
+  const resp = row && row.ai_visibility_responses;
+  const nested = Array.isArray(resp) ? (resp.length ? resp[0] : null) : resp;
+  return {
+    response_id: row && row.response_id != null ? row.response_id : null,
+    provider:
+      nested && nested.provider != null ? String(nested.provider) : '',
+    week_of: nested && nested.week_of != null ? String(nested.week_of) : '',
+    prompt_text_snapshot: truncatePromptSnapshot(
+      nested && nested.prompt_text_snapshot,
+      80,
+    ),
+  };
+}
+
+function bumpBucket(map, key, source) {
+  if (!key) return;
+  let bucket = map.get(key);
+  if (!bucket) {
+    bucket = { value: key, count: 0, sources: [] };
+    map.set(key, bucket);
+  }
+  bucket.count += 1;
+  bucket.sources.push(source);
 }
 
 /**
@@ -795,7 +826,15 @@ router.get('/credizona-analysis/summary', async (req, res) => {
     for (;;) {
       const { data, error } = await supabase
         .from('ai_visibility_credizona_analysis')
-        .select('classification, sentiment, attributes')
+        .select(
+          [
+            'response_id',
+            'classification',
+            'sentiment',
+            'attributes',
+            'ai_visibility_responses ( provider, week_of, prompt_text_snapshot )',
+          ].join(', '),
+        )
         .eq('status', 'success')
         .range(from, from + pageSize - 1);
 
@@ -815,29 +854,27 @@ router.get('/credizona-analysis/summary', async (req, res) => {
     const summary = emptyCredizonaAnalysisSummary();
     summary.total_analyzed = rows.length;
 
-    const attrCounts = new Map();
+    if (!rows.length) {
+      return res.status(200).json(summary);
+    }
+
+    const classMap = new Map();
+    const sentMap = new Map();
+    const attrMap = new Map();
 
     for (const row of rows) {
+      const source = sourceFromJoinedRow(row);
+
       const classification =
         row && row.classification != null ? String(row.classification) : '';
-      if (
-        Object.prototype.hasOwnProperty.call(
-          summary.classification_counts,
-          classification,
-        )
-      ) {
-        summary.classification_counts[classification] += 1;
+      if (CLASSIFICATION_KEYS.includes(classification)) {
+        bumpBucket(classMap, classification, source);
       }
 
       const sentiment =
         row && row.sentiment != null ? String(row.sentiment) : '';
-      if (
-        Object.prototype.hasOwnProperty.call(
-          summary.sentiment_counts,
-          sentiment,
-        )
-      ) {
-        summary.sentiment_counts[sentiment] += 1;
+      if (SENTIMENT_KEYS.includes(sentiment)) {
+        bumpBucket(sentMap, sentiment, source);
       }
 
       const attrs = Array.isArray(row && row.attributes) ? row.attributes : [];
@@ -845,12 +882,25 @@ router.get('/credizona-analysis/summary', async (req, res) => {
         if (raw == null) continue;
         const key = String(raw).trim().toLowerCase();
         if (!key) continue;
-        attrCounts.set(key, (attrCounts.get(key) || 0) + 1);
+        let bucket = attrMap.get(key);
+        if (!bucket) {
+          bucket = { attribute: key, count: 0, sources: [] };
+          attrMap.set(key, bucket);
+        }
+        bucket.count += 1;
+        bucket.sources.push(source);
       }
     }
 
-    summary.top_attributes = Array.from(attrCounts.entries())
-      .map(([attribute, count]) => ({ attribute, count }))
+    summary.classification_counts = CLASSIFICATION_KEYS.filter((k) =>
+      classMap.has(k),
+    ).map((k) => classMap.get(k));
+
+    summary.sentiment_counts = SENTIMENT_KEYS.filter((k) =>
+      sentMap.has(k),
+    ).map((k) => sentMap.get(k));
+
+    summary.top_attributes = Array.from(attrMap.values())
       .sort((a, b) => {
         if (b.count !== a.count) return b.count - a.count;
         return a.attribute.localeCompare(b.attribute, 'es');

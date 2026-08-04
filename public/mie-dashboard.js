@@ -6416,16 +6416,61 @@ init();
     return data;
   }
 
+  function sentimentBadgeClass(value) {
+    if (value === 'positivo') return ' email-badge--completed';
+    if (value === 'negativo') return ' email-badge--error';
+    if (value === 'neutral') return ' email-badge--faint';
+    return '';
+  }
+
+  function renderSummarySourcesList(sources) {
+    const list = Array.isArray(sources) ? sources : [];
+    if (!list.length) return '';
+    return (
+      '<ul class="text-muted ai-vis-summary-sources" data-ai-vis-sources hidden>' +
+      list
+        .map(function (s) {
+          const provider = providerLabel(s && s.provider);
+          const prompt =
+            s && s.prompt_text_snapshot ? String(s.prompt_text_snapshot) : '';
+          const week = s && s.week_of ? String(s.week_of) : '';
+          return (
+            '<li>' +
+            escapeHtml(provider) +
+            ' — ' +
+            escapeHtml(prompt) +
+            (week ? ' (semana ' + escapeHtml(week) + ')' : '') +
+            '</li>'
+          );
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  function renderSummaryBucketRow(count, label, badgeClass, sources) {
+    const n = Number(count) || 0;
+    if (!(n > 0)) return '';
+    return (
+      '<div class="ai-vis-summary-row">' +
+      '<button type="button" class="ai-vis-summary-toggle">' +
+      '<span data-chevron aria-hidden="true">▸</span> ' +
+      '<span class="email-badge' +
+      (badgeClass || '') +
+      '">' +
+      escapeHtml(String(n)) +
+      ' ' +
+      escapeHtml(label) +
+      '</span>' +
+      '</button>' +
+      renderSummarySourcesList(sources) +
+      '</div>'
+    );
+  }
+
   function formatCredizonaAnalysisSummaryHtml(summary) {
     if (!summary || !(Number(summary.total_analyzed) > 0)) return '';
 
-    const classOrder = [
-      'recomendada',
-      'mencionada',
-      'comparada',
-      'desaconsejada',
-      'informacion_insuficiente',
-    ];
     const classLabels = {
       recomendada: 'recomendada',
       mencionada: 'mencionada',
@@ -6433,56 +6478,80 @@ init();
       desaconsejada: 'desaconsejada',
       informacion_insuficiente: 'sin información',
     };
-    const sentOrder = ['positivo', 'neutral', 'negativo'];
     const sentLabels = {
       positivo: 'positivo',
       neutral: 'neutral',
       negativo: 'negativo',
     };
 
-    const counts = summary.classification_counts || {};
-    const classParts = classOrder
-      .filter(function (k) {
-        return Number(counts[k]) > 0;
+    const classRows = (Array.isArray(summary.classification_counts)
+      ? summary.classification_counts
+      : []
+    )
+      .map(function (item) {
+        if (!item || !(Number(item.count) > 0)) return '';
+        const value = String(item.value || '');
+        return renderSummaryBucketRow(
+          item.count,
+          classLabels[value] || value,
+          classificationBadgeClass(value),
+          item.sources,
+        );
       })
-      .map(function (k) {
-        return Number(counts[k]) + ' ' + classLabels[k];
-      });
+      .join('');
 
-    const sCounts = summary.sentiment_counts || {};
-    const sentParts = sentOrder
-      .filter(function (k) {
-        return Number(sCounts[k]) > 0;
+    const sentRows = (Array.isArray(summary.sentiment_counts)
+      ? summary.sentiment_counts
+      : []
+    )
+      .map(function (item) {
+        if (!item || !(Number(item.count) > 0)) return '';
+        const value = String(item.value || '');
+        return renderSummaryBucketRow(
+          item.count,
+          sentLabels[value] || value,
+          sentimentBadgeClass(value),
+          item.sources,
+        );
       })
-      .map(function (k) {
-        return Number(sCounts[k]) + ' ' + sentLabels[k];
-      });
+      .join('');
 
-    const attrs = Array.isArray(summary.top_attributes)
+    const attrRows = (Array.isArray(summary.top_attributes)
       ? summary.top_attributes
-      : [];
-    const attrParts = attrs
-      .filter(function (a) {
-        return a && a.attribute && Number(a.count) > 0;
+      : []
+    )
+      .map(function (item) {
+        if (!item || !(Number(item.count) > 0) || !item.attribute) return '';
+        return renderSummaryBucketRow(
+          item.count,
+          String(item.attribute),
+          '',
+          item.sources,
+        );
       })
-      .map(function (a) {
-        return escapeHtml(String(a.attribute)) + ' (' + Number(a.count) + ')';
-      });
+      .join('');
 
-    let html = '<div class="text-muted" style="margin-top:8px">';
-    if (classParts.length) {
+    let html = '<div class="ai-vis-credizona-summary">';
+    if (classRows) {
       html +=
-        '<div>Clasificación: ' +
-        escapeHtml(classParts.join(' · ')) +
+        '<div class="ai-vis-summary-section">' +
+        '<div class="text-muted ai-vis-summary-section-label">Clasificación</div>' +
+        classRows +
         '</div>';
     }
-    if (sentParts.length) {
+    if (sentRows) {
       html +=
-        '<div>Sentiment: ' + escapeHtml(sentParts.join(' · ')) + '</div>';
+        '<div class="ai-vis-summary-section">' +
+        '<div class="text-muted ai-vis-summary-section-label">Sentiment</div>' +
+        sentRows +
+        '</div>';
     }
-    if (attrParts.length) {
+    if (attrRows) {
       html +=
-        '<div>Atributos frecuentes: ' + attrParts.join(', ') + '</div>';
+        '<div class="ai-vis-summary-section">' +
+        '<div class="text-muted ai-vis-summary-section-label">Atributos frecuentes</div>' +
+        attrRows +
+        '</div>';
     }
     html += '</div>';
     return html;
@@ -6495,9 +6564,32 @@ init();
       /* no bloquear el tab */
       return;
     }
-    if (evolutionLastData) {
-      renderCredizonaCard(evolutionLastData);
-    }
+    renderCredizonaCard(evolutionLastData);
+  }
+
+  if (evolutionCredizonaCard && !evolutionCredizonaCard._summaryToggleBound) {
+    evolutionCredizonaCard.addEventListener('click', function (ev) {
+      const btn = ev.target.closest
+        ? ev.target.closest('.ai-vis-summary-toggle')
+        : null;
+      if (!btn || !evolutionCredizonaCard.contains(btn)) return;
+      const row = btn.parentElement;
+      const list =
+        row && row.querySelector
+          ? row.querySelector('[data-ai-vis-sources]')
+          : null;
+      const chev = btn.querySelector('[data-chevron]');
+      if (!list) return;
+      const open = !list.hasAttribute('hidden');
+      if (open) {
+        list.setAttribute('hidden', '');
+        if (chev) chev.textContent = '▸';
+      } else {
+        list.removeAttribute('hidden');
+        if (chev) chev.textContent = '▾';
+      }
+    });
+    evolutionCredizonaCard._summaryToggleBound = true;
   }
 
   const evolutionToggle = document.getElementById(
@@ -6713,25 +6805,32 @@ init();
       data && data.credizona && Array.isArray(data.credizona.series)
         ? data.credizona.series
         : [];
-    if (!series.length) {
-      evolutionCredizonaCard.innerHTML =
-        '💡 Sin datos de Credizona todavía.' +
-        formatCredizonaAnalysisSummaryHtml(credizonaAnalysisSummary);
-      return;
+
+    let metricHtml =
+      '<div class="text-muted">Sin datos de menciones esta semana todavía.</div>';
+    if (series.length) {
+      const last = series[series.length - 1];
+      const n = Number(last && last.mention_count) || 0;
+      const coverageByWeek = buildCoverageByWeek(data);
+      const m = (last && last.week_of && coverageByWeek[last.week_of]) || 0;
+      const pct =
+        m > 0 ? ' (' + Math.round((n / m) * 100) + '%)' : '';
+      metricHtml =
+        '<div class="kpi-value">' +
+        escapeHtml(String(n)) +
+        ' <span class="ai-vis-credizona-of">de ' +
+        escapeHtml(String(m)) +
+        '</span></div>' +
+        '<div class="kpi-label">respuestas exitosas esta semana' +
+        escapeHtml(pct) +
+        '</div>';
     }
-    const last = series[series.length - 1];
-    const n = Number(last && last.mention_count) || 0;
-    const coverageByWeek = buildCoverageByWeek(data);
-    const m = (last && last.week_of && coverageByWeek[last.week_of]) || 0;
-    const weekLine =
-      '💡 Credizona: mencionada en ' +
-      n +
-      ' de ' +
-      m +
-      ' respuestas exitosas esta semana' +
-      mentionSharePctSuffix(n, m);
+
     evolutionCredizonaCard.innerHTML =
-      escapeHtml(weekLine) +
+      '<h3 class="ai-vis-section-title">Credizona en las respuestas de IA</h3>' +
+      '<div class="ai-vis-credizona-metric">' +
+      metricHtml +
+      '</div>' +
       formatCredizonaAnalysisSummaryHtml(credizonaAnalysisSummary);
   }
 
