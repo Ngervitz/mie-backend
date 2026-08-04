@@ -3027,6 +3027,10 @@
   margin-top: 12px;
   text-align: left;
   color: var(--text);
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-credizona-metric {
@@ -3039,6 +3043,10 @@
   color: var(--text-muted);
 }
 
+#mie-dashboard-app #ai-visibility-evolution-credizona-card .kpi-label {
+  color: var(--text);
+}
+
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-section {
   margin-top: 12px;
 }
@@ -3046,6 +3054,7 @@
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-section-label {
   font-size: 0.8rem;
   margin-bottom: 4px;
+  color: var(--text);
 }
 
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-row {
@@ -3067,6 +3076,7 @@
 #mie-dashboard-app #ai-visibility-evolution-credizona-card .ai-vis-summary-sources {
   margin: 6px 0 0;
   padding-left: 1.2rem;
+  color: var(--text-muted);
 }
 
 #mie-dashboard-app #ai-visibility-list .sms-table {
