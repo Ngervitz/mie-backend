@@ -6403,6 +6403,103 @@ init();
   const evolutionCredizonaCard = document.getElementById(
     'ai-visibility-evolution-credizona-card',
   );
+  let credizonaAnalysisSummary = null;
+
+  async function fetchCredizonaAnalysisSummary() {
+    const response = await fetch('/ai-visibility/credizona-analysis/summary');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(data, 'No se pudo cargar el resumen de análisis.'),
+      );
+    }
+    return data;
+  }
+
+  function formatCredizonaAnalysisSummaryHtml(summary) {
+    if (!summary || !(Number(summary.total_analyzed) > 0)) return '';
+
+    const classOrder = [
+      'recomendada',
+      'mencionada',
+      'comparada',
+      'desaconsejada',
+      'informacion_insuficiente',
+    ];
+    const classLabels = {
+      recomendada: 'recomendada',
+      mencionada: 'mencionada',
+      comparada: 'comparada',
+      desaconsejada: 'desaconsejada',
+      informacion_insuficiente: 'sin información',
+    };
+    const sentOrder = ['positivo', 'neutral', 'negativo'];
+    const sentLabels = {
+      positivo: 'positivo',
+      neutral: 'neutral',
+      negativo: 'negativo',
+    };
+
+    const counts = summary.classification_counts || {};
+    const classParts = classOrder
+      .filter(function (k) {
+        return Number(counts[k]) > 0;
+      })
+      .map(function (k) {
+        return Number(counts[k]) + ' ' + classLabels[k];
+      });
+
+    const sCounts = summary.sentiment_counts || {};
+    const sentParts = sentOrder
+      .filter(function (k) {
+        return Number(sCounts[k]) > 0;
+      })
+      .map(function (k) {
+        return Number(sCounts[k]) + ' ' + sentLabels[k];
+      });
+
+    const attrs = Array.isArray(summary.top_attributes)
+      ? summary.top_attributes
+      : [];
+    const attrParts = attrs
+      .filter(function (a) {
+        return a && a.attribute && Number(a.count) > 0;
+      })
+      .map(function (a) {
+        return escapeHtml(String(a.attribute)) + ' (' + Number(a.count) + ')';
+      });
+
+    let html = '<div class="text-muted" style="margin-top:8px">';
+    if (classParts.length) {
+      html +=
+        '<div>Clasificación: ' +
+        escapeHtml(classParts.join(' · ')) +
+        '</div>';
+    }
+    if (sentParts.length) {
+      html +=
+        '<div>Sentiment: ' + escapeHtml(sentParts.join(' · ')) + '</div>';
+    }
+    if (attrParts.length) {
+      html +=
+        '<div>Atributos frecuentes: ' + attrParts.join(', ') + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  async function refreshCredizonaAnalysisSummary() {
+    try {
+      credizonaAnalysisSummary = await fetchCredizonaAnalysisSummary();
+    } catch (_err) {
+      /* no bloquear el tab */
+      return;
+    }
+    if (evolutionLastData) {
+      renderCredizonaCard(evolutionLastData);
+    }
+  }
+
   const evolutionToggle = document.getElementById(
     'ai-visibility-evolution-toggle',
   );
@@ -6617,21 +6714,25 @@ init();
         ? data.credizona.series
         : [];
     if (!series.length) {
-      evolutionCredizonaCard.textContent =
-        '💡 Sin datos de Credizona todavía.';
+      evolutionCredizonaCard.innerHTML =
+        '💡 Sin datos de Credizona todavía.' +
+        formatCredizonaAnalysisSummaryHtml(credizonaAnalysisSummary);
       return;
     }
     const last = series[series.length - 1];
     const n = Number(last && last.mention_count) || 0;
     const coverageByWeek = buildCoverageByWeek(data);
     const m = (last && last.week_of && coverageByWeek[last.week_of]) || 0;
-    evolutionCredizonaCard.textContent =
+    const weekLine =
       '💡 Credizona: mencionada en ' +
       n +
       ' de ' +
       m +
       ' respuestas exitosas esta semana' +
       mentionSharePctSuffix(n, m);
+    evolutionCredizonaCard.innerHTML =
+      escapeHtml(weekLine) +
+      formatCredizonaAnalysisSummaryHtml(credizonaAnalysisSummary);
   }
 
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
@@ -7099,6 +7200,7 @@ init();
           }
           await refresh();
           await refreshAnalysisStatus();
+          await refreshCredizonaAnalysisSummary();
         } catch (error) {
           if (analysisStatusEl) {
             analysisStatusEl.textContent =
@@ -7336,6 +7438,7 @@ init();
     loadPrompts();
     refresh();
     refreshAnalysisStatus();
+    refreshCredizonaAnalysisSummary();
     fetchRunStatus()
       .then(function (status) {
         if (status.already_run) {

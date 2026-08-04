@@ -761,6 +761,112 @@ router.get('/credizona-analysis/pending', async (req, res) => {
   }
 });
 
+const CLASSIFICATION_KEYS = [
+  'recomendada',
+  'mencionada',
+  'comparada',
+  'desaconsejada',
+  'informacion_insuficiente',
+];
+
+const SENTIMENT_KEYS = ['positivo', 'neutral', 'negativo'];
+
+function emptyCredizonaAnalysisSummary() {
+  return {
+    total_analyzed: 0,
+    classification_counts: Object.fromEntries(
+      CLASSIFICATION_KEYS.map((k) => [k, 0]),
+    ),
+    sentiment_counts: Object.fromEntries(SENTIMENT_KEYS.map((k) => [k, 0])),
+    top_attributes: [],
+  };
+}
+
+/**
+ * GET /ai-visibility/credizona-analysis/summary
+ * Historical aggregate of successful Credizona analyses (all weeks).
+ */
+router.get('/credizona-analysis/summary', async (req, res) => {
+  try {
+    const pageSize = 1000;
+    let from = 0;
+    const rows = [];
+
+    for (;;) {
+      const { data, error } = await supabase
+        .from('ai_visibility_credizona_analysis')
+        .select('classification, sentiment, attributes')
+        .eq('status', 'success')
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        logger.error('GET /credizona-analysis/summary failed', {
+          error: error.message,
+        });
+        return res.status(500).json({ error: error.message });
+      }
+
+      const batch = Array.isArray(data) ? data : [];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+
+    const summary = emptyCredizonaAnalysisSummary();
+    summary.total_analyzed = rows.length;
+
+    const attrCounts = new Map();
+
+    for (const row of rows) {
+      const classification =
+        row && row.classification != null ? String(row.classification) : '';
+      if (
+        Object.prototype.hasOwnProperty.call(
+          summary.classification_counts,
+          classification,
+        )
+      ) {
+        summary.classification_counts[classification] += 1;
+      }
+
+      const sentiment =
+        row && row.sentiment != null ? String(row.sentiment) : '';
+      if (
+        Object.prototype.hasOwnProperty.call(
+          summary.sentiment_counts,
+          sentiment,
+        )
+      ) {
+        summary.sentiment_counts[sentiment] += 1;
+      }
+
+      const attrs = Array.isArray(row && row.attributes) ? row.attributes : [];
+      for (const raw of attrs) {
+        if (raw == null) continue;
+        const key = String(raw).trim().toLowerCase();
+        if (!key) continue;
+        attrCounts.set(key, (attrCounts.get(key) || 0) + 1);
+      }
+    }
+
+    summary.top_attributes = Array.from(attrCounts.entries())
+      .map(([attribute, count]) => ({ attribute, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.attribute.localeCompare(b.attribute, 'es');
+      })
+      .slice(0, 5);
+
+    return res.status(200).json(summary);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('GET /credizona-analysis/summary unexpected', {
+      error: message,
+    });
+    return res.status(500).json({ error: message });
+  }
+});
+
 /**
  * POST /ai-visibility/analyze-credizona-mentions
  */
