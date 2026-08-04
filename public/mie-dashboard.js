@@ -5990,9 +5990,17 @@ init();
   }
 
   function providerLogoHtml(provider) {
-    // Official provider logomarks pending verification — text label fallback.
-    void provider;
-    return '';
+    const logoIds = {
+      openai: 'ai-vis-logo-openai',
+      anthropic: 'ai-vis-logo-anthropic',
+    };
+    const id = logoIds[provider];
+    if (!id) return '';
+    const el = document.getElementById(id);
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.removeAttribute('id');
+    return clone.outerHTML;
   }
 
   function statusLabel(status) {
