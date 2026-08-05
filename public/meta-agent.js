@@ -859,11 +859,42 @@
     return activeSeriesToggles[seriesKey] ? ' checked' : '';
   }
 
+  /**
+   * Same fallback as the KPI card: combined index when available,
+   * else competitor-only pressure when own CPM is missing.
+   */
+  function resolvePressureDisplay(row) {
+    if (!row) return { value: null, kind: null };
+    if (
+      row.auction_pressure_index != null &&
+      Number.isFinite(Number(row.auction_pressure_index))
+    ) {
+      return {
+        value: Number(row.auction_pressure_index),
+        kind: 'combined',
+      };
+    }
+    if (
+      row.competitor_pressure_ratio != null &&
+      Number.isFinite(Number(row.competitor_pressure_ratio))
+    ) {
+      return {
+        value: Number(row.competitor_pressure_ratio),
+        kind: 'competitors',
+      };
+    }
+    return { value: null, kind: null };
+  }
+
   function renderAuctionPressureChartSection(payload) {
     var history =
       payload && Array.isArray(payload.history) ? payload.history : [];
     var withIndex = history.filter(function (row) {
-      return row && row.auction_pressure_index != null;
+      return (
+        row &&
+        (row.auction_pressure_index != null ||
+          row.competitor_pressure_ratio != null)
+      );
     }).length;
 
     var message = null;
@@ -942,6 +973,7 @@
 
     var labels = [];
     var indexValues = [];
+    var pressureKinds = [];
     var holidayValues = [];
     var holidayTitles = [];
     var phaseValues = [];
@@ -957,16 +989,15 @@
       if (!date) return;
       labels.push(date);
 
-      var index =
-        row.auction_pressure_index != null &&
-        Number.isFinite(Number(row.auction_pressure_index))
-          ? Number(row.auction_pressure_index)
-          : null;
-      indexValues.push(index);
+      var pressure = resolvePressureDisplay(row);
+      indexValues.push(pressure.value);
+      pressureKinds.push(pressure.kind);
 
       var holiday = holidayByDate[date] || null;
       holidayTitles.push(holiday ? holiday.title || 'Feriado' : null);
-      holidayValues.push(holiday && index != null ? index : null);
+      holidayValues.push(
+        holiday && pressure.value != null ? pressure.value : null,
+      );
 
       phaseValues.push(0.5);
       phaseLabels.push(liquidityPhaseLabel(row.cycle_phase));
@@ -1096,6 +1127,10 @@
       y: {
         display: true,
         title: { display: true, text: 'Índice' },
+        grid: {
+          color: '#2a2f3a',
+          drawTicks: false,
+        },
       },
       y1: {
         display: false,
@@ -1107,6 +1142,10 @@
       yBcu: axisBounds(bcuValues),
       yEvents: axisBounds(eventValues),
       x: {
+        grid: {
+          color: '#2a2f3a',
+          drawTicks: false,
+        },
         ticks: {
           maxRotation: 45,
           autoSkip: true,
@@ -1136,9 +1175,12 @@
                 var index = ctx.dataIndex;
 
                 if (id === 'auctionIndex') {
-                  return value == null
-                    ? null
-                    : 'Presión: ' + Math.round(value * 100) + '%';
+                  if (value == null) return null;
+                  var pct = Math.round(value * 100) + '%';
+                  if (pressureKinds[index] === 'competitors') {
+                    return 'Presión (solo competidores): ' + pct;
+                  }
+                  return 'Presión de Subasta: ' + pct;
                 }
                 if (id === 'holidays') {
                   return holidayTitles[index]
