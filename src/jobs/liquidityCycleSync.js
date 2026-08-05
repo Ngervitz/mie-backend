@@ -8,6 +8,7 @@
 
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
+const { computeAuctionPressure } = require('../services/auction-pressure');
 
 const SPEND_SOURCE_NOTE =
   'own_ad_metrics DISTINCT ON (campaign_id, metric_date) ORDER BY created_at DESC then SUM(spend)';
@@ -51,12 +52,66 @@ async function runLiquidityCycleSync(options = {}) {
       ? null
       : Number(Number(spendRaw).toFixed(2));
 
+  const { data: existingRow, error: existingErr } = await supabase
+    .from('liquidity_cycle_daily_log')
+    .select(
+      'competitor_pressure_ratio, own_cpm_ratio, auction_pressure_index',
+    )
+    .eq('log_date', logDate)
+    .maybeSingle();
+
+  if (existingErr) {
+    throw new Error(
+      `liquidity_cycle_daily_log prior select failed: ${existingErr.message}`,
+    );
+  }
+
+  let competitorPressureRatio = null;
+  let ownCpmRatio = null;
+  let auctionPressureIndex = null;
+
+  try {
+    const pressure = await computeAuctionPressure({ date: logDate });
+    competitorPressureRatio =
+      pressure.competitorPressureRatio != null
+        ? Number(pressure.competitorPressureRatio)
+        : null;
+    ownCpmRatio =
+      pressure.ownCpmRatio != null
+        ? Number(pressure.ownCpmRatio)
+        : null;
+    auctionPressureIndex =
+      pressure.auctionPressureIndex != null
+        ? Number(pressure.auctionPressureIndex)
+        : null;
+  } catch (err) {
+    logger.warn('liquidity_cycle_sync auction pressure skipped', {
+      logDate,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+
+  if (existingRow) {
+    if (competitorPressureRatio == null) {
+      competitorPressureRatio = existingRow.competitor_pressure_ratio;
+    }
+    if (ownCpmRatio == null) {
+      ownCpmRatio = existingRow.own_cpm_ratio;
+    }
+    if (auctionPressureIndex == null) {
+      auctionPressureIndex = existingRow.auction_pressure_index;
+    }
+  }
+
   const row = {
     log_date: logDate,
     cycle_phase: cyclePhase,
     day_of_month: dayOfMonth,
     meta_spend_day: metaSpendDay,
     spend_source_note: SPEND_SOURCE_NOTE,
+    competitor_pressure_ratio: competitorPressureRatio,
+    own_cpm_ratio: ownCpmRatio,
+    auction_pressure_index: auctionPressureIndex,
   };
 
   const { data: upserted, error: upsertErr } = await supabase
@@ -74,6 +129,9 @@ async function runLiquidityCycleSync(options = {}) {
     cyclePhase,
     dayOfMonth,
     metaSpendDay,
+    competitorPressureRatio,
+    ownCpmRatio,
+    auctionPressureIndex,
   });
 
   return {
@@ -82,6 +140,9 @@ async function runLiquidityCycleSync(options = {}) {
     cyclePhase,
     dayOfMonth,
     metaSpendDay,
+    competitorPressureRatio,
+    ownCpmRatio,
+    auctionPressureIndex,
     row: upserted,
   };
 }

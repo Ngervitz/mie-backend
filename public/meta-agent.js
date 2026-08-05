@@ -50,6 +50,17 @@
     bcuUsuraRate: null,
   };
 
+  var auctionPressureChart = null;
+  var activeSeriesToggles = {
+    auctionIndex: true,
+    holidays: true,
+    phase: true,
+    cpc: true,
+    cpl: false,
+    bcuRate: true,
+    totalEvents: true,
+  };
+
   var root = null;
   var refreshTimerId = null;
 
@@ -785,6 +796,408 @@
     });
   }
 
+  function normalizeChartDate(value) {
+    if (value == null) return null;
+    var raw = String(value).trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : null;
+  }
+
+  function destroyAuctionPressureChart() {
+    if (auctionPressureChart) {
+      auctionPressureChart.destroy();
+      auctionPressureChart = null;
+    }
+  }
+
+  function phasePointColor(phase) {
+    if (phase === 'alta_demanda') return '#ef4444';
+    if (phase === 'mitad_mes') return '#38bdf8';
+    if (phase === 'cierre_mes') return '#a78bfa';
+    return '#94a3b8';
+  }
+
+  function axisBounds(values) {
+    var finite = values
+      .filter(function (value) {
+        return value !== null && Number.isFinite(Number(value));
+      })
+      .map(Number);
+
+    var base = {
+      display: false,
+      grid: { drawOnChartArea: false },
+    };
+    if (!finite.length) return base;
+
+    var min = Math.min.apply(Math, finite);
+    var max = Math.max.apply(Math, finite);
+    if (min === max) {
+      if (min === 0) {
+        min = -1;
+        max = 1;
+      } else {
+        min = min * 0.9;
+        max = max * 1.1;
+        if (min > max) {
+          var swap = min;
+          min = max;
+          max = swap;
+        }
+      }
+    } else {
+      var padding = (max - min) * 0.1;
+      min -= padding;
+      max += padding;
+    }
+
+    base.min = min;
+    base.max = max;
+    return base;
+  }
+
+  function checkedAttribute(seriesKey) {
+    return activeSeriesToggles[seriesKey] ? ' checked' : '';
+  }
+
+  function renderAuctionPressureChartSection(payload) {
+    var history =
+      payload && Array.isArray(payload.history) ? payload.history : [];
+    var withIndex = history.filter(function (row) {
+      return row && row.auction_pressure_index != null;
+    }).length;
+
+    var message = null;
+    if (history.length < 5) {
+      message =
+        '💡 Todavía hay poco historial de este ciclo — el gráfico se va a ir completando con el tiempo.';
+    } else if (withIndex < 5) {
+      message =
+        '💡 Hay historial de fechas, pero todavía pocos días con datos suficientes de Presión de Subasta para graficar una tendencia clara.';
+    }
+
+    if (message) {
+      return (
+        '<section class="ma-kpi-section ma-auction-pressure-chart">' +
+        '<h2 class="ma-kpi-section-title">Presión de Subasta (histórico)</h2>' +
+        '<div class="ma-empty">' +
+        escapeHtml(message) +
+        '</div></section>'
+      );
+    }
+
+    return (
+      '<section class="ma-kpi-section ma-auction-pressure-chart">' +
+      '<h2 class="ma-kpi-section-title">Presión de Subasta (histórico)</h2>' +
+      '<div class="chart-series-toggles" ' +
+      'style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px">' +
+      '<label><input type="checkbox" data-series="auctionIndex"' +
+      checkedAttribute('auctionIndex') +
+      '> Presión de Subasta</label>' +
+      '<label><input type="checkbox" data-series="holidays"' +
+      checkedAttribute('holidays') +
+      '> Feriados</label>' +
+      '<label><input type="checkbox" data-series="phase"' +
+      checkedAttribute('phase') +
+      '> Fase del ciclo</label>' +
+      '<label><input type="checkbox" data-series="cpc"' +
+      checkedAttribute('cpc') +
+      '> CPC propio</label>' +
+      '<label><input type="checkbox" data-series="cpl"' +
+      checkedAttribute('cpl') +
+      '> CPL propio</label>' +
+      '<label><input type="checkbox" data-series="bcuRate"' +
+      checkedAttribute('bcuRate') +
+      '> Tasa usura BCU</label>' +
+      '<label><input type="checkbox" data-series="totalEvents"' +
+      checkedAttribute('totalEvents') +
+      '> Volumen de eventos</label>' +
+      '</div>' +
+      '<div style="position:relative;height:320px;width:100%">' +
+      '<canvas id="ma-auction-pressure-canvas"></canvas>' +
+      '</div></section>'
+    );
+  }
+
+  function mountAuctionPressureChart(payload) {
+    destroyAuctionPressureChart();
+
+    var canvas = document.getElementById('ma-auction-pressure-canvas');
+    if (!canvas || typeof window.Chart !== 'function') return;
+
+    var history = Array.isArray(payload && payload.history)
+      ? payload.history.slice()
+      : [];
+    history.sort(function (a, b) {
+      var left = normalizeChartDate(a && a.log_date) || '';
+      var right = normalizeChartDate(b && b.log_date) || '';
+      return left.localeCompare(right);
+    });
+
+    var holidayByDate = {};
+    (Array.isArray(payload && payload.holidays) ? payload.holidays : [])
+      .forEach(function (holiday) {
+        var date = normalizeChartDate(holiday && holiday.date);
+        if (date) holidayByDate[date] = holiday;
+      });
+
+    var labels = [];
+    var indexValues = [];
+    var holidayValues = [];
+    var holidayTitles = [];
+    var phaseValues = [];
+    var phaseLabels = [];
+    var phaseColors = [];
+    var cpcValues = [];
+    var cplValues = [];
+    var bcuValues = [];
+    var eventValues = [];
+
+    history.forEach(function (row) {
+      var date = normalizeChartDate(row && row.log_date);
+      if (!date) return;
+      labels.push(date);
+
+      var index =
+        row.auction_pressure_index != null &&
+        Number.isFinite(Number(row.auction_pressure_index))
+          ? Number(row.auction_pressure_index)
+          : null;
+      indexValues.push(index);
+
+      var holiday = holidayByDate[date] || null;
+      holidayTitles.push(holiday ? holiday.title || 'Feriado' : null);
+      holidayValues.push(holiday && index != null ? index : null);
+
+      phaseValues.push(0.5);
+      phaseLabels.push(liquidityPhaseLabel(row.cycle_phase));
+      phaseColors.push(phasePointColor(row.cycle_phase));
+
+      cpcValues.push(
+        row.own_cpc != null && Number.isFinite(Number(row.own_cpc))
+          ? Number(row.own_cpc)
+          : null,
+      );
+      cplValues.push(
+        row.own_cpl != null && Number.isFinite(Number(row.own_cpl))
+          ? Number(row.own_cpl)
+          : null,
+      );
+      bcuValues.push(
+        row.bcu_usura_rate != null &&
+        Number.isFinite(Number(row.bcu_usura_rate))
+          ? Number(row.bcu_usura_rate)
+          : null,
+      );
+      eventValues.push(
+        row.total_competitor_events != null &&
+        Number.isFinite(Number(row.total_competitor_events))
+          ? Number(row.total_competitor_events)
+          : null,
+      );
+    });
+
+    var datasets = [
+      {
+        id: 'auctionIndex',
+        label: 'Presión de Subasta',
+        data: indexValues,
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+        tension: 0.25,
+        spanGaps: false,
+        pointRadius: 3,
+        yAxisID: 'y',
+        hidden: !activeSeriesToggles.auctionIndex,
+      },
+      {
+        id: 'holidays',
+        label: 'Feriados',
+        data: holidayValues,
+        borderColor: 'transparent',
+        backgroundColor: '#ef4444',
+        showLine: false,
+        spanGaps: false,
+        pointRadius: 6,
+        pointHoverRadius: 7,
+        yAxisID: 'y',
+        hidden: !activeSeriesToggles.holidays,
+      },
+      {
+        id: 'phase',
+        label: 'Fase del ciclo',
+        data: phaseValues,
+        borderColor: 'transparent',
+        backgroundColor: phaseColors,
+        pointBackgroundColor: phaseColors,
+        showLine: false,
+        spanGaps: false,
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        yAxisID: 'y1',
+        hidden: !activeSeriesToggles.phase,
+      },
+      {
+        id: 'cpc',
+        label: 'CPC propio',
+        data: cpcValues,
+        borderColor: '#22c55e',
+        backgroundColor: '#22c55e',
+        tension: 0.2,
+        spanGaps: false,
+        pointRadius: 3,
+        yAxisID: 'yCpc',
+        hidden: !activeSeriesToggles.cpc,
+      },
+      {
+        id: 'bcuRate',
+        label: 'Tasa usura BCU',
+        data: bcuValues,
+        borderColor: '#38bdf8',
+        backgroundColor: '#38bdf8',
+        tension: 0.2,
+        spanGaps: false,
+        pointRadius: 3,
+        yAxisID: 'yBcu',
+        hidden: !activeSeriesToggles.bcuRate,
+      },
+      {
+        id: 'totalEvents',
+        label: 'Volumen de eventos',
+        data: eventValues,
+        borderColor: '#a78bfa',
+        backgroundColor: '#a78bfa',
+        tension: 0.2,
+        spanGaps: false,
+        pointRadius: 3,
+        yAxisID: 'yEvents',
+        hidden: !activeSeriesToggles.totalEvents,
+      },
+    ];
+
+    var hasCpl = cplValues.some(function (value) {
+      return value != null;
+    });
+    if (hasCpl) {
+      datasets.push({
+        id: 'cpl',
+        label: 'CPL propio',
+        data: cplValues,
+        borderColor: '#f472b6',
+        backgroundColor: '#f472b6',
+        tension: 0.2,
+        spanGaps: false,
+        pointRadius: 3,
+        yAxisID: 'yCpl',
+        hidden: !activeSeriesToggles.cpl,
+      });
+    }
+
+    var scales = {
+      y: {
+        display: true,
+        title: { display: true, text: 'Índice' },
+      },
+      y1: {
+        display: false,
+        min: 0,
+        max: 5,
+        grid: { drawOnChartArea: false },
+      },
+      yCpc: axisBounds(cpcValues),
+      yBcu: axisBounds(bcuValues),
+      yEvents: axisBounds(eventValues),
+      x: {
+        ticks: {
+          maxRotation: 45,
+          autoSkip: true,
+          maxTicksLimit: 10,
+        },
+      },
+    };
+    if (hasCpl) scales.yCpl = axisBounds(cplValues);
+
+    auctionPressureChart = new window.Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: true },
+        plugins: {
+          legend: { display: true },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                var id = ctx.dataset && ctx.dataset.id;
+                var value = ctx.parsed && ctx.parsed.y;
+                var index = ctx.dataIndex;
+
+                if (id === 'auctionIndex') {
+                  return value == null
+                    ? null
+                    : 'Presión: ' + Math.round(value * 100) + '%';
+                }
+                if (id === 'holidays') {
+                  return holidayTitles[index]
+                    ? 'Feriado: ' +
+                        holidayTitles[index] +
+                        ' (' +
+                        labels[index] +
+                        ')'
+                    : null;
+                }
+                if (id === 'phase') {
+                  return 'Fase: ' + (phaseLabels[index] || '—');
+                }
+                if (id === 'cpc') {
+                  return value == null ? null : 'CPC propio: $' + fmt(value);
+                }
+                if (id === 'cpl') {
+                  return value == null ? null : 'CPL propio: $' + fmt(value);
+                }
+                if (id === 'bcuRate') {
+                  return value == null
+                    ? null
+                    : 'Tasa usura BCU: ' + fmt(value) + '%';
+                }
+                if (id === 'totalEvents') {
+                  return value == null
+                    ? null
+                    : 'Eventos competidores: ' + fmt(value, 0);
+                }
+                return null;
+              },
+            },
+          },
+        },
+        scales: scales,
+      },
+    });
+
+    document
+      .querySelectorAll('.chart-series-toggles [data-series]')
+      .forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () {
+          var seriesKey = checkbox.getAttribute('data-series');
+          activeSeriesToggles[seriesKey] = checkbox.checked;
+
+          if (!auctionPressureChart) return;
+          var datasetIndex =
+            auctionPressureChart.data.datasets.findIndex(function (dataset) {
+              return dataset.id === seriesKey;
+            });
+          if (datasetIndex === -1) return;
+
+          auctionPressureChart.getDatasetMeta(datasetIndex).hidden =
+            !checkbox.checked;
+          auctionPressureChart.update();
+        });
+      });
+  }
+
   function renderLiquidityHistory(payload) {
     var rows = payload && Array.isArray(payload.history) ? payload.history : [];
     if (rows.length === 0) {
@@ -996,6 +1409,7 @@
         performance,
         'ma-kpi-section-performance',
       ) +
+      renderAuctionPressureChartSection(state.liquidityCycle) +
       renderKpiSection(
         'Contexto y Señales',
         context,
@@ -1305,6 +1719,8 @@
   function render() {
     if (!root) return;
 
+    destroyAuctionPressureChart();
+
     var derived = computeDerived(state.data);
     var html = '<div class="ma-shell">' + renderHeader(derived.alertas);
 
@@ -1321,6 +1737,9 @@
     html += '</div>';
     root.innerHTML = html;
     bindEvents();
+    if (!state.configMissing && !state.loading && !state.error) {
+      mountAuctionPressureChart(state.liquidityCycle);
+    }
   }
 
   function bindEvents() {
