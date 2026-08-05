@@ -6,6 +6,7 @@ const socialCommentsRouter = require('./routes/social-comments');
 const socialConversationsRouter = require('./routes/social-conversations');
 const liquidityCycleRouter = require('./routes/liquidity-cycle');
 const bcuUsuraRateRouter = require('./routes/bcu-usura-rate');
+const competitorActivityPredictionsRouter = require('./routes/competitor-activity-predictions');
 const authRouter = require('./routes/auth');
 const { requireAuth } = require('./middleware/auth');
 const logger = require('./lib/logger');
@@ -23,6 +24,10 @@ app.use('/api/social-comments', socialCommentsRouter);
 app.use('/api/social-conversations', socialConversationsRouter);
 app.use('/api/liquidity-cycle', liquidityCycleRouter);
 app.use('/api/bcu-usura-rate', bcuUsuraRateRouter);
+app.use(
+  '/competitor-activity-predictions',
+  competitorActivityPredictionsRouter,
+);
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error', { error: err.message });
