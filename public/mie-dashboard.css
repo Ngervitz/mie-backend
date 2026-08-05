@@ -1552,14 +1552,22 @@
 
 #mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(1),
 #mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(1) {
-  width: 50%;
+  width: 42%;
 }
 
 #mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(2),
-#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(2),
+#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(2) {
+  width: 18%;
+}
+
 #mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(3),
 #mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(3) {
-  width: 25%;
+  width: 24%;
+}
+
+#mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(4),
+#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(4) {
+  width: 16%;
 }
 
 #mie-dashboard-app #ml-predictions-landing .ml-prediction-entity {
@@ -1577,6 +1585,86 @@
   top: auto;
   left: auto;
   flex: 0 0 auto;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-block {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 18px;
+  max-width: 42rem;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-block label {
+  font-weight: 600;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-entity-note-row td {
+  width: auto;
+  padding: 12px;
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-entity-note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-item {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-context,
+#mie-dashboard-app #ml-predictions-landing .ml-note-date {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-note-text {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-recent-notes {
+  margin-top: 24px;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-recent-notes h2 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
 }
 
 #mie-dashboard-app .meta-subnav-btn {

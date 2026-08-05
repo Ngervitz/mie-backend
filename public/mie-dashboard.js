@@ -1933,6 +1933,75 @@ init();
   const mlMeta = document.getElementById('ml-predictions-meta');
   const mlStatus = document.getElementById('ml-predictions-status');
   const mlTable = document.getElementById('ml-predictions-table');
+  const mlRunNoteInput = document.getElementById('ml-run-note-input');
+  const mlRunNoteCount = document.getElementById('ml-run-note-count');
+  const mlRunNoteSave = document.getElementById('ml-run-note-save');
+  const mlRunNoteStatus = document.getElementById('ml-run-note-status');
+  const mlRunNotesList = document.getElementById('ml-run-notes-list');
+  const mlRecentNotesStatus = document.getElementById(
+    'ml-recent-notes-status',
+  );
+  const mlRecentNotesList = document.getElementById(
+    'ml-recent-notes-list',
+  );
+
+  let currentMlData = null;
+
+  function formatMlNoteDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return String(value);
+    return date.toLocaleString('es-UY');
+  }
+
+  function renderMlNotes(notes, container, includeEntity) {
+    if (!container) return;
+    const rows = Array.isArray(notes) ? notes : [];
+
+    if (!rows.length) {
+      container.innerHTML =
+        '<p class="text-muted">Todavía no hay notas.</p>';
+      return;
+    }
+
+    container.innerHTML = rows
+      .map(function (item) {
+        const context = includeEntity
+          ? '<div class="ml-note-context">' +
+            escapeHtml(item.name || 'Entidad') +
+            ' · semana ' +
+            escapeHtml(item.week_of || '—') +
+            '</div>'
+          : '';
+
+        return (
+          '<article class="ml-note-item">' +
+          context +
+          '<div class="ml-note-date">' +
+          escapeHtml(formatMlNoteDate(item.created_at)) +
+          '</div>' +
+          '<div class="ml-note-text">' +
+          escapeHtml(item.note || '') +
+          '</div>' +
+          '</article>'
+        );
+      })
+      .join('');
+  }
+
+  async function readMlJson(response) {
+    const data = await response.json().catch(function () {
+      return {};
+    });
+    if (!response.ok) {
+      throw new Error(
+        data && data.error
+          ? String(data.error)
+          : 'Error HTTP ' + response.status,
+      );
+    }
+    return data;
+  }
 
   function setVisible(el, visible) {
     if (!el) return;
@@ -1942,6 +2011,7 @@ init();
   }
 
   function renderMlPredictions(data) {
+    currentMlData = data || {};
     const predictions = Array.isArray(data && data.predictions)
       ? data.predictions
       : [];
@@ -1994,6 +2064,8 @@ init();
           entityName: name,
           websiteDomain: prediction.website_domain || null,
         });
+        const entityId = String(prediction.entity_id || '');
+        const predictedWeekOf = String(data.predicted_week_of || '');
 
         return (
           '<tr class="sms-row">' +
@@ -2010,6 +2082,31 @@ init();
           '">' +
           escapeHtml(badgeText) +
           '</span></td>' +
+          '<td><button type="button" class="btn ml-note-toggle" ' +
+          'data-entity-id="' +
+          escapeHtml(entityId) +
+          '">+ nota</button></td>' +
+          '</tr>' +
+          '<tr class="ml-entity-note-row" data-note-row-for="' +
+          escapeHtml(entityId) +
+          '" hidden><td colspan="4">' +
+          '<form class="ml-entity-note-form" data-entity-id="' +
+          escapeHtml(entityId) +
+          '" data-week-of="' +
+          escapeHtml(predictedWeekOf) +
+          '">' +
+          '<label>Nota para ' +
+          escapeHtml(name) +
+          ' · semana ' +
+          escapeHtml(predictedWeekOf || '—') +
+          '</label>' +
+          '<textarea class="ml-note-textarea ml-entity-note-input" ' +
+          'maxlength="1000" rows="3" required></textarea>' +
+          '<div class="ml-note-actions">' +
+          '<span class="text-muted ml-entity-note-count">0/1000</span>' +
+          '<button type="submit" class="btn">Guardar nota</button>' +
+          '</div><div class="mcl-status ml-entity-note-status" ' +
+          'aria-live="polite"></div></form></td>' +
           '</tr>'
         );
       })
@@ -2018,10 +2115,54 @@ init();
     mlTable.innerHTML =
       '<div class="sms-table-wrap">' +
       '<table class="sms-table">' +
-      '<thead><tr><th>Competidor</th><th>Probabilidad</th><th>Etiqueta</th></tr></thead>' +
+      '<thead><tr><th>Competidor</th><th>Probabilidad</th>' +
+      '<th>Etiqueta</th><th>Nota</th></tr></thead>' +
       '<tbody>' +
       rows +
       '</tbody></table></div>';
+  }
+
+  async function loadRunNotes(modelVersion) {
+    if (!mlRunNotesList || !mlRunNoteStatus) return;
+    if (!modelVersion) {
+      mlRunNoteStatus.textContent = '';
+      renderMlNotes([], mlRunNotesList, false);
+      return;
+    }
+
+    mlRunNoteStatus.textContent = 'Cargando notas de la corrida…';
+    try {
+      const response = await fetch(
+        API_BASE +
+          '/ml-notes/run?model_version=' +
+          encodeURIComponent(modelVersion),
+        { headers: { Accept: 'application/json' } },
+      );
+      const data = await readMlJson(response);
+      mlRunNoteStatus.textContent = '';
+      renderMlNotes(data.notes, mlRunNotesList, false);
+    } catch (error) {
+      mlRunNoteStatus.textContent =
+        'Error: ' +
+        (error && error.message ? error.message : 'Error desconocido');
+    }
+  }
+
+  async function loadRecentMlNotes() {
+    if (!mlRecentNotesList || !mlRecentNotesStatus) return;
+    mlRecentNotesStatus.textContent = 'Cargando notas recientes…';
+    try {
+      const response = await fetch(API_BASE + '/ml-notes/entity-week', {
+        headers: { Accept: 'application/json' },
+      });
+      const data = await readMlJson(response);
+      mlRecentNotesStatus.textContent = '';
+      renderMlNotes(data.notes, mlRecentNotesList, true);
+    } catch (error) {
+      mlRecentNotesStatus.textContent =
+        'Error: ' +
+        (error && error.message ? error.message : 'Error desconocido');
+    }
   }
 
   async function loadMlPredictions() {
@@ -2043,6 +2184,10 @@ init();
         );
       }
       renderMlPredictions(data);
+      await Promise.all([
+        loadRunNotes(data.model_version),
+        loadRecentMlNotes(),
+      ]);
     } catch (error) {
       if (mlStatus) {
         mlStatus.textContent =
@@ -2050,6 +2195,152 @@ init();
           (error && error.message ? error.message : 'Error desconocido');
       }
     }
+  }
+
+  if (mlRunNoteInput && mlRunNoteCount) {
+    mlRunNoteInput.addEventListener('input', function () {
+      mlRunNoteCount.textContent =
+        String(mlRunNoteInput.value.length) + '/1000';
+    });
+  }
+
+  if (mlRunNoteSave) {
+    mlRunNoteSave.addEventListener('click', async function () {
+      const modelVersion =
+        currentMlData && typeof currentMlData.model_version === 'string'
+          ? currentMlData.model_version.trim()
+          : '';
+      const note = mlRunNoteInput ? mlRunNoteInput.value.trim() : '';
+
+      if (!modelVersion) {
+        if (mlRunNoteStatus) {
+          mlRunNoteStatus.textContent =
+            'No hay una versión de modelo disponible.';
+        }
+        return;
+      }
+      if (!note) {
+        if (mlRunNoteStatus) {
+          mlRunNoteStatus.textContent = 'Escribí una nota antes de guardar.';
+        }
+        return;
+      }
+
+      mlRunNoteSave.disabled = true;
+      if (mlRunNoteStatus) mlRunNoteStatus.textContent = 'Guardando…';
+
+      try {
+        const response = await fetch(API_BASE + '/ml-notes/run', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model_version: modelVersion,
+            note,
+          }),
+        });
+        await readMlJson(response);
+        mlRunNoteInput.value = '';
+        if (mlRunNoteCount) mlRunNoteCount.textContent = '0/1000';
+        if (mlRunNoteStatus) mlRunNoteStatus.textContent = 'Nota guardada.';
+        await loadRunNotes(modelVersion);
+      } catch (error) {
+        if (mlRunNoteStatus) {
+          mlRunNoteStatus.textContent =
+            'Error: ' +
+            (error && error.message ? error.message : 'Error desconocido');
+        }
+      } finally {
+        mlRunNoteSave.disabled = false;
+      }
+    });
+  }
+
+  if (mlTable) {
+    mlTable.addEventListener('click', function (event) {
+      const button = event.target.closest('.ml-note-toggle');
+      if (!button || !mlTable.contains(button)) return;
+
+      const entityId = button.getAttribute('data-entity-id') || '';
+      const row = mlTable.querySelector(
+        '[data-note-row-for="' + CSS.escape(entityId) + '"]',
+      );
+      if (!row) return;
+
+      const willOpen = row.hidden;
+      mlTable
+        .querySelectorAll('.ml-entity-note-row')
+        .forEach(function (noteRow) {
+          noteRow.hidden = true;
+        });
+      row.hidden = !willOpen;
+
+      if (willOpen) {
+        const textarea = row.querySelector('.ml-entity-note-input');
+        if (textarea) textarea.focus();
+      }
+    });
+
+    mlTable.addEventListener('input', function (event) {
+      if (!event.target.matches('.ml-entity-note-input')) return;
+      const form = event.target.closest('.ml-entity-note-form');
+      const count = form && form.querySelector('.ml-entity-note-count');
+      if (count) {
+        count.textContent = String(event.target.value.length) + '/1000';
+      }
+    });
+
+    mlTable.addEventListener('submit', async function (event) {
+      const form = event.target.closest('.ml-entity-note-form');
+      if (!form) return;
+      event.preventDefault();
+
+      const textarea = form.querySelector('.ml-entity-note-input');
+      const submitButton = form.querySelector('button[type="submit"]');
+      const status = form.querySelector('.ml-entity-note-status');
+      const note = textarea ? textarea.value.trim() : '';
+      const entityId = form.getAttribute('data-entity-id') || '';
+      const weekOf = form.getAttribute('data-week-of') || '';
+
+      if (!note) {
+        if (status) status.textContent = 'Escribí una nota antes de guardar.';
+        return;
+      }
+
+      if (submitButton) submitButton.disabled = true;
+      if (status) status.textContent = 'Guardando…';
+
+      try {
+        const response = await fetch(API_BASE + '/ml-notes/entity-week', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            entity_id: entityId,
+            week_of: weekOf,
+            note,
+          }),
+        });
+        await readMlJson(response);
+        textarea.value = '';
+        const count = form.querySelector('.ml-entity-note-count');
+        if (count) count.textContent = '0/1000';
+        if (status) status.textContent = 'Nota guardada.';
+        await loadRecentMlNotes();
+      } catch (error) {
+        if (status) {
+          status.textContent =
+            'Error: ' +
+            (error && error.message ? error.message : 'Error desconocido');
+        }
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+    });
   }
 
   function setMarketView(view) {

@@ -369,11 +369,39 @@
           class="kw-disclaimer"
           hidden></div>
         <p id="ml-predictions-meta" class="text-muted"></p>
+        <div id="ml-run-note-block" class="ml-note-block">
+          <label for="ml-run-note-input">Nota general de esta corrida</label>
+          <textarea
+            id="ml-run-note-input"
+            class="ml-note-textarea"
+            maxlength="1000"
+            rows="3"
+            placeholder="Agregar contexto o conclusiones sobre esta corrida"></textarea>
+          <div class="ml-note-actions">
+            <span id="ml-run-note-count" class="text-muted">0/1000</span>
+            <button id="ml-run-note-save" type="button" class="btn">
+              Guardar nota
+            </button>
+          </div>
+          <div
+            id="ml-run-note-status"
+            class="mcl-status"
+            aria-live="polite"></div>
+          <div id="ml-run-notes-list" class="ml-notes-list"></div>
+        </div>
         <div
           id="ml-predictions-status"
           class="mcl-status"
           aria-live="polite"></div>
         <div id="ml-predictions-table"></div>
+        <section class="ml-recent-notes">
+          <h2>Notas recientes</h2>
+          <div
+            id="ml-recent-notes-status"
+            class="mcl-status"
+            aria-live="polite"></div>
+          <div id="ml-recent-notes-list" class="ml-notes-list"></div>
+        </section>
       </div>
     </div>
 
