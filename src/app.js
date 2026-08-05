@@ -15,6 +15,16 @@ const app = express();
 
 app.use(express.json());
 app.use('/', authRouter);
+
+// TEMP diagnostic — remove after confirming cron-job.org header delivery
+app.get('/debug-cron-header', (req, res) => {
+  const received = req.headers['x-cron-key'] || null;
+  res.json({
+    received: received,
+    length: (received || '').length,
+  });
+});
+
 app.use(requireAuth);
 app.use(express.static('public'));
 app.use('/jobs', jobsRouter);
