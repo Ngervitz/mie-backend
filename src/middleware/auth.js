@@ -141,6 +141,20 @@ function isAllowlisted(req) {
 }
 
 /**
+ * Authenticate external cron (e.g. cron-job.org) via X-Cron-Key.
+ * Only succeeds when CRON_SECRET is set and matches (timing-safe).
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+function isValidCronKey(req) {
+  const secret = env.cronSecret;
+  if (!secret) return false;
+  const provided = req.headers && req.headers['x-cron-key'];
+  if (typeof provided !== 'string' || !provided) return false;
+  return safeEqualPassword(provided, secret);
+}
+
+/**
  * Global auth gate. Fail closed if env secrets missing.
  */
 function requireAuth(req, res, next) {
@@ -149,6 +163,11 @@ function requireAuth(req, res, next) {
   }
 
   if (isAllowlisted(req)) {
+    return next();
+  }
+
+  // Cron bypass: any path, no session cookie required.
+  if (isValidCronKey(req)) {
     return next();
   }
 

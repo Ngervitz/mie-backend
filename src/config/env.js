@@ -39,4 +39,6 @@ module.exports = {
   // every request gets 503 { error: 'Login no configurado' } (no open access).
   dashboardLoginPassword: process.env.DASHBOARD_LOGIN_PASSWORD || null,
   sessionSecret: process.env.SESSION_SECRET || null,
+  // Optional at boot. When set, X-Cron-Key header can authenticate cron-job.org.
+  cronSecret: process.env.CRON_SECRET || null,
 };
