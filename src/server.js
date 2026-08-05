@@ -17,4 +17,9 @@ app.use('/ai-visibility', aiVisibilityRouter);
 
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });
+  // TEMP diagnostic — remove after confirming CRON_SECRET on Railway
+  logger.info('CRON_SECRET check', {
+    isSet: !!process.env.CRON_SECRET,
+    length: process.env.CRON_SECRET ? process.env.CRON_SECRET.length : 0,
+  });
 });
