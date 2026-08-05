@@ -272,6 +272,9 @@
           </svg>
           Google
         </button>
+        <button type="button" id="market-ml-tab-btn" class="meta-subnav-btn">
+          🔮 Predicciones ML
+        </button>
       </div>
       <main class="app" id="mie-market-root"></main>
 
@@ -353,6 +356,24 @@
           <h3 class="serp-detail-subtitle">Organic</h3>
           <div id="serp-organic-table"></div>
         </section>
+      </div>
+
+      <div id="ml-predictions-landing" class="mcl-landing hidden" hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Predicciones ML</h1>
+          </div>
+        </header>
+        <div
+          id="ml-predictions-disclaimer"
+          class="kw-disclaimer"
+          hidden></div>
+        <p id="ml-predictions-meta" class="text-muted"></p>
+        <div
+          id="ml-predictions-status"
+          class="mcl-status"
+          aria-live="polite"></div>
+        <div id="ml-predictions-table"></div>
       </div>
     </div>
 

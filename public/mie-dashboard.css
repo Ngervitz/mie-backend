@@ -1534,6 +1534,51 @@
   padding: 12px 20px 0;
 }
 
+#mie-dashboard-app #ml-predictions-landing {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 20px;
+  color: var(--text);
+}
+
+#mie-dashboard-app #ml-predictions-landing .text-muted {
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app #ml-predictions-landing .sms-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+#mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(1),
+#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(1) {
+  width: 50%;
+}
+
+#mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(2),
+#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(2),
+#mie-dashboard-app #ml-predictions-landing .sms-table th:nth-child(3),
+#mie-dashboard-app #ml-predictions-landing .sms-table td:nth-child(3) {
+  width: 25%;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-prediction-entity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#mie-dashboard-app
+  #ml-predictions-landing
+  .ml-prediction-entity
+  .gauge-chip-avatar {
+  position: relative;
+  top: auto;
+  left: auto;
+  flex: 0 0 auto;
+}
+
 #mie-dashboard-app .meta-subnav-btn {
   cursor: pointer;
   font: inherit;

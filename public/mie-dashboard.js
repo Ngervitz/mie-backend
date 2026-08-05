@@ -1918,15 +1918,21 @@ function init() {
 init();
 
 /* ----------------------------------------------------------------------------
- * Competidores — mutually exclusive sub-views (meta | google)
+ * Competidores — mutually exclusive sub-views (meta | google | ml)
  * Visibility toggles only; never rebuild #mie-market-root from this shell.
  * ------------------------------------------------------------------------- */
 (function initMarketViews() {
   const marketRoot = document.getElementById('mie-market-root');
   const chrome = document.getElementById('market-chrome');
   const googleLanding = document.getElementById('serp-import-landing');
+  const mlLanding = document.getElementById('ml-predictions-landing');
   const metaBtn = document.getElementById('market-meta-tab-btn');
   const googleBtn = document.getElementById('market-google-tab-btn');
+  const mlBtn = document.getElementById('market-ml-tab-btn');
+  const mlDisclaimer = document.getElementById('ml-predictions-disclaimer');
+  const mlMeta = document.getElementById('ml-predictions-meta');
+  const mlStatus = document.getElementById('ml-predictions-status');
+  const mlTable = document.getElementById('ml-predictions-table');
 
   function setVisible(el, visible) {
     if (!el) return;
@@ -1935,21 +1941,138 @@ init();
     else el.setAttribute('hidden', '');
   }
 
+  function renderMlPredictions(data) {
+    const predictions = Array.isArray(data && data.predictions)
+      ? data.predictions
+      : [];
+    const trainingRows = Number(data && data.training_rows_used) || 0;
+
+    if (mlDisclaimer) {
+      mlDisclaimer.textContent =
+        '⚠️ Piloto experimental de Machine Learning — entrenado con ' +
+        trainingRows +
+        ' filas de datos históricos, todavía insuficientes para confiar en ' +
+        'estas predicciones como certeza. Sirve para validar el proceso, no ' +
+        'para tomar decisiones de negocio todavía.';
+      mlDisclaimer.hidden = false;
+    }
+
+    if (mlMeta) {
+      mlMeta.textContent =
+        '💡 Prediciendo semana del ' +
+        (data.predicted_week_of || '—') +
+        ', en base a datos hasta el ' +
+        (data.features_week_of || '—') +
+        ' · modelo ' +
+        (data.model_version || '—');
+    }
+
+    if (!predictions.length) {
+      if (mlStatus) mlStatus.textContent = 'Todavía no hay predicciones.';
+      if (mlTable) mlTable.innerHTML = '';
+      return;
+    }
+
+    if (mlStatus) mlStatus.textContent = '';
+    if (!mlTable) return;
+
+    const rows = predictions
+      .map(function (prediction) {
+        const name = prediction && prediction.name
+          ? String(prediction.name)
+          : 'Entidad';
+        const probability = Number(prediction.predicted_probability);
+        const percentage = Number.isFinite(probability)
+          ? Math.round(probability * 100) + '%'
+          : '—';
+        const possiblePeak = prediction.predicted_label === true;
+        const badgeClass = possiblePeak ? ' email-badge--sending' : '';
+        const badgeText = possiblePeak
+          ? 'Posible pico'
+          : 'Sin cambios esperados';
+        const avatar = renderGaugeAvatar({
+          entityName: name,
+          websiteDomain: prediction.website_domain || null,
+        });
+
+        return (
+          '<tr class="sms-row">' +
+          '<td><span class="ml-prediction-entity">' +
+          avatar +
+          '<span>' +
+          escapeHtml(name) +
+          '</span></span></td>' +
+          '<td>' +
+          escapeHtml(percentage) +
+          '</td>' +
+          '<td><span class="email-badge' +
+          badgeClass +
+          '">' +
+          escapeHtml(badgeText) +
+          '</span></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    mlTable.innerHTML =
+      '<div class="sms-table-wrap">' +
+      '<table class="sms-table">' +
+      '<thead><tr><th>Competidor</th><th>Probabilidad</th><th>Etiqueta</th></tr></thead>' +
+      '<tbody>' +
+      rows +
+      '</tbody></table></div>';
+  }
+
+  async function loadMlPredictions() {
+    if (mlStatus) mlStatus.textContent = 'Cargando predicciones…';
+    if (mlTable) mlTable.innerHTML = '';
+    try {
+      const response = await fetch(
+        API_BASE + '/competitor-activity-predictions',
+        { headers: { Accept: 'application/json' } },
+      );
+      const data = await response.json().catch(function () {
+        return {};
+      });
+      if (!response.ok) {
+        throw new Error(
+          data && data.error
+            ? String(data.error)
+            : 'No se pudieron cargar las predicciones.',
+        );
+      }
+      renderMlPredictions(data);
+    } catch (error) {
+      if (mlStatus) {
+        mlStatus.textContent =
+          'Error: ' +
+          (error && error.message ? error.message : 'Error desconocido');
+      }
+    }
+  }
+
   function setMarketView(view) {
-    const v = view === 'google' ? 'google' : 'meta';
+    const v = view === 'google' || view === 'ml' ? view : 'meta';
     setVisible(marketRoot, v === 'meta');
     setVisible(googleLanding, v === 'google');
+    setVisible(mlLanding, v === 'ml');
     setVisible(chrome, true);
     if (metaBtn) metaBtn.classList.toggle('active', v === 'meta');
     if (googleBtn) googleBtn.classList.toggle('active', v === 'google');
+    if (mlBtn) mlBtn.classList.toggle('active', v === 'ml');
     if (v === 'google' && typeof window.__openGoogleSerp === 'function') {
       window.__openGoogleSerp();
+    }
+    if (v === 'ml') {
+      loadMlPredictions();
     }
   }
 
   window.__setMarketView = setMarketView;
   if (metaBtn) metaBtn.addEventListener('click', () => setMarketView('meta'));
   if (googleBtn) googleBtn.addEventListener('click', () => setMarketView('google'));
+  if (mlBtn) mlBtn.addEventListener('click', () => setMarketView('ml'));
   setMarketView('meta');
 })();
 
