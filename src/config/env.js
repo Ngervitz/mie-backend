@@ -35,4 +35,8 @@ module.exports = {
   // Default true; only the string "false" (case-insensitive) disables.
   metaAgenteEnabled:
     String(process.env.META_AGENTE_ENABLED ?? 'true').toLowerCase() !== 'false',
+  // Optional at boot. If either is missing, auth middleware fail-closes:
+  // every request gets 503 { error: 'Login no configurado' } (no open access).
+  dashboardLoginPassword: process.env.DASHBOARD_LOGIN_PASSWORD || null,
+  sessionSecret: process.env.SESSION_SECRET || null,
 };

@@ -7580,3 +7580,21 @@ init();
     refreshEvolution({ force: true });
   };
 })();
+
+(function initJanusLogout() {
+  const btn = document.getElementById('janus-logout-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async function () {
+    btn.disabled = true;
+    try {
+      await fetch((typeof API_BASE === 'string' ? API_BASE : '') + '/logout', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+    } catch (_err) {
+      /* redirect anyway */
+    }
+    window.location.href = '/login.html';
+  });
+})();

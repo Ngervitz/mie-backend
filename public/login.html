@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Janus — Entrar</title>
+  <style>
+    :root {
+      --bg: #12141a;
+      --surface: #1a1d26;
+      --border: #2a2f3a;
+      --text: #e8eaed;
+      --text-muted: #9aa3b2;
+      --accent: #1d9e75;
+      --accent-hover: #178a65;
+      --danger: #a66b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 360px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .sub {
+      margin: 0 0 22px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #12141a;
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+    }
+    input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
+    .error {
+      margin-top: 14px;
+      color: var(--danger);
+      font-size: 0.9rem;
+      min-height: 1.3em;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <form class="card" id="login-form" autocomplete="current-password">
+      <h1>Janus</h1>
+      <p class="sub">Ingresá la clave compartida para continuar.</p>
+      <label for="password">Contraseña</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        required
+        autofocus
+        autocomplete="current-password"
+      />
+      <button type="submit" id="submit-btn">Entrar</button>
+      <div class="error" id="error" role="alert"></div>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var form = document.getElementById('login-form');
+      var passwordInput = document.getElementById('password');
+      var errorEl = document.getElementById('error');
+      var btn = document.getElementById('submit-btn');
+
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        errorEl.textContent = '';
+        btn.disabled = true;
+        var original = btn.textContent;
+        btn.textContent = 'Entrando…';
+
+        fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ password: passwordInput.value || '' }),
+          credentials: 'same-origin',
+        })
+          .then(function (res) {
+            return res.json().then(function (data) {
+              return { ok: res.ok, status: res.status, data: data };
+            }).catch(function () {
+              return { ok: res.ok, status: res.status, data: {} };
+            });
+          })
+          .then(function (result) {
+            if (result.ok && result.data && result.data.ok === true) {
+              window.location.href = '/mie-dashboard.html';
+              return;
+            }
+            errorEl.textContent =
+              (result.data && result.data.error) ||
+              (result.status === 503
+                ? 'Login no configurado en el servidor.'
+                : 'Contraseña incorrecta');
+            btn.disabled = false;
+            btn.textContent = original;
+          })
+          .catch(function () {
+            errorEl.textContent = 'No se pudo conectar. Reintentá.';
+            btn.disabled = false;
+            btn.textContent = original;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

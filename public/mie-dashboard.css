@@ -36,6 +36,10 @@
 }
 
 #mie-dashboard-app .app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 12px 24px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
@@ -43,6 +47,10 @@
 #mie-dashboard-app .app-header-logo {
   height: 64px;
   width: auto;
+}
+
+#mie-dashboard-app .app-header-logout {
+  flex-shrink: 0;
 }
 
 #mie-dashboard-app *,
