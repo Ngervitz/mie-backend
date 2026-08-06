@@ -38,6 +38,36 @@ router.get('/', async (req, res) => {
       });
     }
 
+    const { data: latestRunRows, error: latestRunError } = await supabase
+      .from('competitor_activity_predictions')
+      .select('model_version, trained_at')
+      .eq('predicted_week_of', predictedWeekOf)
+      .order('trained_at', { ascending: false })
+      .limit(1);
+
+    if (latestRunError) {
+      logger.error('GET /competitor-activity-predictions latest run failed', {
+        predicted_week_of: predictedWeekOf,
+        error: latestRunError.message,
+      });
+      return res.status(500).json({ error: latestRunError.message });
+    }
+
+    const latestModelVersion =
+      Array.isArray(latestRunRows) && latestRunRows[0]
+        ? latestRunRows[0].model_version
+        : null;
+
+    if (!latestModelVersion) {
+      return res.status(200).json({
+        predicted_week_of: predictedWeekOf,
+        features_week_of: null,
+        model_version: null,
+        training_rows_used: 0,
+        predictions: [],
+      });
+    }
+
     const { data: rows, error: rowsError } = await supabase
       .from('competitor_activity_predictions')
       .select(
@@ -55,6 +85,7 @@ router.get('/', async (req, res) => {
         ].join(', '),
       )
       .eq('predicted_week_of', predictedWeekOf)
+      .eq('model_version', latestModelVersion)
       .order('predicted_probability', { ascending: false });
 
     if (rowsError) {

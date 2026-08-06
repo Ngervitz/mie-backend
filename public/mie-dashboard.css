@@ -1546,6 +1546,20 @@
   color: var(--text-muted);
 }
 
+#mie-dashboard-app #ml-predictions-landing .ml-predictions-explainer {
+  margin: 0 0 16px;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-predictions-explainer .ga4-summary-note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-predictions-explainer p + p {
+  margin-top: 8px;
+}
+
 #mie-dashboard-app #ml-predictions-landing .sms-table {
   table-layout: fixed;
   width: 100%;

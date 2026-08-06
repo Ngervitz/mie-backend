@@ -2062,13 +2062,28 @@ init();
     }
 
     if (mlMeta) {
-      mlMeta.textContent =
+      mlMeta.innerHTML =
+        '<p class="ga4-summary-note text-muted">' +
         '💡 Prediciendo semana del ' +
-        (data.predicted_week_of || '—') +
+        escapeHtml(data.predicted_week_of || '—') +
         ', en base a datos hasta el ' +
-        (data.features_week_of || '—') +
+        escapeHtml(data.features_week_of || '—') +
         ' · modelo ' +
-        (data.model_version || '—');
+        escapeHtml(data.model_version || '—') +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '📊 Para cada competidor, el modelo mira 3 datos de la semana ' +
+        'anterior: cuántos anuncios tuvo, su promedio histórico, y hace ' +
+        'cuánto no publicaba. Con eso calcula una probabilidad de que tenga ' +
+        'actividad inusualmente alta esta semana (más de 1.5x su promedio).' +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '🧮 Es una regresión logística: combina esos 3 datos con pesos ' +
+        'aprendidos de ' +
+        escapeHtml(String(trainingRows)) +
+        ' casos históricos, y convierte el ' +
+        'resultado en un porcentaje entre 0% y 100%.' +
+        '</p>';
     }
 
     if (!predictions.length) {
