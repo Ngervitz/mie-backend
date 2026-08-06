@@ -1564,7 +1564,122 @@ router.get('/keyword-research', async (req, res) => {
  * range: last 30 calendar dates inclusive (today-29 .. today, UTC).
  * firstAvailableDate = earliest date in the table overall, so the frontend
  * can render an honest empty state without a second endpoint.
+ *
+ * Dates are UTC calendar days (YYYY-MM-DD), same convention as todayUtc()
+ * elsewhere in this router — not America/Montevideo.
+ *
+ * `summary` is aggregated from a fully paginated scan of the date range
+ * (independent of the table `rows` select, which may hit PostgREST caps).
  */
+const GA4_SUMMARY_PAGE_SIZE = 1000;
+
+function normalizeGa4Channel(value) {
+  if (value == null) return 'Unassigned';
+  const trimmed = String(value).trim();
+  if (!trimmed) return 'Unassigned';
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === '(not set)' ||
+    lower === '(none)' ||
+    lower === '(not provided)' ||
+    lower === 'unassigned'
+  ) {
+    return 'Unassigned';
+  }
+  return trimmed;
+}
+
+function roundGa4Summary2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function emptyGa4Summary() {
+  return {
+    total_sessions: 0,
+    total_users: 0,
+    total_key_events: 0,
+    overall_conversion_rate: 0,
+    by_channel: [],
+  };
+}
+
+/**
+ * Aggregate summary over ALL rows in [from, to] via paginated .range().
+ * Never rely on a single uncapped select (PostgREST ~1000 default).
+ */
+async function buildGa4Summary(from, to) {
+  const byChannel = new Map();
+  let totalSessions = 0;
+  let totalUsers = 0;
+  let totalKeyEvents = 0;
+
+  for (let offset = 0; ; offset += GA4_SUMMARY_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('ga4_metrics')
+      .select('id, channel_group, sessions, total_users, key_events')
+      .gte('date', from)
+      .lte('date', to)
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + GA4_SUMMARY_PAGE_SIZE - 1);
+
+    if (error) {
+      throw new Error(
+        `Failed to aggregate ga4_metrics summary: ${error.message}`,
+      );
+    }
+
+    const page = data || [];
+    for (const row of page) {
+      const sessions = Number(row.sessions) || 0;
+      const users = Number(row.total_users) || 0;
+      const keyEvents = Number(row.key_events) || 0;
+      const channel = normalizeGa4Channel(row.channel_group);
+
+      totalSessions += sessions;
+      totalUsers += users;
+      totalKeyEvents += keyEvents;
+
+      const bucket = byChannel.get(channel) || {
+        channel,
+        sessions: 0,
+        users: 0,
+        key_events: 0,
+      };
+      bucket.sessions += sessions;
+      bucket.users += users;
+      bucket.key_events += keyEvents;
+      byChannel.set(channel, bucket);
+    }
+
+    if (page.length < GA4_SUMMARY_PAGE_SIZE) break;
+  }
+
+  const by_channel = [...byChannel.values()]
+    .map((bucket) => ({
+      channel: bucket.channel,
+      sessions: bucket.sessions,
+      users: bucket.users,
+      key_events: bucket.key_events,
+      percentage:
+        totalSessions > 0
+          ? roundGa4Summary2((bucket.sessions / totalSessions) * 100)
+          : 0,
+    }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  return {
+    total_sessions: totalSessions,
+    total_users: totalUsers,
+    total_key_events: totalKeyEvents,
+    overall_conversion_rate:
+      totalSessions > 0
+        ? roundGa4Summary2((totalKeyEvents / totalSessions) * 100)
+        : 0,
+    by_channel,
+  };
+}
+
 router.get('/ga4-metrics', async (req, res) => {
   const rawFrom = typeof req.query.from === 'string' ? req.query.from.trim() : '';
   const rawTo = typeof req.query.to === 'string' ? req.query.to.trim() : '';
@@ -1602,11 +1717,14 @@ router.get('/ga4-metrics', async (req, res) => {
       throw new Error(`Failed to fetch first ga4_metrics date: ${firstError.message}`);
     }
 
+    const summary = await buildGa4Summary(from, to);
+
     return res.json({
       rows: data || [],
       range: { from, to },
       firstAvailableDate:
         firstRow && firstRow.length && firstRow[0].date ? firstRow[0].date : null,
+      summary: summary || emptyGa4Summary(),
     });
   } catch (err) {
     logger.error('Reports ga4-metrics failed', { from, to, error: err.message });

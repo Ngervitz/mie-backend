@@ -122,6 +122,40 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+/** Theme-accessible palette for deterministic string→color mapping. */
+const STRING_COLOR_PALETTE = [
+  '#5b7fad', // --accent-info
+  '#5a9a72', // --accent-success
+  '#b0894a', // --accent-warn
+  '#a66b6b', // --accent-danger
+  '#60a5fa',
+  '#38bdf8',
+  '#a78bfa',
+  '#22c55e',
+  '#f59e0b',
+  '#f472b6',
+];
+
+/**
+ * Deterministic hash of a string → palette index.
+ * Reusable across modules that need stable colors by name (not array index).
+ */
+function hashStringToPaletteIndex(value, paletteLength) {
+  const str = String(value == null ? '' : value);
+  const len = Math.max(1, Number(paletteLength) || STRING_COLOR_PALETTE.length);
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash + str.charCodeAt(i) * (i + 1)) % 2147483647;
+  }
+  return Math.abs(hash) % len;
+}
+
+function colorForString(value, palette) {
+  const colors =
+    Array.isArray(palette) && palette.length ? palette : STRING_COLOR_PALETTE;
+  return colors[hashStringToPaletteIndex(value, colors.length)];
+}
+
 /* ----------------------------------------------------------------------------
  * Data fetching
  * ------------------------------------------------------------------------- */
@@ -3881,18 +3915,134 @@ init();
     return (n * 100).toFixed(2) + '%';
   }
 
-  function renderEmptyState(firstAvailableDate) {
-    resultsEl.innerHTML = '';
-    const empty = document.createElement('div');
-    empty.className = 'mcl-empty';
-    empty.textContent = firstAvailableDate
-      ? 'Sin datos para este rango — la captura arrancó el ' + firstAvailableDate + '.'
-      : 'Todavía no hay datos capturados.';
-    resultsEl.appendChild(empty);
+  function formatInt(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return Math.round(n).toLocaleString('es-UY');
   }
 
-  function renderTable(rows) {
-    resultsEl.innerHTML = '';
+  function emptySummary() {
+    return {
+      total_sessions: 0,
+      total_users: 0,
+      total_key_events: 0,
+      overall_conversion_rate: 0,
+      by_channel: [],
+    };
+  }
+
+  function topChannelsWithOthers(byChannel) {
+    const rows = Array.isArray(byChannel) ? byChannel.slice() : [];
+    if (rows.length <= 6) return rows;
+    const top = rows.slice(0, 6);
+    const rest = rows.slice(6);
+    const others = {
+      channel: 'Otros',
+      sessions: 0,
+      users: 0,
+      key_events: 0,
+      percentage: 0,
+    };
+    rest.forEach(function (row) {
+      others.sessions += Number(row.sessions) || 0;
+      others.users += Number(row.users) || 0;
+      others.key_events += Number(row.key_events) || 0;
+      others.percentage += Number(row.percentage) || 0;
+    });
+    others.percentage = Math.round(others.percentage * 100) / 100;
+    top.push(others);
+    return top;
+  }
+
+  function renderGa4Summary(summary) {
+    const s = summary && typeof summary === 'object' ? summary : emptySummary();
+    const wrap = document.createElement('section');
+    wrap.className = 'ga4-summary';
+    wrap.innerHTML = '<h2 class="section-title">Resumen del rango</h2>';
+
+    if (!Number(s.total_sessions)) {
+      const empty = document.createElement('div');
+      empty.className = 'mcl-empty';
+      empty.textContent = 'Sin datos en este rango';
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    const cards = document.createElement('div');
+    cards.className = 'kpi-grid ga4-summary-kpis';
+    cards.innerHTML =
+      '<div class="kpi-card is-accent">' +
+      '<div class="kpi-value">' +
+      escapeHtml(formatInt(s.total_sessions)) +
+      '</div>' +
+      '<div class="kpi-label">Sesiones totales</div>' +
+      '</div>' +
+      '<div class="kpi-card is-neutral">' +
+      '<div class="kpi-value">' +
+      escapeHtml(formatInt(s.total_users)) +
+      '</div>' +
+      '<div class="kpi-label">Usuarios-día (suma de filas)</div>' +
+      '<div class="ga4-summary-note text-muted">' +
+      'No son usuarios únicos: suma métricas por día × canal × landing × source × medium.' +
+      '</div>' +
+      '</div>' +
+      '<div class="kpi-card is-success">' +
+      '<div class="kpi-value">' +
+      escapeHtml(formatInt(s.total_key_events)) +
+      '</div>' +
+      '<div class="kpi-label">Key Events totales</div>' +
+      '</div>' +
+      '<div class="kpi-card is-warn">' +
+      '<div class="kpi-value">' +
+      escapeHtml(
+        Number.isFinite(Number(s.overall_conversion_rate))
+          ? Number(s.overall_conversion_rate).toFixed(2) + '%'
+          : '—',
+      ) +
+      '</div>' +
+      '<div class="kpi-label">Tasa de conversión general</div>' +
+      '</div>';
+    wrap.appendChild(cards);
+
+    const channels = topChannelsWithOthers(s.by_channel);
+    if (channels.length) {
+      const list = document.createElement('div');
+      list.className = 'ga4-channel-breakdown';
+      list.innerHTML =
+        '<h3 class="ga4-channel-title">Desglose por canal</h3>' +
+        channels
+          .map(function (row) {
+            const pct = Number(row.percentage) || 0;
+            const color = colorForString(row.channel);
+            return (
+              '<div class="ga4-channel-row">' +
+              '<div class="ga4-channel-meta">' +
+              '<span class="ga4-channel-name">' +
+              escapeHtml(row.channel || 'Unassigned') +
+              '</span>' +
+              '<span class="ga4-channel-stats text-muted">' +
+              escapeHtml(formatInt(row.sessions)) +
+              ' sesiones · ' +
+              escapeHtml(pct.toFixed(2) + '%') +
+              '</span></div>' +
+              '<div class="ga4-channel-bar-track">' +
+              '<div class="ga4-channel-bar-fill" style="width:' +
+              escapeHtml(String(Math.max(0, Math.min(100, pct)))) +
+              '%;background:' +
+              escapeHtml(color) +
+              '"></div></div></div>'
+            );
+          })
+          .join('');
+      wrap.appendChild(list);
+    }
+
+    return wrap;
+  }
+
+  function renderTable(rows, targetEl) {
+    const host = targetEl || resultsEl;
+    host.innerHTML = '';
     const table = document.createElement('table');
     table.className = 'ga4-table';
     table.innerHTML =
@@ -3917,7 +4067,7 @@ init();
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    resultsEl.appendChild(table);
+    host.appendChild(table);
   }
 
   async function loadMetrics() {
@@ -3960,13 +4110,32 @@ init();
       }
 
       const rows = Array.isArray(body.rows) ? body.rows : [];
+      resultsEl.innerHTML = '';
+      resultsEl.appendChild(
+        renderGa4Summary(
+          body && body.summary && typeof body.summary === 'object'
+            ? body.summary
+            : emptySummary(),
+        ),
+      );
+
       if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mcl-empty';
+        empty.textContent = body.firstAvailableDate
+          ? 'Sin filas para este rango — la captura arrancó el ' +
+            body.firstAvailableDate +
+            '.'
+          : 'Todavía no hay datos capturados.';
+        resultsEl.appendChild(empty);
         setStatus('', false);
-        renderEmptyState(body.firstAvailableDate || null);
         return;
       }
 
-      renderTable(rows);
+      const tableHost = document.createElement('div');
+      tableHost.className = 'ga4-table-host';
+      resultsEl.appendChild(tableHost);
+      renderTable(rows, tableHost);
       setStatus(rows.length + ' filas', false);
     } catch (err) {
       if (err && err.name === 'AbortError') return;

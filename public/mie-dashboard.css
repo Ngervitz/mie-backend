@@ -2445,6 +2445,77 @@
   white-space: nowrap;
 }
 
+#mie-dashboard-app #ga4-landing .ga4-summary {
+  margin: 8px 0 20px;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-summary-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-summary-note {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+#mie-dashboard-app #ga4-landing .kpi-card.is-warn {
+  border-top-color: var(--accent-warn);
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-name {
+  color: var(--text);
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-channel-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  #mie-dashboard-app #ga4-landing .ga4-summary-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* ---------- Google SERP manual import (Competidores sibling landing) ---------- */
 #mie-dashboard-app .serp-landing {
   max-width: var(--maxw);
