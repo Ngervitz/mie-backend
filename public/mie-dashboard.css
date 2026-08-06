@@ -69,12 +69,12 @@
 
 #mie-dashboard-app .app-sidebar-brand {
   flex-shrink: 0;
-  padding: 4px 4px 8px;
+  padding: 8px 6px 12px;
 }
 
-#mie-dashboard-app .app-header-logo {
+#mie-dashboard-app .app-sidebar-brand .app-header-logo {
   display: block;
-  height: 48px;
+  height: 64px;
   width: auto;
   max-width: 100%;
 }
@@ -202,6 +202,11 @@
   justify-content: space-between;
   text-align: left;
   font-family: inherit;
+}
+
+#mie-dashboard-app .app-sidebar .dashboard-tab-group-label {
+  font-size: 0.65rem;
+  padding: 6px 10px;
 }
 
 #mie-dashboard-app .dashboard-tab-group[data-group="inteligencia"] .dashboard-tab-group-label {
