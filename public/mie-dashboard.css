@@ -118,16 +118,9 @@
   width: 100%;
 }
 
-/*
- * Etapa 1 temporary mitigation — REMOVE/CLEAN UP in Etapa 2 when
- * initDashboardTabGroupsAccordion() is replaced.
- * The old accordion JS still toggles .open on a single group, which
- * would hide the other groups' tabs via .dashboard-tab-group-buttons
- * { display: none }. Force all group button stacks visible in the
- * sidebar so the three groups stay visually open.
- */
+/* Sidebar stack: when .open, legacy rule sets display:flex; this only
+   forces column layout (visibility owned by JS .open again). */
 #mie-dashboard-app .app-sidebar .dashboard-tab-group-buttons {
-  display: flex !important;
   flex-direction: column;
   gap: 6px;
   width: 100%;

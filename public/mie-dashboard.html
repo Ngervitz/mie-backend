@@ -23,8 +23,7 @@
         </nav>
 
         <!-- Primary nav (sidebar). Same 9 tabs / same attributes / same order.
-             Group open-state still mutated by initDashboardTabGroupsAccordion;
-             Etapa 1 CSS forces all group buttons visible anyway. -->
+             Groups open/close independently via initDashboardTabGroupsAccordion. -->
         <nav
           class="sidebar-nav dashboard-tabs"
           role="tablist"
@@ -1053,6 +1052,13 @@
 
       var current = 'market';
 
+      function syncMarketChrome(tabName) {
+        var marketChrome = document.getElementById('market-chrome');
+        if (!marketChrome) return;
+        var show = tabName === 'market';
+        marketChrome.classList.toggle('hidden', !show);
+      }
+
       function activate(name) {
         if (!panels[name]) return;
         Object.keys(panels).forEach(function (key) {
@@ -1082,6 +1088,7 @@
         ) {
           window.__openAiVisibility();
         }
+        syncMarketChrome(name);
         current = name;
       }
 
@@ -1090,6 +1097,10 @@
           activate(btn.getAttribute('data-dashboard-tab'));
         });
       });
+
+      // Initial paint: default tab is market; keep chrome in sync without
+      // waiting for a click (accordion no longer owns this visibility).
+      syncMarketChrome(current);
     })();
   </script>
   <script>
@@ -1106,55 +1117,40 @@
 
       if (!groups.length || !toggles.length) return;
 
-      function openGroup(groupName) {
-        groups.forEach(function (group) {
-          var isTarget =
-            group.getAttribute('data-group') === groupName;
+      // Independent open/closed state per group. Survives tab switches
+      // inside other groups (closing Marketing does not reset later).
+      var openState = {};
 
-          group.classList.toggle('open', isTarget);
-        });
-
-        toggles.forEach(function (toggle) {
-          var isTarget =
-            toggle.getAttribute('data-group-toggle') === groupName;
-
+      function applyGroup(groupEl, isOpen) {
+        var name = groupEl.getAttribute('data-group');
+        if (!name) return;
+        openState[name] = isOpen;
+        groupEl.classList.toggle('open', isOpen);
+        var toggle = groupEl.querySelector('[data-group-toggle]');
+        if (toggle) {
           toggle.setAttribute(
             'aria-expanded',
-            isTarget ? 'true' : 'false'
+            isOpen ? 'true' : 'false'
           );
-        });
-
-        var marketChrome = document.getElementById('market-chrome');
-        if (marketChrome) {
-          marketChrome.classList.toggle('hidden', groupName !== 'inteligencia');
         }
       }
 
-      var activeTab = document.querySelector(
-        '#mie-dashboard-app .dashboard-tab.active'
-      );
-
-      if (activeTab) {
-        var parentGroup = activeTab.closest(
-          '.dashboard-tab-group'
-        );
-
-        if (parentGroup) {
-          openGroup(
-            parentGroup.getAttribute('data-group')
-          );
-        }
-      } else if (groups[0]) {
-        openGroup(
-          groups[0].getAttribute('data-group')
-        );
-      }
+      // Boot: all three groups open.
+      groups.forEach(function (group) {
+        applyGroup(group, true);
+      });
 
       toggles.forEach(function (toggle) {
         toggle.addEventListener('click', function () {
-          openGroup(
-            toggle.getAttribute('data-group-toggle')
+          var groupName = toggle.getAttribute('data-group-toggle');
+          if (!groupName) return;
+          var group = document.querySelector(
+            '#mie-dashboard-app .dashboard-tab-group[data-group="' +
+              groupName +
+              '"]'
           );
+          if (!group) return;
+          applyGroup(group, !openState[groupName]);
         });
       });
     })();
