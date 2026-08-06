@@ -1697,6 +1697,7 @@ function renderLoadingSkeleton() {
     ${renderStatusLine()}
     <section class="section"><div class="kpi-grid">${kpis}</div></section>
     ${renderIntensityGauges()}
+    ${renderCompetitorActivityWeeklySection()}
     <section class="section">
       <h2 class="section-title">Resumen ejecutivo</h2>
       <div class="summary-box">
@@ -1734,6 +1735,7 @@ function renderContent() {
     return `
       ${renderKpis()}
       ${renderIntensityGauges()}
+      ${renderCompetitorActivityWeeklySection()}
       ${renderExecutiveSummary()}
       <section class="section">
         <div class="empty-state">Sin movimientos registrados para esta fecha.</div>
@@ -1744,6 +1746,7 @@ function renderContent() {
   return `
     ${renderKpis()}
     ${renderIntensityGauges()}
+    ${renderCompetitorActivityWeeklySection()}
     ${renderExecutiveSummary()}
     ${renderEntityActivity()}
     ${renderEventsTable()}
@@ -1884,6 +1887,22 @@ function bindEvents() {
       render();
     });
   }
+
+  // Market root is fully replaced via innerHTML on every render(), so this
+  // button is always a fresh node — no duplicate-listener guard needed.
+  const weeklyToggle = document.getElementById(
+    'competitor-activity-weekly-toggle',
+  );
+  if (weeklyToggle) {
+    weeklyToggle.addEventListener('click', function () {
+      activityWeeklyShowAll = !activityWeeklyShowAll;
+      mountCompetitorActivityWeeklyChart();
+    });
+  }
+  if (document.getElementById('competitor-activity-weekly-canvas')) {
+    if (activityWeeklyData) mountCompetitorActivityWeeklyChart();
+    else loadCompetitorActivityWeekly();
+  }
 }
 
 function onActionClick(e) {
@@ -1935,6 +1954,267 @@ function onActionClick(e) {
 }
 
 /* ----------------------------------------------------------------------------
+ * Competitor activity weekly line chart (below Intensidad de mercado)
+ * ------------------------------------------------------------------------- */
+let activityWeeklyChart = null;
+let activityWeeklyData = null;
+let activityWeeklyShowAll = false;
+/** @type {Record<string, boolean>} entity_id → checkbox checked (persists across top5/all) */
+let activityWeeklyChecked = Object.create(null);
+let activityWeeklyLoadPromise = null;
+
+function destroyActivityWeeklyChart() {
+  if (activityWeeklyChart) {
+    activityWeeklyChart.destroy();
+    activityWeeklyChart = null;
+  }
+}
+
+function countWeeksWithAnyEvents(data) {
+  const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
+  const entities = Array.isArray(data && data.entities) ? data.entities : [];
+  let n = 0;
+  weeks.forEach(function (week) {
+    let sum = 0;
+    entities.forEach(function (ent) {
+      const point = (Array.isArray(ent.series) ? ent.series : []).find(
+        function (p) {
+          return p && p.week_of === week;
+        },
+      );
+      sum += Number(point && point.count) || 0;
+    });
+    if (sum > 0) n += 1;
+  });
+  return n;
+}
+
+function getActivityWeeklyVisibleEntities(data) {
+  const entities = Array.isArray(data && data.entities) ? data.entities : [];
+  if (activityWeeklyShowAll || entities.length <= 5) return entities;
+  return entities.slice(0, 5);
+}
+
+function ensureActivityWeeklyCheckedDefaults(entities) {
+  (entities || []).forEach(function (ent) {
+    const id = String(ent.entity_id);
+    if (activityWeeklyChecked[id] === undefined) {
+      activityWeeklyChecked[id] = true;
+    }
+  });
+}
+
+function renderCompetitorActivityWeeklySection() {
+  return (
+    '<section class="section competitor-activity-weekly" id="competitor-activity-weekly-section">' +
+    '<div class="section-title-row">' +
+    '<h2 class="section-title">' +
+    '<i class="ti ti-chart-line" aria-hidden="true"></i> ' +
+    'Actividad semanal de competidores' +
+    '</h2>' +
+    '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-toggle" hidden>' +
+    'Mostrar todos' +
+    '</button>' +
+    '</div>' +
+    '<div id="competitor-activity-weekly-status" class="text-muted" aria-live="polite"></div>' +
+    '<div id="competitor-activity-weekly-toggles" class="competitor-activity-weekly-toggles"></div>' +
+    '<div class="competitor-activity-weekly-chart-wrap">' +
+    '<canvas id="competitor-activity-weekly-canvas"></canvas>' +
+    '</div>' +
+    '</section>'
+  );
+}
+
+function setActivityWeeklyStatus(text) {
+  const el = document.getElementById('competitor-activity-weekly-status');
+  if (el) el.textContent = text || '';
+}
+
+function syncActivityWeeklyToggleButton(entityCount) {
+  const btn = document.getElementById('competitor-activity-weekly-toggle');
+  if (!btn) return;
+  if (!(entityCount > 5)) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.textContent = activityWeeklyShowAll ? 'Mostrar top 5' : 'Mostrar todos';
+}
+
+function renderActivityWeeklyToggles(visibleEntities) {
+  const host = document.getElementById('competitor-activity-weekly-toggles');
+  if (!host) return;
+  host.innerHTML = visibleEntities
+    .map(function (ent) {
+      const id = String(ent.entity_id);
+      const checked = activityWeeklyChecked[id] !== false;
+      const color = colorForString(ent.name || id);
+      return (
+        '<label class="competitor-activity-weekly-toggle">' +
+        '<input type="checkbox" data-series="' +
+        escapeHtml(id) +
+        '"' +
+        (checked ? ' checked' : '') +
+        ' />' +
+        '<span class="competitor-activity-weekly-swatch" style="background:' +
+        escapeHtml(color) +
+        '"></span>' +
+        escapeHtml(ent.name || 'Entidad') +
+        '</label>'
+      );
+    })
+    .join('');
+
+  host.querySelectorAll('input[data-series]').forEach(function (checkbox) {
+    checkbox.addEventListener('change', function () {
+      const seriesKey = checkbox.getAttribute('data-series');
+      if (!seriesKey) return;
+      activityWeeklyChecked[seriesKey] = checkbox.checked;
+      if (!activityWeeklyChart) return;
+      const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
+        function (dataset) {
+          return dataset.id === seriesKey;
+        },
+      );
+      if (datasetIndex === -1) return;
+      activityWeeklyChart.getDatasetMeta(datasetIndex).hidden =
+        !checkbox.checked;
+      activityWeeklyChart.update();
+    });
+  });
+}
+
+function mountCompetitorActivityWeeklyChart() {
+  destroyActivityWeeklyChart();
+  const canvas = document.getElementById('competitor-activity-weekly-canvas');
+  const wrap = canvas && canvas.parentElement;
+  if (!canvas || typeof window.Chart !== 'function') return;
+
+  const data = activityWeeklyData;
+  if (!data) {
+    setActivityWeeklyStatus('Cargando actividad semanal…');
+    if (wrap) wrap.hidden = true;
+    return;
+  }
+
+  const weeks = Array.isArray(data.weeks) ? data.weeks : [];
+  const allEntities = Array.isArray(data.entities) ? data.entities : [];
+  syncActivityWeeklyToggleButton(allEntities.length);
+
+  if (countWeeksWithAnyEvents(data) < 2) {
+    setActivityWeeklyStatus(
+      'Todavía no hay suficiente historial semanal para graficar (se necesitan al menos 2 semanas con actividad).',
+    );
+    const toggles = document.getElementById(
+      'competitor-activity-weekly-toggles',
+    );
+    if (toggles) toggles.innerHTML = '';
+    if (wrap) wrap.hidden = true;
+    return;
+  }
+
+  setActivityWeeklyStatus('');
+  if (wrap) wrap.hidden = false;
+
+  const visible = getActivityWeeklyVisibleEntities(data);
+  ensureActivityWeeklyCheckedDefaults(visible);
+  renderActivityWeeklyToggles(visible);
+
+  const datasets = visible.map(function (ent) {
+    const id = String(ent.entity_id);
+    const color = colorForString(ent.name || id);
+    const byWeek = {};
+    (Array.isArray(ent.series) ? ent.series : []).forEach(function (p) {
+      if (p && p.week_of) byWeek[p.week_of] = Number(p.count) || 0;
+    });
+    return {
+      id: id,
+      label: ent.name || 'Entidad',
+      data: weeks.map(function (w) {
+        return byWeek[w] != null ? byWeek[w] : 0;
+      }),
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: 2,
+      tension: 0.25,
+      pointRadius: 3,
+      hidden: activityWeeklyChecked[id] === false,
+    };
+  });
+
+  activityWeeklyChart = new window.Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels: weeks, datasets: datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: function (items) {
+              if (!items || !items.length) return '';
+              return String(items[0].label || '');
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: '#2a2f3a' },
+          ticks: { color: '#9aa3b2', maxRotation: 0 },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: '#2a2f3a' },
+          ticks: {
+            color: '#9aa3b2',
+            precision: 0,
+          },
+        },
+      },
+    },
+  });
+}
+
+async function loadCompetitorActivityWeekly() {
+  if (activityWeeklyLoadPromise) return activityWeeklyLoadPromise;
+  activityWeeklyLoadPromise = (async function () {
+    try {
+      setActivityWeeklyStatus('Cargando actividad semanal…');
+      const response = await fetch(
+        API_BASE + '/reports/competitor-activity-weekly',
+        { headers: { Accept: 'application/json' } },
+      );
+      const body = await response.json().catch(function () {
+        return {};
+      });
+      if (!response.ok) {
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo cargar la actividad semanal.',
+        );
+      }
+      activityWeeklyData = body;
+      activityWeeklyShowAll = false;
+      activityWeeklyChecked = Object.create(null);
+      mountCompetitorActivityWeeklyChart();
+    } catch (err) {
+      activityWeeklyData = null;
+      destroyActivityWeeklyChart();
+      setActivityWeeklyStatus(
+        'Error: ' +
+          (err && err.message ? err.message : 'Error desconocido'),
+      );
+    } finally {
+      activityWeeklyLoadPromise = null;
+    }
+  })();
+  return activityWeeklyLoadPromise;
+}
+
+/* ----------------------------------------------------------------------------
  * Init
  * ------------------------------------------------------------------------- */
 
@@ -1947,6 +2227,7 @@ function init() {
   render();
   fetchReport(state.selectedDate);
   loadIntensityGauges(state.selectedDate);
+  loadCompetitorActivityWeekly();
 }
 
 init();

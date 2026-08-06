@@ -28,6 +28,101 @@ const {
 
 const router = express.Router();
 
+const MOVEMENT_EVENT_TYPES = [
+  'new_ad',
+  'copy_changed',
+  'ad_reactivated',
+  'ad_deactivated',
+];
+const EVENTS_PAGE_SIZE = 1000;
+const YMD_RE_WEEKLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MONTEVIDEO_TZ = 'America/Montevideo';
+
+function pad2Weekly(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatYmdMontevideoWeekly(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: MONTEVIDEO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function addCalendarDaysWeekly(ymd, deltaDays) {
+  const m = YMD_RE_WEEKLY.exec(ymd);
+  if (!m) throw new Error(`Invalid YMD: ${ymd}`);
+  const utc =
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) +
+    deltaDays * 86_400_000;
+  const dt = new Date(utc);
+  return `${dt.getUTCFullYear()}-${pad2Weekly(dt.getUTCMonth() + 1)}-${pad2Weekly(dt.getUTCDate())}`;
+}
+
+function weekdayShortForYmdWeekly(ymd) {
+  const probe = new Date(`${ymd}T15:00:00.000Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: MONTEVIDEO_TZ,
+    weekday: 'short',
+  }).format(probe);
+}
+
+function daysBackToMondayWeekly(weekdayShort) {
+  const map = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  if (map[weekdayShort] == null) {
+    throw new Error(`Unexpected weekday: ${weekdayShort}`);
+  }
+  return map[weekdayShort];
+}
+
+function mondayOfYmdWeekly(ymd) {
+  return addCalendarDaysWeekly(
+    ymd,
+    -daysBackToMondayWeekly(weekdayShortForYmdWeekly(ymd)),
+  );
+}
+
+function resolveCurrentMondayWeekly() {
+  const today = formatYmdMontevideoWeekly(new Date());
+  return mondayOfYmdWeekly(today);
+}
+
+/** Last N complete Mon–Sun weeks (America/Montevideo), excluding current week. */
+function resolveLastCompleteWeeks(count = 8) {
+  const currentMonday = resolveCurrentMondayWeekly();
+  const lastCompleteMonday = addCalendarDaysWeekly(currentMonday, -7);
+  const weeks = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    weeks.push(addCalendarDaysWeekly(lastCompleteMonday, -7 * i));
+  }
+  return weeks;
+}
+
+async function loadMovementEventsForEntities(entityIds, minDate, maxDate) {
+  const rows = [];
+  if (!entityIds.length) return rows;
+  for (let from = 0; ; from += EVENTS_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id, entity_id, detected_at, event_type')
+      .in('entity_id', entityIds)
+      .in('event_type', MOVEMENT_EVENT_TYPES)
+      .gte('detected_at', minDate)
+      .lte('detected_at', maxDate)
+      .order('detected_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + EVENTS_PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(`Failed to load events: ${error.message}`);
+    }
+    rows.push(...(data || []));
+    if (!data || data.length < EVENTS_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 const serpHtmlUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: 1 },
@@ -1957,6 +2052,93 @@ router.get('/google-serp-competitor-presence', async (req, res) => {
       error: err.message,
     });
     return res.status(500).json({ error: 'Failed to fetch competitor presence' });
+  }
+});
+
+/**
+ * GET /reports/competitor-activity-weekly
+ * Event counts per competitor per complete week (last 8, Montevideo Mon–Sun).
+ */
+router.get('/competitor-activity-weekly', async (req, res) => {
+  try {
+    const weeks = resolveLastCompleteWeeks(8);
+    const rangeStart = weeks[0];
+    const rangeEnd = addCalendarDaysWeekly(weeks[weeks.length - 1], 6);
+
+    const { data: entityRows, error: entitiesError } = await supabase
+      .from('monitored_entities')
+      .select('id, name')
+      .eq('is_self', false)
+      .eq('active', true)
+      .order('name', { ascending: true });
+
+    if (entitiesError) {
+      logger.error('competitor-activity-weekly entities failed', {
+        error: entitiesError.message,
+      });
+      return res.status(500).json({ error: entitiesError.message });
+    }
+
+    const entitiesMeta = Array.isArray(entityRows) ? entityRows : [];
+    const entityIds = entitiesMeta.map((e) => e.id).filter(Boolean);
+
+    const eventRows = await loadMovementEventsForEntities(
+      entityIds,
+      rangeStart,
+      rangeEnd,
+    );
+
+    /** @type {Map<string, Map<string, number>>} */
+    const countsByEntityWeek = new Map();
+    entityIds.forEach((id) => {
+      const weekMap = new Map();
+      weeks.forEach((w) => weekMap.set(w, 0));
+      countsByEntityWeek.set(String(id), weekMap);
+    });
+
+    for (const row of eventRows) {
+      const entityId = row && row.entity_id != null ? String(row.entity_id) : '';
+      const day =
+        row && row.detected_at != null
+          ? String(row.detected_at).slice(0, 10)
+          : '';
+      if (!entityId || !YMD_RE_WEEKLY.test(day)) continue;
+      const weekMap = countsByEntityWeek.get(entityId);
+      if (!weekMap) continue;
+      const weekOf = mondayOfYmdWeekly(day);
+      if (!weekMap.has(weekOf)) continue;
+      weekMap.set(weekOf, (weekMap.get(weekOf) || 0) + 1);
+    }
+
+    const entities = entitiesMeta
+      .map((ent) => {
+        const weekMap = countsByEntityWeek.get(String(ent.id));
+        const series = weeks.map((week_of) => ({
+          week_of,
+          count: weekMap ? weekMap.get(week_of) || 0 : 0,
+        }));
+        const total_events = series.reduce((sum, p) => sum + p.count, 0);
+        return {
+          entity_id: String(ent.id),
+          name: ent.name || 'Entidad',
+          total_events,
+          series,
+        };
+      })
+      .sort((a, b) => {
+        if (b.total_events !== a.total_events) {
+          return b.total_events - a.total_events;
+        }
+        return String(a.name).localeCompare(String(b.name), 'es');
+      });
+
+    return res.status(200).json({ weeks, entities });
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Internal error';
+    logger.error('GET /reports/competitor-activity-weekly unexpected', {
+      error: message,
+    });
+    return res.status(500).json({ error: message });
   }
 });
 

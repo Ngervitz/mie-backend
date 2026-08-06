@@ -3583,3 +3583,33 @@
   background: var(--surface-2);
   border-color: var(--border-strong);
 }
+
+#mie-dashboard-app .competitor-activity-weekly-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 8px 0 12px;
+}
+
+#mie-dashboard-app .competitor-activity-weekly-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+#mie-dashboard-app .competitor-activity-weekly-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+#mie-dashboard-app .competitor-activity-weekly-chart-wrap {
+  position: relative;
+  height: 320px;
+  width: 100%;
+}
