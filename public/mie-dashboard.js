@@ -2298,7 +2298,13 @@ function mountCompetitorActivityWeeklyChart() {
       responsive: true,
       maintainAspectRatio: false,
       onClick: function (_evt, elements) {
-        if (!elements || !elements.length) return;
+        if (!elements || !elements.length) {
+          if (activityWeeklyHighlightId) {
+            activityWeeklyHighlightId = null;
+            applyActivityWeeklyHighlightStyles();
+          }
+          return;
+        }
         const ds =
           activityWeeklyChart.data.datasets[elements[0].datasetIndex];
         if (!ds || !ds.id) return;
