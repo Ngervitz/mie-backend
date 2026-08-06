@@ -25,6 +25,12 @@ const {
   buildGa4Client,
   metricCellToNumber,
 } = require('../steps/collectGa4Metrics');
+const {
+  formatYmdMontevideo,
+  addCalendarDays,
+  mondayOfYmd,
+  YMD_RE,
+} = require('../lib/montevideo-week');
 
 const router = express.Router();
 
@@ -35,69 +41,88 @@ const MOVEMENT_EVENT_TYPES = [
   'ad_deactivated',
 ];
 const EVENTS_PAGE_SIZE = 1000;
-const YMD_RE_WEEKLY = /^(\d{4})-(\d{2})-(\d{2})$/;
-const MONTEVIDEO_TZ = 'America/Montevideo';
-
-function pad2Weekly(n) {
-  return String(n).padStart(2, '0');
-}
-
-function formatYmdMontevideoWeekly(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: MONTEVIDEO_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
-
-function addCalendarDaysWeekly(ymd, deltaDays) {
-  const m = YMD_RE_WEEKLY.exec(ymd);
-  if (!m) throw new Error(`Invalid YMD: ${ymd}`);
-  const utc =
-    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) +
-    deltaDays * 86_400_000;
-  const dt = new Date(utc);
-  return `${dt.getUTCFullYear()}-${pad2Weekly(dt.getUTCMonth() + 1)}-${pad2Weekly(dt.getUTCDate())}`;
-}
-
-function weekdayShortForYmdWeekly(ymd) {
-  const probe = new Date(`${ymd}T15:00:00.000Z`);
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: MONTEVIDEO_TZ,
-    weekday: 'short',
-  }).format(probe);
-}
-
-function daysBackToMondayWeekly(weekdayShort) {
-  const map = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
-  if (map[weekdayShort] == null) {
-    throw new Error(`Unexpected weekday: ${weekdayShort}`);
-  }
-  return map[weekdayShort];
-}
-
-function mondayOfYmdWeekly(ymd) {
-  return addCalendarDaysWeekly(
-    ymd,
-    -daysBackToMondayWeekly(weekdayShortForYmdWeekly(ymd)),
-  );
-}
-
-function resolveCurrentMondayWeekly() {
-  const today = formatYmdMontevideoWeekly(new Date());
-  return mondayOfYmdWeekly(today);
-}
+const MAX_ACTIVITY_WEEKLY_WEEKS = 26;
+const PHASE_TIEBREAK_ORDER = ['alta_demanda', 'mitad_mes', 'cierre_mes'];
 
 /** Last N complete Mon–Sun weeks (America/Montevideo), excluding current week. */
 function resolveLastCompleteWeeks(count = 8) {
-  const currentMonday = resolveCurrentMondayWeekly();
-  const lastCompleteMonday = addCalendarDaysWeekly(currentMonday, -7);
+  const currentMonday = mondayOfYmd(formatYmdMontevideo(new Date()));
+  const lastCompleteMonday = addCalendarDays(currentMonday, -7);
   const weeks = [];
   for (let i = count - 1; i >= 0; i -= 1) {
-    weeks.push(addCalendarDaysWeekly(lastCompleteMonday, -7 * i));
+    weeks.push(addCalendarDays(lastCompleteMonday, -7 * i));
   }
   return weeks;
+}
+
+/**
+ * Optional ?from=&to= (YYYY-MM-DD), snapped to Monday. Default: last 8 complete weeks.
+ * @returns {{ weeks: string[] } | { error: string }}
+ */
+function resolveWeeksFromRange(fromRaw, toRaw) {
+  const hasFrom = fromRaw != null && String(fromRaw).trim() !== '';
+  const hasTo = toRaw != null && String(toRaw).trim() !== '';
+  if (!hasFrom && !hasTo) {
+    return { weeks: resolveLastCompleteWeeks(8) };
+  }
+  if (!hasFrom || !hasTo) {
+    return {
+      error: 'from y to deben enviarse juntos (YYYY-MM-DD), o ninguno',
+    };
+  }
+  const fromStr = String(fromRaw).trim();
+  const toStr = String(toRaw).trim();
+  if (!YMD_RE.test(fromStr) || !YMD_RE.test(toStr)) {
+    return { error: 'from y to deben tener formato YYYY-MM-DD' };
+  }
+  const fromMonday = mondayOfYmd(fromStr);
+  const toMonday = mondayOfYmd(toStr);
+  if (fromMonday > toMonday) {
+    return { error: 'from no puede ser posterior a to' };
+  }
+  const weeks = [];
+  for (let w = fromMonday; w <= toMonday; w = addCalendarDays(w, 7)) {
+    weeks.push(w);
+    if (weeks.length > MAX_ACTIVITY_WEEKLY_WEEKS) {
+      return {
+        error:
+          'El rango no puede superar ' +
+          MAX_ACTIVITY_WEEKLY_WEEKS +
+          ' semanas',
+      };
+    }
+  }
+  return { weeks };
+}
+
+/**
+ * Majority cycle_phase for Mon–Sun week. Tie → PHASE_TIEBREAK_ORDER.
+ * No logged days → null.
+ * @param {string} weekOf
+ * @param {Map<string, string>} phaseByDate
+ * @returns {string|null}
+ */
+function dominantPhaseForWeek(weekOf, phaseByDate) {
+  const counts = { alta_demanda: 0, mitad_mes: 0, cierre_mes: 0 };
+  let any = 0;
+  for (let d = 0; d < 7; d += 1) {
+    const day = addCalendarDays(weekOf, d);
+    const phase = phaseByDate.get(day);
+    if (phase && Object.prototype.hasOwnProperty.call(counts, phase)) {
+      counts[phase] += 1;
+      any += 1;
+    }
+  }
+  if (!any) return null;
+  let best = null;
+  let bestN = -1;
+  for (const phase of PHASE_TIEBREAK_ORDER) {
+    if (counts[phase] > bestN) {
+      bestN = counts[phase];
+      best = phase;
+    }
+  }
+  return best;
 }
 
 async function loadMovementEventsForEntities(entityIds, minDate, maxDate) {
@@ -2057,13 +2082,17 @@ router.get('/google-serp-competitor-presence', async (req, res) => {
 
 /**
  * GET /reports/competitor-activity-weekly
- * Event counts per competitor per complete week (last 8, Montevideo Mon–Sun).
+ * Optional ?from=&to= (YYYY-MM-DD, snapped to Monday). Default: last 8 complete weeks.
  */
 router.get('/competitor-activity-weekly', async (req, res) => {
   try {
-    const weeks = resolveLastCompleteWeeks(8);
+    const resolved = resolveWeeksFromRange(req.query.from, req.query.to);
+    if (resolved.error) {
+      return res.status(400).json({ error: resolved.error });
+    }
+    const weeks = resolved.weeks;
     const rangeStart = weeks[0];
-    const rangeEnd = addCalendarDaysWeekly(weeks[weeks.length - 1], 6);
+    const rangeEnd = addCalendarDays(weeks[weeks.length - 1], 6);
 
     const { data: entityRows, error: entitiesError } = await supabase
       .from('monitored_entities')
@@ -2088,11 +2117,11 @@ router.get('/competitor-activity-weekly', async (req, res) => {
       rangeEnd,
     );
 
-    /** @type {Map<string, Map<string, number>>} */
+    /** @type {Map<string, Map<string, { count: number, by_type: Record<string, number> }>>} */
     const countsByEntityWeek = new Map();
     entityIds.forEach((id) => {
       const weekMap = new Map();
-      weeks.forEach((w) => weekMap.set(w, 0));
+      weeks.forEach((w) => weekMap.set(w, { count: 0, by_type: {} }));
       countsByEntityWeek.set(String(id), weekMap);
     });
 
@@ -2102,21 +2131,59 @@ router.get('/competitor-activity-weekly', async (req, res) => {
         row && row.detected_at != null
           ? String(row.detected_at).slice(0, 10)
           : '';
-      if (!entityId || !YMD_RE_WEEKLY.test(day)) continue;
+      if (!entityId || !YMD_RE.test(day)) continue;
       const weekMap = countsByEntityWeek.get(entityId);
       if (!weekMap) continue;
-      const weekOf = mondayOfYmdWeekly(day);
+      const weekOf = mondayOfYmd(day);
       if (!weekMap.has(weekOf)) continue;
-      weekMap.set(weekOf, (weekMap.get(weekOf) || 0) + 1);
+      const bucket = weekMap.get(weekOf);
+      const eventType = row.event_type != null ? String(row.event_type) : '';
+      bucket.count += 1;
+      if (eventType) {
+        bucket.by_type[eventType] = (bucket.by_type[eventType] || 0) + 1;
+      }
     }
+
+    const { data: phaseRows, error: phaseError } = await supabase
+      .from('liquidity_cycle_daily_log')
+      .select('log_date, cycle_phase')
+      .gte('log_date', rangeStart)
+      .lte('log_date', rangeEnd);
+
+    if (phaseError) {
+      logger.error('competitor-activity-weekly liquidity phases failed', {
+        error: phaseError.message,
+      });
+      return res.status(500).json({ error: phaseError.message });
+    }
+
+    /** @type {Map<string, string>} */
+    const phaseByDate = new Map();
+    (Array.isArray(phaseRows) ? phaseRows : []).forEach((row) => {
+      const day =
+        row && row.log_date != null ? String(row.log_date).slice(0, 10) : '';
+      if (!YMD_RE.test(day) || !row.cycle_phase) return;
+      phaseByDate.set(day, String(row.cycle_phase));
+    });
+
+    const phase_by_week = weeks.map((week_of) => ({
+      week_of,
+      dominant_phase: dominantPhaseForWeek(week_of, phaseByDate),
+    }));
 
     const entities = entitiesMeta
       .map((ent) => {
         const weekMap = countsByEntityWeek.get(String(ent.id));
-        const series = weeks.map((week_of) => ({
-          week_of,
-          count: weekMap ? weekMap.get(week_of) || 0 : 0,
-        }));
+        const series = weeks.map((week_of) => {
+          const bucket = weekMap
+            ? weekMap.get(week_of) || { count: 0, by_type: {} }
+            : { count: 0, by_type: {} };
+          return {
+            week_of,
+            count: bucket.count,
+            by_type: bucket.by_type,
+          };
+        });
         const total_events = series.reduce((sum, p) => sum + p.count, 0);
         return {
           entity_id: String(ent.id),
@@ -2132,7 +2199,7 @@ router.get('/competitor-activity-weekly', async (req, res) => {
         return String(a.name).localeCompare(String(b.name), 'es');
       });
 
-    return res.status(200).json({ weeks, entities });
+    return res.status(200).json({ weeks, entities, phase_by_week });
   } catch (err) {
     const message = err && err.message ? err.message : 'Internal error';
     logger.error('GET /reports/competitor-activity-weekly unexpected', {

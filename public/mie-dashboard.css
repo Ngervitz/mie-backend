@@ -3584,6 +3584,11 @@
   border-color: var(--border-strong);
 }
 
+#mie-dashboard-app .competitor-activity-weekly-filters {
+  margin: 8px 0 4px;
+  align-items: flex-end;
+}
+
 #mie-dashboard-app .competitor-activity-weekly-toggles {
   display: flex;
   flex-wrap: wrap;

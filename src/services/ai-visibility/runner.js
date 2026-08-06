@@ -9,10 +9,14 @@ const { OpenAiVisibilityProvider } = require('./providers/openai');
 const { AnthropicVisibilityProvider } = require('./providers/anthropic');
 const { GeminiVisibilityProvider } = require('./providers/gemini');
 const { PerplexityVisibilityProvider } = require('./providers/perplexity');
+const {
+  formatYmdMontevideo,
+  weekdayShortForYmd,
+  mondayOfYmd,
+  YMD_RE,
+} = require('../../lib/montevideo-week');
 
-const TZ = 'America/Montevideo';
 const MAX_CONCURRENCY = 4;
-const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const PROVIDER_SPECS = [
   { id: 'openai', create: () => new OpenAiVisibilityProvider() },
@@ -20,52 +24,6 @@ const PROVIDER_SPECS = [
   { id: 'gemini', create: () => new GeminiVisibilityProvider() },
   { id: 'perplexity', create: () => new PerplexityVisibilityProvider() },
 ];
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-/**
- * Civil YYYY-MM-DD in America/Montevideo for an Instant.
- * @param {Date} [date]
- */
-function formatYmdMontevideo(date = new Date()) {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return fmt.format(date);
-}
-
-/**
- * Weekday short name (Mon..Sun) for a civil YMD interpreted in Montevideo.
- * Uruguay is UTC-3 year-round; midday UTC maps to local morning/noon.
- * @param {string} ymd
- */
-function weekdayShortForYmd(ymd) {
-  const probe = new Date(`${ymd}T15:00:00.000Z`);
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ,
-    weekday: 'short',
-  }).format(probe);
-}
-
-/**
- * @param {string} ymd
- * @param {number} deltaDays
- */
-function addCalendarDays(ymd, deltaDays) {
-  const m = YMD_RE.exec(ymd);
-  if (!m) throw new Error(`Invalid YMD: ${ymd}`);
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  const utc = Date.UTC(y, mo - 1, d) + deltaDays * 86_400_000;
-  const dt = new Date(utc);
-  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
-}
 
 /**
  * @param {string} ymd
@@ -84,22 +42,6 @@ function isRealCalendarDate(ymd) {
   );
 }
 
-function daysBackToMonday(weekdayShort) {
-  const map = {
-    Mon: 0,
-    Tue: 1,
-    Wed: 2,
-    Thu: 3,
-    Fri: 4,
-    Sat: 5,
-    Sun: 6,
-  };
-  if (map[weekdayShort] == null) {
-    throw new Error(`Unexpected weekday: ${weekdayShort}`);
-  }
-  return map[weekdayShort];
-}
-
 /**
  * Shared week resolution for weekly and single-prompt runs.
  * @param {string|undefined|null} weekOf
@@ -107,9 +49,7 @@ function daysBackToMonday(weekdayShort) {
  */
 function resolveWeekOf(weekOf) {
   if (weekOf == null || weekOf === '') {
-    const today = formatYmdMontevideo(new Date());
-    const back = daysBackToMonday(weekdayShortForYmd(today));
-    return addCalendarDays(today, -back);
+    return mondayOfYmd(formatYmdMontevideo(new Date()));
   }
 
   if (typeof weekOf !== 'string' || !YMD_RE.test(weekOf)) {

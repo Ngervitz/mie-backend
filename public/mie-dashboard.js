@@ -1696,8 +1696,8 @@ function renderLoadingSkeleton() {
     ${renderHeader()}
     ${renderStatusLine()}
     <section class="section"><div class="kpi-grid">${kpis}</div></section>
-    ${renderIntensityGauges()}
     ${renderCompetitorActivityWeeklySection()}
+    ${renderIntensityGauges()}
     <section class="section">
       <h2 class="section-title">Resumen ejecutivo</h2>
       <div class="summary-box">
@@ -1734,8 +1734,8 @@ function renderContent() {
   if (total === 0) {
     return `
       ${renderKpis()}
-      ${renderIntensityGauges()}
       ${renderCompetitorActivityWeeklySection()}
+      ${renderIntensityGauges()}
       ${renderExecutiveSummary()}
       <section class="section">
         <div class="empty-state">Sin movimientos registrados para esta fecha.</div>
@@ -1745,8 +1745,8 @@ function renderContent() {
 
   return `
     ${renderKpis()}
-    ${renderIntensityGauges()}
     ${renderCompetitorActivityWeeklySection()}
+    ${renderIntensityGauges()}
     ${renderExecutiveSummary()}
     ${renderEntityActivity()}
     ${renderEventsTable()}
@@ -1899,6 +1899,31 @@ function bindEvents() {
       mountCompetitorActivityWeeklyChart();
     });
   }
+
+  const weeklyFrom = document.getElementById(
+    'competitor-activity-weekly-from',
+  );
+  const weeklyTo = document.getElementById('competitor-activity-weekly-to');
+  function onWeeklyRangeChange() {
+    if (!weeklyFrom || !weeklyTo) return;
+    activityWeeklyFrom = weeklyFrom.value || '';
+    activityWeeklyTo = weeklyTo.value || '';
+    if (!activityWeeklyFrom || !activityWeeklyTo) return;
+    loadCompetitorActivityWeekly();
+  }
+  if (weeklyFrom) weeklyFrom.addEventListener('change', onWeeklyRangeChange);
+  if (weeklyTo) weeklyTo.addEventListener('change', onWeeklyRangeChange);
+
+  const clearHi = document.getElementById(
+    'competitor-activity-weekly-clear-highlight',
+  );
+  if (clearHi) {
+    clearHi.addEventListener('click', function () {
+      activityWeeklyHighlightId = null;
+      applyActivityWeeklyHighlightStyles();
+    });
+  }
+
   if (document.getElementById('competitor-activity-weekly-canvas')) {
     if (activityWeeklyData) mountCompetitorActivityWeeklyChart();
     else loadCompetitorActivityWeekly();
@@ -1954,14 +1979,71 @@ function onActionClick(e) {
 }
 
 /* ----------------------------------------------------------------------------
- * Competitor activity weekly line chart (below Intensidad de mercado)
+ * Competitor activity weekly line chart (below KPIs, above Intensidad)
  * ------------------------------------------------------------------------- */
 let activityWeeklyChart = null;
 let activityWeeklyData = null;
 let activityWeeklyShowAll = false;
-/** @type {Record<string, boolean>} entity_id → checkbox checked (persists across top5/all) */
+/** @type {Record<string, boolean>} entity_id / zafra → checkbox checked */
 let activityWeeklyChecked = Object.create(null);
 let activityWeeklyLoadPromise = null;
+let activityWeeklyFrom = '';
+let activityWeeklyTo = '';
+let activityWeeklyHighlightId = null;
+let activityWeeklyRequestSeq = 0;
+
+const ACTIVITY_WEEKLY_TYPE_LABELS = {
+  new_ad: 'Nuevos',
+  copy_changed: 'Cambios de copy',
+  ad_reactivated: 'Reactivados',
+  ad_deactivated: 'Desactivados',
+};
+const ACTIVITY_WEEKLY_PHASE_LABELS = {
+  alta_demanda: 'Alta demanda',
+  mitad_mes: 'Mitad de mes',
+  cierre_mes: 'Cierre de mes',
+};
+const ACTIVITY_WEEKLY_PHASE_ID = 'zafra';
+
+function phasePointColor(phase) {
+  if (phase === 'alta_demanda') return '#ef4444';
+  if (phase === 'mitad_mes') return '#38bdf8';
+  if (phase === 'cierre_mes') return '#a78bfa';
+  return '#94a3b8';
+}
+
+function colorWithAlpha(hex, alpha) {
+  const raw = String(hex || '').replace('#', '');
+  if (raw.length !== 6) return hex;
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  if (![r, g, b].every(Number.isFinite)) return hex;
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function applyActivityWeeklyHighlightStyles() {
+  if (!activityWeeklyChart) return;
+  const highlightId = activityWeeklyHighlightId;
+  activityWeeklyChart.data.datasets.forEach(function (dataset) {
+    if (typeof dataset._baseColor !== 'string') return;
+    const base = dataset._baseColor;
+    const isHi = highlightId && dataset.id === highlightId;
+    const dimmed =
+      highlightId &&
+      highlightId !== ACTIVITY_WEEKLY_PHASE_ID &&
+      !isHi;
+    dataset.borderColor = dimmed ? colorWithAlpha(base, 0.18) : base;
+    dataset.backgroundColor = dataset.borderColor;
+    dataset.borderWidth = isHi ? 3.5 : 2;
+    dataset.pointRadius = isHi ? 4 : 3;
+  });
+  activityWeeklyChart.update('none');
+  const clearBtn = document.getElementById(
+    'competitor-activity-weekly-clear-highlight',
+  );
+  if (clearBtn) clearBtn.hidden = !highlightId;
+}
 
 function destroyActivityWeeklyChart() {
   if (activityWeeklyChart) {
@@ -2002,6 +2084,9 @@ function ensureActivityWeeklyCheckedDefaults(entities) {
       activityWeeklyChecked[id] = true;
     }
   });
+  if (activityWeeklyChecked[ACTIVITY_WEEKLY_PHASE_ID] === undefined) {
+    activityWeeklyChecked[ACTIVITY_WEEKLY_PHASE_ID] = true;
+  }
 }
 
 function renderCompetitorActivityWeeklySection() {
@@ -2015,6 +2100,18 @@ function renderCompetitorActivityWeeklySection() {
     '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-toggle" hidden>' +
     'Mostrar todos' +
     '</button>' +
+    '</div>' +
+    '<div class="mcl-filters competitor-activity-weekly-filters">' +
+    '<label class="mcl-field"><span class="mcl-field-label">Desde</span>' +
+    '<input type="date" id="competitor-activity-weekly-from" class="mcl-input" value="' +
+    escapeHtml(activityWeeklyFrom) +
+    '" /></label>' +
+    '<label class="mcl-field"><span class="mcl-field-label">Hasta</span>' +
+    '<input type="date" id="competitor-activity-weekly-to" class="mcl-input" value="' +
+    escapeHtml(activityWeeklyTo) +
+    '" /></label>' +
+    '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-clear-highlight" hidden>' +
+    'Quitar resaltado</button>' +
     '</div>' +
     '<div id="competitor-activity-weekly-status" class="text-muted" aria-live="polite"></div>' +
     '<div id="competitor-activity-weekly-toggles" class="competitor-activity-weekly-toggles"></div>' +
@@ -2044,26 +2141,39 @@ function syncActivityWeeklyToggleButton(entityCount) {
 function renderActivityWeeklyToggles(visibleEntities) {
   const host = document.getElementById('competitor-activity-weekly-toggles');
   if (!host) return;
-  host.innerHTML = visibleEntities
-    .map(function (ent) {
-      const id = String(ent.entity_id);
-      const checked = activityWeeklyChecked[id] !== false;
-      const color = colorForString(ent.name || id);
-      return (
-        '<label class="competitor-activity-weekly-toggle">' +
-        '<input type="checkbox" data-series="' +
-        escapeHtml(id) +
-        '"' +
-        (checked ? ' checked' : '') +
-        ' />' +
-        '<span class="competitor-activity-weekly-swatch" style="background:' +
-        escapeHtml(color) +
-        '"></span>' +
-        escapeHtml(ent.name || 'Entidad') +
-        '</label>'
-      );
-    })
-    .join('');
+  const phaseChecked =
+    activityWeeklyChecked[ACTIVITY_WEEKLY_PHASE_ID] !== false;
+  const phaseToggle =
+    '<label class="competitor-activity-weekly-toggle">' +
+    '<input type="checkbox" data-series="' +
+    ACTIVITY_WEEKLY_PHASE_ID +
+    '"' +
+    (phaseChecked ? ' checked' : '') +
+    ' />' +
+    '<span class="competitor-activity-weekly-swatch" style="background:#94a3b8"></span>' +
+    'Fase de Zafra</label>';
+  host.innerHTML =
+    phaseToggle +
+    visibleEntities
+      .map(function (ent) {
+        const id = String(ent.entity_id);
+        const checked = activityWeeklyChecked[id] !== false;
+        const color = colorForString(ent.name || id);
+        return (
+          '<label class="competitor-activity-weekly-toggle">' +
+          '<input type="checkbox" data-series="' +
+          escapeHtml(id) +
+          '"' +
+          (checked ? ' checked' : '') +
+          ' />' +
+          '<span class="competitor-activity-weekly-swatch" style="background:' +
+          escapeHtml(color) +
+          '"></span>' +
+          escapeHtml(ent.name || 'Entidad') +
+          '</label>'
+        );
+      })
+      .join('');
 
   host.querySelectorAll('input[data-series]').forEach(function (checkbox) {
     checkbox.addEventListener('change', function () {
@@ -2120,26 +2230,65 @@ function mountCompetitorActivityWeeklyChart() {
   ensureActivityWeeklyCheckedDefaults(visible);
   renderActivityWeeklyToggles(visible);
 
+  const phaseByWeek = {};
+  (Array.isArray(data.phase_by_week) ? data.phase_by_week : []).forEach(
+    function (row) {
+      if (row && row.week_of) {
+        phaseByWeek[row.week_of] = row.dominant_phase || null;
+      }
+    },
+  );
+
+  const phaseColors = weeks.map(function (w) {
+    return phaseByWeek[w] ? phasePointColor(phaseByWeek[w]) : 'transparent';
+  });
+  const phaseValues = weeks.map(function (w) {
+    return phaseByWeek[w] ? 0.5 : null;
+  });
+
   const datasets = visible.map(function (ent) {
     const id = String(ent.entity_id);
     const color = colorForString(ent.name || id);
-    const byWeek = {};
+    const weekMeta = {};
     (Array.isArray(ent.series) ? ent.series : []).forEach(function (p) {
-      if (p && p.week_of) byWeek[p.week_of] = Number(p.count) || 0;
+      if (!p || !p.week_of) return;
+      weekMeta[p.week_of] = {
+        count: Number(p.count) || 0,
+        by_type:
+          p.by_type && typeof p.by_type === 'object' ? p.by_type : {},
+      };
     });
     return {
       id: id,
       label: ent.name || 'Entidad',
+      _baseColor: color,
+      weekMeta: weekMeta,
       data: weeks.map(function (w) {
-        return byWeek[w] != null ? byWeek[w] : 0;
+        return weekMeta[w] ? weekMeta[w].count : 0;
       }),
       borderColor: color,
       backgroundColor: color,
       borderWidth: 2,
       tension: 0.25,
       pointRadius: 3,
+      yAxisID: 'y',
       hidden: activityWeeklyChecked[id] === false,
     };
+  });
+
+  datasets.push({
+    id: ACTIVITY_WEEKLY_PHASE_ID,
+    label: 'Fase de Zafra',
+    data: phaseValues,
+    borderColor: 'transparent',
+    backgroundColor: phaseColors,
+    pointBackgroundColor: phaseColors,
+    showLine: false,
+    spanGaps: false,
+    pointRadius: 5,
+    pointHoverRadius: 6,
+    yAxisID: 'y1',
+    hidden: activityWeeklyChecked[ACTIVITY_WEEKLY_PHASE_ID] === false,
   });
 
   activityWeeklyChart = new window.Chart(canvas.getContext('2d'), {
@@ -2148,13 +2297,58 @@ function mountCompetitorActivityWeeklyChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: function (_evt, elements) {
+        if (!elements || !elements.length) return;
+        const ds =
+          activityWeeklyChart.data.datasets[elements[0].datasetIndex];
+        if (!ds || !ds.id) return;
+        activityWeeklyHighlightId =
+          activityWeeklyHighlightId === ds.id ? null : ds.id;
+        applyActivityWeeklyHighlightStyles();
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             title: function (items) {
               if (!items || !items.length) return '';
-              return String(items[0].label || '');
+              const week = String(items[0].label || '');
+              const ds = items[0].dataset || {};
+              if (ds.id === ACTIVITY_WEEKLY_PHASE_ID) {
+                return week;
+              }
+              const meta = ds.weekMeta && ds.weekMeta[week];
+              const total = meta ? meta.count : items[0].parsed.y;
+              return (
+                (ds.label || 'Competidor') +
+                ' · ' +
+                week +
+                ' · ' +
+                total +
+                ' eventos'
+              );
+            },
+            label: function (item) {
+              const week = String(item.label || '');
+              const ds = item.dataset || {};
+              if (ds.id === ACTIVITY_WEEKLY_PHASE_ID) {
+                const phase = phaseByWeek[week];
+                if (!phase) return null;
+                return (
+                  'Fase: ' +
+                  (ACTIVITY_WEEKLY_PHASE_LABELS[phase] || phase)
+                );
+              }
+              const meta = ds.weekMeta && ds.weekMeta[week];
+              const byType = (meta && meta.by_type) || {};
+              const lines = [];
+              Object.keys(byType).forEach(function (type) {
+                const n = Number(byType[type]) || 0;
+                if (n <= 0) return;
+                const label = ACTIVITY_WEEKLY_TYPE_LABELS[type] || type;
+                lines.push(label + ': ' + n);
+              });
+              return lines.length ? lines : ['Sin desglose'];
             },
           },
         },
@@ -2172,20 +2366,34 @@ function mountCompetitorActivityWeeklyChart() {
             precision: 0,
           },
         },
+        y1: {
+          display: false,
+          min: 0,
+          max: 5,
+          grid: { drawOnChartArea: false },
+        },
       },
     },
   });
+  applyActivityWeeklyHighlightStyles();
 }
 
 async function loadCompetitorActivityWeekly() {
-  if (activityWeeklyLoadPromise) return activityWeeklyLoadPromise;
+  const seq = ++activityWeeklyRequestSeq;
   activityWeeklyLoadPromise = (async function () {
     try {
       setActivityWeeklyStatus('Cargando actividad semanal…');
-      const response = await fetch(
-        API_BASE + '/reports/competitor-activity-weekly',
-        { headers: { Accept: 'application/json' } },
-      );
+      let url = API_BASE + '/reports/competitor-activity-weekly';
+      if (activityWeeklyFrom && activityWeeklyTo) {
+        url +=
+          '?from=' +
+          encodeURIComponent(activityWeeklyFrom) +
+          '&to=' +
+          encodeURIComponent(activityWeeklyTo);
+      }
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
       const body = await response.json().catch(function () {
         return {};
       });
@@ -2196,11 +2404,26 @@ async function loadCompetitorActivityWeekly() {
             : 'No se pudo cargar la actividad semanal.',
         );
       }
+      if (seq !== activityWeeklyRequestSeq) return;
       activityWeeklyData = body;
-      activityWeeklyShowAll = false;
-      activityWeeklyChecked = Object.create(null);
+      activityWeeklyHighlightId = null;
+      if (
+        !activityWeeklyFrom &&
+        Array.isArray(body.weeks) &&
+        body.weeks.length
+      ) {
+        activityWeeklyFrom = body.weeks[0];
+        activityWeeklyTo = body.weeks[body.weeks.length - 1];
+        const fromEl = document.getElementById(
+          'competitor-activity-weekly-from',
+        );
+        const toEl = document.getElementById('competitor-activity-weekly-to');
+        if (fromEl) fromEl.value = activityWeeklyFrom;
+        if (toEl) toEl.value = activityWeeklyTo;
+      }
       mountCompetitorActivityWeeklyChart();
     } catch (err) {
+      if (seq !== activityWeeklyRequestSeq) return;
       activityWeeklyData = null;
       destroyActivityWeeklyChart();
       setActivityWeeklyStatus(
@@ -2208,7 +2431,9 @@ async function loadCompetitorActivityWeekly() {
           (err && err.message ? err.message : 'Error desconocido'),
       );
     } finally {
-      activityWeeklyLoadPromise = null;
+      if (seq === activityWeeklyRequestSeq) {
+        activityWeeklyLoadPromise = null;
+      }
     }
   })();
   return activityWeeklyLoadPromise;
