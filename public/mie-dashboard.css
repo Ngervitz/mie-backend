@@ -2452,12 +2452,31 @@
 #mie-dashboard-app #ga4-landing .ga4-summary-kpis {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 16px;
+  align-items: stretch;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-summary-kpis .kpi-card {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-summary-kpis .kpi-value {
+  font-size: 1.35rem;
+}
+
+#mie-dashboard-app #ga4-landing .ga4-summary-kpis .kpi-label {
+  margin-top: 6px;
 }
 
 #mie-dashboard-app #ga4-landing .ga4-summary-note {
   margin-top: 6px;
   font-size: 0.75rem;
   line-height: 1.35;
+  min-height: 2.7rem;
+  flex: 1 1 auto;
 }
 
 #mie-dashboard-app #ga4-landing .kpi-card.is-warn {

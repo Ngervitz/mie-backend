@@ -3975,22 +3975,28 @@ init();
       '<div class="kpi-value">' +
       escapeHtml(formatInt(s.total_sessions)) +
       '</div>' +
-      '<div class="kpi-label">Sesiones totales</div>' +
+      '<div class="kpi-label">🖱️ Sesiones totales</div>' +
+      '<div class="ga4-summary-note text-muted">' +
+      'Cada visita cuenta aparte, aunque sea la misma persona en otro momento.' +
+      '</div>' +
       '</div>' +
       '<div class="kpi-card is-neutral">' +
       '<div class="kpi-value">' +
       escapeHtml(formatInt(s.total_users)) +
       '</div>' +
-      '<div class="kpi-label">Usuarios-día (suma de filas)</div>' +
+      '<div class="kpi-label">👤 Usuarios (estimado)</div>' +
       '<div class="ga4-summary-note text-muted">' +
-      'No son usuarios únicos: suma métricas por día × canal × landing × source × medium.' +
+      'Suma de total_users por fila (día × canal × landing × source × medium). No son usuarios únicos.' +
       '</div>' +
       '</div>' +
       '<div class="kpi-card is-success">' +
       '<div class="kpi-value">' +
       escapeHtml(formatInt(s.total_key_events)) +
       '</div>' +
-      '<div class="kpi-label">Key Events totales</div>' +
+      '<div class="kpi-label">🎯 Key Events totales</div>' +
+      '<div class="ga4-summary-note text-muted">' +
+      'Veces que alguien completó una acción marcada como conversión (ej. envío de solicitud).' +
+      '</div>' +
       '</div>' +
       '<div class="kpi-card is-warn">' +
       '<div class="kpi-value">' +
@@ -4000,7 +4006,10 @@ init();
           : '—',
       ) +
       '</div>' +
-      '<div class="kpi-label">Tasa de conversión general</div>' +
+      '<div class="kpi-label">📈 Tasa de conversión</div>' +
+      '<div class="ga4-summary-note text-muted">' +
+      'Key Events dividido sesiones — no es lo mismo que usuarios ni que leads.' +
+      '</div>' +
       '</div>';
     wrap.appendChild(cards);
 
