@@ -2026,7 +2026,7 @@ function setActivityWeeklyEntityDatasetsHidden(entityId, hidden) {
 
 /**
  * Auxiliary dashed prediction segments for entities with a valid ML row
- * matching nextWeek (exact predicted_week_of string).
+ * when root predicted_week_of matches nextWeek (exact string).
  */
 function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
   const preds =
@@ -2034,26 +2034,17 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
     Array.isArray(activityWeeklyPredictions.predictions)
       ? activityWeeklyPredictions.predictions
       : [];
-  var predsAvailability;
-  if (activityWeeklyPredictions == null) {
-    predsAvailability =
-      activityWeeklyPredictions === undefined ? 'undefined' : 'null';
-  } else if (!Array.isArray(activityWeeklyPredictions.predictions)) {
-    predsAvailability =
-      'predictions_not_array:' + typeof activityWeeklyPredictions.predictions;
-  } else {
-    predsAvailability = activityWeeklyPredictions.predictions.length;
+  const rootPredictedWeekOf =
+    activityWeeklyPredictions &&
+    activityWeeklyPredictions.predicted_week_of != null
+      ? activityWeeklyPredictions.predicted_week_of
+      : null;
+  if (
+    rootPredictedWeekOf == null ||
+    String(rootPredictedWeekOf) !== String(nextWeek)
+  ) {
+    return [];
   }
-  console.log(
-    '[DEBUG-PREDICTION] nextWeek=',
-    nextWeek,
-    'typeof=',
-    typeof nextWeek,
-  );
-  console.log(
-    '[DEBUG-PREDICTION] predictions available=',
-    predsAvailability,
-  );
 
   const byEntity = new Map();
   preds.forEach(function (p) {
@@ -2062,28 +2053,10 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
   });
 
   const out = [];
-  var matchTrue = 0;
-  var matchFalse = 0;
   (allEntities || []).forEach(function (ent) {
     const id = String(ent.entity_id);
     const pred = byEntity.get(id);
-    const rawPredictedWeekOf = pred ? pred.predicted_week_of : undefined;
-    const weekMatch =
-      !!pred && String(rawPredictedWeekOf) === String(nextWeek);
-    console.log('[DEBUG-PREDICTION] entity', {
-      entity_id: id,
-      predicted_week_of: rawPredictedWeekOf,
-      predicted_week_of_typeof: typeof rawPredictedWeekOf,
-      nextWeek: nextWeek,
-      nextWeek_typeof: typeof nextWeek,
-      hasPredRow: !!pred,
-      match: weekMatch,
-    });
-    if (weekMatch) matchTrue += 1;
-    else matchFalse += 1;
-
     if (!pred) return;
-    if (!weekMatch) return;
 
     const hist = Number(pred.historical_avg);
     const prob = Number(pred.predicted_probability);
@@ -2129,12 +2102,6 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
       },
     });
   });
-  console.log(
-    '[DEBUG-PREDICTION] match counts true=',
-    matchTrue,
-    'false=',
-    matchFalse,
-  );
   return out;
 }
 
