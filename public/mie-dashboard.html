@@ -10,22 +10,25 @@
 </head>
 <body>
   <div id="mie-dashboard-app">
-    <header class="app-header">
-      <img src="/assets/janus-logo-dark.svg" alt="Janus" class="app-header-logo">
-      <button type="button" id="janus-logout-btn" class="btn btn-secondary app-header-logout">
-        Cerrar sesión
-      </button>
-    </header>
-    <nav class="brief-backnav">
-      <a href="/hugo-brief.html" class="brief-backnav-link">
-        <i class="ti ti-arrow-left" aria-hidden="true"></i>
-        Volver al executive brief
-      </a>
-    </nav>
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <div class="app-sidebar-brand">
+          <img src="/assets/janus-logo-dark.svg" alt="Janus" class="app-header-logo">
+        </div>
+        <nav class="brief-backnav">
+          <a href="/hugo-brief.html" class="brief-backnav-link">
+            <i class="ti ti-arrow-left" aria-hidden="true"></i>
+            Volver al executive brief
+          </a>
+        </nav>
 
-    <!-- Primary nav: 4 equal top-level sections. Trends discovery and GA4 are
-         top-level here (no longer nested inside Competidores). -->
-    <nav class="dashboard-tabs" role="tablist" aria-label="Secciones del dashboard">
+        <!-- Primary nav (sidebar). Same 9 tabs / same attributes / same order.
+             Group open-state still mutated by initDashboardTabGroupsAccordion;
+             Etapa 1 CSS forces all group buttons visible anyway. -->
+        <nav
+          class="sidebar-nav dashboard-tabs"
+          role="tablist"
+          aria-label="Secciones del dashboard">
       <div class="dashboard-tab-group" data-group="inteligencia">
         <button
           type="button"
@@ -229,8 +232,16 @@
       </button>
         </div>
       </div>
-    </nav>
+        </nav>
 
+        <div class="sidebar-footer">
+          <button type="button" id="janus-logout-btn" class="btn btn-secondary app-header-logout">
+            Cerrar sesión
+          </button>
+        </div>
+      </aside>
+
+      <main class="app-content">
     <!-- Competidores: ONLY its own entities/activity content (Trends and GA4
          moved to their own top-level panels). Market root stays fully owned
          by render(). SERP import is a sibling landing (same pattern as Meta
@@ -1009,6 +1020,8 @@
           <div class="inbox-soon mcl-empty">Próximamente</div>
         </div>
       </div>
+    </div>
+      </main>
     </div>
   </div>
 

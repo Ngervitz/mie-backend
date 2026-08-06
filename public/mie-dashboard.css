@@ -35,28 +35,146 @@
   -webkit-font-smoothing: antialiased;
 }
 
-#mie-dashboard-app .app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 24px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-
-#mie-dashboard-app .app-header-logo {
-  height: 64px;
-  width: auto;
-}
-
-#mie-dashboard-app .app-header-logout {
-  flex-shrink: 0;
-}
-
 #mie-dashboard-app *,
 #mie-dashboard-app *::before,
 #mie-dashboard-app *::after {
   box-sizing: border-box;
+}
+
+/* ---------- App shell (sidebar + content) ---------- */
+#mie-dashboard-app .app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+  /* No transform / filter / perspective / contain — keeps
+     .ad-modal-backdrop { position: fixed } viewport-scoped. */
+}
+
+#mie-dashboard-app .app-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex: 0 0 250px;
+  width: 250px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#mie-dashboard-app .app-sidebar-brand {
+  flex-shrink: 0;
+  padding: 4px 4px 8px;
+}
+
+#mie-dashboard-app .app-header-logo {
+  display: block;
+  height: 48px;
+  width: auto;
+  max-width: 100%;
+}
+
+#mie-dashboard-app .app-sidebar .brief-backnav {
+  max-width: none;
+  margin: 0;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+#mie-dashboard-app .app-sidebar .brief-backnav-link {
+  font-size: 0.8rem;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+#mie-dashboard-app .app-sidebar .sidebar-nav.dashboard-tabs {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 14px;
+  max-width: none;
+  margin: 0;
+  padding: 8px 0 0;
+  min-height: 0;
+}
+
+#mie-dashboard-app .app-sidebar .dashboard-tab-group {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+}
+
+/* Neutralize horizontal accordion expansion inside the sidebar. */
+#mie-dashboard-app .app-sidebar .dashboard-tab-group.open {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+/*
+ * Etapa 1 temporary mitigation — REMOVE/CLEAN UP in Etapa 2 when
+ * initDashboardTabGroupsAccordion() is replaced.
+ * The old accordion JS still toggles .open on a single group, which
+ * would hide the other groups' tabs via .dashboard-tab-group-buttons
+ * { display: none }. Force all group button stacks visible in the
+ * sidebar so the three groups stay visually open.
+ */
+#mie-dashboard-app .app-sidebar .dashboard-tab-group-buttons {
+  display: flex !important;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+#mie-dashboard-app .app-sidebar .dashboard-tab {
+  flex: 0 0 auto;
+  width: 100%;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+}
+
+#mie-dashboard-app .sidebar-footer {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#mie-dashboard-app .app-header-logout {
+  width: 100%;
+}
+
+#mie-dashboard-app .app-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Children keep max-width: var(--maxw); margin: 0 auto → centered
+     in the remaining column, not the full viewport. */
+}
+
+/* Narrow fallback: stack sidebar above content (desktop-first product;
+   keeps layout usable if opened on a narrow window). */
+@media (max-width: 900px) {
+  #mie-dashboard-app .app-shell {
+    flex-direction: column;
+  }
+
+  #mie-dashboard-app .app-sidebar {
+    position: static;
+    flex: 0 0 auto;
+    width: 100%;
+    height: auto;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 #mie-dashboard-app .app {
@@ -65,22 +183,11 @@
   padding: 24px 20px 64px;
 }
 
-/* ---------- Tabs / nav ---------- */
-#mie-dashboard-app .dashboard-tabs {
-  max-width: var(--maxw);
-  margin: 0 auto;
-  padding: 12px 20px 0;
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
+/* ---------- Tabs / nav (shared primitives; layout owned by .app-sidebar) ---------- */
 #mie-dashboard-app .dashboard-tab-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -142,6 +249,8 @@
   border-color: #D4537E;
 }
 
+/* Legacy accordion show/hide (still used by initDashboardTabGroupsAccordion).
+   Overridden inside .app-sidebar by the Etapa 1 mitigation above. */
 #mie-dashboard-app .dashboard-tab-group-buttons {
   display: none;
   gap: 8px;
@@ -150,11 +259,6 @@
 
 #mie-dashboard-app .dashboard-tab-group.open .dashboard-tab-group-buttons {
   display: flex;
-}
-
-#mie-dashboard-app .dashboard-tab-group.open {
-  flex: 1 1 100%;
-  width: 100%;
 }
 
 #mie-dashboard-app .dashboard-tab-group-label:focus-visible {
