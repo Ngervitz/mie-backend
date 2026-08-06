@@ -1914,13 +1914,12 @@ function bindEvents() {
   if (weeklyFrom) weeklyFrom.addEventListener('change', onWeeklyRangeChange);
   if (weeklyTo) weeklyTo.addEventListener('change', onWeeklyRangeChange);
 
-  const clearHi = document.getElementById(
-    'competitor-activity-weekly-clear-highlight',
+  const weeklySelectAll = document.getElementById(
+    'competitor-activity-weekly-select-all',
   );
-  if (clearHi) {
-    clearHi.addEventListener('click', function () {
-      activityWeeklyHighlightId = null;
-      applyActivityWeeklyHighlightStyles();
+  if (weeklySelectAll) {
+    weeklySelectAll.addEventListener('click', function () {
+      toggleActivityWeeklySelectAllVisible();
     });
   }
 
@@ -2039,10 +2038,6 @@ function applyActivityWeeklyHighlightStyles() {
     dataset.pointRadius = isHi ? 4 : 3;
   });
   activityWeeklyChart.update('none');
-  const clearBtn = document.getElementById(
-    'competitor-activity-weekly-clear-highlight',
-  );
-  if (clearBtn) clearBtn.hidden = !highlightId;
 }
 
 function destroyActivityWeeklyChart() {
@@ -2100,6 +2095,9 @@ function renderCompetitorActivityWeeklySection() {
     '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-toggle" hidden>' +
     'Mostrar todos' +
     '</button>' +
+    '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-select-all" hidden>' +
+    'Deseleccionar todos' +
+    '</button>' +
     '</div>' +
     '<div class="mcl-filters competitor-activity-weekly-filters">' +
     '<label class="mcl-field"><span class="mcl-field-label">Desde</span>' +
@@ -2110,8 +2108,6 @@ function renderCompetitorActivityWeeklySection() {
     '<input type="date" id="competitor-activity-weekly-to" class="mcl-input" value="' +
     escapeHtml(activityWeeklyTo) +
     '" /></label>' +
-    '<button type="button" class="btn btn-secondary" id="competitor-activity-weekly-clear-highlight" hidden>' +
-    'Quitar resaltado</button>' +
     '</div>' +
     '<div id="competitor-activity-weekly-status" class="text-muted" aria-live="polite"></div>' +
     '<div id="competitor-activity-weekly-toggles" class="competitor-activity-weekly-toggles"></div>' +
@@ -2136,6 +2132,71 @@ function syncActivityWeeklyToggleButton(entityCount) {
   }
   btn.hidden = false;
   btn.textContent = activityWeeklyShowAll ? 'Mostrar top 5' : 'Mostrar todos';
+}
+
+function getActivityWeeklyVisibleCompetitorIds() {
+  if (!activityWeeklyData) return [];
+  return getActivityWeeklyVisibleEntities(activityWeeklyData).map(
+    function (ent) {
+      return String(ent.entity_id);
+    },
+  );
+}
+
+function activityWeeklyAllVisibleUnchecked(ids) {
+  return (
+    ids.length > 0 &&
+    ids.every(function (id) {
+      return activityWeeklyChecked[id] === false;
+    })
+  );
+}
+
+function syncActivityWeeklySelectAllButton() {
+  const btn = document.getElementById(
+    'competitor-activity-weekly-select-all',
+  );
+  if (!btn) return;
+  const ids = getActivityWeeklyVisibleCompetitorIds();
+  if (!ids.length) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.textContent = activityWeeklyAllVisibleUnchecked(ids)
+    ? 'Seleccionar todos'
+    : 'Deseleccionar todos';
+}
+
+function toggleActivityWeeklySelectAllVisible() {
+  const ids = getActivityWeeklyVisibleCompetitorIds();
+  if (!ids.length) return;
+  const selectAll = activityWeeklyAllVisibleUnchecked(ids);
+  ids.forEach(function (id) {
+    activityWeeklyChecked[id] = selectAll;
+  });
+  const host = document.getElementById('competitor-activity-weekly-toggles');
+  if (host) {
+    host.querySelectorAll('input[data-series]').forEach(function (checkbox) {
+      const seriesKey = checkbox.getAttribute('data-series');
+      if (!seriesKey || seriesKey === ACTIVITY_WEEKLY_PHASE_ID) return;
+      if (ids.indexOf(seriesKey) === -1) return;
+      checkbox.checked = selectAll;
+    });
+  }
+  if (activityWeeklyChart) {
+    ids.forEach(function (id) {
+      const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
+        function (dataset) {
+          return dataset.id === id;
+        },
+      );
+      if (datasetIndex === -1) return;
+      activityWeeklyChart.getDatasetMeta(datasetIndex).hidden = !selectAll;
+    });
+    activityWeeklyChart.update();
+  }
+  syncActivityWeeklySelectAllButton();
 }
 
 function renderActivityWeeklyToggles(visibleEntities) {
@@ -2190,6 +2251,9 @@ function renderActivityWeeklyToggles(visibleEntities) {
       activityWeeklyChart.getDatasetMeta(datasetIndex).hidden =
         !checkbox.checked;
       activityWeeklyChart.update();
+      if (seriesKey !== ACTIVITY_WEEKLY_PHASE_ID) {
+        syncActivityWeeklySelectAllButton();
+      }
     });
   });
 }
@@ -2220,6 +2284,10 @@ function mountCompetitorActivityWeeklyChart() {
     );
     if (toggles) toggles.innerHTML = '';
     if (wrap) wrap.hidden = true;
+    const selectAllBtn = document.getElementById(
+      'competitor-activity-weekly-select-all',
+    );
+    if (selectAllBtn) selectAllBtn.hidden = true;
     return;
   }
 
@@ -2229,6 +2297,7 @@ function mountCompetitorActivityWeeklyChart() {
   const visible = getActivityWeeklyVisibleEntities(data);
   ensureActivityWeeklyCheckedDefaults(visible);
   renderActivityWeeklyToggles(visible);
+  syncActivityWeeklySelectAllButton();
 
   const phaseByWeek = {};
   (Array.isArray(data.phase_by_week) ? data.phase_by_week : []).forEach(
