@@ -2450,7 +2450,7 @@
 }
 
 #mie-dashboard-app #ga4-landing .ga4-summary-kpis {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 16px;
   align-items: stretch;
 }
@@ -2481,6 +2481,10 @@
 
 #mie-dashboard-app #ga4-landing .kpi-card.is-warn {
   border-top-color: var(--accent-warn);
+}
+
+#mie-dashboard-app #ga4-landing .kpi-card.is-info {
+  border-top-color: var(--accent-info);
 }
 
 #mie-dashboard-app #ga4-landing .ga4-channel-breakdown {
@@ -2527,6 +2531,12 @@
   height: 100%;
   border-radius: inherit;
   min-width: 0;
+}
+
+@media (max-width: 1099px) and (min-width: 901px) {
+  #mie-dashboard-app #ga4-landing .ga4-summary-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {

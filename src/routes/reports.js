@@ -20,6 +20,11 @@ const {
   normalizeDomain,
 } = require('../steps/collectGoogleSerpImports');
 const { computeAuctionPressure } = require('../services/auction-pressure');
+const {
+  getPropertyId,
+  buildGa4Client,
+  metricCellToNumber,
+} = require('../steps/collectGa4Metrics');
 
 const router = express.Router();
 
@@ -1570,8 +1575,96 @@ router.get('/keyword-research', async (req, res) => {
  *
  * `summary` is aggregated from a fully paginated scan of the date range
  * (independent of the table `rows` select, which may hit PostgREST caps).
+ * `summary.true_unique_users` is a live GA4 Data API call (no dimensions),
+ * cached briefly in-process; null if the live query fails.
  */
 const GA4_SUMMARY_PAGE_SIZE = 1000;
+const GA4_UNIQUE_USERS_TIMEOUT_MS = 10000;
+const GA4_UNIQUE_USERS_CACHE_TTL_MS = 5 * 60 * 1000;
+/** @type {Map<string, { value: number, expiresAt: number }>} */
+const ga4UniqueUsersCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * Live GA4 totalUsers for [from, to] with no dimensions (true unique users).
+ * Returns null on any failure; never throws.
+ */
+async function fetchGa4TrueUniqueUsers(from, to) {
+  const cacheKey = `${from}|${to}`;
+  const cached = ga4UniqueUsersCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  try {
+    const propertyId = getPropertyId();
+    const property = `properties/${propertyId}`;
+    const client = buildGa4Client();
+
+    const [response] = await withTimeout(
+      client.runReport({
+        property,
+        dateRanges: [{ startDate: from, endDate: to }],
+        metrics: [{ name: 'totalUsers' }],
+        limit: 1,
+        returnPropertyQuota: true,
+      }),
+      GA4_UNIQUE_USERS_TIMEOUT_MS,
+      'GA4 true unique users',
+    );
+
+    const metricHeaders =
+      response && response.metricHeaders ? response.metricHeaders : [];
+    const metricIndex = {};
+    metricHeaders.forEach((h, i) => {
+      if (h && h.name) metricIndex[h.name] = i;
+    });
+    const idx = metricIndex.totalUsers;
+    const firstRow =
+      response && Array.isArray(response.rows) ? response.rows[0] : null;
+    const metricValues =
+      firstRow && firstRow.metricValues ? firstRow.metricValues : [];
+
+    // Empty report / no rows → successful zero traffic, not an error.
+    if (idx === undefined || !firstRow) {
+      ga4UniqueUsersCache.set(cacheKey, {
+        value: 0,
+        expiresAt: Date.now() + GA4_UNIQUE_USERS_CACHE_TTL_MS,
+      });
+      return 0;
+    }
+
+    const parsed = metricCellToNumber(metricValues, idx);
+    const value =
+      parsed != null && Number.isFinite(Number(parsed))
+        ? Math.trunc(Number(parsed))
+        : 0;
+
+    ga4UniqueUsersCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + GA4_UNIQUE_USERS_CACHE_TTL_MS,
+    });
+    return value;
+  } catch (err) {
+    logger.warn('GA4 true unique users query failed', {
+      from,
+      to,
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return null;
+  }
+}
 
 function normalizeGa4Channel(value) {
   if (value == null) return 'Unassigned';
@@ -1600,6 +1693,7 @@ function emptyGa4Summary() {
     total_key_events: 0,
     overall_conversion_rate: 0,
     by_channel: [],
+    true_unique_users: null,
   };
 }
 
@@ -1717,7 +1811,14 @@ router.get('/ga4-metrics', async (req, res) => {
       throw new Error(`Failed to fetch first ga4_metrics date: ${firstError.message}`);
     }
 
-    const summary = await buildGa4Summary(from, to);
+    const [summaryBase, trueUniqueUsers] = await Promise.all([
+      buildGa4Summary(from, to),
+      fetchGa4TrueUniqueUsers(from, to),
+    ]);
+    const summary = {
+      ...summaryBase,
+      true_unique_users: trueUniqueUsers,
+    };
 
     return res.json({
       rows: data || [],

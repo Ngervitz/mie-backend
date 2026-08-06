@@ -3928,6 +3928,7 @@ init();
       total_key_events: 0,
       overall_conversion_rate: 0,
       by_channel: [],
+      true_unique_users: null,
     };
   }
 
@@ -4009,6 +4010,23 @@ init();
       '<div class="kpi-label">📈 Tasa de conversión</div>' +
       '<div class="ga4-summary-note text-muted">' +
       'Key Events dividido sesiones — no es lo mismo que usuarios ni que leads.' +
+      '</div>' +
+      '</div>' +
+      '<div class="kpi-card is-info">' +
+      '<div class="kpi-value">' +
+      escapeHtml(
+        s.true_unique_users === null || s.true_unique_users === undefined
+          ? '—'
+          : formatInt(s.true_unique_users),
+      ) +
+      '</div>' +
+      '<div class="kpi-label">🧍 Usuarios únicos según GA4</div>' +
+      '<div class="ga4-summary-note text-muted">' +
+      (s.true_unique_users === null || s.true_unique_users === undefined
+        ? 'No se pudo consultar en este momento.'
+        : Number(s.true_unique_users) === 0
+          ? 'Sin tráfico único registrado en este rango.'
+          : 'Consultado en vivo a GA4, deduplicado según su identidad de usuario — la referencia más confiable para comparar contra sesiones.') +
       '</div>' +
       '</div>';
     wrap.appendChild(cards);
