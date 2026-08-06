@@ -26,11 +26,15 @@ const {
   metricCellToNumber,
 } = require('../steps/collectGa4Metrics');
 const {
-  formatYmdMontevideo,
   addCalendarDays,
   mondayOfYmd,
   YMD_RE,
 } = require('../lib/montevideo-week');
+const {
+  lastCompleteWeekMonday,
+  resolveLastCompleteWeeks,
+  resolveWeeksFromRange,
+} = require('../lib/competitor-activity-weeks');
 
 const router = express.Router();
 
@@ -41,59 +45,7 @@ const MOVEMENT_EVENT_TYPES = [
   'ad_deactivated',
 ];
 const EVENTS_PAGE_SIZE = 1000;
-const MAX_ACTIVITY_WEEKLY_WEEKS = 26;
 const PHASE_TIEBREAK_ORDER = ['alta_demanda', 'mitad_mes', 'cierre_mes'];
-
-/** Last N complete Mon–Sun weeks (America/Montevideo), excluding current week. */
-function resolveLastCompleteWeeks(count = 8) {
-  const currentMonday = mondayOfYmd(formatYmdMontevideo(new Date()));
-  const lastCompleteMonday = addCalendarDays(currentMonday, -7);
-  const weeks = [];
-  for (let i = count - 1; i >= 0; i -= 1) {
-    weeks.push(addCalendarDays(lastCompleteMonday, -7 * i));
-  }
-  return weeks;
-}
-
-/**
- * Optional ?from=&to= (YYYY-MM-DD), snapped to Monday. Default: last 8 complete weeks.
- * @returns {{ weeks: string[] } | { error: string }}
- */
-function resolveWeeksFromRange(fromRaw, toRaw) {
-  const hasFrom = fromRaw != null && String(fromRaw).trim() !== '';
-  const hasTo = toRaw != null && String(toRaw).trim() !== '';
-  if (!hasFrom && !hasTo) {
-    return { weeks: resolveLastCompleteWeeks(8) };
-  }
-  if (!hasFrom || !hasTo) {
-    return {
-      error: 'from y to deben enviarse juntos (YYYY-MM-DD), o ninguno',
-    };
-  }
-  const fromStr = String(fromRaw).trim();
-  const toStr = String(toRaw).trim();
-  if (!YMD_RE.test(fromStr) || !YMD_RE.test(toStr)) {
-    return { error: 'from y to deben tener formato YYYY-MM-DD' };
-  }
-  const fromMonday = mondayOfYmd(fromStr);
-  const toMonday = mondayOfYmd(toStr);
-  if (fromMonday > toMonday) {
-    return { error: 'from no puede ser posterior a to' };
-  }
-  const weeks = [];
-  for (let w = fromMonday; w <= toMonday; w = addCalendarDays(w, 7)) {
-    weeks.push(w);
-    if (weeks.length > MAX_ACTIVITY_WEEKLY_WEEKS) {
-      return {
-        error:
-          'El rango no puede superar ' +
-          MAX_ACTIVITY_WEEKLY_WEEKS +
-          ' semanas',
-      };
-    }
-  }
-  return { weeks };
-}
 
 /**
  * Majority cycle_phase for Mon–Sun week. Tie → PHASE_TIEBREAK_ORDER.
@@ -2091,6 +2043,13 @@ router.get('/competitor-activity-weekly', async (req, res) => {
       return res.status(400).json({ error: resolved.error });
     }
     const weeks = resolved.weeks;
+    if (!weeks.length) {
+      return res.status(200).json({
+        weeks: [],
+        entities: [],
+        phase_by_week: [],
+      });
+    }
     const rangeStart = weeks[0];
     const rangeEnd = addCalendarDays(weeks[weeks.length - 1], 6);
 
@@ -2210,6 +2169,9 @@ router.get('/competitor-activity-weekly', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.lastCompleteWeekMonday = lastCompleteWeekMonday;
+module.exports.resolveLastCompleteWeeks = resolveLastCompleteWeeks;
+module.exports.resolveWeeksFromRange = resolveWeeksFromRange;
 module.exports.buildHugoContext = buildHugoContext;
 module.exports.isValidDateOnly = isValidDateOnly;
 module.exports.todayUtc = todayUtc;
