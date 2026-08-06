@@ -77,6 +77,7 @@ router.get('/', async (req, res) => {
           'predicted_week_of',
           'predicted_probability',
           'predicted_label',
+          'historical_avg',
           'model_version',
           'training_rows_used',
           'trained_at',
@@ -109,6 +110,7 @@ router.get('/', async (req, res) => {
             : null,
         predicted_probability: row.predicted_probability,
         predicted_label: row.predicted_label === true,
+        historical_avg: row.historical_avg,
         trained_at: row.trained_at,
         created_at: row.created_at,
       };

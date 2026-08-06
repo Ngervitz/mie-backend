@@ -1982,6 +1982,8 @@ function onActionClick(e) {
  * ------------------------------------------------------------------------- */
 let activityWeeklyChart = null;
 let activityWeeklyData = null;
+/** @type {object|null} body de GET /competitor-activity-predictions */
+let activityWeeklyPredictions = null;
 let activityWeeklyShowAll = false;
 /** @type {Record<string, boolean>} entity_id / zafra → checkbox checked */
 let activityWeeklyChecked = Object.create(null);
@@ -2003,6 +2005,94 @@ const ACTIVITY_WEEKLY_PHASE_LABELS = {
   cierre_mes: 'Cierre de mes',
 };
 const ACTIVITY_WEEKLY_PHASE_ID = 'zafra';
+
+function isActivityWeeklyPredictionDatasetId(id) {
+  return String(id || '').endsWith('-prediction');
+}
+
+function setActivityWeeklyEntityDatasetsHidden(entityId, hidden) {
+  if (!activityWeeklyChart) return;
+  const ids = [String(entityId), String(entityId) + '-prediction'];
+  ids.forEach(function (id) {
+    const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
+      function (dataset) {
+        return dataset.id === id;
+      },
+    );
+    if (datasetIndex === -1) return;
+    activityWeeklyChart.getDatasetMeta(datasetIndex).hidden = hidden;
+  });
+}
+
+/**
+ * Auxiliary dashed prediction segments for entities with a valid ML row
+ * matching nextWeek (exact predicted_week_of string).
+ */
+function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
+  const preds =
+    activityWeeklyPredictions &&
+    Array.isArray(activityWeeklyPredictions.predictions)
+      ? activityWeeklyPredictions.predictions
+      : [];
+  const byEntity = new Map();
+  preds.forEach(function (p) {
+    if (!p || p.entity_id == null) return;
+    byEntity.set(String(p.entity_id), p);
+  });
+
+  const out = [];
+  (allEntities || []).forEach(function (ent) {
+    const id = String(ent.entity_id);
+    const pred = byEntity.get(id);
+    if (!pred) return;
+    if (String(pred.predicted_week_of) !== String(nextWeek)) return;
+
+    const hist = Number(pred.historical_avg);
+    const prob = Number(pred.predicted_probability);
+    if (!Number.isFinite(hist) || !Number.isFinite(prob)) return;
+    if (prob < 0 || prob > 1) return;
+
+    const series = Array.isArray(ent.series) ? ent.series : [];
+    let lastPoint = null;
+    series.forEach(function (p) {
+      if (!p || !p.week_of) return;
+      if (!lastPoint || String(p.week_of) > String(lastPoint.week_of)) {
+        lastPoint = p;
+      }
+    });
+    if (!lastPoint) return;
+
+    const color = colorForString(ent.name || id);
+    const alertColor = pred.predicted_label === true ? '#f97316' : '#94a3b8';
+    const endRadius = Math.min(10, Math.max(4, 4 + prob * 6));
+
+    out.push({
+      id: id + '-prediction',
+      label: (ent.name || 'Entidad') + ' (predicción)',
+      data: [
+        { x: String(lastPoint.week_of), y: Number(lastPoint.count) || 0 },
+        { x: String(nextWeek), y: hist },
+      ],
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: 2,
+      borderDash: [6, 4],
+      tension: 0,
+      spanGaps: true,
+      pointRadius: [0, endRadius],
+      pointHoverRadius: [0, endRadius + 1],
+      pointBackgroundColor: [color, alertColor],
+      pointBorderColor: [color, color],
+      yAxisID: 'y',
+      hidden: activityWeeklyChecked[id] === false,
+      _predictionMeta: {
+        historical_avg: hist,
+        predicted_probability: prob,
+      },
+    });
+  });
+  return out;
+}
 
 function phasePointColor(phase) {
   if (phase === 'alta_demanda') return '#ef4444';
@@ -2186,13 +2276,7 @@ function toggleActivityWeeklySelectAllVisible() {
   }
   if (activityWeeklyChart) {
     ids.forEach(function (id) {
-      const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
-        function (dataset) {
-          return dataset.id === id;
-        },
-      );
-      if (datasetIndex === -1) return;
-      activityWeeklyChart.getDatasetMeta(datasetIndex).hidden = !selectAll;
+      setActivityWeeklyEntityDatasetsHidden(id, !selectAll);
     });
     activityWeeklyChart.update();
   }
@@ -2242,14 +2326,19 @@ function renderActivityWeeklyToggles(visibleEntities) {
       if (!seriesKey) return;
       activityWeeklyChecked[seriesKey] = checkbox.checked;
       if (!activityWeeklyChart) return;
-      const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
-        function (dataset) {
-          return dataset.id === seriesKey;
-        },
-      );
-      if (datasetIndex === -1) return;
-      activityWeeklyChart.getDatasetMeta(datasetIndex).hidden =
-        !checkbox.checked;
+      if (seriesKey === ACTIVITY_WEEKLY_PHASE_ID) {
+        const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
+          function (dataset) {
+            return dataset.id === seriesKey;
+          },
+        );
+        if (datasetIndex !== -1) {
+          activityWeeklyChart.getDatasetMeta(datasetIndex).hidden =
+            !checkbox.checked;
+        }
+      } else {
+        setActivityWeeklyEntityDatasetsHidden(seriesKey, !checkbox.checked);
+      }
       activityWeeklyChart.update();
       if (seriesKey !== ACTIVITY_WEEKLY_PHASE_ID) {
         syncActivityWeeklySelectAllButton();
@@ -2308,10 +2397,22 @@ function mountCompetitorActivityWeeklyChart() {
     },
   );
 
-  const phaseColors = weeks.map(function (w) {
+  const nextWeek =
+    weeks.length > 0 ? shiftDate(weeks[weeks.length - 1], 7) : null;
+  const predictionDatasets = nextWeek
+    ? buildActivityWeeklyPredictionDatasets(allEntities, nextWeek)
+    : [];
+  const chartLabels =
+    predictionDatasets.length > 0 && nextWeek
+      ? weeks.concat([nextWeek])
+      : weeks.slice();
+
+  const phaseColors = chartLabels.map(function (w) {
+    if (weeks.indexOf(w) === -1) return 'transparent';
     return phaseByWeek[w] ? phasePointColor(phaseByWeek[w]) : 'transparent';
   });
-  const phaseValues = weeks.map(function (w) {
+  const phaseValues = chartLabels.map(function (w) {
+    if (weeks.indexOf(w) === -1) return null;
     return phaseByWeek[w] ? 0.5 : null;
   });
 
@@ -2332,7 +2433,8 @@ function mountCompetitorActivityWeeklyChart() {
       label: ent.name || 'Entidad',
       _baseColor: color,
       weekMeta: weekMeta,
-      data: weeks.map(function (w) {
+      data: chartLabels.map(function (w) {
+        if (weeks.indexOf(w) === -1) return null;
         return weekMeta[w] ? weekMeta[w].count : 0;
       }),
       borderColor: color,
@@ -2341,8 +2443,13 @@ function mountCompetitorActivityWeeklyChart() {
       tension: 0.25,
       pointRadius: 3,
       yAxisID: 'y',
+      spanGaps: false,
       hidden: activityWeeklyChecked[id] === false,
     };
+  });
+
+  predictionDatasets.forEach(function (ds) {
+    datasets.push(ds);
   });
 
   datasets.push({
@@ -2362,7 +2469,7 @@ function mountCompetitorActivityWeeklyChart() {
 
   activityWeeklyChart = new window.Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: { labels: weeks, datasets: datasets },
+    data: { labels: chartLabels, datasets: datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -2377,6 +2484,7 @@ function mountCompetitorActivityWeeklyChart() {
         const ds =
           activityWeeklyChart.data.datasets[elements[0].datasetIndex];
         if (!ds || !ds.id) return;
+        if (isActivityWeeklyPredictionDatasetId(ds.id)) return;
         activityWeeklyHighlightId =
           activityWeeklyHighlightId === ds.id ? null : ds.id;
         applyActivityWeeklyHighlightStyles();
@@ -2389,6 +2497,9 @@ function mountCompetitorActivityWeeklyChart() {
               if (!items || !items.length) return '';
               const week = String(items[0].label || '');
               const ds = items[0].dataset || {};
+              if (isActivityWeeklyPredictionDatasetId(ds.id)) {
+                return items[0].dataIndex === 1 ? week : '';
+              }
               if (ds.id === ACTIVITY_WEEKLY_PHASE_ID) {
                 return week;
               }
@@ -2406,6 +2517,17 @@ function mountCompetitorActivityWeeklyChart() {
             label: function (item) {
               const week = String(item.label || '');
               const ds = item.dataset || {};
+              if (isActivityWeeklyPredictionDatasetId(ds.id)) {
+                if (item.dataIndex !== 1) return null;
+                const meta = ds._predictionMeta || {};
+                return (
+                  'Promedio histórico: ' +
+                  meta.historical_avg +
+                  ' · Probabilidad de superarlo: ' +
+                  Math.round(Number(meta.predicted_probability) * 100) +
+                  '%'
+                );
+              }
               if (ds.id === ACTIVITY_WEEKLY_PHASE_ID) {
                 const phase = phaseByWeek[week];
                 if (!phase) return null;
@@ -2466,29 +2588,53 @@ async function loadCompetitorActivityWeekly() {
           '&to=' +
           encodeURIComponent(activityWeeklyTo);
       }
-      const response = await fetch(url, {
+
+      const weeklyPromise = fetch(url, {
         headers: { Accept: 'application/json' },
+      }).then(async function (response) {
+        const body = await response.json().catch(function () {
+          return {};
+        });
+        return { response: response, body: body };
       });
-      const body = await response.json().catch(function () {
-        return {};
-      });
-      if (!response.ok) {
+
+      const predsPromise = fetch(
+        API_BASE + '/competitor-activity-predictions',
+        { headers: { Accept: 'application/json' } },
+      )
+        .then(async function (response) {
+          if (!response.ok) return null;
+          return response.json().catch(function () {
+            return null;
+          });
+        })
+        .catch(function () {
+          return null;
+        });
+
+      const pair = await Promise.all([weeklyPromise, predsPromise]);
+      if (seq !== activityWeeklyRequestSeq) return;
+
+      const weeklyResult = pair[0];
+      if (!weeklyResult.response.ok) {
         throw new Error(
-          body && body.error
-            ? String(body.error)
+          weeklyResult.body && weeklyResult.body.error
+            ? String(weeklyResult.body.error)
             : 'No se pudo cargar la actividad semanal.',
         );
       }
-      if (seq !== activityWeeklyRequestSeq) return;
-      activityWeeklyData = body;
+
+      activityWeeklyData = weeklyResult.body;
+      activityWeeklyPredictions = pair[1];
       activityWeeklyHighlightId = null;
       if (
         !activityWeeklyFrom &&
-        Array.isArray(body.weeks) &&
-        body.weeks.length
+        Array.isArray(weeklyResult.body.weeks) &&
+        weeklyResult.body.weeks.length
       ) {
-        activityWeeklyFrom = body.weeks[0];
-        activityWeeklyTo = body.weeks[body.weeks.length - 1];
+        activityWeeklyFrom = weeklyResult.body.weeks[0];
+        activityWeeklyTo =
+          weeklyResult.body.weeks[weeklyResult.body.weeks.length - 1];
         const fromEl = document.getElementById(
           'competitor-activity-weekly-from',
         );
@@ -2500,6 +2646,7 @@ async function loadCompetitorActivityWeekly() {
     } catch (err) {
       if (seq !== activityWeeklyRequestSeq) return;
       activityWeeklyData = null;
+      activityWeeklyPredictions = null;
       destroyActivityWeeklyChart();
       setActivityWeeklyStatus(
         'Error: ' +
