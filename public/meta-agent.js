@@ -470,13 +470,6 @@
     var syncLabel = state.lastUpdate ? 'SYNC ' + escapeHtml(state.lastUpdate) : '';
     return (
       '<div class="ma-header">' +
-      '<div class="ma-header-left">' +
-      '<div class="ma-logo">⚡</div>' +
-      '<div>' +
-      '<div class="ma-brand">META ADS AGENT</div>' +
-      '<div class="ma-brand-sub">POWERED BY CLAUDE AI</div>' +
-      '</div>' +
-      '</div>' +
       '<div class="ma-header-right">' +
       alertBadge +
       '<div class="ma-sync-label">' +
