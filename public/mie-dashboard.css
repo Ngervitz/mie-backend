@@ -3589,6 +3589,12 @@
   align-items: flex-end;
 }
 
+#mie-dashboard-app .competitor-activity-weekly-caption {
+  margin: 4px 0 8px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
 #mie-dashboard-app .competitor-activity-weekly-toggles {
   display: flex;
   flex-wrap: wrap;

@@ -2006,6 +2006,45 @@ const ACTIVITY_WEEKLY_PHASE_LABELS = {
 };
 const ACTIVITY_WEEKLY_PHASE_ID = 'zafra';
 
+const ACTIVITY_WEEKLY_PREDICTION_ZONE_PLUGIN = {
+  id: 'activityWeeklyPredictionZone',
+  beforeDraw: function (chart) {
+    const opts =
+      chart.options.plugins &&
+      chart.options.plugins.activityWeeklyPredictionZone;
+    if (!opts || !opts.enabled) return;
+    const idx = opts.lastRealIndex;
+    if (idx == null || !Number.isFinite(Number(idx))) return;
+    const xScale = chart.scales.x;
+    const area = chart.chartArea;
+    if (!xScale || !area) return;
+    const x0 = xScale.getPixelForValue(Number(idx));
+    if (!Number.isFinite(x0)) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.fillRect(x0, area.top, area.right - x0, area.bottom - area.top);
+    ctx.restore();
+  },
+};
+
+function syncActivityWeeklyPredictionCaption(lastRealWeek, predictionWeek) {
+  const el = document.getElementById('competitor-activity-weekly-caption');
+  if (!el) return;
+  if (!lastRealWeek || !predictionWeek) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML =
+    '💡 Los datos hasta ' +
+    escapeHtml(lastRealWeek) +
+    ' son reales. ' +
+    escapeHtml(predictionWeek) +
+    ' es la semana en curso — la línea punteada muestra la proyección del modelo de ML, no un dato observado.';
+}
+
 function isActivityWeeklyPredictionDatasetId(id) {
   return String(id || '').endsWith('-prediction');
 }
@@ -2200,6 +2239,7 @@ function renderCompetitorActivityWeeklySection() {
     'Deseleccionar todos' +
     '</button>' +
     '</div>' +
+    '<p id="competitor-activity-weekly-caption" class="ga4-summary-note text-muted competitor-activity-weekly-caption" hidden></p>' +
     '<div class="mcl-filters competitor-activity-weekly-filters">' +
     '<label class="mcl-field"><span class="mcl-field-label">Desde</span>' +
     '<input type="date" id="competitor-activity-weekly-from" class="mcl-input" value="' +
@@ -2368,6 +2408,7 @@ function mountCompetitorActivityWeeklyChart() {
   if (!data) {
     setActivityWeeklyStatus('Cargando actividad semanal…');
     if (wrap) wrap.hidden = true;
+    syncActivityWeeklyPredictionCaption(null, null);
     return;
   }
 
@@ -2388,6 +2429,7 @@ function mountCompetitorActivityWeeklyChart() {
       'competitor-activity-weekly-select-all',
     );
     if (selectAllBtn) selectAllBtn.hidden = true;
+    syncActivityWeeklyPredictionCaption(null, null);
     return;
   }
 
@@ -2417,6 +2459,12 @@ function mountCompetitorActivityWeeklyChart() {
     predictionDatasets.length > 0 && nextWeek
       ? weeks.concat([nextWeek])
       : weeks.slice();
+  const hasPredictionWeek = predictionDatasets.length > 0 && !!nextWeek;
+  const lastRealWeek = weeks.length ? weeks[weeks.length - 1] : null;
+  syncActivityWeeklyPredictionCaption(
+    hasPredictionWeek ? lastRealWeek : null,
+    hasPredictionWeek ? nextWeek : null,
+  );
 
   const phaseColors = chartLabels.map(function (w) {
     if (weeks.indexOf(w) === -1) return 'transparent';
@@ -2481,6 +2529,7 @@ function mountCompetitorActivityWeeklyChart() {
   activityWeeklyChart = new window.Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { labels: chartLabels, datasets: datasets },
+    plugins: [ACTIVITY_WEEKLY_PREDICTION_ZONE_PLUGIN],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -2501,6 +2550,10 @@ function mountCompetitorActivityWeeklyChart() {
         applyActivityWeeklyHighlightStyles();
       },
       plugins: {
+        activityWeeklyPredictionZone: {
+          enabled: hasPredictionWeek,
+          lastRealIndex: hasPredictionWeek ? weeks.length - 1 : null,
+        },
         legend: { display: false },
         tooltip: {
           callbacks: {
