@@ -2034,6 +2034,27 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
     Array.isArray(activityWeeklyPredictions.predictions)
       ? activityWeeklyPredictions.predictions
       : [];
+  var predsAvailability;
+  if (activityWeeklyPredictions == null) {
+    predsAvailability =
+      activityWeeklyPredictions === undefined ? 'undefined' : 'null';
+  } else if (!Array.isArray(activityWeeklyPredictions.predictions)) {
+    predsAvailability =
+      'predictions_not_array:' + typeof activityWeeklyPredictions.predictions;
+  } else {
+    predsAvailability = activityWeeklyPredictions.predictions.length;
+  }
+  console.log(
+    '[DEBUG-PREDICTION] nextWeek=',
+    nextWeek,
+    'typeof=',
+    typeof nextWeek,
+  );
+  console.log(
+    '[DEBUG-PREDICTION] predictions available=',
+    predsAvailability,
+  );
+
   const byEntity = new Map();
   preds.forEach(function (p) {
     if (!p || p.entity_id == null) return;
@@ -2041,11 +2062,28 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
   });
 
   const out = [];
+  var matchTrue = 0;
+  var matchFalse = 0;
   (allEntities || []).forEach(function (ent) {
     const id = String(ent.entity_id);
     const pred = byEntity.get(id);
+    const rawPredictedWeekOf = pred ? pred.predicted_week_of : undefined;
+    const weekMatch =
+      !!pred && String(rawPredictedWeekOf) === String(nextWeek);
+    console.log('[DEBUG-PREDICTION] entity', {
+      entity_id: id,
+      predicted_week_of: rawPredictedWeekOf,
+      predicted_week_of_typeof: typeof rawPredictedWeekOf,
+      nextWeek: nextWeek,
+      nextWeek_typeof: typeof nextWeek,
+      hasPredRow: !!pred,
+      match: weekMatch,
+    });
+    if (weekMatch) matchTrue += 1;
+    else matchFalse += 1;
+
     if (!pred) return;
-    if (String(pred.predicted_week_of) !== String(nextWeek)) return;
+    if (!weekMatch) return;
 
     const hist = Number(pred.historical_avg);
     const prob = Number(pred.predicted_probability);
@@ -2091,6 +2129,12 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
       },
     });
   });
+  console.log(
+    '[DEBUG-PREDICTION] match counts true=',
+    matchTrue,
+    'false=',
+    matchFalse,
+  );
   return out;
 }
 
