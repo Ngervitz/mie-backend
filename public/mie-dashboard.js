@@ -2971,6 +2971,14 @@ init();
         escapeHtml(String(trainingRows)) +
         ' casos históricos, y convierte el ' +
         'resultado en un porcentaje entre 0% y 100%.' +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '🔎 Antes de mostrar una predicción, el modelo chequea si tiene ' +
+        'suficiente información sobre ese competidor. Si nunca vio ningún ' +
+        'aviso de esa entidad, no inventa un número — muestra "Sin datos ' +
+        'suficientes". Si vio actividad pero esa entidad nunca tuvo un pico ' +
+        'histórico, la predicción se muestra igual pero marcada como "baja ' +
+        'confianza", porque hay poca evidencia todavía.' +
         '</p>';
     }
 
