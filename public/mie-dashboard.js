@@ -215,6 +215,16 @@ function setSelectedDate(date) {
 
 const MOVEMENT_EVENT_TYPES = ['new_ad', 'copy_changed', 'ad_reactivated', 'ad_deactivated'];
 
+/** Confirmed scrape outcomes (same set as activity pipeline VALID_SNAPSHOT_STATUSES). */
+const CONFIRMED_SNAPSHOT_STATUSES = ['success', 'empty_confirmed'];
+
+/**
+ * Max calendar days since last confirmed snapshot to count as "Monitoreo al día".
+ * Audit 2026-08-07 (37 active): days-since last success min=0 median=0 max=4 (20/21 at 0);
+ * with success|empty_confirmed, 30/31 at 0. Threshold 1 = same day or 1-day lag.
+ */
+const MONITORING_FRESH_MAX_DAYS = 1;
+
 function getSupabaseDatasourceConfig() {
   const injected = typeof window !== 'undefined' ? window.__META_AGENT_DATASOURCE__ : null;
   if (!injected || typeof injected !== 'object') {
@@ -375,6 +385,80 @@ async function queryHistoricalMovementDays(selectedDate, entityIds) {
   );
 }
 
+/**
+ * Read-only: ad_snapshots coverage per entity (any row + last confirmed date).
+ * Confirmed = success | empty_confirmed. Used only for the monitoring signal.
+ */
+async function queryAdSnapshotCoverage(entityIds) {
+  const coverage = new Map();
+  (entityIds || []).forEach((id) => {
+    if (id) coverage.set(id, { hasAny: false, lastConfirmedDate: null });
+  });
+  if (!coverage.size) return coverage;
+
+  const inList = [...coverage.keys()].map((id) => encodeURIComponent(id)).join(',');
+  const rows = await supabaseRestGet(
+    `ad_snapshots?select=entity_id,snapshot_date,status` +
+      `&entity_id=in.(${inList})` +
+      `&order=snapshot_date.desc`,
+  );
+  (rows || []).forEach((row) => {
+    const entityId = row && row.entity_id;
+    if (!entityId || !coverage.has(entityId)) return;
+    const entry = coverage.get(entityId);
+    entry.hasAny = true;
+    if (
+      !entry.lastConfirmedDate
+      && CONFIRMED_SNAPSHOT_STATUSES.includes(String(row.status || ''))
+      && row.snapshot_date
+    ) {
+      entry.lastConfirmedDate = String(row.snapshot_date);
+    }
+  });
+  return coverage;
+}
+
+/** Calendar-day difference (asOfYmd - fromYmd). Null if either date missing. */
+function calendarDaysBetween(fromYmd, asOfYmd) {
+  if (!fromYmd || !asOfYmd) return null;
+  const from = Date.parse(`${fromYmd}T12:00:00Z`);
+  const asOf = Date.parse(`${asOfYmd}T12:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(asOf)) return null;
+  return Math.round((asOf - from) / 86400000);
+}
+
+/**
+ * Independent monitoring signal from ad_snapshots (not events / días con cambios).
+ * @returns {{ status: 'ok'|'delayed'|'unconfigured', label: string, lastConfirmedDate: string|null, daysSince: number|null }}
+ */
+function buildMonitoringSignal(coverageEntry, selectedDate) {
+  const entry = coverageEntry || { hasAny: false, lastConfirmedDate: null };
+  if (!entry.hasAny) {
+    return {
+      status: 'unconfigured',
+      label: 'Sin monitoreo configurado',
+      lastConfirmedDate: null,
+      daysSince: null,
+    };
+  }
+  const daysSince = calendarDaysBetween(entry.lastConfirmedDate, selectedDate);
+  const fresh = daysSince != null && daysSince <= MONITORING_FRESH_MAX_DAYS;
+  if (fresh) {
+    return {
+      status: 'ok',
+      label: 'Monitoreo al día',
+      lastConfirmedDate: entry.lastConfirmedDate,
+      daysSince,
+    };
+  }
+  return {
+    status: 'delayed',
+    label: 'Monitoreo con demora',
+    lastConfirmedDate: entry.lastConfirmedDate,
+    daysSince,
+  };
+}
+
 function countDailyMovementsByEntityDay(eventRows) {
   const map = new Map();
   (eventRows || []).forEach((row) => {
@@ -445,7 +529,7 @@ function buildLastMovementByEntity(windowRows, historyRows) {
   return map;
 }
 
-function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDate) {
+function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDate, snapshotCoverage) {
   const daily = countDailyMovementsByEntityDay(windowRows);
   const histDays = countDistinctHistoricalDaysByEntity(historyRows);
   const lastMovement = buildLastMovementByEntity(windowRows, historyRows);
@@ -458,6 +542,10 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
     const entityId = entity.id;
     const historicalDays = histDays.get(entityId) || 0;
     const todayCount = daily.get(`${entityId}|${selectedDate}`) || 0;
+    const monitoring = buildMonitoringSignal(
+      snapshotCoverage && snapshotCoverage.get(entityId),
+      selectedDate,
+    );
     const meta = {
       active: entity.active !== false,
       segment: entity.segment || null,
@@ -465,6 +553,7 @@ function buildIntensityGaugeModels(entities, windowRows, historyRows, selectedDa
       adLibraryUrl: entity.ad_library_url || null,
       websiteDomain: entity.website_domain || null,
       lastMovementDate: lastMovement.get(entityId) || null,
+      monitoring,
     };
 
     if (historicalDays < 7) {
@@ -498,15 +587,17 @@ async function loadIntensityGauges(selectedDate) {
   try {
     const entities = await queryCompetitorEntities();
     const entityIds = entities.map((e) => e.id).filter(Boolean);
-    const [windowRows, historyRows] = await Promise.all([
+    const [windowRows, historyRows, snapshotCoverage] = await Promise.all([
       queryEventsForIntensityGauge(selectedDate, entityIds),
       queryHistoricalMovementDays(selectedDate, entityIds),
+      queryAdSnapshotCoverage(entityIds),
     ]);
     state.gauge.entities = buildIntensityGaugeModels(
       entities,
       windowRows,
       historyRows,
       selectedDate,
+      snapshotCoverage,
     );
     state.gauge.loading = false;
     state.gauge.error = null;
@@ -612,7 +703,11 @@ function renderGaugeAvatar(g) {
 /** Presentation-only: color class for percentage value text. */
 function getPctValueColorClass(pctLabel, sortValue) {
   const raw = String(pctLabel || '').trim();
-  if (/^día\s*0\s*\/\s*7$/i.test(raw) || raw === '0%') {
+  if (
+    /^día\s*0\s*\/\s*7$/i.test(raw)
+    || /^días con cambios:\s*0\s*\/\s*7$/i.test(raw)
+    || raw === '0%'
+  ) {
     return 'is-pct-zero';
   }
   let n = Number(sortValue);
@@ -625,21 +720,54 @@ function getPctValueColorClass(pctLabel, sortValue) {
   return 'is-pct-mid';
 }
 
+/** Presentation-only: change-days counter label (same N/7 math). */
+function formatChangeDaysLabel(historicalDays) {
+  const n = Math.min(7, Number(historicalDays) || 0);
+  return `Días con cambios: ${n}/7`;
+}
+
+/** Presentation-only: monitoring badge next to change-days (independent signal). */
+function renderMonitoringBadge(monitoring) {
+  const m = monitoring || { status: 'unconfigured', label: 'Sin monitoreo configurado' };
+  const status = m.status === 'ok' || m.status === 'delayed' ? m.status : 'unconfigured';
+  const label = m.label || 'Sin monitoreo configurado';
+  let detail = '';
+  if (status === 'ok' || status === 'delayed') {
+    if (m.lastConfirmedDate) {
+      detail = m.daysSince === 0
+        ? `Último snapshot confirmado: ${m.lastConfirmedDate} (hoy)`
+        : `Último snapshot confirmado: ${m.lastConfirmedDate} (hace ${m.daysSince} d)`;
+    } else if (status === 'delayed') {
+      detail = 'Hay intentos de captura, pero ninguno confirmado recientemente';
+    }
+  } else {
+    detail = 'Sin filas en ad_snapshots (no configurado para monitoreo)';
+  }
+  const title = detail ? `${label}. ${detail}` : label;
+  return `<span class="gauge-chip-monitor is-${status}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+}
+
 function renderIntensityChip(g, index, variant) {
   const delay = `${(index * 0.04).toFixed(2)}s`;
   const fullName = g.entityName || '—';
   const titleAttr = escapeHtml(fullName);
   const entityAttr = escapeHtml(String(g.entityId || ''));
   const avatar = renderGaugeAvatar(g);
+  const monitorBadge = renderMonitoringBadge(g.monitoring);
 
-  // Idle section: favicon + name only (no status emoji / día 0/7).
+  // Idle section: name + both signals (change-days + monitoring).
   if (variant === 'idle') {
     const pausedClass = g.active === false ? ' is-paused' : '';
+    const dayLabel = formatChangeDaysLabel(g.historicalDays);
     return `
       <button type="button" class="gauge-chip is-idle-row${pausedClass}" style="--gauge-delay:${delay}"
         title="${titleAttr}" data-action="open-entity-modal" data-entity-id="${entityAttr}">
         ${avatar}
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
+        <span class="gauge-chip-signals">
+          <span class="gauge-chip-value is-fallback-label is-pct-zero">${escapeHtml(dayLabel)}</span>
+          ${monitorBadge}
+        </span>
       </button>
     `;
   }
@@ -652,13 +780,14 @@ function renderIntensityChip(g, index, variant) {
         <span class="gauge-chip-emoji" aria-hidden="true">🚫</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value is-fallback-label">pausada</span>
+        ${monitorBadge}
       </button>
     `;
   }
 
   if (g.mode === 'collecting') {
-    const n = Math.min(7, g.historicalDays || 0);
-    const dayLabel = `día ${n}/7`;
+    const dayLabel = formatChangeDaysLabel(g.historicalDays);
+    const n = Math.min(7, Number(g.historicalDays) || 0);
     const dayColor = n <= 0 ? ' is-pct-zero' : '';
     return `
       <button type="button" class="gauge-chip is-collecting is-compact" style="--gauge-delay:${delay}"
@@ -667,6 +796,7 @@ function renderIntensityChip(g, index, variant) {
         <span class="gauge-chip-emoji" aria-hidden="true">⏳</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value is-fallback-label${dayColor}">${escapeHtml(dayLabel)}</span>
+        ${monitorBadge}
       </button>
     `;
   }
@@ -684,6 +814,7 @@ function renderIntensityChip(g, index, variant) {
         <span class="gauge-chip-emoji" aria-hidden="true">❔</span>
         <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
         <span class="gauge-chip-value ${colorClass}">${escapeHtml(pct.pctLabel)}</span>
+        ${monitorBadge}
       </button>
     `;
   }
@@ -710,6 +841,7 @@ function renderIntensityChip(g, index, variant) {
       <span class="gauge-chip-emoji" aria-hidden="true">${emoji}</span>
       <span class="gauge-chip-name">${escapeHtml(fullName)}</span>
       <span class="gauge-chip-value ${colorClass}">${escapeHtml(pctLabel)}</span>
+      ${monitorBadge}
     </button>
   `;
 }
@@ -957,8 +1089,12 @@ function renderEntityModal() {
           <div>${escapeHtml(formatSegmentLabel(entity.segment))} · ${escapeHtml(entity.sector || '—')}</div>
         </div>
         <div class="ad-modal-block">
-          <div class="ad-modal-label">Días de historial</div>
+          <div class="ad-modal-label">Días con cambios (historial)</div>
           <div>${escapeHtml(String(entity.historicalDays || 0))}</div>
+        </div>
+        <div class="ad-modal-block">
+          <div class="ad-modal-label">Monitoreo (ad_snapshots)</div>
+          <div>${escapeHtml((entity.monitoring && entity.monitoring.label) || '—')}</div>
         </div>
         <div class="ad-modal-block">
           <div class="ad-modal-label">Último movimiento</div>
@@ -1087,7 +1223,7 @@ function renderIntensityGauges() {
         ));
       }
       if (recent.length) {
-        // Ready chips + collecting with día > 0/7 (keep día X/7 visible).
+        // Ready chips + collecting with días con cambios > 0/7.
         const recentHtml = recent.map((g) => renderIntensityChip(g, idx++)).join('');
         const recentGrid = recent.every((g) => g.mode === 'ready' && g.intensity)
           ? 'is-ready-row'
@@ -1096,7 +1232,7 @@ function renderIntensityGauges() {
       }
       if (idle.length) {
         parts.push(renderGaugeSection(
-          'Sin movimiento (últimos 7 días)',
+          'Sin cambios detectados',
           'is-idle-row',
           idle.map((g) => renderIntensityChip(g, idx++, 'idle')).join(''),
         ));

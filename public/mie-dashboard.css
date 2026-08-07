@@ -1324,6 +1324,57 @@
   font-size: 10px;
 }
 
+#mie-dashboard-app .gauge-chip-signals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+#mie-dashboard-app .gauge-chip-monitor {
+  display: block;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.9;
+}
+
+#mie-dashboard-app .gauge-chip-monitor.is-ok {
+  color: #1f7a4c;
+}
+
+#mie-dashboard-app .gauge-chip-monitor.is-delayed {
+  color: #9a6b12;
+}
+
+#mie-dashboard-app .gauge-chip-monitor.is-unconfigured {
+  color: #6b7280;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-signals {
+  margin-left: auto;
+  align-items: flex-end;
+  text-align: right;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-value {
+  font-size: 10px;
+}
+
+#mie-dashboard-app .gauge-chip.is-idle-row .gauge-chip-monitor {
+  font-size: 9px;
+}
+
 #mie-dashboard-app .gauge-chip.is-below {
   background: var(--surface);
   opacity: 0.72;
