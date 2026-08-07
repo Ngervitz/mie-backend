@@ -26,6 +26,8 @@ const {
   metricCellToNumber,
 } = require('../steps/collectGa4Metrics');
 const {
+  formatYmdMontevideo,
+  formatInstantMontevideo,
   addCalendarDays,
   mondayOfYmd,
   YMD_RE,
@@ -98,6 +100,41 @@ async function loadMovementEventsForEntities(entityIds, minDate, maxDate) {
     if (!data || data.length < EVENTS_PAGE_SIZE) break;
   }
   return rows;
+}
+
+/**
+ * In-progress week counts (Mon → today, America/Montevideo DATE filter).
+ * Every active competitor id is present (0 if no events).
+ * @param {string[]} entityIds
+ */
+async function buildCurrentWeekPartial(entityIds) {
+  const todayYmd = formatYmdMontevideo(new Date());
+  const weekOf = mondayOfYmd(todayYmd);
+  const eventRows = await loadMovementEventsForEntities(
+    entityIds,
+    weekOf,
+    todayYmd,
+  );
+  /** @type {Record<string, number>} */
+  const counts_by_entity = {};
+  entityIds.forEach((id) => {
+    counts_by_entity[String(id)] = 0;
+  });
+  for (const row of eventRows) {
+    const entityId = row && row.entity_id != null ? String(row.entity_id) : '';
+    if (
+      !entityId ||
+      !Object.prototype.hasOwnProperty.call(counts_by_entity, entityId)
+    ) {
+      continue;
+    }
+    counts_by_entity[entityId] += 1;
+  }
+  return {
+    week_of: weekOf,
+    as_of: formatInstantMontevideo(new Date()),
+    counts_by_entity,
+  };
 }
 
 const serpHtmlUpload = multer({
@@ -2035,6 +2072,7 @@ router.get('/google-serp-competitor-presence', async (req, res) => {
 /**
  * GET /reports/competitor-activity-weekly
  * Optional ?from=&to= (YYYY-MM-DD, snapped to Monday). Default: last 8 complete weeks.
+ * Always includes current_week_partial for the in-progress Montevideo week.
  */
 router.get('/competitor-activity-weekly', async (req, res) => {
   try {
@@ -2043,15 +2081,6 @@ router.get('/competitor-activity-weekly', async (req, res) => {
       return res.status(400).json({ error: resolved.error });
     }
     const weeks = resolved.weeks;
-    if (!weeks.length) {
-      return res.status(200).json({
-        weeks: [],
-        entities: [],
-        phase_by_week: [],
-      });
-    }
-    const rangeStart = weeks[0];
-    const rangeEnd = addCalendarDays(weeks[weeks.length - 1], 6);
 
     const { data: entityRows, error: entitiesError } = await supabase
       .from('monitored_entities')
@@ -2069,6 +2098,25 @@ router.get('/competitor-activity-weekly', async (req, res) => {
 
     const entitiesMeta = Array.isArray(entityRows) ? entityRows : [];
     const entityIds = entitiesMeta.map((e) => e.id).filter(Boolean);
+
+    const current_week_partial = await buildCurrentWeekPartial(entityIds);
+
+    if (!weeks.length) {
+      return res.status(200).json({
+        weeks: [],
+        entities: entitiesMeta.map((ent) => ({
+          entity_id: String(ent.id),
+          name: ent.name || 'Entidad',
+          total_events: 0,
+          series: [],
+        })),
+        phase_by_week: [],
+        current_week_partial,
+      });
+    }
+
+    const rangeStart = weeks[0];
+    const rangeEnd = addCalendarDays(weeks[weeks.length - 1], 6);
 
     const eventRows = await loadMovementEventsForEntities(
       entityIds,
@@ -2158,7 +2206,12 @@ router.get('/competitor-activity-weekly', async (req, res) => {
         return String(a.name).localeCompare(String(b.name), 'es');
       });
 
-    return res.status(200).json({ weeks, entities, phase_by_week });
+    return res.status(200).json({
+      weeks,
+      entities,
+      phase_by_week,
+      current_week_partial,
+    });
   } catch (err) {
     const message = err && err.message ? err.message : 'Internal error';
     logger.error('GET /reports/competitor-activity-weekly unexpected', {

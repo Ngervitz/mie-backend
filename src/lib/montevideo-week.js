@@ -27,6 +27,55 @@ function formatYmdMontevideo(date = new Date()) {
 }
 
 /**
+ * Instant as ISO-like local timestamp in America/Montevideo (offset from Intl, not hardcoded).
+ * Example: 2026-08-07T10:15:30-03:00
+ * @param {Date} [date]
+ */
+function formatInstantMontevideo(date = new Date()) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+  });
+  /** @type {Record<string, string>} */
+  const bag = {};
+  dtf.formatToParts(date).forEach((part) => {
+    if (part.type !== 'literal') bag[part.type] = part.value;
+  });
+  let offset = String(bag.timeZoneName || 'GMT')
+    .replace(/^GMT/i, '')
+    .replace(/^UTC/i, '');
+  if (!offset) offset = '+00:00';
+  if (/^[+-]\d{1,2}$/.test(offset)) {
+    offset = offset[0] + offset.slice(1).padStart(2, '0') + ':00';
+  } else if (/^[+-]\d{2}$/.test(offset)) {
+    offset = offset + ':00';
+  } else if (/^[+-]\d{2}\d{2}$/.test(offset)) {
+    offset = offset.slice(0, 3) + ':' + offset.slice(3);
+  }
+  return (
+    bag.year +
+    '-' +
+    bag.month +
+    '-' +
+    bag.day +
+    'T' +
+    bag.hour +
+    ':' +
+    bag.minute +
+    ':' +
+    bag.second +
+    offset
+  );
+}
+
+/**
  * Weekday short name (Mon..Sun) for a civil YMD interpreted in Montevideo.
  * Uruguay is UTC-3 year-round; midday UTC maps to local morning/noon.
  * @param {string} ymd
@@ -80,6 +129,7 @@ function mondayOfYmd(ymd) {
 
 module.exports = {
   formatYmdMontevideo,
+  formatInstantMontevideo,
   weekdayShortForYmd,
   addCalendarDays,
   daysBackToMonday,

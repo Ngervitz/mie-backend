@@ -2049,9 +2049,17 @@ function isActivityWeeklyPredictionDatasetId(id) {
   return String(id || '').endsWith('-prediction');
 }
 
+function isActivityWeeklyPartialDatasetId(id) {
+  return String(id || '').endsWith('-partial');
+}
+
 function setActivityWeeklyEntityDatasetsHidden(entityId, hidden) {
   if (!activityWeeklyChart) return;
-  const ids = [String(entityId), String(entityId) + '-prediction'];
+  const ids = [
+    String(entityId),
+    String(entityId) + '-prediction',
+    String(entityId) + '-partial',
+  ];
   ids.forEach(function (id) {
     const datasetIndex = activityWeeklyChart.data.datasets.findIndex(
       function (dataset) {
@@ -2139,6 +2147,60 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
         historical_avg: hist,
         predicted_probability: prob,
       },
+    });
+  });
+  return out;
+}
+
+/**
+ * Hollow "en curso" point at the prediction week X — only when
+ * current_week_partial.week_of === predictionWeek. Iterates all
+ * counts_by_entity keys (0 is a valid count).
+ */
+function buildActivityWeeklyPartialDatasets(predictionWeek) {
+  const partial =
+    activityWeeklyData && activityWeeklyData.current_week_partial
+      ? activityWeeklyData.current_week_partial
+      : null;
+  if (!partial || !predictionWeek) return [];
+  if (String(partial.week_of) !== String(predictionWeek)) return [];
+  const counts = partial.counts_by_entity;
+  if (!counts || typeof counts !== 'object') return [];
+
+  const nameById = Object.create(null);
+  (Array.isArray(activityWeeklyData.entities)
+    ? activityWeeklyData.entities
+    : []
+  ).forEach(function (ent) {
+    if (!ent || ent.entity_id == null) return;
+    nameById[String(ent.entity_id)] = ent.name || '';
+  });
+
+  const out = [];
+  Object.keys(counts).forEach(function (entityId) {
+    if (!Object.prototype.hasOwnProperty.call(counts, entityId)) return;
+    const count = Number(counts[entityId]);
+    if (!Number.isFinite(count)) return;
+
+    const name = nameById[entityId] || '';
+    // Same key as real series / toggles: colorForString(ent.name || id)
+    const color = colorForString(name || entityId);
+
+    out.push({
+      id: entityId + '-partial',
+      label: (name || 'Entidad') + ' (en curso)',
+      data: [{ x: String(predictionWeek), y: count }],
+      showLine: false,
+      borderColor: color,
+      backgroundColor: '#ffffff',
+      pointRadius: 5,
+      pointHoverRadius: 6,
+      pointBackgroundColor: '#ffffff',
+      pointBorderColor: color,
+      pointBorderWidth: 2,
+      yAxisID: 'y',
+      hidden: activityWeeklyChecked[entityId] === false,
+      _partialMeta: { count: count },
     });
   });
   return out;
@@ -2470,6 +2532,9 @@ function mountCompetitorActivityWeeklyChart() {
     hasPredictionWeek ? lastRealWeek : null,
     hasPredictionWeek ? nextWeek : null,
   );
+  const partialDatasets = hasPredictionWeek
+    ? buildActivityWeeklyPartialDatasets(nextWeek)
+    : [];
 
   const phaseColors = chartLabels.map(function (w) {
     if (weeks.indexOf(w) === -1) return 'transparent';
@@ -2515,6 +2580,9 @@ function mountCompetitorActivityWeeklyChart() {
   predictionDatasets.forEach(function (ds) {
     datasets.push(ds);
   });
+  partialDatasets.forEach(function (ds) {
+    datasets.push(ds);
+  });
 
   datasets.push({
     id: ACTIVITY_WEEKLY_PHASE_ID,
@@ -2550,6 +2618,7 @@ function mountCompetitorActivityWeeklyChart() {
           activityWeeklyChart.data.datasets[elements[0].datasetIndex];
         if (!ds || !ds.id) return;
         if (isActivityWeeklyPredictionDatasetId(ds.id)) return;
+        if (isActivityWeeklyPartialDatasetId(ds.id)) return;
         activityWeeklyHighlightId =
           activityWeeklyHighlightId === ds.id ? null : ds.id;
         applyActivityWeeklyHighlightStyles();
@@ -2566,6 +2635,9 @@ function mountCompetitorActivityWeeklyChart() {
               if (!items || !items.length) return '';
               const week = String(items[0].label || '');
               const ds = items[0].dataset || {};
+              if (isActivityWeeklyPartialDatasetId(ds.id)) {
+                return week;
+              }
               if (isActivityWeeklyPredictionDatasetId(ds.id)) {
                 return items[0].dataIndex === 1 ? week : '';
               }
@@ -2586,6 +2658,15 @@ function mountCompetitorActivityWeeklyChart() {
             label: function (item) {
               const week = String(item.label || '');
               const ds = item.dataset || {};
+              if (isActivityWeeklyPartialDatasetId(ds.id)) {
+                const meta = ds._partialMeta || {};
+                const n = Number(meta.count);
+                return (
+                  'En curso (hasta hoy): ' +
+                  (Number.isFinite(n) ? n : item.parsed.y) +
+                  ' eventos'
+                );
+              }
               if (isActivityWeeklyPredictionDatasetId(ds.id)) {
                 if (item.dataIndex !== 1) return null;
                 const meta = ds._predictionMeta || {};

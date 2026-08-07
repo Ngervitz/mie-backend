@@ -397,4 +397,6 @@ module.exports = {
   metricCellToNumber,
   computeConversionRate,
   mapResponseRows,
+  getPropertyId,
+  buildGa4Client,
 };
