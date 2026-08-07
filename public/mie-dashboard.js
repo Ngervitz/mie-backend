@@ -2104,6 +2104,7 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
     const id = String(ent.entity_id);
     const pred = byEntity.get(id);
     if (!pred) return;
+    if (pred.eligibility_status === 'ineligible') return;
 
     const hist = Number(pred.historical_avg);
     const prob = Number(pred.predicted_probability);
@@ -2154,8 +2155,10 @@ function buildActivityWeeklyPredictionDatasets(allEntities, nextWeek) {
 
 /**
  * Hollow "en curso" point at the prediction week X — only when
- * current_week_partial.week_of === predictionWeek. Iterates all
- * counts_by_entity keys (0 is a valid count).
+ * current_week_partial.week_of === predictionWeek.
+ * Same entity scope as -prediction / real lines (visible set): counts_by_entity
+ * may include non-visible actives; those must not get orphan datasets.
+ * 0 is a valid count.
  */
 function buildActivityWeeklyPartialDatasets(predictionWeek) {
   const partial =
@@ -2166,6 +2169,12 @@ function buildActivityWeeklyPartialDatasets(predictionWeek) {
   if (String(partial.week_of) !== String(predictionWeek)) return [];
   const counts = partial.counts_by_entity;
   if (!counts || typeof counts !== 'object') return [];
+
+  const visibleIds = new Set(
+    getActivityWeeklyVisibleEntities(activityWeeklyData).map(function (ent) {
+      return String(ent.entity_id);
+    }),
+  );
 
   const nameById = Object.create(null);
   (Array.isArray(activityWeeklyData.entities)
@@ -2179,6 +2188,7 @@ function buildActivityWeeklyPartialDatasets(predictionWeek) {
   const out = [];
   Object.keys(counts).forEach(function (entityId) {
     if (!Object.prototype.hasOwnProperty.call(counts, entityId)) return;
+    if (!visibleIds.has(entityId)) return;
     const count = Number(counts[entityId]);
     if (!Number.isFinite(count)) return;
 
@@ -2978,15 +2988,41 @@ init();
         const name = prediction && prediction.name
           ? String(prediction.name)
           : 'Entidad';
-        const probability = Number(prediction.predicted_probability);
-        const percentage = Number.isFinite(probability)
-          ? Math.round(probability * 100) + '%'
-          : '—';
-        const possiblePeak = prediction.predicted_label === true;
-        const badgeClass = possiblePeak ? ' email-badge--sending' : '';
-        const badgeText = possiblePeak
-          ? 'Posible pico'
-          : 'Sin cambios esperados';
+        const status =
+          prediction && prediction.eligibility_status != null
+            ? String(prediction.eligibility_status)
+            : null;
+        const isIneligible = status === 'ineligible';
+        const isLowConfidence = status === 'low_confidence';
+
+        let percentage;
+        let badgeHtml;
+        if (isIneligible) {
+          percentage = 'Sin datos suficientes';
+          badgeHtml =
+            '<span class="email-badge">Sin datos suficientes</span>';
+        } else {
+          const probability = Number(prediction.predicted_probability);
+          percentage = Number.isFinite(probability)
+            ? Math.round(probability * 100) + '%'
+            : '—';
+          const possiblePeak = prediction.predicted_label === true;
+          const badgeClass = possiblePeak ? ' email-badge--sending' : '';
+          const badgeText = possiblePeak
+            ? 'Posible pico'
+            : 'Sin cambios esperados';
+          badgeHtml =
+            '<span class="email-badge' +
+            badgeClass +
+            '">' +
+            escapeHtml(badgeText) +
+            '</span>';
+          if (isLowConfidence) {
+            badgeHtml +=
+              ' <span class="email-badge email-badge--low-confidence">' +
+              'Baja confianza</span>';
+          }
+        }
         const avatar = renderGaugeAvatar({
           entityName: name,
           websiteDomain: prediction.website_domain || null,
@@ -3004,11 +3040,9 @@ init();
           '<td>' +
           escapeHtml(percentage) +
           '</td>' +
-          '<td><span class="email-badge' +
-          badgeClass +
-          '">' +
-          escapeHtml(badgeText) +
-          '</span></td>' +
+          '<td>' +
+          badgeHtml +
+          '</td>' +
           '<td><button type="button" class="btn ml-note-toggle" ' +
           'data-entity-id="' +
           escapeHtml(entityId) +
