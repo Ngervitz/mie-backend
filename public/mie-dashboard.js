@@ -2208,7 +2208,12 @@ function countWeeksWithAnyEvents(data) {
 
 function getActivityWeeklyVisibleEntities(data) {
   const entities = Array.isArray(data && data.entities) ? data.entities : [];
-  if (activityWeeklyShowAll || entities.length <= 5) return entities;
+  if (activityWeeklyShowAll) {
+    return entities.slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+    });
+  }
+  if (entities.length <= 5) return entities;
   return entities.slice(0, 5);
 }
 
@@ -2453,7 +2458,7 @@ function mountCompetitorActivityWeeklyChart() {
   const nextWeek =
     weeks.length > 0 ? shiftDate(weeks[weeks.length - 1], 7) : null;
   const predictionDatasets = nextWeek
-    ? buildActivityWeeklyPredictionDatasets(allEntities, nextWeek)
+    ? buildActivityWeeklyPredictionDatasets(visible, nextWeek)
     : [];
   const chartLabels =
     predictionDatasets.length > 0 && nextWeek
