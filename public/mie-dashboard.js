@@ -3071,12 +3071,20 @@ init();
 
   function renderMarketPatternCard(hypothesis, evaluation) {
     const name = escapeHtml(hypothesis.hypothesis_name || '—');
+    const hypothesisCode =
+      hypothesis && hypothesis.id != null ? 'H' + String(hypothesis.id) : null;
+    const codeHtml = hypothesisCode
+      ? '<span class="ml-pattern-code">' +
+        escapeHtml(hypothesisCode) +
+        '</span>'
+      : '';
     const isActive = hypothesis.active !== false;
 
     if (!isActive) {
       return (
         '<article class="ml-pattern-card is-paused">' +
         '<h3 class="ml-pattern-name">' +
+        codeHtml +
         name +
         '</h3>' +
         '<p class="ml-pattern-pause">' +
@@ -3137,6 +3145,7 @@ init();
       escapeHtml(statusKey) +
       '">' +
       '<h3 class="ml-pattern-name">' +
+      codeHtml +
       '<span class="ml-pattern-status-icon" aria-hidden="true">' +
       statusIcon +
       '</span>' +

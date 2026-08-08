@@ -1843,7 +1843,8 @@
 
 #mie-dashboard-app #ml-predictions-landing .ml-market-patterns {
   margin-top: 28px;
-  padding-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 #mie-dashboard-app #ml-predictions-landing .ml-market-patterns-title {
@@ -1920,6 +1921,21 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+#mie-dashboard-app #ml-predictions-landing .ml-pattern-code {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  align-self: center;
 }
 
 #mie-dashboard-app #ml-predictions-landing .ml-pattern-status-icon {
