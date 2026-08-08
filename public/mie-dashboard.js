@@ -3002,8 +3002,194 @@ init();
   const mlRecentNotesList = document.getElementById(
     'ml-recent-notes-list',
   );
+  const mlMarketPatterns = document.getElementById('ml-market-patterns');
 
   let currentMlData = null;
+
+  const PATTERN_STATUS_LABELS = {
+    insufficient_support: 'Acumulando evidencia',
+    candidate: 'En validación',
+    validated: 'Patrón confirmado',
+  };
+
+  function hideMarketPatterns() {
+    if (!mlMarketPatterns) return;
+    mlMarketPatterns.hidden = true;
+    mlMarketPatterns.innerHTML = '';
+  }
+
+  /** Pause copy for active=false — never implies statistical failure. */
+  function patternPauseReason(hypothesis) {
+    const cj =
+      hypothesis && hypothesis.condition_json && typeof hypothesis.condition_json === 'object'
+        ? hypothesis.condition_json
+        : null;
+    const fromJson =
+      (cj && (cj.pause_reason || cj.inactive_reason || cj.paused_reason || cj.pauseReason)) ||
+      null;
+    if (typeof fromJson === 'string' && fromJson.trim()) {
+      const raw = fromJson.trim();
+      return raw.toLowerCase().startsWith('pausado') ? raw : 'Pausado: ' + raw;
+    }
+    return 'Pausado: fuente de datos no disponible';
+  }
+
+  function pickLatestEvaluation(evals) {
+    const list = Array.isArray(evals) ? evals.slice() : [];
+    list.sort(function (a, b) {
+      const ta = Date.parse(a && a.evaluated_at) || 0;
+      const tb = Date.parse(b && b.evaluated_at) || 0;
+      if (tb !== ta) return tb - ta;
+      return (Number(b && b.run_version) || 0) - (Number(a && a.run_version) || 0);
+    });
+    return list[0] || null;
+  }
+
+  function formatPatternLift(lift) {
+    const n = Number(lift);
+    if (!Number.isFinite(n)) return null;
+    const rounded = Math.round(n * 10) / 10;
+    const text = Number.isInteger(rounded)
+      ? String(rounded)
+      : rounded.toFixed(1);
+    return text + '× más probable';
+  }
+
+  function renderMarketPatternCard(hypothesis, evaluation) {
+    const name = escapeHtml(hypothesis.hypothesis_name || '—');
+    const isActive = hypothesis.active !== false;
+
+    if (!isActive) {
+      return (
+        '<article class="ml-pattern-card is-paused">' +
+        '<h3 class="ml-pattern-name">' +
+        name +
+        '</h3>' +
+        '<p class="ml-pattern-pause">' +
+        escapeHtml(patternPauseReason(hypothesis)) +
+        '</p>' +
+        '</article>'
+      );
+    }
+
+    const statusKey =
+      evaluation && PATTERN_STATUS_LABELS[evaluation.validation_status]
+        ? evaluation.validation_status
+        : 'insufficient_support';
+    const statusLabel = PATTERN_STATUS_LABELS[statusKey];
+    const supportCount = evaluation
+      ? Number(evaluation.support_count) || 0
+      : 0;
+    const minSupport = Number(hypothesis.min_support_required) || 0;
+    const supportPlain =
+      escapeHtml(String(supportCount)) +
+      ' de ' +
+      escapeHtml(String(minSupport)) +
+      ' semanas mínimas';
+
+    let bodyHtml =
+      '<p class="ml-pattern-support">' + supportPlain + '</p>';
+
+    if (statusKey === 'validated' && evaluation) {
+      const liftText = formatPatternLift(evaluation.lift);
+      const periodStart = evaluation.data_period_start || '—';
+      const periodEnd = evaluation.data_period_end || '—';
+      // Lift and support share one line at equal visual weight — never lift alone.
+      const validatedLine = liftText
+        ? liftText +
+          ' — observado en ' +
+          supportCount +
+          ' casos · validado sobre ' +
+          periodStart +
+          '–' +
+          periodEnd
+        : 'Observado en ' +
+          supportCount +
+          ' casos · validado sobre ' +
+          periodStart +
+          '–' +
+          periodEnd;
+      bodyHtml =
+        '<p class="ml-pattern-validated">' +
+        escapeHtml(validatedLine) +
+        '</p>';
+    }
+
+    return (
+      '<article class="ml-pattern-card is-' +
+      escapeHtml(statusKey) +
+      '">' +
+      '<h3 class="ml-pattern-name">' +
+      name +
+      '</h3>' +
+      '<span class="ml-pattern-badge is-' +
+      escapeHtml(statusKey) +
+      '">' +
+      escapeHtml(statusLabel) +
+      '</span>' +
+      bodyHtml +
+      '</article>'
+    );
+  }
+
+  async function loadMarketPatterns() {
+    if (!mlMarketPatterns) return;
+    hideMarketPatterns();
+    try {
+      const hypotheses = await supabaseRestGet(
+        'signal_hypotheses?select=id,hypothesis_name,min_support_required,active,condition_json&order=id.asc',
+      );
+      if (!Array.isArray(hypotheses) || hypotheses.length === 0) {
+        return;
+      }
+
+      const ids = hypotheses
+        .map(function (h) {
+          return h && h.id != null ? String(h.id) : '';
+        })
+        .filter(Boolean);
+      let evaluations = [];
+      if (ids.length) {
+        evaluations = await supabaseRestGet(
+          'signal_pattern_evaluations?select=' +
+            'id,hypothesis_id,data_period_start,data_period_end,run_version,' +
+            'support_count,lift,validation_status,evaluated_at' +
+            '&hypothesis_id=in.(' +
+            ids.join(',') +
+            ')' +
+            '&order=evaluated_at.desc',
+        );
+      }
+      if (!Array.isArray(evaluations)) evaluations = [];
+
+      const byHypothesis = new Map();
+      evaluations.forEach(function (row) {
+        const hid = row && row.hypothesis_id;
+        if (hid == null) return;
+        if (!byHypothesis.has(hid)) byHypothesis.set(hid, []);
+        byHypothesis.get(hid).push(row);
+      });
+
+      const cardsHtml = hypotheses
+        .map(function (h) {
+          const latest = pickLatestEvaluation(byHypothesis.get(h.id) || []);
+          return renderMarketPatternCard(h, latest);
+        })
+        .join('');
+
+      if (!cardsHtml) return;
+
+      mlMarketPatterns.innerHTML =
+        '<h2 class="ml-market-patterns-title">Patrones de mercado</h2>' +
+        '<div class="ml-pattern-card-grid">' +
+        cardsHtml +
+        '</div>';
+      mlMarketPatterns.hidden = false;
+    } catch (ignore) {
+      // Missing tables, RLS, or empty catalog → clean absence (no decorative empty state).
+      hideMarketPatterns();
+    }
+  }
 
   function formatMlNoteDate(value) {
     if (!value) return '—';
@@ -3292,6 +3478,7 @@ init();
       await Promise.all([
         loadRunNotes(data.model_version),
         loadRecentMlNotes(),
+        loadMarketPatterns(),
       ]);
     } catch (error) {
       if (mlStatus) {
@@ -3299,6 +3486,8 @@ init();
           'Error: ' +
           (error && error.message ? error.message : 'Error desconocido');
       }
+      // Patterns are independent of the predictions endpoint.
+      loadMarketPatterns();
     }
   }
 
