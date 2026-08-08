@@ -3012,6 +3012,20 @@ init();
     validated: 'Patrón confirmado',
   };
 
+  /** Same emoji system as ML explainer bullets (💡📊🧮🔎) — no new icon format. */
+  const PATTERN_STATUS_ICONS = {
+    insufficient_support: '⏳',
+    candidate: '🔬',
+    validated: '✅',
+  };
+
+  /** email-badge variants already used on this screen for competitor prediction pills. */
+  const PATTERN_STATUS_BADGE_CLASS = {
+    insufficient_support: 'email-badge',
+    candidate: 'email-badge email-badge--sending',
+    validated: 'email-badge email-badge--completed',
+  };
+
   function hideMarketPatterns() {
     if (!mlMarketPatterns) return;
     mlMarketPatterns.hidden = true;
@@ -3077,6 +3091,9 @@ init();
         ? evaluation.validation_status
         : 'insufficient_support';
     const statusLabel = PATTERN_STATUS_LABELS[statusKey];
+    const statusIcon = PATTERN_STATUS_ICONS[statusKey] || '⏳';
+    const badgeClass =
+      PATTERN_STATUS_BADGE_CLASS[statusKey] || 'email-badge';
     const supportCount = evaluation
       ? Number(evaluation.support_count) || 0
       : 0;
@@ -3120,10 +3137,13 @@ init();
       escapeHtml(statusKey) +
       '">' +
       '<h3 class="ml-pattern-name">' +
+      '<span class="ml-pattern-status-icon" aria-hidden="true">' +
+      statusIcon +
+      '</span>' +
       name +
       '</h3>' +
-      '<span class="ml-pattern-badge is-' +
-      escapeHtml(statusKey) +
+      '<span class="' +
+      badgeClass +
       '">' +
       escapeHtml(statusLabel) +
       '</span>' +
@@ -3168,6 +3188,26 @@ init();
 
       mlMarketPatterns.innerHTML =
         '<h2 class="ml-market-patterns-title">Patrones de mercado</h2>' +
+        '<div class="ml-market-patterns-explainer">' +
+        '<p class="ga4-summary-note text-muted">' +
+        '💡 Un patrón de mercado es una hipótesis que el sistema evalúa con ' +
+        'evidencia acumulada semana a semana (por ejemplo, si la visibilidad ' +
+        'en IA se asocia a más tráfico orgánico).' +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '📊 Acumulando evidencia = todavía no llega al soporte mínimo. ' +
+        'En validación = hay señales, pero aún no confirma. ' +
+        'Patrón confirmado = pasó el umbral de soporte y lift.' +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '🧮 Hoy no hay ningún patrón confirmado: el sistema recién empieza a ' +
+        'acumular datos y las hipótesis aparecen en progreso a propósito.' +
+        '</p>' +
+        '<p class="ga4-summary-note text-muted">' +
+        '🔎 Esta vista muestra los tres estados para ver cómo crece la ' +
+        'evidencia; no es un resumen ejecutivo de patrones ya validados.' +
+        '</p>' +
+        '</div>' +
         '<div class="ml-pattern-card-grid">' +
         cardsHtml +
         '</div>';
