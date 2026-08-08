@@ -16,6 +16,7 @@ const API_PATH_PREFIXES = [
   '/email',
   '/ai-visibility',
   '/competitor-activity-predictions',
+  '/market-patterns',
   '/ml-notes',
   '/jobs',
   '/reports',

@@ -3136,44 +3136,31 @@ init();
     if (!mlMarketPatterns) return;
     hideMarketPatterns();
     try {
-      const hypotheses = await supabaseRestGet(
-        'signal_hypotheses?select=id,hypothesis_name,min_support_required,active,condition_json&order=id.asc',
-      );
-      if (!Array.isArray(hypotheses) || hypotheses.length === 0) {
-        return;
-      }
-
-      const ids = hypotheses
-        .map(function (h) {
-          return h && h.id != null ? String(h.id) : '';
-        })
-        .filter(Boolean);
-      let evaluations = [];
-      if (ids.length) {
-        evaluations = await supabaseRestGet(
-          'signal_pattern_evaluations?select=' +
-            'id,hypothesis_id,data_period_start,data_period_end,run_version,' +
-            'support_count,lift,validation_status,evaluated_at' +
-            '&hypothesis_id=in.(' +
-            ids.join(',') +
-            ')' +
-            '&order=evaluated_at.desc',
+      const response = await fetch(API_BASE + '/market-patterns', {
+        headers: { Accept: 'application/json' },
+      });
+      const data = await response.json().catch(function () {
+        return {};
+      });
+      if (!response.ok) {
+        throw new Error(
+          data && data.error
+            ? String(data.error)
+            : 'No se pudieron cargar los patrones de mercado.',
         );
       }
-      if (!Array.isArray(evaluations)) evaluations = [];
 
-      const byHypothesis = new Map();
-      evaluations.forEach(function (row) {
-        const hid = row && row.hypothesis_id;
-        if (hid == null) return;
-        if (!byHypothesis.has(hid)) byHypothesis.set(hid, []);
-        byHypothesis.get(hid).push(row);
-      });
+      const hypotheses = Array.isArray(data.hypotheses) ? data.hypotheses : [];
+      if (!hypotheses.length) return;
 
       const cardsHtml = hypotheses
         .map(function (h) {
-          const latest = pickLatestEvaluation(byHypothesis.get(h.id) || []);
-          return renderMarketPatternCard(h, latest);
+          // Backend already merges latest evaluation (or explicit null).
+          const evaluation =
+            h && Object.prototype.hasOwnProperty.call(h, 'evaluation')
+              ? h.evaluation
+              : null;
+          return renderMarketPatternCard(h, evaluation);
         })
         .join('');
 
@@ -3186,7 +3173,7 @@ init();
         '</div>';
       mlMarketPatterns.hidden = false;
     } catch (ignore) {
-      // Missing tables, RLS, or empty catalog → clean absence (no decorative empty state).
+      // Missing tables or empty catalog → clean absence (no decorative empty state).
       hideMarketPatterns();
     }
   }

@@ -7,6 +7,7 @@ const socialConversationsRouter = require('./routes/social-conversations');
 const liquidityCycleRouter = require('./routes/liquidity-cycle');
 const bcuUsuraRateRouter = require('./routes/bcu-usura-rate');
 const competitorActivityPredictionsRouter = require('./routes/competitor-activity-predictions');
+const marketPatternsRouter = require('./routes/market-patterns');
 const mlNotesRouter = require('./routes/ml-notes');
 const authRouter = require('./routes/auth');
 const { requireAuth } = require('./middleware/auth');
@@ -29,6 +30,7 @@ app.use(
   '/competitor-activity-predictions',
   competitorActivityPredictionsRouter,
 );
+app.use('/market-patterns', marketPatternsRouter);
 app.use('/ml-notes', mlNotesRouter);
 
 app.use((err, req, res, next) => {
