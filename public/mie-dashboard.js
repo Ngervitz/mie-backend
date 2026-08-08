@@ -96,6 +96,16 @@ function shiftDate(dateStr, deltaDays) {
   return `${y}-${m}-${dd}`;
 }
 
+/**
+ * Display-only axis label for competitor-activity weeks.
+ * Internal week_of stays Monday; the X axis shows the Sunday close (Mon + 6).
+ * Uses shiftDate (Y/M/D parts) — never new Date('YYYY-MM-DD').
+ */
+function formatWeekOfAxisLabel(weekOfMonday) {
+  if (!weekOfMonday) return '';
+  return shiftDate(String(weekOfMonday), 6);
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   return String(dateStr);
@@ -2849,7 +2859,15 @@ function mountCompetitorActivityWeeklyChart() {
       scales: {
         x: {
           grid: { color: '#2a2f3a' },
-          ticks: { color: '#9aa3b2', maxRotation: 0 },
+          ticks: {
+            color: '#9aa3b2',
+            maxRotation: 0,
+            // Labels array stays Monday week_of (matching / tooltips / prediction x).
+            // Tick text only: Sunday close for every weekly slot including prediction.
+            callback: function (value) {
+              return formatWeekOfAxisLabel(this.getLabelForValue(value));
+            },
+          },
         },
         y: {
           beginAtZero: true,
