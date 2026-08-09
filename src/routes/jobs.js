@@ -20,6 +20,7 @@ const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
 const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
 const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
+const { runSerpImportSync } = require('../jobs/serpImportSync');
 const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
@@ -1228,6 +1229,36 @@ router.post('/run-liquidity-cycle-sync', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+/**
+ * POST /jobs/run-serp-import-sync
+ * Active serp_monitored_queries → Serper /search → importGoogleSerpJson.
+ * Auth: same /jobs layer (session cookie or X-Cron-Key).
+ */
+router.post('/run-serp-import-sync', async (req, res) => {
+  logger.info('POST /jobs/run-serp-import-sync — started');
+  try {
+    const result = await runSerpImportSync();
+    logger.info('serp_import_sync finished', {
+      totalProcessed: result.totalProcessed,
+      imported: result.imported,
+      duplicated: result.duplicated,
+      noResults: result.noResults,
+      errors: result.errors,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('serp_import_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
     });
   }
 });

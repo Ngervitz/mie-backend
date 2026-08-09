@@ -30,6 +30,23 @@ async function listSerpMonitoredQueries() {
   return { queries: (data || []).map(mapQueryRow) };
 }
 
+/** Active catalog rows only (Serper sync job). */
+async function listActiveSerpMonitoredQueries() {
+  const { data, error } = await supabase
+    .from('serp_monitored_queries')
+    .select('id, query_text, query_text_normalized, active, notes, created_at')
+    .eq('active', true)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw new Error(
+      `Failed to list active serp_monitored_queries: ${error.message}`,
+    );
+  }
+
+  return { queries: (data || []).map(mapQueryRow) };
+}
+
 async function createSerpMonitoredQuery({ queryText, notes } = {}) {
   const raw = queryText != null ? String(queryText).trim() : '';
   if (!raw) {
@@ -160,6 +177,7 @@ async function patchSerpMonitoredQuery(id, patch = {}) {
 
 module.exports = {
   listSerpMonitoredQueries,
+  listActiveSerpMonitoredQueries,
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
   mapQueryRow,

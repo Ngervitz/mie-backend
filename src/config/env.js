@@ -41,4 +41,6 @@ module.exports = {
   sessionSecret: process.env.SESSION_SECRET || null,
   // Optional at boot. When set, X-Cron-Key header can authenticate cron-job.org.
   cronSecret: process.env.CRON_SECRET || null,
+  // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
+  serperApiKey: process.env.SERPER_API_KEY || null,
 };
