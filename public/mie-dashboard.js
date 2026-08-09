@@ -5534,16 +5534,18 @@ init();
   const entityPresenceStatusEl = document.getElementById(
     'serp-entity-presence-status',
   );
-  const entityPresenceBlocks = document.getElementById(
-    'serp-entity-presence-blocks',
+  const entityPresenceSummaryEl = document.getElementById(
+    'serp-entity-presence-summary',
+  );
+  const entityPresenceChartWrap = document.getElementById(
+    'serp-entity-presence-chart-wrap',
   );
   const entityAdsCountEl = document.getElementById('serp-entity-ads-count');
   const entityOrganicCountEl = document.getElementById(
     'serp-entity-organic-count',
   );
-  const entityAdsTableEl = document.getElementById('serp-entity-ads-table');
-  const entityOrganicTableEl = document.getElementById(
-    'serp-entity-organic-table',
+  const entityPresenceCanvas = document.getElementById(
+    'serp-entity-presence-canvas',
   );
 
   if (!landing || !form) return;
@@ -5556,6 +5558,7 @@ init();
   let selectedFiles = [];
   let queriesBusy = false;
   let entityPresenceBusy = false;
+  let entityPresenceChart = null;
 
   /**
    * Same rules as backend normalizeSearchTerm — presentation filter only.
@@ -5636,47 +5639,52 @@ init();
       : '';
   }
 
-  function renderEntityAppearanceTable(rows, tableEl, kind) {
-    if (!tableEl) return;
-    const list = Array.isArray(rows) ? rows : [];
-    if (!list.length) {
-      tableEl.innerHTML =
-        '<div class="mcl-empty">Sin apariciones en este filtro.</div>';
-      return;
+  function destroyEntityPresenceChart() {
+    if (entityPresenceChart) {
+      entityPresenceChart.destroy();
+      entityPresenceChart = null;
     }
-    const head =
-      kind === 'ad'
-        ? '<th>Fecha</th><th>Query</th><th>Posición</th><th>Placement</th>'
-        : '<th>Fecha</th><th>Query</th><th>Posición</th>';
-    const body = list
-      .map(function (row) {
-        let cells =
-          '<td>' +
-          escapeHtml(formatPresenceDate(row.date)) +
-          '</td>' +
-          '<td class="serp-capture-term">' +
-          escapeHtml(row.search_term || '—') +
-          '</td>' +
-          '<td class="serp-num">' +
-          escapeHtml(String(row.position != null ? row.position : '—')) +
-          '</td>';
-        if (kind === 'ad') {
-          cells +=
-            '<td>' + escapeHtml(row.placement || '—') + '</td>';
-        }
-        return '<tr>' + cells + '</tr>';
-      })
-      .join('');
-    tableEl.innerHTML =
-      '<table class="serp-captures-table"><thead><tr>' +
-      head +
-      '</tr></thead><tbody>' +
-      body +
-      '</tbody></table>';
+  }
+
+  function formatEntityPresenceAxisDate(ms) {
+    const d = new Date(ms);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleDateString('es-UY');
+  }
+
+  function formatEntityPresenceTooltipWhen(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return String(iso);
+    return d.toLocaleString('es-UY', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function chartPointsFromPresence(points) {
+    const list = Array.isArray(points) ? points : [];
+    const out = [];
+    list.forEach(function (p) {
+      const ms = Date.parse(p && p.imported_at);
+      const y = Number(p && p.position);
+      if (!Number.isFinite(ms) || !Number.isFinite(y)) return;
+      out.push({
+        x: ms,
+        y: y,
+        search_term: p.search_term || '',
+        imported_at: p.imported_at,
+        date: p.date || null,
+        capture_id: p.capture_id || null,
+      });
+    });
+    return out;
   }
 
   function renderEntityPresence(data) {
-    if (!entityPresenceBlocks) return;
     const y =
       data && data.totalSuccessCaptures != null
         ? Number(data.totalSuccessCaptures)
@@ -5692,23 +5700,149 @@ init();
 
     if (entityAdsCountEl) {
       entityAdsCountEl.textContent =
-        adsX + ' de ' + y + ' corridas';
+        'Ad: ' + adsX + ' de ' + y + ' corridas';
     }
     if (entityOrganicCountEl) {
       entityOrganicCountEl.textContent =
-        orgX + ' de ' + y + ' corridas';
+        'Orgánico: ' + orgX + ' de ' + y + ' corridas';
     }
-    renderEntityAppearanceTable(
-      data && data.ads ? data.ads.appearances : [],
-      entityAdsTableEl,
-      'ad',
+    if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = false;
+
+    destroyEntityPresenceChart();
+    if (!entityPresenceCanvas || typeof window.Chart !== 'function') {
+      setEntityPresenceStatus(
+        'No se pudo cargar Chart.js para el gráfico de presencia.',
+        true,
+      );
+      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+      return;
+    }
+
+    const adData = chartPointsFromPresence(
+      data && data.ads ? data.ads.chartPoints : [],
     );
-    renderEntityAppearanceTable(
-      data && data.organic ? data.organic.appearances : [],
-      entityOrganicTableEl,
-      'organic',
+    const organicData = chartPointsFromPresence(
+      data && data.organic ? data.organic.chartPoints : [],
     );
-    entityPresenceBlocks.hidden = false;
+    const allY = adData
+      .concat(organicData)
+      .map(function (p) {
+        return p.y;
+      });
+    const maxPos = allY.length ? Math.max.apply(null, allY) : 5;
+
+    if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = false;
+
+    entityPresenceChart = new window.Chart(
+      entityPresenceCanvas.getContext('2d'),
+      {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'Posición como Ad',
+              data: adData,
+              borderColor: '#f97316',
+              backgroundColor: '#f97316',
+              pointBackgroundColor: '#f97316',
+              borderWidth: 2,
+              pointRadius: 4,
+              pointHoverRadius: 5,
+              tension: 0,
+              spanGaps: false,
+              showLine: true,
+            },
+            {
+              label: 'Posición como Orgánico',
+              data: organicData,
+              borderColor: '#38bdf8',
+              backgroundColor: '#38bdf8',
+              pointBackgroundColor: '#38bdf8',
+              borderWidth: 2,
+              pointRadius: 4,
+              pointHoverRadius: 5,
+              tension: 0,
+              spanGaps: false,
+              showLine: true,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: false,
+          interaction: {
+            mode: 'nearest',
+            intersect: true,
+          },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: { color: '#9aa3b2' },
+            },
+            tooltip: {
+              callbacks: {
+                // Dataset distinguished by legend color/label — do not repeat Ad/Organic.
+                title: function (items) {
+                  if (!items || !items.length || !items[0].raw) return '';
+                  const raw = items[0].raw;
+                  return formatEntityPresenceTooltipWhen(raw.imported_at);
+                },
+                label: function (item) {
+                  const raw = item.raw || {};
+                  return [
+                    'Query: ' + (raw.search_term || '—'),
+                    'Posición: ' +
+                      (Number.isFinite(Number(raw.y))
+                        ? String(raw.y)
+                        : '—'),
+                  ];
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              type: 'linear',
+              grid: { color: '#2a2f3a' },
+              ticks: {
+                color: '#9aa3b2',
+                maxRotation: 0,
+                callback: function (value) {
+                  return formatEntityPresenceAxisDate(value);
+                },
+              },
+              title: {
+                display: true,
+                text: 'Captura',
+                color: '#9aa3b2',
+              },
+            },
+            y: {
+              reverse: true,
+              min: 0.5,
+              suggestedMax: maxPos + 1,
+              grace: '5%',
+              grid: { color: '#2a2f3a' },
+              ticks: {
+                color: '#9aa3b2',
+                stepSize: 1,
+                callback: function (value) {
+                  if (!Number.isInteger(value)) return '';
+                  return value + '.º';
+                },
+              },
+              title: {
+                display: true,
+                text: 'Posición',
+                color: '#9aa3b2',
+              },
+            },
+          },
+        },
+      },
+    );
   }
 
   async function loadEntityPresenceCompetitors() {
@@ -5754,7 +5888,9 @@ init();
     if (!entityPresenceSelect) return;
     const entityId = String(entityPresenceSelect.value || '').trim();
     if (!entityId) {
-      if (entityPresenceBlocks) entityPresenceBlocks.hidden = true;
+      destroyEntityPresenceChart();
+      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+      if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = true;
       setEntityPresenceStatus('', false);
       return;
     }
@@ -5787,7 +5923,9 @@ init();
       renderEntityPresence(body);
       setEntityPresenceStatus('', false);
     } catch (err) {
-      if (entityPresenceBlocks) entityPresenceBlocks.hidden = true;
+      destroyEntityPresenceChart();
+      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+      if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = true;
       setEntityPresenceStatus(
         err && err.message
           ? err.message

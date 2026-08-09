@@ -1069,7 +1069,9 @@ async function getGoogleSerpEntityPresence({
 
   let capturesQuery = supabase
     .from('google_serp_captures')
-    .select('id, search_term, search_term_normalized, date, parse_status')
+    .select(
+      'id, search_term, search_term_normalized, date, parse_status, imported_at',
+    )
     .eq('parse_status', 'success');
   if (normFilter) {
     capturesQuery = capturesQuery.eq('search_term_normalized', normFilter);
@@ -1083,6 +1085,9 @@ async function getGoogleSerpEntityPresence({
   const realCaptures = captures || [];
   const totalCaptures = realCaptures.length;
   const captureIds = realCaptures.map((c) => c.id);
+  const importedAtByCapture = new Map(
+    realCaptures.map((c) => [c.id, c.imported_at || null]),
+  );
 
   const adAppearances = [];
   const organicAppearances = [];
@@ -1115,6 +1120,7 @@ async function getGoogleSerpEntityPresence({
       if (!matched || matched.id !== entity.id) continue;
 
       const resultType = String(row.result_type || '').toLowerCase();
+      const importedAt = importedAtByCapture.get(row.capture_id) || null;
       if (resultType === 'organic') {
         organicCaptureIds.add(row.capture_id);
         organicAppearances.push({
@@ -1122,6 +1128,7 @@ async function getGoogleSerpEntityPresence({
           date: row.date,
           search_term: row.search_term,
           capture_id: row.capture_id,
+          imported_at: importedAt,
         });
       } else {
         adCaptureIds.add(row.capture_id);
@@ -1131,19 +1138,45 @@ async function getGoogleSerpEntityPresence({
           date: row.date,
           search_term: row.search_term,
           capture_id: row.capture_id,
+          imported_at: importedAt,
         });
       }
     }
   }
 
-  const byDateDesc = (a, b) => {
-    const da = String(a.date || '');
-    const db = String(b.date || '');
-    if (db !== da) return db.localeCompare(da);
-    return (Number(a.position) || 0) - (Number(b.position) || 0);
-  };
-  adAppearances.sort(byDateDesc);
-  organicAppearances.sort(byDateDesc);
+  /**
+   * One chart point per capture (best/lowest position). X counts already use
+   * distinct capture_id; chart must not plot duplicate rows from the same capture.
+   */
+  function bestPositionPoints(appearances) {
+    const best = new Map();
+    for (const row of appearances || []) {
+      const cid = row.capture_id;
+      if (cid == null) continue;
+      const pos = Number(row.position);
+      if (!Number.isFinite(pos)) continue;
+      const prev = best.get(cid);
+      if (!prev || pos < prev.position) {
+        best.set(cid, {
+          position: pos,
+          date: row.date,
+          search_term: row.search_term,
+          capture_id: cid,
+          imported_at: row.imported_at,
+          placement: row.placement != null ? row.placement : undefined,
+        });
+      }
+    }
+    return [...best.values()].sort((a, b) => {
+      const ta = Date.parse(a.imported_at) || 0;
+      const tb = Date.parse(b.imported_at) || 0;
+      if (ta !== tb) return ta - tb;
+      return (Number(a.position) || 0) - (Number(b.position) || 0);
+    });
+  }
+
+  const adPoints = bestPositionPoints(adAppearances);
+  const organicPoints = bestPositionPoints(organicAppearances);
 
   return {
     entity: {
@@ -1157,14 +1190,18 @@ async function getGoogleSerpEntityPresence({
     /** Y — same denominator for ads and organic blocks. */
     totalSuccessCaptures: totalCaptures,
     ads: {
+      /** X — distinct captures with ≥1 ad match (not row count). */
       appearanceCaptureCount: adCaptureIds.size,
       totalSuccessCaptures: totalCaptures,
       appearances: adAppearances,
+      /** One point per capture for timeline chart (min position). */
+      chartPoints: adPoints,
     },
     organic: {
       appearanceCaptureCount: organicCaptureIds.size,
       totalSuccessCaptures: totalCaptures,
       appearances: organicAppearances,
+      chartPoints: organicPoints,
     },
   };
 }

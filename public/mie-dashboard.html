@@ -397,18 +397,15 @@
             </label>
           </div>
           <div id="serp-entity-presence-status" class="mcl-status" aria-live="polite"></div>
-          <div id="serp-entity-presence-summary" class="serp-entity-presence-summary" hidden></div>
-          <div class="serp-entity-presence-blocks" hidden id="serp-entity-presence-blocks">
-            <div class="serp-entity-presence-block">
-              <h3 class="serp-detail-subtitle">Apariciones como Ad</h3>
-              <p id="serp-entity-ads-count" class="serp-entity-presence-count text-muted"></p>
-              <div id="serp-entity-ads-table"></div>
-            </div>
-            <div class="serp-entity-presence-block">
-              <h3 class="serp-detail-subtitle">Apariciones como Orgánico</h3>
-              <p id="serp-entity-organic-count" class="serp-entity-presence-count text-muted"></p>
-              <div id="serp-entity-organic-table"></div>
-            </div>
+          <div class="serp-entity-presence-summary" id="serp-entity-presence-summary" hidden>
+            <p id="serp-entity-ads-count" class="serp-entity-presence-count text-muted"></p>
+            <p id="serp-entity-organic-count" class="serp-entity-presence-count text-muted"></p>
+          </div>
+          <div
+            class="serp-entity-presence-chart-wrap"
+            id="serp-entity-presence-chart-wrap"
+            hidden>
+            <canvas id="serp-entity-presence-canvas"></canvas>
           </div>
         </section>
 
