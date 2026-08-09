@@ -1189,6 +1189,22 @@ async function getGoogleSerpEntityPresence({
     searchTermNormalized: normFilter || null,
     /** Y — same denominator for ads and organic blocks. */
     totalSuccessCaptures: totalCaptures,
+    /**
+     * Success captures in the active filter (for chart X-axis domain even when
+     * the entity has zero appearances). Sorted by imported_at ascending.
+     */
+    captures: realCaptures
+      .map((c) => ({
+        capture_id: c.id,
+        imported_at: c.imported_at || null,
+        date: c.date || null,
+        search_term: c.search_term || null,
+      }))
+      .sort((a, b) => {
+        const ta = Date.parse(a.imported_at) || 0;
+        const tb = Date.parse(b.imported_at) || 0;
+        return ta - tb;
+      }),
     ads: {
       /** X — distinct captures with ≥1 ad match (not row count). */
       appearanceCaptureCount: adCaptureIds.size,

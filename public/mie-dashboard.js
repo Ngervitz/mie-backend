@@ -5543,9 +5543,6 @@ init();
   const entityPresenceTogglesEl = document.getElementById(
     'serp-entity-presence-toggles',
   );
-  const entityPresenceShowAllBtn = document.getElementById(
-    'serp-entity-presence-show-all',
-  );
   const entityPresenceSelectAllBtn = document.getElementById(
     'serp-entity-presence-select-all',
   );
@@ -5568,7 +5565,6 @@ init();
   let entityPresenceCompetitors = [];
   /** Checked state per entity id. Default: unchecked (undefined/false). */
   let entityPresenceChecked = Object.create(null);
-  let entityPresenceShowAll = false;
   /** @type {'ad'|'organic'} */
   let entityPresenceMode = 'ad';
   /** Cache: entityId → last presence payload for current query filter key. */
@@ -5681,32 +5677,6 @@ init();
     });
   }
 
-  function chartPointsFromPresence(points) {
-    const list = Array.isArray(points) ? points : [];
-    const out = [];
-    list.forEach(function (p) {
-      const ms = Date.parse(p && p.imported_at);
-      const y = Number(p && p.position);
-      if (!Number.isFinite(ms) || !Number.isFinite(y)) return;
-      out.push({
-        x: ms,
-        y: y,
-        search_term: p.search_term || '',
-        imported_at: p.imported_at,
-        date: p.date || null,
-        capture_id: p.capture_id || null,
-      });
-    });
-    return out;
-  }
-
-  function getEntityPresenceVisibleCompetitors() {
-    const entities = entityPresenceCompetitors.slice();
-    if (entityPresenceShowAll) return entities;
-    if (entities.length <= 5) return entities;
-    return entities.slice(0, 5);
-  }
-
   function getEntityPresenceCheckedIds() {
     return entityPresenceCompetitors
       .map(function (ent) {
@@ -5717,7 +5687,7 @@ init();
       });
   }
 
-  function entityPresenceAllVisibleUnchecked(ids) {
+  function entityPresenceAllUnchecked(ids) {
     return (
       ids.length > 0 &&
       ids.every(function (id) {
@@ -5726,31 +5696,17 @@ init();
     );
   }
 
-  function syncEntityPresenceShowAllButton() {
-    if (!entityPresenceShowAllBtn) return;
-    if (!(entityPresenceCompetitors.length > 5)) {
-      entityPresenceShowAllBtn.hidden = true;
-      return;
-    }
-    entityPresenceShowAllBtn.hidden = false;
-    entityPresenceShowAllBtn.textContent = entityPresenceShowAll
-      ? 'Mostrar top 5'
-      : 'Mostrar todos';
-  }
-
   function syncEntityPresenceSelectAllButton() {
     if (!entityPresenceSelectAllBtn) return;
-    const visibleIds = getEntityPresenceVisibleCompetitors().map(function (ent) {
+    const ids = entityPresenceCompetitors.map(function (ent) {
       return String(ent.id);
     });
-    if (!visibleIds.length) {
+    if (!ids.length) {
       entityPresenceSelectAllBtn.hidden = true;
       return;
     }
     entityPresenceSelectAllBtn.hidden = false;
-    entityPresenceSelectAllBtn.textContent = entityPresenceAllVisibleUnchecked(
-      visibleIds,
-    )
+    entityPresenceSelectAllBtn.textContent = entityPresenceAllUnchecked(ids)
       ? 'Seleccionar todos'
       : 'Deseleccionar todos';
   }
@@ -5768,6 +5724,65 @@ init();
       entityPresenceSummaryEl.hidden = true;
     }
     setEntityPresenceStatus(message || '', false);
+  }
+
+  /**
+   * Canonical timestamp for chart X: imported_at (ISO) from the presence payload.
+   * Falls back to date (YYYY-MM-DD) only if imported_at is missing.
+   */
+  function entityPresencePointTimeMs(p) {
+    if (!p) return NaN;
+    if (p.imported_at) {
+      const ms = Date.parse(p.imported_at);
+      if (Number.isFinite(ms)) return ms;
+    }
+    if (p.date) {
+      const ms = Date.parse(String(p.date));
+      if (Number.isFinite(ms)) return ms;
+    }
+    return NaN;
+  }
+
+  function chartPointsFromPresence(points) {
+    const list = Array.isArray(points) ? points : [];
+    const out = [];
+    list.forEach(function (p) {
+      const ms = entityPresencePointTimeMs(p);
+      const y = Number(p && p.position);
+      if (!Number.isFinite(ms) || !Number.isFinite(y)) return;
+      out.push({
+        x: ms,
+        y: y,
+        search_term: p.search_term || '',
+        imported_at: p.imported_at || null,
+        date: p.date || null,
+        capture_id: p.capture_id || null,
+      });
+    });
+    return out;
+  }
+
+  function getEntityPresenceFilterMeta(checkedIds) {
+    for (let i = 0; i < checkedIds.length; i += 1) {
+      const data = entityPresenceById[checkedIds[i]];
+      if (!data) continue;
+      const total =
+        data.totalSuccessCaptures != null
+          ? Number(data.totalSuccessCaptures)
+          : 0;
+      const captures = Array.isArray(data.captures) ? data.captures : [];
+      const times = [];
+      captures.forEach(function (c) {
+        const ms = entityPresencePointTimeMs(c);
+        if (Number.isFinite(ms)) times.push(ms);
+      });
+      return {
+        totalSuccessCaptures: total,
+        xMin: times.length ? Math.min.apply(null, times) : null,
+        xMax: times.length ? Math.max.apply(null, times) : null,
+      };
+    }
+    return { totalSuccessCaptures: 0, xMin: null, xMax: null };
   }
 
   function renderEntityPresenceSummary(checkedIds) {
@@ -5827,17 +5842,31 @@ init();
       return;
     }
 
+    const filterMeta = getEntityPresenceFilterMeta(checkedIds);
+    if (!(filterMeta.totalSuccessCaptures > 0)) {
+      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+      setEntityPresenceStatus('Sin corridas para este filtro', false);
+      return;
+    }
+
     const datasets = [];
     let maxPos = 5;
+    let pointCount = 0;
     checkedIds.forEach(function (id) {
       const ent = entityPresenceCompetitors.find(function (e) {
         return String(e.id) === id;
       });
       const name = (ent && ent.name) || id;
-      const block = getEntityPresenceModeBlock(entityPresenceById[id]);
-      const points = chartPointsFromPresence(
-        block && block.chartPoints ? block.chartPoints : [],
-      );
+      const data = entityPresenceById[id];
+      const block = getEntityPresenceModeBlock(data);
+      let rawPoints =
+        block && Array.isArray(block.chartPoints) ? block.chartPoints : null;
+      // Defensive: older payloads without chartPoints can use appearances.
+      if (!rawPoints && block && Array.isArray(block.appearances)) {
+        rawPoints = block.appearances;
+      }
+      const points = chartPointsFromPresence(rawPoints || []);
+      pointCount += points.length;
       points.forEach(function (p) {
         if (p.y > maxPos) maxPos = p.y;
       });
@@ -5858,7 +5887,41 @@ init();
       });
     });
 
+    const xScale = {
+      type: 'linear',
+      grid: { color: '#2a2f3a' },
+      ticks: {
+        color: '#9aa3b2',
+        maxRotation: 0,
+        callback: function (value) {
+          return formatEntityPresenceAxisDate(value);
+        },
+      },
+      title: {
+        display: true,
+        text: 'Captura',
+        color: '#9aa3b2',
+      },
+    };
+    // Force real capture range so empty series do not collapse to epoch (x=0).
+    if (filterMeta.xMin != null && filterMeta.xMax != null) {
+      const pad =
+        filterMeta.xMax > filterMeta.xMin
+          ? (filterMeta.xMax - filterMeta.xMin) * 0.02
+          : 86400000;
+      xScale.min = filterMeta.xMin - pad;
+      xScale.max = filterMeta.xMax + pad;
+    }
+
     if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = false;
+    if (pointCount === 0) {
+      setEntityPresenceStatus(
+        'Sin apariciones de los competidores tildados en este filtro (eje X = corridas del filtro).',
+        false,
+      );
+    } else {
+      setEntityPresenceStatus('', false);
+    }
 
     entityPresenceChart = new window.Chart(
       entityPresenceCanvas.getContext('2d'),
@@ -5874,7 +5937,6 @@ init();
             intersect: true,
           },
           plugins: {
-            // Color/name already shown in checkbox toggles (same as weekly chart).
             legend: { display: false },
             tooltip: {
               callbacks: {
@@ -5885,7 +5947,9 @@ init();
                   return (
                     (ds.label || 'Competidor') +
                     ' · ' +
-                    formatEntityPresenceTooltipWhen(raw.imported_at)
+                    formatEntityPresenceTooltipWhen(
+                      raw.imported_at || raw.date,
+                    )
                   );
                 },
                 label: function (item) {
@@ -5902,22 +5966,7 @@ init();
             },
           },
           scales: {
-            x: {
-              type: 'linear',
-              grid: { color: '#2a2f3a' },
-              ticks: {
-                color: '#9aa3b2',
-                maxRotation: 0,
-                callback: function (value) {
-                  return formatEntityPresenceAxisDate(value);
-                },
-              },
-              title: {
-                display: true,
-                text: 'Captura',
-                color: '#9aa3b2',
-              },
-            },
+            x: xScale,
             y: {
               reverse: true,
               min: 0.5,
@@ -5952,13 +6001,11 @@ init();
     }
     renderEntityPresenceSummary(checkedIds);
     renderEntityPresenceChart(checkedIds);
-    setEntityPresenceStatus('', false);
   }
 
   function renderEntityPresenceToggles() {
     if (!entityPresenceTogglesEl) return;
-    const visible = getEntityPresenceVisibleCompetitors();
-    entityPresenceTogglesEl.innerHTML = visible
+    entityPresenceTogglesEl.innerHTML = entityPresenceCompetitors
       .map(function (ent) {
         const id = String(ent.id);
         const checked = entityPresenceChecked[id] === true;
@@ -5991,25 +6038,22 @@ init();
         });
       });
 
-    syncEntityPresenceShowAllButton();
     syncEntityPresenceSelectAllButton();
   }
 
-  function toggleEntityPresenceSelectAllVisible() {
-    const visibleIds = getEntityPresenceVisibleCompetitors().map(function (ent) {
+  function toggleEntityPresenceSelectAll() {
+    const ids = entityPresenceCompetitors.map(function (ent) {
       return String(ent.id);
     });
-    if (!visibleIds.length) return;
-    const selectAll = entityPresenceAllVisibleUnchecked(visibleIds);
-    visibleIds.forEach(function (id) {
+    if (!ids.length) return;
+    const selectAll = entityPresenceAllUnchecked(ids);
+    ids.forEach(function (id) {
       entityPresenceChecked[id] = selectAll;
     });
     if (entityPresenceTogglesEl) {
       entityPresenceTogglesEl
         .querySelectorAll('input[data-series]')
         .forEach(function (checkbox) {
-          const seriesKey = checkbox.getAttribute('data-series');
-          if (!seriesKey || visibleIds.indexOf(seriesKey) === -1) return;
           checkbox.checked = selectAll;
         });
     }
@@ -6271,16 +6315,9 @@ init();
     historyQueryFilter.addEventListener('change', onSharedQueryFilterChange);
   }
 
-  if (entityPresenceShowAllBtn) {
-    entityPresenceShowAllBtn.addEventListener('click', function () {
-      entityPresenceShowAll = !entityPresenceShowAll;
-      renderEntityPresenceToggles();
-    });
-  }
-
   if (entityPresenceSelectAllBtn) {
     entityPresenceSelectAllBtn.addEventListener('click', function () {
-      toggleEntityPresenceSelectAllVisible();
+      toggleEntityPresenceSelectAll();
     });
   }
 
