@@ -376,31 +376,62 @@
         <div id="serp-import-summary" class="serp-summary" hidden></div>
 
         <section class="serp-entity-presence-section" id="serp-entity-presence-section">
-          <h2 class="cov-section-title">Presencia observada en SERP</h2>
+          <div class="section-title-row">
+            <h2 class="cov-section-title">Presencia observada en SERP</h2>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              id="serp-entity-presence-show-all"
+              hidden>
+              Mostrar todos
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              id="serp-entity-presence-select-all"
+              hidden>
+              Deseleccionar todos
+            </button>
+          </div>
           <p class="text-muted serp-entity-presence-explainer ga4-summary-note">
             💡 Esta vista muestra presencia observada en las SERP monitoreadas
             (apariciones en ads u orgánicos parseados), no la actividad
             publicitaria absoluta del competidor fuera de estas búsquedas.
           </p>
           <div class="serp-entity-presence-controls">
-            <label class="mcl-field" for="serp-entity-presence-select">
-              <span class="mcl-field-label">Competidor</span>
-              <select id="serp-entity-presence-select" class="mcl-input">
-                <option value="">Elegí un competidor…</option>
-              </select>
-            </label>
             <label class="mcl-field" for="serp-history-query-filter">
               <span class="mcl-field-label">Filtrar por query</span>
               <select id="serp-history-query-filter" class="mcl-input">
                 <option value="">Todas</option>
               </select>
             </label>
+            <fieldset class="serp-entity-presence-mode" id="serp-entity-presence-mode">
+              <legend class="mcl-field-label">Tipo de resultado</legend>
+              <label class="serp-entity-presence-mode-option">
+                <input
+                  type="radio"
+                  name="serp-entity-presence-mode"
+                  value="ad"
+                  checked />
+                Ad
+              </label>
+              <label class="serp-entity-presence-mode-option">
+                <input
+                  type="radio"
+                  name="serp-entity-presence-mode"
+                  value="organic" />
+                Orgánico
+              </label>
+            </fieldset>
           </div>
+          <div
+            id="serp-entity-presence-toggles"
+            class="competitor-activity-weekly-toggles"></div>
           <div id="serp-entity-presence-status" class="mcl-status" aria-live="polite"></div>
-          <div class="serp-entity-presence-summary" id="serp-entity-presence-summary" hidden>
-            <p id="serp-entity-ads-count" class="serp-entity-presence-count text-muted"></p>
-            <p id="serp-entity-organic-count" class="serp-entity-presence-count text-muted"></p>
-          </div>
+          <div
+            class="serp-entity-presence-summary"
+            id="serp-entity-presence-summary"
+            hidden></div>
           <div
             class="serp-entity-presence-chart-wrap"
             id="serp-entity-presence-chart-wrap"

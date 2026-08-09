@@ -5528,9 +5528,6 @@ init();
   const historyQueryFilter = document.getElementById(
     'serp-history-query-filter',
   );
-  const entityPresenceSelect = document.getElementById(
-    'serp-entity-presence-select',
-  );
   const entityPresenceStatusEl = document.getElementById(
     'serp-entity-presence-status',
   );
@@ -5540,12 +5537,20 @@ init();
   const entityPresenceChartWrap = document.getElementById(
     'serp-entity-presence-chart-wrap',
   );
-  const entityAdsCountEl = document.getElementById('serp-entity-ads-count');
-  const entityOrganicCountEl = document.getElementById(
-    'serp-entity-organic-count',
-  );
   const entityPresenceCanvas = document.getElementById(
     'serp-entity-presence-canvas',
+  );
+  const entityPresenceTogglesEl = document.getElementById(
+    'serp-entity-presence-toggles',
+  );
+  const entityPresenceShowAllBtn = document.getElementById(
+    'serp-entity-presence-show-all',
+  );
+  const entityPresenceSelectAllBtn = document.getElementById(
+    'serp-entity-presence-select-all',
+  );
+  const entityPresenceModeEl = document.getElementById(
+    'serp-entity-presence-mode',
   );
 
   if (!landing || !form) return;
@@ -5559,6 +5564,17 @@ init();
   let queriesBusy = false;
   let entityPresenceBusy = false;
   let entityPresenceChart = null;
+  /** @type {Array<{id:string,name:string}>} */
+  let entityPresenceCompetitors = [];
+  /** Checked state per entity id. Default: unchecked (undefined/false). */
+  let entityPresenceChecked = Object.create(null);
+  let entityPresenceShowAll = false;
+  /** @type {'ad'|'organic'} */
+  let entityPresenceMode = 'ad';
+  /** Cache: entityId → last presence payload for current query filter key. */
+  let entityPresenceById = Object.create(null);
+  let entityPresenceCacheKey = '';
+  let entityPresenceRequestSeq = 0;
 
   /**
    * Same rules as backend normalizeSearchTerm — presentation filter only.
@@ -5684,31 +5700,124 @@ init();
     return out;
   }
 
-  function renderEntityPresence(data) {
-    const y =
-      data && data.totalSuccessCaptures != null
-        ? Number(data.totalSuccessCaptures)
-        : 0;
-    const adsX =
-      data && data.ads && data.ads.appearanceCaptureCount != null
-        ? Number(data.ads.appearanceCaptureCount)
-        : 0;
-    const orgX =
-      data && data.organic && data.organic.appearanceCaptureCount != null
-        ? Number(data.organic.appearanceCaptureCount)
-        : 0;
+  function getEntityPresenceVisibleCompetitors() {
+    const entities = entityPresenceCompetitors.slice();
+    if (entityPresenceShowAll) return entities;
+    if (entities.length <= 5) return entities;
+    return entities.slice(0, 5);
+  }
 
-    if (entityAdsCountEl) {
-      entityAdsCountEl.textContent =
-        'Ad: ' + adsX + ' de ' + y + ' corridas';
-    }
-    if (entityOrganicCountEl) {
-      entityOrganicCountEl.textContent =
-        'Orgánico: ' + orgX + ' de ' + y + ' corridas';
-    }
-    if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = false;
+  function getEntityPresenceCheckedIds() {
+    return entityPresenceCompetitors
+      .map(function (ent) {
+        return String(ent.id);
+      })
+      .filter(function (id) {
+        return entityPresenceChecked[id] === true;
+      });
+  }
 
+  function entityPresenceAllVisibleUnchecked(ids) {
+    return (
+      ids.length > 0 &&
+      ids.every(function (id) {
+        return entityPresenceChecked[id] !== true;
+      })
+    );
+  }
+
+  function syncEntityPresenceShowAllButton() {
+    if (!entityPresenceShowAllBtn) return;
+    if (!(entityPresenceCompetitors.length > 5)) {
+      entityPresenceShowAllBtn.hidden = true;
+      return;
+    }
+    entityPresenceShowAllBtn.hidden = false;
+    entityPresenceShowAllBtn.textContent = entityPresenceShowAll
+      ? 'Mostrar top 5'
+      : 'Mostrar todos';
+  }
+
+  function syncEntityPresenceSelectAllButton() {
+    if (!entityPresenceSelectAllBtn) return;
+    const visibleIds = getEntityPresenceVisibleCompetitors().map(function (ent) {
+      return String(ent.id);
+    });
+    if (!visibleIds.length) {
+      entityPresenceSelectAllBtn.hidden = true;
+      return;
+    }
+    entityPresenceSelectAllBtn.hidden = false;
+    entityPresenceSelectAllBtn.textContent = entityPresenceAllVisibleUnchecked(
+      visibleIds,
+    )
+      ? 'Seleccionar todos'
+      : 'Deseleccionar todos';
+  }
+
+  function getEntityPresenceModeBlock(data) {
+    if (!data) return null;
+    return entityPresenceMode === 'organic' ? data.organic : data.ads;
+  }
+
+  function clearEntityPresenceView(message) {
     destroyEntityPresenceChart();
+    if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+    if (entityPresenceSummaryEl) {
+      entityPresenceSummaryEl.innerHTML = '';
+      entityPresenceSummaryEl.hidden = true;
+    }
+    setEntityPresenceStatus(message || '', false);
+  }
+
+  function renderEntityPresenceSummary(checkedIds) {
+    if (!entityPresenceSummaryEl) return;
+    if (!checkedIds.length) {
+      entityPresenceSummaryEl.innerHTML = '';
+      entityPresenceSummaryEl.hidden = true;
+      return;
+    }
+    const lines = checkedIds
+      .map(function (id) {
+        const ent = entityPresenceCompetitors.find(function (e) {
+          return String(e.id) === id;
+        });
+        const name = (ent && ent.name) || id;
+        const data = entityPresenceById[id];
+        const block = getEntityPresenceModeBlock(data);
+        const y =
+          data && data.totalSuccessCaptures != null
+            ? Number(data.totalSuccessCaptures)
+            : 0;
+        const x =
+          block && block.appearanceCaptureCount != null
+            ? Number(block.appearanceCaptureCount)
+            : 0;
+        const color = colorForString(name || id);
+        return (
+          '<p class="serp-entity-presence-summary-line text-muted">' +
+          '<span class="competitor-activity-weekly-swatch" style="background:' +
+          escapeHtml(color) +
+          ';display:inline-block;margin-right:6px;vertical-align:middle"></span>' +
+          escapeHtml(name) +
+          ': ' +
+          x +
+          ' de ' +
+          y +
+          ' corridas</p>'
+        );
+      })
+      .join('');
+    entityPresenceSummaryEl.innerHTML = lines;
+    entityPresenceSummaryEl.hidden = false;
+  }
+
+  function renderEntityPresenceChart(checkedIds) {
+    destroyEntityPresenceChart();
+    if (!checkedIds.length) {
+      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
+      return;
+    }
     if (!entityPresenceCanvas || typeof window.Chart !== 'function') {
       setEntityPresenceStatus(
         'No se pudo cargar Chart.js para el gráfico de presencia.',
@@ -5718,18 +5827,36 @@ init();
       return;
     }
 
-    const adData = chartPointsFromPresence(
-      data && data.ads ? data.ads.chartPoints : [],
-    );
-    const organicData = chartPointsFromPresence(
-      data && data.organic ? data.organic.chartPoints : [],
-    );
-    const allY = adData
-      .concat(organicData)
-      .map(function (p) {
-        return p.y;
+    const datasets = [];
+    let maxPos = 5;
+    checkedIds.forEach(function (id) {
+      const ent = entityPresenceCompetitors.find(function (e) {
+        return String(e.id) === id;
       });
-    const maxPos = allY.length ? Math.max.apply(null, allY) : 5;
+      const name = (ent && ent.name) || id;
+      const block = getEntityPresenceModeBlock(entityPresenceById[id]);
+      const points = chartPointsFromPresence(
+        block && block.chartPoints ? block.chartPoints : [],
+      );
+      points.forEach(function (p) {
+        if (p.y > maxPos) maxPos = p.y;
+      });
+      const color = colorForString(name || id);
+      datasets.push({
+        id: id,
+        label: name,
+        data: points,
+        borderColor: color,
+        backgroundColor: color,
+        pointBackgroundColor: color,
+        borderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 5,
+        tension: 0,
+        spanGaps: false,
+        showLine: true,
+      });
+    });
 
     if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = false;
 
@@ -5737,36 +5864,7 @@ init();
       entityPresenceCanvas.getContext('2d'),
       {
         type: 'line',
-        data: {
-          datasets: [
-            {
-              label: 'Posición como Ad',
-              data: adData,
-              borderColor: '#f97316',
-              backgroundColor: '#f97316',
-              pointBackgroundColor: '#f97316',
-              borderWidth: 2,
-              pointRadius: 4,
-              pointHoverRadius: 5,
-              tension: 0,
-              spanGaps: false,
-              showLine: true,
-            },
-            {
-              label: 'Posición como Orgánico',
-              data: organicData,
-              borderColor: '#38bdf8',
-              backgroundColor: '#38bdf8',
-              pointBackgroundColor: '#38bdf8',
-              borderWidth: 2,
-              pointRadius: 4,
-              pointHoverRadius: 5,
-              tension: 0,
-              spanGaps: false,
-              showLine: true,
-            },
-          ],
-        },
+        data: { datasets: datasets },
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -5776,18 +5874,19 @@ init();
             intersect: true,
           },
           plugins: {
-            legend: {
-              display: true,
-              position: 'bottom',
-              labels: { color: '#9aa3b2' },
-            },
+            // Color/name already shown in checkbox toggles (same as weekly chart).
+            legend: { display: false },
             tooltip: {
               callbacks: {
-                // Dataset distinguished by legend color/label — do not repeat Ad/Organic.
                 title: function (items) {
                   if (!items || !items.length || !items[0].raw) return '';
+                  const ds = items[0].dataset || {};
                   const raw = items[0].raw;
-                  return formatEntityPresenceTooltipWhen(raw.imported_at);
+                  return (
+                    (ds.label || 'Competidor') +
+                    ' · ' +
+                    formatEntityPresenceTooltipWhen(raw.imported_at)
+                  );
                 },
                 label: function (item) {
                   const raw = item.raw || {};
@@ -5845,37 +5944,120 @@ init();
     );
   }
 
+  function renderEntityPresenceFromState() {
+    const checkedIds = getEntityPresenceCheckedIds();
+    if (!checkedIds.length) {
+      clearEntityPresenceView('Seleccioná al menos un competidor');
+      return;
+    }
+    renderEntityPresenceSummary(checkedIds);
+    renderEntityPresenceChart(checkedIds);
+    setEntityPresenceStatus('', false);
+  }
+
+  function renderEntityPresenceToggles() {
+    if (!entityPresenceTogglesEl) return;
+    const visible = getEntityPresenceVisibleCompetitors();
+    entityPresenceTogglesEl.innerHTML = visible
+      .map(function (ent) {
+        const id = String(ent.id);
+        const checked = entityPresenceChecked[id] === true;
+        const color = colorForString(ent.name || id);
+        return (
+          '<label class="competitor-activity-weekly-toggle">' +
+          '<input type="checkbox" data-series="' +
+          escapeHtml(id) +
+          '"' +
+          (checked ? ' checked' : '') +
+          ' />' +
+          '<span class="competitor-activity-weekly-swatch" style="background:' +
+          escapeHtml(color) +
+          '"></span>' +
+          escapeHtml(ent.name || 'Entidad') +
+          '</label>'
+        );
+      })
+      .join('');
+
+    entityPresenceTogglesEl
+      .querySelectorAll('input[data-series]')
+      .forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () {
+          const seriesKey = checkbox.getAttribute('data-series');
+          if (!seriesKey) return;
+          entityPresenceChecked[seriesKey] = checkbox.checked;
+          syncEntityPresenceSelectAllButton();
+          loadEntityPresence();
+        });
+      });
+
+    syncEntityPresenceShowAllButton();
+    syncEntityPresenceSelectAllButton();
+  }
+
+  function toggleEntityPresenceSelectAllVisible() {
+    const visibleIds = getEntityPresenceVisibleCompetitors().map(function (ent) {
+      return String(ent.id);
+    });
+    if (!visibleIds.length) return;
+    const selectAll = entityPresenceAllVisibleUnchecked(visibleIds);
+    visibleIds.forEach(function (id) {
+      entityPresenceChecked[id] = selectAll;
+    });
+    if (entityPresenceTogglesEl) {
+      entityPresenceTogglesEl
+        .querySelectorAll('input[data-series]')
+        .forEach(function (checkbox) {
+          const seriesKey = checkbox.getAttribute('data-series');
+          if (!seriesKey || visibleIds.indexOf(seriesKey) === -1) return;
+          checkbox.checked = selectAll;
+        });
+    }
+    syncEntityPresenceSelectAllButton();
+    loadEntityPresence();
+  }
+
+  async function fetchEntityPresenceOne(entityId, norm) {
+    let url =
+      API_BASE +
+      '/reports/google-serp-entity-presence?entity_id=' +
+      encodeURIComponent(entityId);
+    if (norm) {
+      url += '&search_term_normalized=' + encodeURIComponent(norm);
+    }
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    const body = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok) {
+      throw new Error(
+        body && body.error
+          ? String(body.error)
+          : 'No se pudo cargar la presencia.',
+      );
+    }
+    return body;
+  }
+
   async function loadEntityPresenceCompetitors() {
-    if (!entityPresenceSelect) return;
+    if (!entityPresenceTogglesEl) return;
     try {
       const entities = await supabaseRestGet(
         'monitored_entities?select=id,name,website_domain,active,is_self' +
           '&is_self=eq.false&active=eq.true' +
           '&website_domain=not.is.null&order=name.asc',
       );
-      const rows = Array.isArray(entities) ? entities : [];
-      const prev = entityPresenceSelect.value || '';
-      entityPresenceSelect.innerHTML =
-        '<option value="">Elegí un competidor…</option>' +
-        rows
-          .map(function (e) {
-            return (
-              '<option value="' +
-              escapeHtml(String(e.id)) +
-              '">' +
-              escapeHtml(e.name || e.id) +
-              '</option>'
-            );
-          })
-          .join('');
-      if (
-        prev &&
-        Array.prototype.some.call(entityPresenceSelect.options, function (opt) {
-          return opt.value === prev;
-        })
-      ) {
-        entityPresenceSelect.value = prev;
-      }
+      entityPresenceCompetitors = (Array.isArray(entities) ? entities : []).map(
+        function (e) {
+          return {
+            id: String(e.id),
+            name: e.name || String(e.id),
+          };
+        },
+      );
+      renderEntityPresenceToggles();
     } catch (err) {
       setEntityPresenceStatus(
         'No se pudieron cargar los competidores.',
@@ -5885,44 +6067,46 @@ init();
   }
 
   async function loadEntityPresence() {
-    if (!entityPresenceSelect) return;
-    const entityId = String(entityPresenceSelect.value || '').trim();
-    if (!entityId) {
-      destroyEntityPresenceChart();
-      if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
-      if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = true;
-      setEntityPresenceStatus('', false);
+    const checkedIds = getEntityPresenceCheckedIds();
+    if (!checkedIds.length) {
+      clearEntityPresenceView('Seleccioná al menos un competidor');
       return;
     }
-    if (entityPresenceBusy) return;
+
+    const norm = getSelectedSearchTermNormalized();
+    const cacheKey = norm || '__all__';
+    if (cacheKey !== entityPresenceCacheKey) {
+      entityPresenceById = Object.create(null);
+      entityPresenceCacheKey = cacheKey;
+    }
+
+    const missing = checkedIds.filter(function (id) {
+      return !entityPresenceById[id];
+    });
+
+    if (!missing.length) {
+      renderEntityPresenceFromState();
+      return;
+    }
+
+    const seq = ++entityPresenceRequestSeq;
     entityPresenceBusy = true;
     setEntityPresenceStatus('Cargando presencia…', false);
     try {
-      const norm = getSelectedSearchTermNormalized();
-      let url =
-        API_BASE +
-        '/reports/google-serp-entity-presence?entity_id=' +
-        encodeURIComponent(entityId);
-      if (norm) {
-        url +=
-          '&search_term_normalized=' + encodeURIComponent(norm);
-      }
-      const res = await fetch(url, {
-        headers: { Accept: 'application/json' },
+      const results = await Promise.all(
+        missing.map(function (id) {
+          return fetchEntityPresenceOne(id, norm).then(function (body) {
+            return { id: id, body: body };
+          });
+        }),
+      );
+      if (seq !== entityPresenceRequestSeq) return;
+      results.forEach(function (row) {
+        entityPresenceById[row.id] = row.body;
       });
-      const body = await res.json().catch(function () {
-        return {};
-      });
-      if (!res.ok) {
-        throw new Error(
-          body && body.error
-            ? String(body.error)
-            : 'No se pudo cargar la presencia.',
-        );
-      }
-      renderEntityPresence(body);
-      setEntityPresenceStatus('', false);
+      renderEntityPresenceFromState();
     } catch (err) {
+      if (seq !== entityPresenceRequestSeq) return;
       destroyEntityPresenceChart();
       if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
       if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = true;
@@ -5933,13 +6117,27 @@ init();
         true,
       );
     } finally {
-      entityPresenceBusy = false;
+      if (seq === entityPresenceRequestSeq) {
+        entityPresenceBusy = false;
+      }
     }
   }
 
   function onSharedQueryFilterChange() {
     refreshImportsListView();
+    entityPresenceById = Object.create(null);
+    entityPresenceCacheKey = '';
     loadEntityPresence();
+  }
+
+  function onEntityPresenceModeChange() {
+    if (!entityPresenceModeEl) return;
+    const selected = entityPresenceModeEl.querySelector(
+      'input[name="serp-entity-presence-mode"]:checked',
+    );
+    entityPresenceMode =
+      selected && selected.value === 'organic' ? 'organic' : 'ad';
+    renderEntityPresenceFromState();
   }
 
   function setQueriesStatus(text, isError) {
@@ -6073,10 +6271,25 @@ init();
     historyQueryFilter.addEventListener('change', onSharedQueryFilterChange);
   }
 
-  if (entityPresenceSelect) {
-    entityPresenceSelect.addEventListener('change', function () {
-      loadEntityPresence();
+  if (entityPresenceShowAllBtn) {
+    entityPresenceShowAllBtn.addEventListener('click', function () {
+      entityPresenceShowAll = !entityPresenceShowAll;
+      renderEntityPresenceToggles();
     });
+  }
+
+  if (entityPresenceSelectAllBtn) {
+    entityPresenceSelectAllBtn.addEventListener('click', function () {
+      toggleEntityPresenceSelectAllVisible();
+    });
+  }
+
+  if (entityPresenceModeEl) {
+    entityPresenceModeEl
+      .querySelectorAll('input[name="serp-entity-presence-mode"]')
+      .forEach(function (input) {
+        input.addEventListener('change', onEntityPresenceModeChange);
+      });
   }
 
   if (queryForm) {
@@ -6911,7 +7124,7 @@ init();
   window.__openGoogleSerp = () => {
     loadSerpQueries();
     loadEntityPresenceCompetitors().then(function () {
-      loadEntityPresence();
+      clearEntityPresenceView('Seleccioná al menos un competidor');
     });
     loadImports();
     loadPresence();
