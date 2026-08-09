@@ -5525,6 +5525,9 @@ init();
   const queryForm = document.getElementById('serp-query-form');
   const queryInput = document.getElementById('serp-query-input');
   const queryAddBtn = document.getElementById('serp-query-add-btn');
+  const historyQueryFilter = document.getElementById(
+    'serp-history-query-filter',
+  );
 
   if (!landing || !form) return;
 
@@ -5535,6 +5538,73 @@ init();
   /** @type {File[]} Shared selection for picker + drag-and-drop. */
   let selectedFiles = [];
   let queriesBusy = false;
+
+  /**
+   * Same rules as backend normalizeSearchTerm — presentation filter only.
+   * Collapses "prestamo  con cedula" vs catalog "prestamo con cedula".
+   */
+  function normalizeSerpTermForFilter(term) {
+    if (term == null) return '';
+    let s = String(term).trim().toLowerCase();
+    s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+  }
+
+  function populateHistoryQueryFilter(queries) {
+    if (!historyQueryFilter) return;
+    const prev = historyQueryFilter.value || '';
+    const rows = Array.isArray(queries) ? queries.slice() : [];
+    rows.sort(function (a, b) {
+      return String(a.queryText || '').localeCompare(
+        String(b.queryText || ''),
+        'es',
+      );
+    });
+    historyQueryFilter.innerHTML =
+      '<option value="">Todas</option>' +
+      rows
+        .map(function (q) {
+          const norm =
+            q.queryTextNormalized ||
+            normalizeSerpTermForFilter(q.queryText);
+          const label = q.queryText || norm || '—';
+          return (
+            '<option value="' +
+            escapeHtml(norm) +
+            '">' +
+            escapeHtml(label) +
+            '</option>'
+          );
+        })
+        .join('');
+    if (
+      prev &&
+      Array.prototype.some.call(historyQueryFilter.options, function (opt) {
+        return opt.value === prev;
+      })
+    ) {
+      historyQueryFilter.value = prev;
+    } else {
+      historyQueryFilter.value = '';
+    }
+  }
+
+  function getFilteredImports() {
+    const selectedNorm = historyQueryFilter
+      ? String(historyQueryFilter.value || '').trim()
+      : '';
+    if (!selectedNorm) return importsCache.slice();
+    return importsCache.filter(function (item) {
+      return (
+        normalizeSerpTermForFilter(item && item.searchTerm) === selectedNorm
+      );
+    });
+  }
+
+  function refreshImportsListView() {
+    renderImportsList(getFilteredImports());
+  }
 
   function setQueriesStatus(text, isError) {
     if (!queriesStatusEl) return;
@@ -5650,6 +5720,8 @@ init();
         );
       }
       renderSerpQueries(body.queries);
+      populateHistoryQueryFilter(body.queries);
+      refreshImportsListView();
     } catch (err) {
       setQueriesStatus(
         err && err.message
@@ -5658,6 +5730,12 @@ init();
         true,
       );
     }
+  }
+
+  if (historyQueryFilter) {
+    historyQueryFilter.addEventListener('change', function () {
+      refreshImportsListView();
+    });
   }
 
   if (queryForm) {
@@ -6372,7 +6450,7 @@ init();
         const path = btn.getAttribute('data-path') || '';
         if (!path) return;
         selectedPath = path;
-        renderImportsList(importsCache);
+        refreshImportsListView();
         loadCaptureDetail(path);
       });
     });
@@ -6455,7 +6533,7 @@ init();
         return;
       }
       importsCache = Array.isArray(body.imports) ? body.imports : [];
-      renderImportsList(importsCache);
+      refreshImportsListView();
       if (!silent) {
         setStatus(
           body.total ? body.total + ' importación(es)' : 'Sin importaciones aún',

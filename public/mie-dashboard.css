@@ -3244,6 +3244,15 @@
   margin-top: 8px;
 }
 
+#mie-dashboard-app .serp-history-filter {
+  margin: 0 0 12px;
+  max-width: 420px;
+}
+
+#mie-dashboard-app .serp-history-filter .mcl-field {
+  margin: 0;
+}
+
 #mie-dashboard-app .serp-detail-subtitle {
   font-size: 0.95rem;
   font-weight: var(--font-weight-medium);
