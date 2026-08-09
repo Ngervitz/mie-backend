@@ -375,9 +375,20 @@
         <div id="serp-import-status" class="mcl-status" aria-live="polite"></div>
         <div id="serp-import-summary" class="serp-summary" hidden></div>
 
-        <section class="serp-history-section">
-          <h2 class="cov-section-title">Importaciones anteriores</h2>
-          <div class="serp-history-filter">
+        <section class="serp-entity-presence-section" id="serp-entity-presence-section">
+          <h2 class="cov-section-title">Presencia observada en SERP</h2>
+          <p class="text-muted serp-entity-presence-explainer ga4-summary-note">
+            💡 Esta vista muestra presencia observada en las SERP monitoreadas
+            (apariciones en ads u orgánicos parseados), no la actividad
+            publicitaria absoluta del competidor fuera de estas búsquedas.
+          </p>
+          <div class="serp-entity-presence-controls">
+            <label class="mcl-field" for="serp-entity-presence-select">
+              <span class="mcl-field-label">Competidor</span>
+              <select id="serp-entity-presence-select" class="mcl-input">
+                <option value="">Elegí un competidor…</option>
+              </select>
+            </label>
             <label class="mcl-field" for="serp-history-query-filter">
               <span class="mcl-field-label">Filtrar por query</span>
               <select id="serp-history-query-filter" class="mcl-input">
@@ -385,6 +396,24 @@
               </select>
             </label>
           </div>
+          <div id="serp-entity-presence-status" class="mcl-status" aria-live="polite"></div>
+          <div id="serp-entity-presence-summary" class="serp-entity-presence-summary" hidden></div>
+          <div class="serp-entity-presence-blocks" hidden id="serp-entity-presence-blocks">
+            <div class="serp-entity-presence-block">
+              <h3 class="serp-detail-subtitle">Apariciones como Ad</h3>
+              <p id="serp-entity-ads-count" class="serp-entity-presence-count text-muted"></p>
+              <div id="serp-entity-ads-table"></div>
+            </div>
+            <div class="serp-entity-presence-block">
+              <h3 class="serp-detail-subtitle">Apariciones como Orgánico</h3>
+              <p id="serp-entity-organic-count" class="serp-entity-presence-count text-muted"></p>
+              <div id="serp-entity-organic-table"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="serp-history-section">
+          <h2 class="cov-section-title">Importaciones anteriores</h2>
           <div id="serp-imports-list" class="serp-imports-table-wrap"></div>
         </section>
 

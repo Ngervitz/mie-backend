@@ -1014,6 +1014,162 @@ async function getGoogleSerpImportAds({ path, captureId } = {}) {
 }
 
 /**
+ * Per-entity SERP presence across parse_status=success captures.
+ * Matching: reuse matchAdvertiserToEntities (exact domain only — no aliases).
+ *
+ * Volume note (2026-08): google_serp_ads_manual ~317 rows — low enough that
+ * we intentionally load matching rows without server-side pagination.
+ *
+ * @param {{ entityId: string, searchTermNormalized?: string|null }} opts
+ *   searchTermNormalized: same identifier as the history filter dropdown value
+ *   (query_text_normalized). Empty/null = all queries ("Todas").
+ */
+async function getGoogleSerpEntityPresence({
+  entityId,
+  searchTermNormalized,
+} = {}) {
+  const id = entityId != null ? String(entityId).trim() : '';
+  if (!id) {
+    const err = new Error('entity_id is required');
+    err.statusCode = 400;
+    err.code = 'ENTITY_ID_REQUIRED';
+    throw err;
+  }
+
+  const { data: entityRows, error: entErr } = await supabase
+    .from('monitored_entities')
+    .select('id, name, is_self, active, website_domain')
+    .eq('id', id)
+    .limit(1);
+  if (entErr) {
+    throw new Error(`Failed to load monitored_entities: ${entErr.message}`);
+  }
+  if (!entityRows || !entityRows.length) {
+    const err = new Error('Entity not found');
+    err.statusCode = 404;
+    err.code = 'ENTITY_NOT_FOUND';
+    throw err;
+  }
+
+  const entity = entityRows[0];
+  const domain = normalizeDomain(entity.website_domain);
+  if (!domain) {
+    const err = new Error(
+      'Entity has no website_domain — cannot compute SERP presence',
+    );
+    err.statusCode = 400;
+    err.code = 'ENTITY_DOMAIN_MISSING';
+    throw err;
+  }
+
+  const normFilter =
+    searchTermNormalized != null && String(searchTermNormalized).trim()
+      ? normalizeSearchTerm(String(searchTermNormalized).trim())
+      : '';
+
+  let capturesQuery = supabase
+    .from('google_serp_captures')
+    .select('id, search_term, search_term_normalized, date, parse_status')
+    .eq('parse_status', 'success');
+  if (normFilter) {
+    capturesQuery = capturesQuery.eq('search_term_normalized', normFilter);
+  }
+
+  const { data: captures, error: capErr } = await capturesQuery;
+  if (capErr) {
+    throw new Error(`Failed to load captures for entity presence: ${capErr.message}`);
+  }
+
+  const realCaptures = captures || [];
+  const totalCaptures = realCaptures.length;
+  const captureIds = realCaptures.map((c) => c.id);
+
+  const adAppearances = [];
+  const organicAppearances = [];
+  const adCaptureIds = new Set();
+  const organicCaptureIds = new Set();
+
+  if (captureIds.length) {
+    // Intentional full fetch: row volume is low (~hundreds). See header comment.
+    const { data: rows, error: rowErr } = await supabase
+      .from('google_serp_ads_manual')
+      .select(
+        'id, capture_id, search_term, date, result_type, position, placement, advertiser_domain, advertiser_name',
+      )
+      .in('capture_id', captureIds);
+    if (rowErr) {
+      throw new Error(
+        `Failed to load SERP rows for entity presence: ${rowErr.message}`,
+      );
+    }
+
+    const entitiesForMatch = [entity];
+    for (const row of rows || []) {
+      const matched = matchAdvertiserToEntities(
+        {
+          advertiser_domain: row.advertiser_domain,
+          advertiser_name: row.advertiser_name,
+        },
+        entitiesForMatch,
+      );
+      if (!matched || matched.id !== entity.id) continue;
+
+      const resultType = String(row.result_type || '').toLowerCase();
+      if (resultType === 'organic') {
+        organicCaptureIds.add(row.capture_id);
+        organicAppearances.push({
+          position: row.position,
+          date: row.date,
+          search_term: row.search_term,
+          capture_id: row.capture_id,
+        });
+      } else {
+        adCaptureIds.add(row.capture_id);
+        adAppearances.push({
+          position: row.position,
+          placement: row.placement,
+          date: row.date,
+          search_term: row.search_term,
+          capture_id: row.capture_id,
+        });
+      }
+    }
+  }
+
+  const byDateDesc = (a, b) => {
+    const da = String(a.date || '');
+    const db = String(b.date || '');
+    if (db !== da) return db.localeCompare(da);
+    return (Number(a.position) || 0) - (Number(b.position) || 0);
+  };
+  adAppearances.sort(byDateDesc);
+  organicAppearances.sort(byDateDesc);
+
+  return {
+    entity: {
+      id: entity.id,
+      name: entity.name,
+      websiteDomain: domain,
+      active: entity.active !== false,
+      isSelf: entity.is_self === true,
+    },
+    searchTermNormalized: normFilter || null,
+    /** Y — same denominator for ads and organic blocks. */
+    totalSuccessCaptures: totalCaptures,
+    ads: {
+      appearanceCaptureCount: adCaptureIds.size,
+      totalSuccessCaptures: totalCaptures,
+      appearances: adAppearances,
+    },
+    organic: {
+      appearanceCaptureCount: organicCaptureIds.size,
+      totalSuccessCaptures: totalCaptures,
+      appearances: organicAppearances,
+    },
+  };
+}
+
+/**
  * Count-based competitor presence across real (parse_status=success) captures.
  * No percentages, rates, growth, or trends.
  */
@@ -1157,5 +1313,6 @@ module.exports = {
   listGoogleSerpImports,
   getGoogleSerpImportAds,
   getGoogleSerpCompetitorPresence,
+  getGoogleSerpEntityPresence,
   ensureSerpHtmlBucket,
 };

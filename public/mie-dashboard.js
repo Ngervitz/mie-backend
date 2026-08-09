@@ -5528,6 +5528,23 @@ init();
   const historyQueryFilter = document.getElementById(
     'serp-history-query-filter',
   );
+  const entityPresenceSelect = document.getElementById(
+    'serp-entity-presence-select',
+  );
+  const entityPresenceStatusEl = document.getElementById(
+    'serp-entity-presence-status',
+  );
+  const entityPresenceBlocks = document.getElementById(
+    'serp-entity-presence-blocks',
+  );
+  const entityAdsCountEl = document.getElementById('serp-entity-ads-count');
+  const entityOrganicCountEl = document.getElementById(
+    'serp-entity-organic-count',
+  );
+  const entityAdsTableEl = document.getElementById('serp-entity-ads-table');
+  const entityOrganicTableEl = document.getElementById(
+    'serp-entity-organic-table',
+  );
 
   if (!landing || !form) return;
 
@@ -5538,6 +5555,7 @@ init();
   /** @type {File[]} Shared selection for picker + drag-and-drop. */
   let selectedFiles = [];
   let queriesBusy = false;
+  let entityPresenceBusy = false;
 
   /**
    * Same rules as backend normalizeSearchTerm — presentation filter only.
@@ -5604,6 +5622,186 @@ init();
 
   function refreshImportsListView() {
     renderImportsList(getFilteredImports());
+  }
+
+  function setEntityPresenceStatus(text, isError) {
+    if (!entityPresenceStatusEl) return;
+    entityPresenceStatusEl.textContent = text || '';
+    entityPresenceStatusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function getSelectedSearchTermNormalized() {
+    return historyQueryFilter
+      ? String(historyQueryFilter.value || '').trim()
+      : '';
+  }
+
+  function renderEntityAppearanceTable(rows, tableEl, kind) {
+    if (!tableEl) return;
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) {
+      tableEl.innerHTML =
+        '<div class="mcl-empty">Sin apariciones en este filtro.</div>';
+      return;
+    }
+    const head =
+      kind === 'ad'
+        ? '<th>Fecha</th><th>Query</th><th>Posición</th><th>Placement</th>'
+        : '<th>Fecha</th><th>Query</th><th>Posición</th>';
+    const body = list
+      .map(function (row) {
+        let cells =
+          '<td>' +
+          escapeHtml(formatPresenceDate(row.date)) +
+          '</td>' +
+          '<td class="serp-capture-term">' +
+          escapeHtml(row.search_term || '—') +
+          '</td>' +
+          '<td class="serp-num">' +
+          escapeHtml(String(row.position != null ? row.position : '—')) +
+          '</td>';
+        if (kind === 'ad') {
+          cells +=
+            '<td>' + escapeHtml(row.placement || '—') + '</td>';
+        }
+        return '<tr>' + cells + '</tr>';
+      })
+      .join('');
+    tableEl.innerHTML =
+      '<table class="serp-captures-table"><thead><tr>' +
+      head +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table>';
+  }
+
+  function renderEntityPresence(data) {
+    if (!entityPresenceBlocks) return;
+    const y =
+      data && data.totalSuccessCaptures != null
+        ? Number(data.totalSuccessCaptures)
+        : 0;
+    const adsX =
+      data && data.ads && data.ads.appearanceCaptureCount != null
+        ? Number(data.ads.appearanceCaptureCount)
+        : 0;
+    const orgX =
+      data && data.organic && data.organic.appearanceCaptureCount != null
+        ? Number(data.organic.appearanceCaptureCount)
+        : 0;
+
+    if (entityAdsCountEl) {
+      entityAdsCountEl.textContent =
+        adsX + ' de ' + y + ' corridas';
+    }
+    if (entityOrganicCountEl) {
+      entityOrganicCountEl.textContent =
+        orgX + ' de ' + y + ' corridas';
+    }
+    renderEntityAppearanceTable(
+      data && data.ads ? data.ads.appearances : [],
+      entityAdsTableEl,
+      'ad',
+    );
+    renderEntityAppearanceTable(
+      data && data.organic ? data.organic.appearances : [],
+      entityOrganicTableEl,
+      'organic',
+    );
+    entityPresenceBlocks.hidden = false;
+  }
+
+  async function loadEntityPresenceCompetitors() {
+    if (!entityPresenceSelect) return;
+    try {
+      const entities = await supabaseRestGet(
+        'monitored_entities?select=id,name,website_domain,active,is_self' +
+          '&is_self=eq.false&active=eq.true' +
+          '&website_domain=not.is.null&order=name.asc',
+      );
+      const rows = Array.isArray(entities) ? entities : [];
+      const prev = entityPresenceSelect.value || '';
+      entityPresenceSelect.innerHTML =
+        '<option value="">Elegí un competidor…</option>' +
+        rows
+          .map(function (e) {
+            return (
+              '<option value="' +
+              escapeHtml(String(e.id)) +
+              '">' +
+              escapeHtml(e.name || e.id) +
+              '</option>'
+            );
+          })
+          .join('');
+      if (
+        prev &&
+        Array.prototype.some.call(entityPresenceSelect.options, function (opt) {
+          return opt.value === prev;
+        })
+      ) {
+        entityPresenceSelect.value = prev;
+      }
+    } catch (err) {
+      setEntityPresenceStatus(
+        'No se pudieron cargar los competidores.',
+        true,
+      );
+    }
+  }
+
+  async function loadEntityPresence() {
+    if (!entityPresenceSelect) return;
+    const entityId = String(entityPresenceSelect.value || '').trim();
+    if (!entityId) {
+      if (entityPresenceBlocks) entityPresenceBlocks.hidden = true;
+      setEntityPresenceStatus('', false);
+      return;
+    }
+    if (entityPresenceBusy) return;
+    entityPresenceBusy = true;
+    setEntityPresenceStatus('Cargando presencia…', false);
+    try {
+      const norm = getSelectedSearchTermNormalized();
+      let url =
+        API_BASE +
+        '/reports/google-serp-entity-presence?entity_id=' +
+        encodeURIComponent(entityId);
+      if (norm) {
+        url +=
+          '&search_term_normalized=' + encodeURIComponent(norm);
+      }
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo cargar la presencia.',
+        );
+      }
+      renderEntityPresence(body);
+      setEntityPresenceStatus('', false);
+    } catch (err) {
+      if (entityPresenceBlocks) entityPresenceBlocks.hidden = true;
+      setEntityPresenceStatus(
+        err && err.message
+          ? err.message
+          : 'No se pudo cargar la presencia.',
+        true,
+      );
+    } finally {
+      entityPresenceBusy = false;
+    }
+  }
+
+  function onSharedQueryFilterChange() {
+    refreshImportsListView();
+    loadEntityPresence();
   }
 
   function setQueriesStatus(text, isError) {
@@ -5722,6 +5920,7 @@ init();
       renderSerpQueries(body.queries);
       populateHistoryQueryFilter(body.queries);
       refreshImportsListView();
+      loadEntityPresence();
     } catch (err) {
       setQueriesStatus(
         err && err.message
@@ -5733,8 +5932,12 @@ init();
   }
 
   if (historyQueryFilter) {
-    historyQueryFilter.addEventListener('change', function () {
-      refreshImportsListView();
+    historyQueryFilter.addEventListener('change', onSharedQueryFilterChange);
+  }
+
+  if (entityPresenceSelect) {
+    entityPresenceSelect.addEventListener('change', function () {
+      loadEntityPresence();
     });
   }
 
@@ -6569,6 +6772,9 @@ init();
 
   window.__openGoogleSerp = () => {
     loadSerpQueries();
+    loadEntityPresenceCompetitors().then(function () {
+      loadEntityPresence();
+    });
     loadImports();
     loadPresence();
   };

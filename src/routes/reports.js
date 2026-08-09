@@ -17,6 +17,7 @@ const {
   listGoogleSerpImports,
   getGoogleSerpImportAds,
   getGoogleSerpCompetitorPresence,
+  getGoogleSerpEntityPresence,
   normalizeDomain,
 } = require('../steps/collectGoogleSerpImports');
 const { importGoogleSerpJson } = require('../steps/collectGoogleSerpJsonImports');
@@ -2177,6 +2178,39 @@ router.get('/google-serp-competitor-presence', async (req, res) => {
       error: err.message,
     });
     return res.status(500).json({ error: 'Failed to fetch competitor presence' });
+  }
+});
+
+/**
+ * GET /reports/google-serp-entity-presence
+ * Query: entity_id (required), search_term_normalized (optional — same id as
+ * the history/query filter dropdown value; empty = all queries).
+ */
+router.get('/google-serp-entity-presence', async (req, res) => {
+  const entityId =
+    req.query.entity_id != null ? String(req.query.entity_id).trim() : '';
+  const searchTermNormalized =
+    req.query.search_term_normalized != null
+      ? String(req.query.search_term_normalized).trim()
+      : '';
+  try {
+    const result = await getGoogleSerpEntityPresence({
+      entityId,
+      searchTermNormalized: searchTermNormalized || null,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports google-serp-entity-presence failed', {
+      entityId,
+      searchTermNormalized: searchTermNormalized || null,
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to load entity SERP presence',
+      code: err.code || 'ENTITY_PRESENCE_FAILED',
+    });
   }
 });
 
