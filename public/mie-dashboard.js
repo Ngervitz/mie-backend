@@ -5549,6 +5549,12 @@ init();
   const entityPresenceModeEl = document.getElementById(
     'serp-entity-presence-mode',
   );
+  const entityPresenceFromInput = document.getElementById(
+    'serp-entity-presence-from',
+  );
+  const entityPresenceToInput = document.getElementById(
+    'serp-entity-presence-to',
+  );
 
   if (!landing || !form) return;
 
@@ -5565,9 +5571,9 @@ init();
   let entityPresenceCompetitors = [];
   /** Checked state per entity id. Default: unchecked (undefined/false). */
   let entityPresenceChecked = Object.create(null);
-  /** @type {'ad'|'organic'} */
+  /** @type {'ad'|'organic'|'both'} */
   let entityPresenceMode = 'ad';
-  /** Cache: entityId → last presence payload for current query filter key. */
+  /** Cache: entityId → last presence payload for current query+date filter key. */
   let entityPresenceById = Object.create(null);
   let entityPresenceCacheKey = '';
   let entityPresenceRequestSeq = 0;
@@ -5711,9 +5717,10 @@ init();
       : 'Deseleccionar todos';
   }
 
-  function getEntityPresenceModeBlock(data) {
+  function getEntityPresenceModeBlock(data, kind) {
     if (!data) return null;
-    return entityPresenceMode === 'organic' ? data.organic : data.ads;
+    if (kind === 'organic') return data.organic;
+    return data.ads;
   }
 
   function clearEntityPresenceView(message) {
@@ -5727,20 +5734,12 @@ init();
   }
 
   /**
-   * Canonical timestamp for chart X: imported_at (ISO) from the presence payload.
-   * Falls back to date (YYYY-MM-DD) only if imported_at is missing.
+   * Canonical timestamp for chart X and date filter: imported_at only.
    */
   function entityPresencePointTimeMs(p) {
-    if (!p) return NaN;
-    if (p.imported_at) {
-      const ms = Date.parse(p.imported_at);
-      if (Number.isFinite(ms)) return ms;
-    }
-    if (p.date) {
-      const ms = Date.parse(String(p.date));
-      if (Number.isFinite(ms)) return ms;
-    }
-    return NaN;
+    if (!p || !p.imported_at) return NaN;
+    const ms = Date.parse(p.imported_at);
+    return Number.isFinite(ms) ? ms : NaN;
   }
 
   function chartPointsFromPresence(points) {
@@ -5755,11 +5754,33 @@ init();
         y: y,
         search_term: p.search_term || '',
         imported_at: p.imported_at || null,
-        date: p.date || null,
         capture_id: p.capture_id || null,
       });
     });
     return out;
+  }
+
+  function getEntityPresenceDateRange() {
+    const from = entityPresenceFromInput
+      ? String(entityPresenceFromInput.value || '').trim()
+      : '';
+    const to = entityPresenceToInput
+      ? String(entityPresenceToInput.value || '').trim()
+      : '';
+    if (!from && !to) return { from: '', to: '' };
+    if (!from || !to) return { from: '', to: '', incomplete: true };
+    if (from > to) return { from: from, to: to, invalidOrder: true };
+    return { from: from, to: to };
+  }
+
+  function getEntityPresenceCacheKey(norm, dateRange) {
+    return (
+      (norm || '__all__') +
+      '|' +
+      (dateRange.from || '') +
+      '|' +
+      (dateRange.to || '')
+    );
   }
 
   function getEntityPresenceFilterMeta(checkedIds) {
@@ -5785,46 +5806,37 @@ init();
     return { totalSuccessCaptures: 0, xMin: null, xMax: null };
   }
 
-  function renderEntityPresenceSummary(checkedIds) {
-    if (!entityPresenceSummaryEl) return;
-    if (!checkedIds.length) {
-      entityPresenceSummaryEl.innerHTML = '';
-      entityPresenceSummaryEl.hidden = true;
-      return;
+  function pushEntityPresenceDataset(datasets, opts) {
+    const points = opts.points || [];
+    points.forEach(function (p) {
+      if (p.y > opts.maxPosRef.value) opts.maxPosRef.value = p.y;
+    });
+    opts.pointCountRef.value += points.length;
+    const ds = {
+      id: opts.id,
+      label: opts.label,
+      data: points,
+      borderColor: opts.color,
+      backgroundColor: opts.color,
+      pointBackgroundColor: opts.color,
+      borderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 5,
+      tension: 0,
+      spanGaps: false,
+      showLine: true,
+    };
+    if (opts.dashed) {
+      ds.borderDash = [6, 4];
     }
-    const lines = checkedIds
-      .map(function (id) {
-        const ent = entityPresenceCompetitors.find(function (e) {
-          return String(e.id) === id;
-        });
-        const name = (ent && ent.name) || id;
-        const data = entityPresenceById[id];
-        const block = getEntityPresenceModeBlock(data);
-        const y =
-          data && data.totalSuccessCaptures != null
-            ? Number(data.totalSuccessCaptures)
-            : 0;
-        const x =
-          block && block.appearanceCaptureCount != null
-            ? Number(block.appearanceCaptureCount)
-            : 0;
-        const color = colorForString(name || id);
-        return (
-          '<p class="serp-entity-presence-summary-line text-muted">' +
-          '<span class="competitor-activity-weekly-swatch" style="background:' +
-          escapeHtml(color) +
-          ';display:inline-block;margin-right:6px;vertical-align:middle"></span>' +
-          escapeHtml(name) +
-          ': ' +
-          x +
-          ' de ' +
-          y +
-          ' corridas</p>'
-        );
-      })
-      .join('');
-    entityPresenceSummaryEl.innerHTML = lines;
-    entityPresenceSummaryEl.hidden = false;
+    datasets.push(ds);
+  }
+
+  function rawChartPointsForBlock(block) {
+    if (!block) return [];
+    if (Array.isArray(block.chartPoints)) return block.chartPoints;
+    if (Array.isArray(block.appearances)) return block.appearances;
+    return [];
   }
 
   function renderEntityPresenceChart(checkedIds) {
@@ -5850,41 +5862,46 @@ init();
     }
 
     const datasets = [];
-    let maxPos = 5;
-    let pointCount = 0;
+    const maxPosRef = { value: 5 };
+    const pointCountRef = { value: 0 };
+    const mode = entityPresenceMode;
+
     checkedIds.forEach(function (id) {
       const ent = entityPresenceCompetitors.find(function (e) {
         return String(e.id) === id;
       });
       const name = (ent && ent.name) || id;
       const data = entityPresenceById[id];
-      const block = getEntityPresenceModeBlock(data);
-      let rawPoints =
-        block && Array.isArray(block.chartPoints) ? block.chartPoints : null;
-      // Defensive: older payloads without chartPoints can use appearances.
-      if (!rawPoints && block && Array.isArray(block.appearances)) {
-        rawPoints = block.appearances;
-      }
-      const points = chartPointsFromPresence(rawPoints || []);
-      pointCount += points.length;
-      points.forEach(function (p) {
-        if (p.y > maxPos) maxPos = p.y;
-      });
       const color = colorForString(name || id);
-      datasets.push({
-        id: id,
-        label: name,
-        data: points,
-        borderColor: color,
-        backgroundColor: color,
-        pointBackgroundColor: color,
-        borderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 5,
-        tension: 0,
-        spanGaps: false,
-        showLine: true,
-      });
+
+      if (mode === 'ad' || mode === 'both') {
+        pushEntityPresenceDataset(datasets, {
+          id: id + ':ad',
+          label: mode === 'both' ? name + ' (Ad)' : name,
+          points: chartPointsFromPresence(
+            rawChartPointsForBlock(getEntityPresenceModeBlock(data, 'ad')),
+          ),
+          color: color,
+          dashed: false,
+          maxPosRef: maxPosRef,
+          pointCountRef: pointCountRef,
+        });
+      }
+      if (mode === 'organic' || mode === 'both') {
+        pushEntityPresenceDataset(datasets, {
+          id: id + ':organic',
+          label: mode === 'both' ? name + ' (Orgánico)' : name,
+          points: chartPointsFromPresence(
+            rawChartPointsForBlock(
+              getEntityPresenceModeBlock(data, 'organic'),
+            ),
+          ),
+          color: color,
+          dashed: mode === 'both',
+          maxPosRef: maxPosRef,
+          pointCountRef: pointCountRef,
+        });
+      }
     });
 
     const xScale = {
@@ -5903,7 +5920,6 @@ init();
         color: '#9aa3b2',
       },
     };
-    // Force real capture range so empty series do not collapse to epoch (x=0).
     if (filterMeta.xMin != null && filterMeta.xMax != null) {
       const pad =
         filterMeta.xMax > filterMeta.xMin
@@ -5914,7 +5930,7 @@ init();
     }
 
     if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = false;
-    if (pointCount === 0) {
+    if (pointCountRef.value === 0) {
       setEntityPresenceStatus(
         'Sin apariciones de los competidores tildados en este filtro (eje X = corridas del filtro).',
         false,
@@ -5937,7 +5953,11 @@ init();
             intersect: true,
           },
           plugins: {
-            legend: { display: false },
+            legend: {
+              display: mode === 'both',
+              position: 'bottom',
+              labels: { color: '#9aa3b2' },
+            },
             tooltip: {
               callbacks: {
                 title: function (items) {
@@ -5947,9 +5967,7 @@ init();
                   return (
                     (ds.label || 'Competidor') +
                     ' · ' +
-                    formatEntityPresenceTooltipWhen(
-                      raw.imported_at || raw.date,
-                    )
+                    formatEntityPresenceTooltipWhen(raw.imported_at)
                   );
                 },
                 label: function (item) {
@@ -5970,7 +5988,7 @@ init();
             y: {
               reverse: true,
               min: 0.5,
-              suggestedMax: maxPos + 1,
+              suggestedMax: maxPosRef.value + 1,
               grace: '5%',
               grid: { color: '#2a2f3a' },
               ticks: {
@@ -5991,6 +6009,88 @@ init();
         },
       },
     );
+  }
+
+  function renderEntityPresenceSummary(checkedIds) {
+    if (!entityPresenceSummaryEl) return;
+    if (!checkedIds.length) {
+      entityPresenceSummaryEl.innerHTML = '';
+      entityPresenceSummaryEl.hidden = true;
+      return;
+    }
+    const mode = entityPresenceMode;
+    const lines = [];
+    checkedIds.forEach(function (id) {
+      const ent = entityPresenceCompetitors.find(function (e) {
+        return String(e.id) === id;
+      });
+      const name = (ent && ent.name) || id;
+      const data = entityPresenceById[id];
+      const y =
+        data && data.totalSuccessCaptures != null
+          ? Number(data.totalSuccessCaptures)
+          : 0;
+      const adsX =
+        data && data.ads && data.ads.appearanceCaptureCount != null
+          ? Number(data.ads.appearanceCaptureCount)
+          : 0;
+      const orgX =
+        data && data.organic && data.organic.appearanceCaptureCount != null
+          ? Number(data.organic.appearanceCaptureCount)
+          : 0;
+      const color = colorForString(name || id);
+      const swatch =
+        '<span class="competitor-activity-weekly-swatch" style="background:' +
+        escapeHtml(color) +
+        ';display:inline-block;margin-right:6px;vertical-align:middle"></span>';
+
+      if (mode === 'both') {
+        lines.push(
+          '<p class="serp-entity-presence-summary-line text-muted">' +
+            swatch +
+            escapeHtml(name) +
+            ' (Ad): ' +
+            adsX +
+            ' de ' +
+            y +
+            ' corridas</p>',
+        );
+        lines.push(
+          '<p class="serp-entity-presence-summary-line text-muted">' +
+            swatch +
+            escapeHtml(name) +
+            ' (Orgánico): ' +
+            orgX +
+            ' de ' +
+            y +
+            ' corridas</p>',
+        );
+      } else if (mode === 'organic') {
+        lines.push(
+          '<p class="serp-entity-presence-summary-line text-muted">' +
+            swatch +
+            escapeHtml(name) +
+            ': ' +
+            orgX +
+            ' de ' +
+            y +
+            ' corridas</p>',
+        );
+      } else {
+        lines.push(
+          '<p class="serp-entity-presence-summary-line text-muted">' +
+            swatch +
+            escapeHtml(name) +
+            ': ' +
+            adsX +
+            ' de ' +
+            y +
+            ' corridas</p>',
+        );
+      }
+    });
+    entityPresenceSummaryEl.innerHTML = lines.join('');
+    entityPresenceSummaryEl.hidden = false;
   }
 
   function renderEntityPresenceFromState() {
@@ -6061,13 +6161,20 @@ init();
     loadEntityPresence();
   }
 
-  async function fetchEntityPresenceOne(entityId, norm) {
+  async function fetchEntityPresenceOne(entityId, norm, dateRange) {
     let url =
       API_BASE +
       '/reports/google-serp-entity-presence?entity_id=' +
       encodeURIComponent(entityId);
     if (norm) {
       url += '&search_term_normalized=' + encodeURIComponent(norm);
+    }
+    if (dateRange && dateRange.from && dateRange.to) {
+      url +=
+        '&from=' +
+        encodeURIComponent(dateRange.from) +
+        '&to=' +
+        encodeURIComponent(dateRange.to);
     }
     const res = await fetch(url, {
       headers: { Accept: 'application/json' },
@@ -6117,8 +6224,21 @@ init();
       return;
     }
 
+    const dateRange = getEntityPresenceDateRange();
+    if (dateRange.incomplete) {
+      setEntityPresenceStatus(
+        'Completá Desde y Hasta (o dejá ambos vacíos).',
+        true,
+      );
+      return;
+    }
+    if (dateRange.invalidOrder) {
+      setEntityPresenceStatus('Desde no puede ser posterior a Hasta.', true);
+      return;
+    }
+
     const norm = getSelectedSearchTermNormalized();
-    const cacheKey = norm || '__all__';
+    const cacheKey = getEntityPresenceCacheKey(norm, dateRange);
     if (cacheKey !== entityPresenceCacheKey) {
       entityPresenceById = Object.create(null);
       entityPresenceCacheKey = cacheKey;
@@ -6139,9 +6259,11 @@ init();
     try {
       const results = await Promise.all(
         missing.map(function (id) {
-          return fetchEntityPresenceOne(id, norm).then(function (body) {
-            return { id: id, body: body };
-          });
+          return fetchEntityPresenceOne(id, norm, dateRange).then(
+            function (body) {
+              return { id: id, body: body };
+            },
+          );
         }),
       );
       if (seq !== entityPresenceRequestSeq) return;
@@ -6153,7 +6275,10 @@ init();
       if (seq !== entityPresenceRequestSeq) return;
       destroyEntityPresenceChart();
       if (entityPresenceChartWrap) entityPresenceChartWrap.hidden = true;
-      if (entityPresenceSummaryEl) entityPresenceSummaryEl.hidden = true;
+      if (entityPresenceSummaryEl) {
+        entityPresenceSummaryEl.innerHTML = '';
+        entityPresenceSummaryEl.hidden = true;
+      }
       setEntityPresenceStatus(
         err && err.message
           ? err.message
@@ -6174,13 +6299,21 @@ init();
     loadEntityPresence();
   }
 
+  function onEntityPresenceDateRangeChange() {
+    entityPresenceById = Object.create(null);
+    entityPresenceCacheKey = '';
+    loadEntityPresence();
+  }
+
   function onEntityPresenceModeChange() {
     if (!entityPresenceModeEl) return;
     const selected = entityPresenceModeEl.querySelector(
       'input[name="serp-entity-presence-mode"]:checked',
     );
-    entityPresenceMode =
-      selected && selected.value === 'organic' ? 'organic' : 'ad';
+    const value = selected ? String(selected.value || '') : 'ad';
+    if (value === 'organic') entityPresenceMode = 'organic';
+    else if (value === 'both') entityPresenceMode = 'both';
+    else entityPresenceMode = 'ad';
     renderEntityPresenceFromState();
   }
 
@@ -6327,6 +6460,19 @@ init();
       .forEach(function (input) {
         input.addEventListener('change', onEntityPresenceModeChange);
       });
+  }
+
+  if (entityPresenceFromInput) {
+    entityPresenceFromInput.addEventListener(
+      'change',
+      onEntityPresenceDateRangeChange,
+    );
+  }
+  if (entityPresenceToInput) {
+    entityPresenceToInput.addEventListener(
+      'change',
+      onEntityPresenceDateRangeChange,
+    );
   }
 
   if (queryForm) {

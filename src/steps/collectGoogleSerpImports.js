@@ -3,6 +3,10 @@ const cheerio = require('cheerio');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 const { todayUruguay } = require('../activity/dates');
+const {
+  formatYmdMontevideo,
+  YMD_RE,
+} = require('../lib/montevideo-week');
 
 /**
  * Manual Google SERP HTML import (capture-only, no scraper).
@@ -1020,13 +1024,23 @@ async function getGoogleSerpImportAds({ path, captureId } = {}) {
  * Volume note (2026-08): google_serp_ads_manual ~317 rows — low enough that
  * we intentionally load matching rows without server-side pagination.
  *
- * @param {{ entityId: string, searchTermNormalized?: string|null }} opts
+ * @param {{
+ *   entityId: string,
+ *   searchTermNormalized?: string|null,
+ *   from?: string|null,
+ *   to?: string|null,
+ * }} opts
  *   searchTermNormalized: same identifier as the history filter dropdown value
  *   (query_text_normalized). Empty/null = all queries ("Todas").
+ *   from/to: optional inclusive civil-day range (YYYY-MM-DD) applied to the
+ *   Montevideo calendar day of capture.imported_at (canonical timestamp).
+ *   Both required together, or neither.
  */
 async function getGoogleSerpEntityPresence({
   entityId,
   searchTermNormalized,
+  from: fromRaw,
+  to: toRaw,
 } = {}) {
   const id = entityId != null ? String(entityId).trim() : '';
   if (!id) {
@@ -1034,6 +1048,35 @@ async function getGoogleSerpEntityPresence({
     err.statusCode = 400;
     err.code = 'ENTITY_ID_REQUIRED';
     throw err;
+  }
+
+  const hasFrom = fromRaw != null && String(fromRaw).trim() !== '';
+  const hasTo = toRaw != null && String(toRaw).trim() !== '';
+  let fromYmd = null;
+  let toYmd = null;
+  if (hasFrom || hasTo) {
+    if (!hasFrom || !hasTo) {
+      const err = new Error(
+        'from y to deben enviarse juntos (YYYY-MM-DD), o ninguno',
+      );
+      err.statusCode = 400;
+      err.code = 'DATE_RANGE_INCOMPLETE';
+      throw err;
+    }
+    fromYmd = String(fromRaw).trim();
+    toYmd = String(toRaw).trim();
+    if (!YMD_RE.test(fromYmd) || !YMD_RE.test(toYmd)) {
+      const err = new Error('from y to deben tener formato YYYY-MM-DD');
+      err.statusCode = 400;
+      err.code = 'DATE_RANGE_INVALID';
+      throw err;
+    }
+    if (fromYmd > toYmd) {
+      const err = new Error('from no puede ser posterior a to');
+      err.statusCode = 400;
+      err.code = 'DATE_RANGE_ORDER';
+      throw err;
+    }
   }
 
   const { data: entityRows, error: entErr } = await supabase
@@ -1082,7 +1125,20 @@ async function getGoogleSerpEntityPresence({
     throw new Error(`Failed to load captures for entity presence: ${capErr.message}`);
   }
 
-  const realCaptures = captures || [];
+  /**
+   * Inclusive civil-day filter on imported_at using America/Montevideo YMD
+   * (same TZ source as activity-weekly helpers). from <= ymd(imported_at) <= to.
+   */
+  let realCaptures = captures || [];
+  if (fromYmd && toYmd) {
+    realCaptures = realCaptures.filter((c) => {
+      if (!c || !c.imported_at) return false;
+      const instant = new Date(c.imported_at);
+      if (!Number.isFinite(instant.getTime())) return false;
+      const ymd = formatYmdMontevideo(instant);
+      return ymd >= fromYmd && ymd <= toYmd;
+    });
+  }
   const totalCaptures = realCaptures.length;
   const captureIds = realCaptures.map((c) => c.id);
   const importedAtByCapture = new Map(
@@ -1187,6 +1243,8 @@ async function getGoogleSerpEntityPresence({
       isSelf: entity.is_self === true,
     },
     searchTermNormalized: normFilter || null,
+    dateFrom: fromYmd,
+    dateTo: toYmd,
     /** Y — same denominator for ads and organic blocks. */
     totalSuccessCaptures: totalCaptures,
     /**

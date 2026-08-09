@@ -3279,15 +3279,6 @@
   margin: 0;
 }
 
-#mie-dashboard-app .serp-entity-presence-summary {
-  margin: 0 0 10px;
-}
-
-#mie-dashboard-app .serp-entity-presence-summary-line {
-  margin: 0 0 4px;
-  font-size: 0.8rem;
-}
-
 #mie-dashboard-app .serp-entity-presence-mode {
   margin: 0;
   padding: 0;
@@ -3309,6 +3300,15 @@
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
+}
+
+#mie-dashboard-app .serp-entity-presence-summary {
+  margin: 0 0 10px;
+}
+
+#mie-dashboard-app .serp-entity-presence-summary-line {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
 }
 
 #mie-dashboard-app .serp-entity-presence-chart-wrap {

@@ -2185,6 +2185,8 @@ router.get('/google-serp-competitor-presence', async (req, res) => {
  * GET /reports/google-serp-entity-presence
  * Query: entity_id (required), search_term_normalized (optional — same id as
  * the history/query filter dropdown value; empty = all queries).
+ * Optional from=&to= (YYYY-MM-DD, both required together): inclusive filter on
+ * the America/Montevideo civil day of capture.imported_at.
  */
 router.get('/google-serp-entity-presence', async (req, res) => {
   const entityId =
@@ -2193,10 +2195,15 @@ router.get('/google-serp-entity-presence', async (req, res) => {
     req.query.search_term_normalized != null
       ? String(req.query.search_term_normalized).trim()
       : '';
+  const from =
+    req.query.from != null ? String(req.query.from).trim() : '';
+  const to = req.query.to != null ? String(req.query.to).trim() : '';
   try {
     const result = await getGoogleSerpEntityPresence({
       entityId,
       searchTermNormalized: searchTermNormalized || null,
+      from: from || null,
+      to: to || null,
     });
     return res.status(200).json(result);
   } catch (err) {
@@ -2204,6 +2211,8 @@ router.get('/google-serp-entity-presence', async (req, res) => {
     logger.error('Reports google-serp-entity-presence failed', {
       entityId,
       searchTermNormalized: searchTermNormalized || null,
+      from: from || null,
+      to: to || null,
       error: err.message,
       code: err.code || null,
     });
