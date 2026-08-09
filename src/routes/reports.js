@@ -19,6 +19,12 @@ const {
   getGoogleSerpCompetitorPresence,
   normalizeDomain,
 } = require('../steps/collectGoogleSerpImports');
+const { importGoogleSerpJson } = require('../steps/collectGoogleSerpJsonImports');
+const {
+  listSerpMonitoredQueries,
+  createSerpMonitoredQuery,
+  patchSerpMonitoredQuery,
+} = require('../steps/serpMonitoredQueries');
 const { computeAuctionPressure } = require('../services/auction-pressure');
 const {
   getPropertyId,
@@ -2014,6 +2020,111 @@ router.post('/import-google-serp', (req, res) => {
       });
     }
   });
+});
+
+/**
+ * POST /reports/import-google-serp-json
+ * application/json body: Serper.dev /search shape.
+ * Does not modify HTML import-google-serp.
+ */
+router.post('/import-google-serp-json', async (req, res) => {
+  try {
+    logger.info('Reports import-google-serp-json requested', {
+      hasBody: Boolean(req.body && typeof req.body === 'object'),
+      hasQ: Boolean(
+        req.body &&
+          req.body.searchParameters &&
+          req.body.searchParameters.q,
+      ),
+    });
+
+    const result = await importGoogleSerpJson({ payload: req.body });
+    const status = result.parserFoundNoResults ? 422 : 200;
+    return res.status(status).json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports import-google-serp-json failed', {
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to import Google SERP JSON',
+      code: err.code || 'IMPORT_FAILED',
+    });
+  }
+});
+
+/**
+ * GET /reports/serp-queries — catalog of monitored SERP search terms.
+ */
+router.get('/serp-queries', async (req, res) => {
+  try {
+    const result = await listSerpMonitoredQueries();
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('Reports serp-queries list failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to list SERP queries' });
+  }
+});
+
+/**
+ * POST /reports/serp-queries — add a query (UNIQUE on normalized text).
+ * Body: { queryText: string, notes?: string|null }
+ */
+router.post('/serp-queries', async (req, res) => {
+  try {
+    const queryText =
+      req.body && req.body.queryText != null
+        ? req.body.queryText
+        : req.body && req.body.query_text != null
+          ? req.body.query_text
+          : null;
+    const notes =
+      req.body && Object.prototype.hasOwnProperty.call(req.body, 'notes')
+        ? req.body.notes
+        : undefined;
+    const row = await createSerpMonitoredQuery({ queryText, notes });
+    return res.status(201).json(row);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports serp-queries create failed', {
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to create SERP query',
+      code: err.code || 'CREATE_FAILED',
+    });
+  }
+});
+
+/**
+ * PATCH /reports/serp-queries/:id — partial update (active and/or notes).
+ * Same PATCH partial pattern as /seo-landing-drafts/:id/status.
+ */
+router.patch('/serp-queries/:id', async (req, res) => {
+  try {
+    const patch = {};
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'active')) {
+      patch.active = req.body.active;
+    }
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'notes')) {
+      patch.notes = req.body.notes;
+    }
+    const row = await patchSerpMonitoredQuery(req.params.id, patch);
+    return res.status(200).json(row);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports serp-queries patch failed', {
+      id: req.params.id,
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to update SERP query',
+      code: err.code || 'PATCH_FAILED',
+    });
+  }
 });
 
 /**

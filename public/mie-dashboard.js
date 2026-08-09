@@ -5520,6 +5520,11 @@ init();
   const toggleImportBtn = document.getElementById('serp-toggle-import-btn');
   const dropzone = document.getElementById('serp-dropzone');
   const selectedFilesEl = document.getElementById('serp-selected-files');
+  const queriesStatusEl = document.getElementById('serp-queries-status');
+  const queriesListEl = document.getElementById('serp-queries-list');
+  const queryForm = document.getElementById('serp-query-form');
+  const queryInput = document.getElementById('serp-query-input');
+  const queryAddBtn = document.getElementById('serp-query-add-btn');
 
   if (!landing || !form) return;
 
@@ -5529,6 +5534,177 @@ init();
   let formExpanded = false;
   /** @type {File[]} Shared selection for picker + drag-and-drop. */
   let selectedFiles = [];
+  let queriesBusy = false;
+
+  function setQueriesStatus(text, isError) {
+    if (!queriesStatusEl) return;
+    queriesStatusEl.textContent = text || '';
+    queriesStatusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function formatQueryCreatedAt(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return String(iso);
+    return d.toLocaleDateString('es-UY');
+  }
+
+  function renderSerpQueries(queries) {
+    if (!queriesListEl) return;
+    const rows = Array.isArray(queries) ? queries.slice() : [];
+    if (!rows.length) {
+      queriesListEl.innerHTML =
+        '<p class="text-muted">Todavía no hay queries en el catálogo.</p>';
+      return;
+    }
+    queriesListEl.innerHTML = rows
+      .map(function (q) {
+        const active = q && q.active !== false;
+        const id = q && q.id != null ? String(q.id) : '';
+        return (
+          '<div class="serp-query-row' +
+          (active ? '' : ' is-inactive') +
+          '" data-id="' +
+          escapeHtml(id) +
+          '">' +
+          '<span class="serp-query-text">' +
+          escapeHtml((q && q.queryText) || '—') +
+          '</span>' +
+          '<span class="serp-query-date">' +
+          escapeHtml(formatQueryCreatedAt(q && q.createdAt)) +
+          '</span>' +
+          '<button type="button" class="serp-query-toggle' +
+          (active ? ' is-active' : '') +
+          '" data-id="' +
+          escapeHtml(id) +
+          '" data-active="' +
+          (active ? '1' : '0') +
+          '">' +
+          (active ? 'Activa' : 'Inactiva') +
+          '</button>' +
+          '</div>'
+        );
+      })
+      .join('');
+
+    queriesListEl.querySelectorAll('.serp-query-toggle').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        if (queriesBusy) return;
+        const id = btn.getAttribute('data-id');
+        const currentlyActive = btn.getAttribute('data-active') === '1';
+        if (!id) return;
+        queriesBusy = true;
+        setQueriesStatus('Actualizando…', false);
+        try {
+          const res = await fetch(
+            API_BASE + '/reports/serp-queries/' + encodeURIComponent(id),
+            {
+              method: 'PATCH',
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ active: !currentlyActive }),
+            },
+          );
+          const body = await res.json().catch(function () {
+            return {};
+          });
+          if (!res.ok) {
+            throw new Error(
+              body && body.error
+                ? String(body.error)
+                : 'No se pudo actualizar la query.',
+            );
+          }
+          setQueriesStatus('', false);
+          await loadSerpQueries();
+        } catch (err) {
+          setQueriesStatus(
+            err && err.message
+              ? err.message
+              : 'No se pudo actualizar la query.',
+            true,
+          );
+        } finally {
+          queriesBusy = false;
+        }
+      });
+    });
+  }
+
+  async function loadSerpQueries() {
+    if (!queriesListEl) return;
+    try {
+      const res = await fetch(API_BASE + '/reports/serp-queries', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudieron cargar las queries.',
+        );
+      }
+      renderSerpQueries(body.queries);
+    } catch (err) {
+      setQueriesStatus(
+        err && err.message
+          ? err.message
+          : 'No se pudieron cargar las queries.',
+        true,
+      );
+    }
+  }
+
+  if (queryForm) {
+    queryForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (queriesBusy) return;
+      const text = queryInput ? queryInput.value.trim() : '';
+      if (!text) {
+        setQueriesStatus('Escribí una query.', true);
+        return;
+      }
+      queriesBusy = true;
+      if (queryAddBtn) queryAddBtn.disabled = true;
+      setQueriesStatus('Agregando…', false);
+      try {
+        const res = await fetch(API_BASE + '/reports/serp-queries', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ queryText: text }),
+        });
+        const body = await res.json().catch(function () {
+          return {};
+        });
+        if (!res.ok) {
+          throw new Error(
+            body && body.error
+              ? String(body.error)
+              : 'No se pudo agregar la query.',
+          );
+        }
+        if (queryInput) queryInput.value = '';
+        setQueriesStatus('Query agregada.', false);
+        await loadSerpQueries();
+      } catch (err) {
+        setQueriesStatus(
+          err && err.message ? err.message : 'No se pudo agregar la query.',
+          true,
+        );
+      } finally {
+        queriesBusy = false;
+        if (queryAddBtn) queryAddBtn.disabled = false;
+      }
+    });
+  }
 
   function setStatus(text, isError) {
     if (!statusEl) return;
@@ -6314,6 +6490,7 @@ init();
   }
 
   window.__openGoogleSerp = () => {
+    loadSerpQueries();
     loadImports();
     loadPresence();
   };

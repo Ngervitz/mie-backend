@@ -2865,6 +2865,84 @@
   margin-bottom: 12px;
 }
 
+#mie-dashboard-app .serp-queries-section {
+  margin: 8px 0 20px;
+  padding: 14px 14px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#mie-dashboard-app .serp-queries-hint {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+#mie-dashboard-app .serp-query-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#mie-dashboard-app .serp-query-form .mcl-field {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+#mie-dashboard-app .serp-queries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#mie-dashboard-app .serp-query-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app .serp-query-row.is-inactive {
+  opacity: 0.65;
+}
+
+#mie-dashboard-app .serp-query-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .serp-query-date {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .serp-query-toggle {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+#mie-dashboard-app .serp-query-toggle.is-active {
+  color: var(--accent-success);
+  background: var(--accent-success-soft);
+  border-color: var(--accent-success);
+}
+
 #mie-dashboard-app .serp-upload-panel {
   margin-bottom: 16px;
 }

@@ -307,6 +307,31 @@
           </button>
         </div>
 
+        <section class="serp-queries-section" id="serp-queries-section">
+          <h2 class="cov-section-title">Queries monitoreadas</h2>
+          <p class="text-muted serp-queries-hint">
+            Catálogo de búsquedas SERP (activas e inactivas). No se borran: desactivá las que no quieras correr.
+          </p>
+          <form id="serp-query-form" class="serp-query-form">
+            <label class="mcl-field">
+              <span class="mcl-field-label">Nueva query</span>
+              <input
+                type="text"
+                id="serp-query-input"
+                class="mcl-input"
+                placeholder="ej. prestamo con cedula"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <button type="submit" id="serp-query-add-btn" class="btn btn-primary">
+              Agregar
+            </button>
+          </form>
+          <div id="serp-queries-status" class="mcl-status" aria-live="polite"></div>
+          <div id="serp-queries-list" class="serp-queries-list"></div>
+        </section>
+
         <div id="serp-upload-panel" class="serp-upload-panel" hidden>
           <form id="serp-import-form" class="serp-upload-form" enctype="multipart/form-data">
             <div
