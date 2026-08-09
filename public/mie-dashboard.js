@@ -5742,22 +5742,41 @@ init();
     return Number.isFinite(ms) ? ms : NaN;
   }
 
-  function chartPointsFromPresence(points) {
+  function chartPointsFromPresence(points, resultKind) {
     const list = Array.isArray(points) ? points : [];
     const out = [];
     list.forEach(function (p) {
       const ms = entityPresencePointTimeMs(p);
       const y = Number(p && p.position);
       if (!Number.isFinite(ms) || !Number.isFinite(y)) return;
+      const count = Math.max(1, Number(p.appearance_count) || 1);
       out.push({
         x: ms,
         y: y,
         search_term: p.search_term || '',
         imported_at: p.imported_at || null,
         capture_id: p.capture_id || null,
+        appearance_count: count,
+        result_kind: resultKind || null,
       });
     });
     return out;
+  }
+
+  /**
+   * Point radius from appearance_count. count=1 → 4 (previous fixed size);
+   * grows with sqrt so multi-hit captures are visible without dominating.
+   */
+  function entityPresencePointRadius(count) {
+    const n = Math.max(1, Number(count) || 1);
+    const minR = 4;
+    const maxR = 12;
+    const raw = minR + (Math.sqrt(n) - 1) * 5;
+    return Math.min(maxR, Math.max(minR, Math.round(raw)));
+  }
+
+  function entityPresenceHoverRadius(count) {
+    return entityPresencePointRadius(count) + 2;
   }
 
   function getEntityPresenceDateRange() {
@@ -5820,8 +5839,18 @@ init();
       backgroundColor: opts.color,
       pointBackgroundColor: opts.color,
       borderWidth: 2,
-      pointRadius: 4,
-      pointHoverRadius: 5,
+      pointRadius: function (context) {
+        const raw = context && context.raw;
+        return entityPresencePointRadius(
+          raw && raw.appearance_count != null ? raw.appearance_count : 1,
+        );
+      },
+      pointHoverRadius: function (context) {
+        const raw = context && context.raw;
+        return entityPresenceHoverRadius(
+          raw && raw.appearance_count != null ? raw.appearance_count : 1,
+        );
+      },
       tension: 0,
       spanGaps: false,
       showLine: true,
@@ -5880,6 +5909,7 @@ init();
           label: mode === 'both' ? name + ' (Ad)' : name,
           points: chartPointsFromPresence(
             rawChartPointsForBlock(getEntityPresenceModeBlock(data, 'ad')),
+            'ad',
           ),
           color: color,
           dashed: false,
@@ -5895,6 +5925,7 @@ init();
             rawChartPointsForBlock(
               getEntityPresenceModeBlock(data, 'organic'),
             ),
+            'organic',
           ),
           color: color,
           dashed: mode === 'both',
@@ -5972,12 +6003,25 @@ init();
                 },
                 label: function (item) {
                   const raw = item.raw || {};
+                  const count = Math.max(
+                    1,
+                    Number(raw.appearance_count) || 1,
+                  );
+                  const countLabel =
+                    raw.result_kind === 'organic'
+                      ? count === 1
+                        ? '1 resultado orgánico en esta corrida'
+                        : count + ' resultados orgánicos en esta corrida'
+                      : count === 1
+                        ? '1 anuncio en esta corrida'
+                        : count + ' anuncios en esta corrida';
                   return [
                     'Query: ' + (raw.search_term || '—'),
                     'Posición: ' +
                       (Number.isFinite(Number(raw.y))
                         ? String(raw.y)
                         : '—'),
+                    countLabel,
                   ];
                 },
               },

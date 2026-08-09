@@ -1201,14 +1201,17 @@ async function getGoogleSerpEntityPresence({
   }
 
   /**
-   * One chart point per capture (best/lowest position). X counts already use
-   * distinct capture_id; chart must not plot duplicate rows from the same capture.
+   * One chart point per capture (best/lowest position). Also counts how many
+   * matching rows that capture contributed (appearance_count), so the chart
+   * can scale point size without plotting duplicate rows.
    */
   function bestPositionPoints(appearances) {
     const best = new Map();
+    const counts = new Map();
     for (const row of appearances || []) {
       const cid = row.capture_id;
       if (cid == null) continue;
+      counts.set(cid, (counts.get(cid) || 0) + 1);
       const pos = Number(row.position);
       if (!Number.isFinite(pos)) continue;
       const prev = best.get(cid);
@@ -1223,12 +1226,17 @@ async function getGoogleSerpEntityPresence({
         });
       }
     }
-    return [...best.values()].sort((a, b) => {
-      const ta = Date.parse(a.imported_at) || 0;
-      const tb = Date.parse(b.imported_at) || 0;
-      if (ta !== tb) return ta - tb;
-      return (Number(a.position) || 0) - (Number(b.position) || 0);
-    });
+    return [...best.values()]
+      .map((p) => ({
+        ...p,
+        appearance_count: counts.get(p.capture_id) || 1,
+      }))
+      .sort((a, b) => {
+        const ta = Date.parse(a.imported_at) || 0;
+        const tb = Date.parse(b.imported_at) || 0;
+        if (ta !== tb) return ta - tb;
+        return (Number(a.position) || 0) - (Number(b.position) || 0);
+      });
   }
 
   const adPoints = bestPositionPoints(adAppearances);
