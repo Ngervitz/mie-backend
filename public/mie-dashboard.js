@@ -6479,7 +6479,8 @@ init();
   function renderSerpQueryCpcMeta(estimate) {
     if (!estimate) {
       return (
-        '<p class="text-muted serp-queries-hint">Sin datos de CPC todavía</p>'
+        '<p class="serp-queries-hint serp-query-cpc-empty">' +
+        '⏳ Sin datos de CPC todavía</p>'
       );
     }
     const vol = formatAvgMonthlySearches(estimate.avgMonthlySearches);
@@ -6495,7 +6496,7 @@ init();
     const fetched = formatQueryCreatedAt(estimate.fetchedAt);
     return (
       '<p class="text-muted serp-queries-hint">' +
-      'Vol. búsquedas: ' +
+      '💰 Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
       escapeHtml(comp) +

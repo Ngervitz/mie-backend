@@ -2888,6 +2888,18 @@
   line-height: 1.35;
 }
 
+/* Empty CPC line: --text (only step above --text-muted in the palette),
+   kept at hint size so it stays secondary to .serp-query-text. */
+#mie-dashboard-app .serp-queries-list .serp-query-cpc-empty {
+  margin: 2px 0 8px;
+  color: var(--text);
+  opacity: 0.72;
+}
+
+#mie-dashboard-app .serp-queries-list .serp-queries-hint {
+  margin: 2px 0 8px;
+}
+
 #mie-dashboard-app .serp-query-form {
   display: flex;
   flex-wrap: wrap;
