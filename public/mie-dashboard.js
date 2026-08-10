@@ -1148,28 +1148,52 @@ function renderAddEntityModal() {
           </button>
         </div>
         <form id="add-entity-form" class="entity-form">
-          <label class="entity-form-field">
-            <span class="ad-modal-label">Nombre</span>
-            <input class="input" type="text" name="name" id="add-entity-name"
-              value="${escapeHtml(m.name)}" required ${m.busy ? 'disabled' : ''} />
+          <label class="mcl-field entity-form-field" for="add-entity-name">
+            <span class="mcl-field-label">Nombre</span>
+            <input
+              class="mcl-input"
+              type="text"
+              name="name"
+              id="add-entity-name"
+              value="${escapeHtml(m.name)}"
+              required
+              ${m.busy ? 'disabled' : ''}
+              autocomplete="organization"
+              placeholder="Ej. Credifast" />
           </label>
-          <label class="entity-form-field">
-            <span class="ad-modal-label">Categoría</span>
-            <select class="select" name="segment" id="add-entity-segment" ${m.busy ? 'disabled' : ''}>
+          <label class="mcl-field entity-form-field" for="add-entity-segment">
+            <span class="mcl-field-label">Categoría</span>
+            <select
+              class="mcl-select"
+              name="segment"
+              id="add-entity-segment"
+              ${m.busy ? 'disabled' : ''}>
               ${segmentOptions}
             </select>
           </label>
-          <label class="entity-form-field">
-            <span class="ad-modal-label">Ad Library URL</span>
-            <input class="input" type="url" name="adLibraryUrl" id="add-entity-url"
-              value="${escapeHtml(m.adLibraryUrl)}" required ${m.busy ? 'disabled' : ''}
+          <label class="mcl-field entity-form-field" for="add-entity-url">
+            <span class="mcl-field-label">Ad Library URL</span>
+            <input
+              class="mcl-input"
+              type="url"
+              name="adLibraryUrl"
+              id="add-entity-url"
+              value="${escapeHtml(m.adLibraryUrl)}"
+              required
+              ${m.busy ? 'disabled' : ''}
               placeholder="https://www.facebook.com/ads/library/..." />
           </label>
-          <label class="entity-form-field">
-            <span class="ad-modal-label">Dominio web <span class="text-muted">(opcional, para match SERP)</span></span>
-            <input class="input" type="text" name="websiteDomain" id="add-entity-website-domain"
-              value="${escapeHtml(m.websiteDomain || '')}" ${m.busy ? 'disabled' : ''}
-              placeholder="ej. alprestamo.uy" autocomplete="off" />
+          <label class="mcl-field entity-form-field" for="add-entity-website-domain">
+            <span class="mcl-field-label">Dominio web (opcional, match SERP)</span>
+            <input
+              class="mcl-input"
+              type="text"
+              name="websiteDomain"
+              id="add-entity-website-domain"
+              value="${escapeHtml(m.websiteDomain || '')}"
+              ${m.busy ? 'disabled' : ''}
+              placeholder="ej. alprestamo.uy"
+              autocomplete="off" />
           </label>
           ${errorHtml}
           <div class="ad-modal-actions">
