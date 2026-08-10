@@ -6141,6 +6141,26 @@ init();
     );
   }
 
+  function buildEntityPresenceSummaryItem(label, x, y, color) {
+    const hasPresence = Number(x) > 0;
+    const swatch =
+      '<span class="competitor-activity-weekly-swatch" style="background:' +
+      escapeHtml(color) +
+      '"></span>';
+    return (
+      '<span class="serp-entity-presence-summary-item' +
+      (hasPresence ? ' is-present' : ' is-absent') +
+      '">' +
+      swatch +
+      escapeHtml(label) +
+      ': ' +
+      Number(x) +
+      ' de ' +
+      Number(y) +
+      ' corridas</span>'
+    );
+  }
+
   function renderEntityPresenceSummary(checkedIds) {
     if (!entityPresenceSummaryEl) return;
     if (!checkedIds.length) {
@@ -6169,54 +6189,23 @@ init();
           ? Number(data.organic.appearanceCaptureCount)
           : 0;
       const color = colorForString(name || id);
-      const swatch =
-        '<span class="competitor-activity-weekly-swatch" style="background:' +
-        escapeHtml(color) +
-        ';display:inline-block;margin-right:6px;vertical-align:middle"></span>';
 
       if (mode === 'both') {
         lines.push(
-          '<p class="serp-entity-presence-summary-line text-muted">' +
-            swatch +
-            escapeHtml(name) +
-            ' (Ad): ' +
-            adsX +
-            ' de ' +
-            y +
-            ' corridas</p>',
+          buildEntityPresenceSummaryItem(name + ' (Ad)', adsX, y, color),
         );
         lines.push(
-          '<p class="serp-entity-presence-summary-line text-muted">' +
-            swatch +
-            escapeHtml(name) +
-            ' (Orgánico): ' +
-            orgX +
-            ' de ' +
-            y +
-            ' corridas</p>',
+          buildEntityPresenceSummaryItem(
+            name + ' (Orgánico)',
+            orgX,
+            y,
+            color,
+          ),
         );
       } else if (mode === 'organic') {
-        lines.push(
-          '<p class="serp-entity-presence-summary-line text-muted">' +
-            swatch +
-            escapeHtml(name) +
-            ': ' +
-            orgX +
-            ' de ' +
-            y +
-            ' corridas</p>',
-        );
+        lines.push(buildEntityPresenceSummaryItem(name, orgX, y, color));
       } else {
-        lines.push(
-          '<p class="serp-entity-presence-summary-line text-muted">' +
-            swatch +
-            escapeHtml(name) +
-            ': ' +
-            adsX +
-            ' de ' +
-            y +
-            ' corridas</p>',
-        );
+        lines.push(buildEntityPresenceSummaryItem(name, adsX, y, color));
       }
     });
     entityPresenceSummaryEl.innerHTML = lines.join('');
