@@ -88,10 +88,13 @@ async function runKeywordCpcSync() {
   } catch (err) {
     const message = err && err.message ? err.message : 'unknown';
     const code = err && err.code ? err.code : 'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
+    const envDiagnostics =
+      err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : null;
     logger.error('keyword_cpc_sync Keyword Planner call failed', {
       syncRunId,
       error: message,
       code,
+      envDiagnostics,
     });
 
     for (const query of queries) {
@@ -108,6 +111,7 @@ async function runKeywordCpcSync() {
     }
 
     summary.ok = false;
+    if (envDiagnostics) summary.envDiagnostics = envDiagnostics;
     return summary;
   }
 

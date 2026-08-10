@@ -13,6 +13,14 @@ function requireEnv(name) {
   return value;
 }
 
+/** Optional env: trim whitespace/newlines from Railway copy-paste; empty → null. */
+function optionalTrimmedEnv(name) {
+  const value = process.env[name];
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+}
+
 const port = parseInt(process.env.PORT || '3000', 10);
 
 if (Number.isNaN(port)) {
@@ -44,11 +52,12 @@ module.exports = {
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
   // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.
+  // Trimmed: Railway copy-paste often leaves trailing \n (illegal in gRPC metadata).
   // GOOGLE_ADS_LOGIN_CUSTOMER_ID only when OAuth is against an MCC managing COPANEL.
-  googleAdsDeveloperToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || null,
-  googleAdsClientId: process.env.GOOGLE_ADS_CLIENT_ID || null,
-  googleAdsClientSecret: process.env.GOOGLE_ADS_CLIENT_SECRET || null,
-  googleAdsRefreshToken: process.env.GOOGLE_ADS_REFRESH_TOKEN || null,
-  googleAdsCustomerId: process.env.GOOGLE_ADS_CUSTOMER_ID || null,
-  googleAdsLoginCustomerId: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || null,
+  googleAdsDeveloperToken: optionalTrimmedEnv('GOOGLE_ADS_DEVELOPER_TOKEN'),
+  googleAdsClientId: optionalTrimmedEnv('GOOGLE_ADS_CLIENT_ID'),
+  googleAdsClientSecret: optionalTrimmedEnv('GOOGLE_ADS_CLIENT_SECRET'),
+  googleAdsRefreshToken: optionalTrimmedEnv('GOOGLE_ADS_REFRESH_TOKEN'),
+  googleAdsCustomerId: optionalTrimmedEnv('GOOGLE_ADS_CUSTOMER_ID'),
+  googleAdsLoginCustomerId: optionalTrimmedEnv('GOOGLE_ADS_LOGIN_CUSTOMER_ID'),
 };

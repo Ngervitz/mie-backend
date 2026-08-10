@@ -46,7 +46,70 @@ function normalizeCustomerId(raw) {
   return digits || null;
 }
 
+const GOOGLE_ADS_ENV_NAMES = [
+  'GOOGLE_ADS_DEVELOPER_TOKEN',
+  'GOOGLE_ADS_CLIENT_ID',
+  'GOOGLE_ADS_CLIENT_SECRET',
+  'GOOGLE_ADS_REFRESH_TOKEN',
+  'GOOGLE_ADS_CUSTOMER_ID',
+  'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
+];
+
+/**
+ * TEMP diagnostic: lengths / whitespace flags on RAW process.env (pre-trim).
+ * Never includes credential values.
+ * @param {string} name
+ */
+function inspectGoogleAdsEnvRaw(name) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') {
+    return {
+      name,
+      present: false,
+      length: 0,
+      endsWithNewline: false,
+      hasLeadingWhitespace: false,
+      hasTrailingWhitespace: false,
+      containsNewline: false,
+      trimmedLength: 0,
+      trimChangedLength: false,
+    };
+  }
+  const s = String(raw);
+  const trimmed = s.trim();
+  return {
+    name,
+    present: true,
+    length: s.length,
+    endsWithNewline: /[\r\n]$/.test(s),
+    hasLeadingWhitespace: /^\s/.test(s),
+    hasTrailingWhitespace: /\s$/.test(s),
+    containsNewline: /[\r\n]/.test(s),
+    trimmedLength: trimmed.length,
+    trimChangedLength: trimmed.length !== s.length,
+  };
+}
+
+/** @returns {ReturnType<typeof inspectGoogleAdsEnvRaw>[]} */
+function getGoogleAdsEnvDiagnostics() {
+  return GOOGLE_ADS_ENV_NAMES.map(inspectGoogleAdsEnvRaw);
+}
+
 function requireAdsConfig() {
+  const diagnostics = getGoogleAdsEnvDiagnostics();
+  const suspicious = diagnostics.filter(
+    (d) =>
+      d.present &&
+      (d.containsNewline ||
+        d.hasLeadingWhitespace ||
+        d.hasTrailingWhitespace ||
+        d.trimChangedLength),
+  );
+  logger.warn('Google Ads env diagnostic (no secrets)', {
+    vars: diagnostics,
+    suspicious: suspicious.map((d) => d.name),
+  });
+
   const developerToken = env.googleAdsDeveloperToken;
   const clientId = env.googleAdsClientId;
   const clientSecret = env.googleAdsClientSecret;
@@ -66,6 +129,7 @@ function requireAdsConfig() {
       `Google Ads not configured (missing: ${missing.join(', ')})`,
     );
     err.code = 'GOOGLE_ADS_CONFIG_MISSING';
+    err.envDiagnostics = diagnostics;
     throw err;
   }
 
@@ -76,6 +140,7 @@ function requireAdsConfig() {
     refreshToken,
     customerId,
     loginCustomerId,
+    envDiagnostics: diagnostics,
   };
 }
 
@@ -270,7 +335,10 @@ async function fetchKeywordHistoricalMetrics(keywords) {
       'Google Ads GenerateKeywordHistoricalMetrics',
     );
   } catch (err) {
-    if (err && err.code === 'GOOGLE_ADS_TIMEOUT') throw err;
+    if (err && err.code === 'GOOGLE_ADS_TIMEOUT') {
+      err.envDiagnostics = cfg.envDiagnostics;
+      throw err;
+    }
     const wrapped = new Error(
       err && err.message
         ? err.message
@@ -279,6 +347,7 @@ async function fetchKeywordHistoricalMetrics(keywords) {
     wrapped.code =
       err && err.code ? err.code : 'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
     wrapped.cause = err;
+    wrapped.envDiagnostics = cfg.envDiagnostics;
     throw wrapped;
   }
 
@@ -328,6 +397,7 @@ module.exports = {
   fetchKeywordHistoricalMetrics,
   normalizeCustomerId,
   normalizeKeywordKey,
+  getGoogleAdsEnvDiagnostics,
   KEYWORD_BATCH_MAX,
   KEYWORD_PLANNER_TIMEOUT_MS,
   GEO_URUGUAY,

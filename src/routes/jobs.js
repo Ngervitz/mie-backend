@@ -1290,11 +1290,15 @@ router.post('/run-keyword-cpc-sync', async (req, res) => {
     logger.error('keyword_cpc_sync failed', {
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
+      envDiagnostics:
+        err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : null,
     });
     return res.status(500).json({
       ok: false,
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
+      envDiagnostics:
+        err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : undefined,
     });
   }
 });
