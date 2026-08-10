@@ -18,7 +18,9 @@ const {
  * Serper.dev /search JSON import — parallel to HTML importGoogleSerpHtml.
  * Does not modify Cheerio parsing or POST /import-google-serp.
  *
- * Dedup: SHA-256 of json-stable-stringify(payload) stored in google_serp_captures.file_hash.
+ * Dedup: SHA-256 of json-stable-stringify(payload) stored in
+ * google_serp_captures.file_hash, unique per (file_hash, date) among
+ * source_type='serper_json' (same content on a new day → new capture).
  * Storage: private bucket serp-json-imports (created on first use, same pattern as HTML).
  */
 
@@ -90,16 +92,22 @@ async function archiveJsonToStorage(buffer) {
   return `${STORAGE_BUCKET_JSON}/${fileName}`;
 }
 
-async function findCaptureByHash(fileHash) {
+/**
+ * Dedup for Serper JSON: same file_hash on the same Uruguay calendar date only.
+ * Same content on a different date is allowed (new capture + ads rows).
+ */
+async function findCaptureByHashAndDate(fileHash, date) {
   const { data, error } = await supabase
     .from('google_serp_captures')
     .select(
-      'id, search_term, date, storage_path, file_hash, parse_status, ads_found, imported_at',
+      'id, search_term, date, storage_path, file_hash, parse_status, ads_found, imported_at, source_type',
     )
     .eq('file_hash', fileHash)
+    .eq('date', date)
+    .eq('source_type', 'serper_json')
     .maybeSingle();
   if (error) {
-    throw new Error(`Failed to check file_hash: ${error.message}`);
+    throw new Error(`Failed to check file_hash+date: ${error.message}`);
   }
   return data || null;
 }
@@ -314,11 +322,13 @@ async function importGoogleSerpJson(opts) {
   const validated = validateSerperPayload(payload);
 
   const fileHash = hashSerperJson(payload);
-  const existing = await findCaptureByHash(fileHash);
+  const date = todayUruguay();
+  const existing = await findCaptureByHashAndDate(fileHash, date);
   if (existing) {
     const counts = await fetchCaptureResultCounts(existing.id);
-    logger.info('SERP JSON import duplicate hash — skipping', {
+    logger.info('SERP JSON import duplicate hash+date — skipping', {
       fileHash,
+      date,
       captureId: existing.id,
       storagePath: existing.storage_path,
     });
@@ -351,7 +361,6 @@ async function importGoogleSerpJson(opts) {
 
   const searchTerm = validated.searchTerm;
   const searchTermNormalized = normalizeSearchTerm(searchTerm);
-  const date = todayUruguay();
 
   const rawJson = Buffer.from(canonicalizeSerperJson(payload), 'utf8');
   if (rawJson.length > MAX_JSON_BYTES) {
@@ -373,6 +382,7 @@ async function importGoogleSerpJson(opts) {
         date,
         storage_path: storagePath,
         file_hash: fileHash,
+        source_type: 'serper_json',
         parse_status: 'no_ads_found',
         ads_found: 0,
       })
@@ -424,6 +434,7 @@ async function importGoogleSerpJson(opts) {
       date,
       storage_path: storagePath,
       file_hash: fileHash,
+      source_type: 'serper_json',
       parse_status: 'success',
       ads_found: adsFoundCount,
     })
@@ -434,7 +445,7 @@ async function importGoogleSerpJson(opts) {
 
   if (captureError) {
     if (/duplicate|unique/i.test(captureError.message || '')) {
-      const raced = await findCaptureByHash(fileHash);
+      const raced = await findCaptureByHashAndDate(fileHash, date);
       if (raced) {
         const counts = await fetchCaptureResultCounts(raced.id);
         return {

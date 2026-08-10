@@ -721,6 +721,7 @@ async function importGoogleSerpHtml(opts) {
         date,
         storage_path: storagePath,
         file_hash: fileHash,
+        source_type: 'html_manual',
         parse_status: 'no_ads_found',
         ads_found: 0,
       })
@@ -778,6 +779,7 @@ async function importGoogleSerpHtml(opts) {
       date,
       storage_path: storagePath,
       file_hash: fileHash,
+      source_type: 'html_manual',
       parse_status: 'success',
       ads_found: parsed.ads.length,
     })
