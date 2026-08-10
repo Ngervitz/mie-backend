@@ -2238,7 +2238,7 @@ router.get('/competitor-activity-weekly', async (req, res) => {
 
     const { data: entityRows, error: entitiesError } = await supabase
       .from('monitored_entities')
-      .select('id, name')
+      .select('id, name, segment')
       .eq('is_self', false)
       .eq('active', true)
       .order('name', { ascending: true });
@@ -2261,6 +2261,7 @@ router.get('/competitor-activity-weekly', async (req, res) => {
         entities: entitiesMeta.map((ent) => ({
           entity_id: String(ent.id),
           name: ent.name || 'Entidad',
+          segment: ent.segment != null ? String(ent.segment) : null,
           total_events: 0,
           series: [],
         })),
@@ -2349,6 +2350,7 @@ router.get('/competitor-activity-weekly', async (req, res) => {
         return {
           entity_id: String(ent.id),
           name: ent.name || 'Entidad',
+          segment: ent.segment != null ? String(ent.segment) : null,
           total_events,
           series,
         };

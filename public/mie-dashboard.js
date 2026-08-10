@@ -873,6 +873,7 @@ function formatSegmentLabel(segment) {
     deuda: 'Deuda',
     billetera_digital: 'Billetera digital',
     tarjeta_de_credito: 'Tarjeta de crédito',
+    comparador_marketplace: 'Comparador/Marketplace',
   };
   if (!segment) return '—';
   return map[segment] || String(segment);
@@ -1137,6 +1138,7 @@ function renderAddEntityModal() {
     { value: 'deuda', label: 'Deuda' },
     { value: 'billetera_digital', label: 'Billetera digital' },
     { value: 'tarjeta_de_credito', label: 'Tarjeta de crédito' },
+    { value: 'comparador_marketplace', label: 'Comparador/Marketplace' },
   ].map((opt) => {
     const selected = opt.value === m.segment ? ' selected' : '';
     return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
@@ -2088,6 +2090,16 @@ function bindEvents() {
   if (weeklyFrom) weeklyFrom.addEventListener('change', onWeeklyRangeChange);
   if (weeklyTo) weeklyTo.addEventListener('change', onWeeklyRangeChange);
 
+  const weeklySegment = document.getElementById(
+    'competitor-activity-weekly-segment',
+  );
+  if (weeklySegment) {
+    weeklySegment.addEventListener('change', function () {
+      activityWeeklySegmentFilter = String(weeklySegment.value || '');
+      if (activityWeeklyData) mountCompetitorActivityWeeklyChart();
+    });
+  }
+
   const weeklySelectAll = document.getElementById(
     'competitor-activity-weekly-select-all',
   );
@@ -2164,6 +2176,8 @@ let activityWeeklyChecked = Object.create(null);
 let activityWeeklyLoadPromise = null;
 let activityWeeklyFrom = '';
 let activityWeeklyTo = '';
+/** '' = Todas; '__none__' = Sin categoría; else segment slug */
+let activityWeeklySegmentFilter = '';
 let activityWeeklyHighlightId = null;
 let activityWeeklyRequestSeq = 0;
 
@@ -2452,8 +2466,22 @@ function countWeeksWithAnyEvents(data) {
   return n;
 }
 
-function getActivityWeeklyVisibleEntities(data) {
+function getActivityWeeklySegmentFilteredEntities(data) {
   const entities = Array.isArray(data && data.entities) ? data.entities : [];
+  const filter = activityWeeklySegmentFilter;
+  if (!filter) return entities;
+  if (filter === '__none__') {
+    return entities.filter(function (ent) {
+      return ent.segment == null || String(ent.segment).trim() === '';
+    });
+  }
+  return entities.filter(function (ent) {
+    return String(ent.segment || '') === filter;
+  });
+}
+
+function getActivityWeeklyVisibleEntities(data) {
+  const entities = getActivityWeeklySegmentFilteredEntities(data);
   if (activityWeeklyShowAll) {
     return entities.slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'es');
@@ -2476,6 +2504,31 @@ function ensureActivityWeeklyCheckedDefaults(entities) {
 }
 
 function renderCompetitorActivityWeeklySection() {
+  const segmentOpts = [
+    { value: '', label: 'Todas' },
+    { value: 'prestamos', label: 'Préstamos' },
+    { value: 'cooperativa', label: 'Cooperativa' },
+    { value: 'deuda', label: 'Deuda' },
+    { value: 'billetera_digital', label: 'Billetera digital' },
+    { value: 'tarjeta_de_credito', label: 'Tarjeta de crédito' },
+    { value: 'comparador_marketplace', label: 'Comparador/Marketplace' },
+    { value: '__none__', label: 'Sin categoría' },
+  ]
+    .map(function (opt) {
+      const selected =
+        opt.value === activityWeeklySegmentFilter ? ' selected' : '';
+      return (
+        '<option value="' +
+        escapeHtml(opt.value) +
+        '"' +
+        selected +
+        '>' +
+        escapeHtml(opt.label) +
+        '</option>'
+      );
+    })
+    .join('');
+
   return (
     '<section class="section competitor-activity-weekly" id="competitor-activity-weekly-section">' +
     '<div class="section-title-row">' +
@@ -2500,6 +2553,11 @@ function renderCompetitorActivityWeeklySection() {
     '<input type="date" id="competitor-activity-weekly-to" class="mcl-input" value="' +
     escapeHtml(activityWeeklyTo) +
     '" /></label>' +
+    '<label class="mcl-field" for="competitor-activity-weekly-segment">' +
+    '<span class="mcl-field-label">Categoría</span>' +
+    '<select id="competitor-activity-weekly-segment" class="mcl-select">' +
+    segmentOpts +
+    '</select></label>' +
     '</div>' +
     '<div id="competitor-activity-weekly-status" class="text-muted" aria-live="polite"></div>' +
     '<div id="competitor-activity-weekly-toggles" class="competitor-activity-weekly-toggles"></div>' +
@@ -2664,8 +2722,8 @@ function mountCompetitorActivityWeeklyChart() {
   }
 
   const weeks = Array.isArray(data.weeks) ? data.weeks : [];
-  const allEntities = Array.isArray(data.entities) ? data.entities : [];
-  syncActivityWeeklyToggleButton(allEntities.length);
+  const segmentPool = getActivityWeeklySegmentFilteredEntities(data);
+  syncActivityWeeklyToggleButton(segmentPool.length);
 
   if (countWeeksWithAnyEvents(data) < 2) {
     setActivityWeeklyStatus(
