@@ -5069,8 +5069,11 @@ init();
   const seedFilter = document.getElementById('kw-seed-filter');
   const topList = document.getElementById('kw-top-list');
   const risingList = document.getElementById('kw-rising-list');
+  const serpList = document.getElementById('kw-serp-list');
+  const serpColumn = document.getElementById('kw-serp-column');
+  const columnsEl = document.getElementById('kw-columns');
 
-  if (!statusEl || !seedFilter || !topList || !risingList) {
+  if (!statusEl || !seedFilter || !topList || !risingList || !serpList || !serpColumn) {
     return;
   }
 
@@ -5167,6 +5170,33 @@ init();
       .join('');
   }
 
+  /** SERP unmatched domains (queryType=serp) — no Trends score/growth UI. */
+  function renderSerpColumn() {
+    const rows = filteredRows('serp').sort((a, b) =>
+      String(a.term || '').localeCompare(String(b.term || ''), 'es'),
+    );
+    if (!rows.length) {
+      serpColumn.hidden = true;
+      if (columnsEl) columnsEl.classList.remove('has-serp-column');
+      serpList.innerHTML = '';
+      return;
+    }
+    serpColumn.hidden = false;
+    if (columnsEl) columnsEl.classList.add('has-serp-column');
+    serpList.innerHTML = rows
+      .map(
+        (r) => `
+        <div class="kw-row">
+          <div class="kw-row-main">
+            <span class="kw-term">${escapeHtml(r.term)}</span>
+            ${decisionBadgeFor(r)}
+          </div>
+          <div class="kw-row-meta">seed: ${escapeHtml(r.seed)} · candidato a competidor (SERP)</div>
+        </div>`,
+      )
+      .join('');
+  }
+
   function renderSeedFilter() {
     const current = kwState.seed;
     seedFilter.innerHTML =
@@ -5183,6 +5213,7 @@ init();
     renderSeedFilter();
     renderTopColumn();
     renderRisingColumn();
+    renderSerpColumn();
   }
 
   async function loadKeywords() {
@@ -5196,14 +5227,21 @@ init();
       kwState.keywords = Array.isArray(body.keywords) ? body.keywords : [];
       kwState.seeds = Array.isArray(body.seeds) ? body.seeds : [];
       kwState.loaded = true;
+      const serpCount = kwState.keywords.filter(function (k) {
+        return k && k.queryType === 'serp';
+      }).length;
       statusEl.textContent = kwState.keywords.length
-        ? `${kwState.keywords.length} términos descubiertos`
+        ? `${kwState.keywords.length} términos descubiertos` +
+          (serpCount ? ` · ${serpCount} dominios SERP sin matchear` : '')
         : 'Sin datos de discovery todavía — corré el discovery refresh primero.';
       renderAll();
     } catch (err) {
       statusEl.textContent = 'No se pudieron cargar los términos.';
       topList.innerHTML = '';
       risingList.innerHTML = '';
+      serpList.innerHTML = '';
+      serpColumn.hidden = true;
+      if (columnsEl) columnsEl.classList.remove('has-serp-column');
     }
   }
 
@@ -5211,6 +5249,7 @@ init();
     kwState.seed = seedFilter.value;
     renderTopColumn();
     renderRisingColumn();
+    renderSerpColumn();
   });
 
   // Loading is driven by the unified discoveries controller.

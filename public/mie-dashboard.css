@@ -2627,8 +2627,21 @@
   align-items: start;
 }
 
+#mie-dashboard-app .kw-columns.has-serp-column {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+@media (max-width: 1100px) {
+  #mie-dashboard-app .kw-columns.has-serp-column {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 900px) {
-  #mie-dashboard-app .kw-columns { grid-template-columns: 1fr; }
+  #mie-dashboard-app .kw-columns,
+  #mie-dashboard-app .kw-columns.has-serp-column {
+    grid-template-columns: 1fr;
+  }
 }
 
 #mie-dashboard-app .kw-column {
