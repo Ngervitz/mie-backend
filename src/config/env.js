@@ -43,4 +43,12 @@ module.exports = {
   cronSecret: process.env.CRON_SECRET || null,
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
+  // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.
+  // GOOGLE_ADS_LOGIN_CUSTOMER_ID only when OAuth is against an MCC managing COPANEL.
+  googleAdsDeveloperToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || null,
+  googleAdsClientId: process.env.GOOGLE_ADS_CLIENT_ID || null,
+  googleAdsClientSecret: process.env.GOOGLE_ADS_CLIENT_SECRET || null,
+  googleAdsRefreshToken: process.env.GOOGLE_ADS_REFRESH_TOKEN || null,
+  googleAdsCustomerId: process.env.GOOGLE_ADS_CUSTOMER_ID || null,
+  googleAdsLoginCustomerId: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || null,
 };

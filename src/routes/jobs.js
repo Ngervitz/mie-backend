@@ -21,6 +21,7 @@ const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
 const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
 const { runSerpImportSync } = require('../jobs/serpImportSync');
+const { runKeywordCpcSync } = require('../jobs/keywordCpcSync');
 const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
@@ -1252,6 +1253,41 @@ router.post('/run-serp-import-sync', async (req, res) => {
     return res.status(200).json(result);
   } catch (err) {
     logger.error('serp_import_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+    });
+  }
+});
+
+/**
+ * POST /jobs/run-keyword-cpc-sync
+ * Active serp_monitored_queries → Keyword Planner (UY) → keyword_cpc_estimates.
+ * Auth: same /jobs layer (session cookie or X-Cron-Key).
+ * Not wired to cron yet.
+ */
+router.post('/run-keyword-cpc-sync', async (req, res) => {
+  logger.info('POST /jobs/run-keyword-cpc-sync — started');
+  try {
+    const result = await runKeywordCpcSync();
+    logger.info('keyword_cpc_sync finished', {
+      syncRunId: result.syncRunId,
+      totalProcessed: result.totalProcessed,
+      imported: result.imported,
+      noData: result.noData,
+      errors: result.errors,
+      currencyCode: result.currencyCode,
+    });
+    const status = result.ok === false && result.errors > 0 && result.imported === 0
+      ? 502
+      : 200;
+    return res.status(status).json(result);
+  } catch (err) {
+    logger.error('keyword_cpc_sync failed', {
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
     });
