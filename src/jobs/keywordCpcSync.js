@@ -90,10 +90,22 @@ async function runKeywordCpcSync() {
     const code = err && err.code ? err.code : 'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
     const envDiagnostics =
       err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : null;
+    const googleAdsError =
+      err && err.googleAdsError
+        ? err.googleAdsError
+        : {
+            message,
+            code,
+            googleErrorCodes: err && err.googleErrorCodes ? err.googleErrorCodes : [],
+            googleMessages: err && err.googleMessages ? err.googleMessages : [],
+            requestId: err && err.googleRequestId ? err.googleRequestId : null,
+            grpcCode: err && err.grpcCode != null ? err.grpcCode : null,
+          };
     logger.error('keyword_cpc_sync Keyword Planner call failed', {
       syncRunId,
       error: message,
       code,
+      googleAdsError,
       envDiagnostics,
     });
 
@@ -106,11 +118,13 @@ async function runKeywordCpcSync() {
         outcome: 'error',
         error: message,
         code,
+        googleErrorCodes: googleAdsError.googleErrorCodes || [],
         estimateId: null,
       });
     }
 
     summary.ok = false;
+    summary.googleAdsError = googleAdsError;
     if (envDiagnostics) summary.envDiagnostics = envDiagnostics;
     return summary;
   }

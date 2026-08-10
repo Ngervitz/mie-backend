@@ -1290,6 +1290,7 @@ router.post('/run-keyword-cpc-sync', async (req, res) => {
     logger.error('keyword_cpc_sync failed', {
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
+      googleAdsError: err && err.googleAdsError ? err.googleAdsError : null,
       envDiagnostics:
         err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : null,
     });
@@ -1297,6 +1298,7 @@ router.post('/run-keyword-cpc-sync', async (req, res) => {
       ok: false,
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
+      googleAdsError: err && err.googleAdsError ? err.googleAdsError : undefined,
       envDiagnostics:
         err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : undefined,
     });

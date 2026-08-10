@@ -46,6 +46,136 @@ function normalizeCustomerId(raw) {
   return digits || null;
 }
 
+/**
+ * TEMP: unpack real google-ads-api / gRPC / GoogleAdsFailure details.
+ * Never includes credential values — only codes, messages, request ids.
+ * @param {unknown} err
+ */
+function extractGoogleAdsErrorDetails(err) {
+  if (err == null) {
+    return {
+      message: 'unknown',
+      code: 'GOOGLE_ADS_UNKNOWN',
+      googleErrorCodes: [],
+      googleMessages: [],
+      requestId: null,
+      grpcCode: null,
+      grpcDetails: null,
+    };
+  }
+
+  /** @type {Record<string, unknown>|null} */
+  let failure = null;
+  if (typeof err === 'object' && err !== null) {
+    const raw = /** @type {Record<string, unknown>} */ (err);
+    if (typeof raw.toJSON === 'function') {
+      try {
+        const asJson = raw.toJSON();
+        if (asJson && typeof asJson === 'object') {
+          failure = /** @type {Record<string, unknown>} */ (asJson);
+        }
+      } catch {
+        failure = raw;
+      }
+    }
+    if (!failure) failure = raw;
+  }
+
+  /** @type {string[]} */
+  const googleErrorCodes = [];
+  /** @type {string[]} */
+  const googleMessages = [];
+  let requestId = null;
+
+  // Decoded GoogleAdsFailure — often has no Error.message
+  if (failure && Array.isArray(failure.errors)) {
+    for (const item of failure.errors) {
+      if (!item || typeof item !== 'object') continue;
+      const row = /** @type {Record<string, unknown>} */ (item);
+      if (typeof row.message === 'string' && row.message.trim()) {
+        googleMessages.push(row.message.trim());
+      }
+      const ec = row.error_code || row.errorCode;
+      if (ec && typeof ec === 'object' && !Array.isArray(ec)) {
+        for (const [k, v] of Object.entries(
+          /** @type {Record<string, unknown>} */ (ec),
+        )) {
+          if (v == null || v === 0 || v === '0' || v === '') continue;
+          googleErrorCodes.push(`${k}=${String(v)}`);
+        }
+      }
+    }
+  }
+
+  if (failure && failure.request_id != null) {
+    requestId = String(failure.request_id);
+  } else if (failure && failure.requestId != null) {
+    requestId = String(failure.requestId);
+  }
+
+  let message =
+    err instanceof Error && err.message
+      ? String(err.message)
+      : failure && typeof failure.message === 'string' && failure.message
+        ? String(failure.message)
+        : '';
+
+  if (!message && googleMessages.length) {
+    message = googleMessages.join(' | ');
+  }
+  if (!message && googleErrorCodes.length) {
+    message = `Google Ads API error: ${googleErrorCodes.join(', ')}`;
+  }
+  if (!message) {
+    try {
+      const keys =
+        failure && typeof failure === 'object' ? Object.keys(failure) : [];
+      message = keys.length
+        ? `Google Ads error object keys: ${keys.join(',')}`
+        : 'Google Ads Keyword Planner request failed';
+    } catch {
+      message = 'Google Ads Keyword Planner request failed';
+    }
+  }
+
+  const code =
+    (failure && typeof failure.code === 'string' && failure.code) ||
+    (googleErrorCodes[0]
+      ? String(googleErrorCodes[0]).split('=')[0].toUpperCase()
+      : null) ||
+    'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
+
+  const grpcCode =
+    failure && typeof failure.code === 'number' ? failure.code : null;
+  const grpcDetails =
+    failure && typeof failure.details === 'string' ? failure.details : null;
+
+  return {
+    message,
+    code: String(code),
+    googleErrorCodes,
+    googleMessages,
+    requestId,
+    grpcCode,
+    grpcDetails,
+  };
+}
+
+function wrapGoogleAdsError(err, cfg, fallbackCode) {
+  const details = extractGoogleAdsErrorDetails(err);
+  const wrapped = new Error(details.message);
+  wrapped.code = details.code || fallbackCode || 'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
+  wrapped.googleErrorCodes = details.googleErrorCodes;
+  wrapped.googleMessages = details.googleMessages;
+  wrapped.googleRequestId = details.requestId;
+  wrapped.grpcCode = details.grpcCode;
+  wrapped.grpcDetails = details.grpcDetails;
+  wrapped.cause = err;
+  wrapped.envDiagnostics = cfg && cfg.envDiagnostics ? cfg.envDiagnostics : null;
+  wrapped.googleAdsError = details;
+  return wrapped;
+}
+
 const GOOGLE_ADS_ENV_NAMES = [
   'GOOGLE_ADS_DEVELOPER_TOKEN',
   'GOOGLE_ADS_CLIENT_ID',
@@ -313,9 +443,14 @@ async function fetchKeywordHistoricalMetrics(keywords) {
   try {
     currencyCode = await fetchCustomerCurrencyCode(customer);
   } catch (err) {
+    const details = extractGoogleAdsErrorDetails(err);
     logger.warn('Google Ads currency_code fetch failed', {
-      error: err && err.message ? err.message : 'unknown',
-      code: err && err.code ? err.code : null,
+      error: details.message,
+      code: details.code,
+      googleErrorCodes: details.googleErrorCodes,
+      googleMessages: details.googleMessages,
+      requestId: details.requestId,
+      grpcCode: details.grpcCode,
     });
   }
 
@@ -339,15 +474,20 @@ async function fetchKeywordHistoricalMetrics(keywords) {
       err.envDiagnostics = cfg.envDiagnostics;
       throw err;
     }
-    const wrapped = new Error(
-      err && err.message
-        ? err.message
-        : 'Google Ads Keyword Planner request failed',
+    const wrapped = wrapGoogleAdsError(
+      err,
+      cfg,
+      'GOOGLE_ADS_KEYWORD_PLANNER_ERROR',
     );
-    wrapped.code =
-      err && err.code ? err.code : 'GOOGLE_ADS_KEYWORD_PLANNER_ERROR';
-    wrapped.cause = err;
-    wrapped.envDiagnostics = cfg.envDiagnostics;
+    logger.error('Google Ads GenerateKeywordHistoricalMetrics failed', {
+      message: wrapped.message,
+      code: wrapped.code,
+      googleErrorCodes: wrapped.googleErrorCodes,
+      googleMessages: wrapped.googleMessages,
+      googleRequestId: wrapped.googleRequestId,
+      grpcCode: wrapped.grpcCode,
+      envDiagnostics: cfg.envDiagnostics,
+    });
     throw wrapped;
   }
 
@@ -398,6 +538,7 @@ module.exports = {
   normalizeCustomerId,
   normalizeKeywordKey,
   getGoogleAdsEnvDiagnostics,
+  extractGoogleAdsErrorDetails,
   KEYWORD_BATCH_MAX,
   KEYWORD_PLANNER_TIMEOUT_MS,
   GEO_URUGUAY,
