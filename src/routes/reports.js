@@ -2377,6 +2377,82 @@ router.get('/competitor-activity-weekly', async (req, res) => {
   }
 });
 
+/**
+ * GET /reports/keyword-cpc-estimates
+ * Latest Keyword Planner snapshot per monitored_query_id (app-level DISTINCT ON:
+ * order fetched_at DESC, first row wins — same pattern as own-ad-changes event-types).
+ */
+router.get('/keyword-cpc-estimates', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('keyword_cpc_estimates')
+      .select(
+        [
+          'id',
+          'monitored_query_id',
+          'query_text_snapshot',
+          'avg_monthly_searches',
+          'low_top_of_page_bid_raw',
+          'high_top_of_page_bid_raw',
+          'currency_code',
+          'competition_level',
+          'sync_run_id',
+          'fetched_at',
+        ].join(', '),
+      )
+      .order('fetched_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to fetch keyword_cpc_estimates: ${error.message}`);
+    }
+
+    const latestByQuery = new Map();
+    (data || []).forEach((row) => {
+      if (!row || row.monitored_query_id == null) return;
+      const key = String(row.monitored_query_id);
+      if (latestByQuery.has(key)) return;
+      latestByQuery.set(key, {
+        id: row.id,
+        monitoredQueryId: key,
+        queryTextSnapshot: row.query_text_snapshot,
+        avgMonthlySearches:
+          row.avg_monthly_searches != null
+            ? Number(row.avg_monthly_searches)
+            : null,
+        lowTopOfPageBidRaw:
+          row.low_top_of_page_bid_raw != null
+            ? Number(row.low_top_of_page_bid_raw)
+            : null,
+        highTopOfPageBidRaw:
+          row.high_top_of_page_bid_raw != null
+            ? Number(row.high_top_of_page_bid_raw)
+            : null,
+        currencyCode:
+          row.currency_code != null && String(row.currency_code).trim()
+            ? String(row.currency_code).trim()
+            : null,
+        competitionLevel:
+          row.competition_level != null
+            ? String(row.competition_level)
+            : null,
+        syncRunId: row.sync_run_id != null ? String(row.sync_run_id) : null,
+        fetchedAt: row.fetched_at,
+      });
+    });
+
+    return res.status(200).json({
+      estimates: Array.from(latestByQuery.values()),
+    });
+  } catch (err) {
+    logger.error('Reports keyword-cpc-estimates failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res
+      .status(500)
+      .json({ error: 'Failed to list keyword CPC estimates' });
+  }
+});
+
 module.exports = router;
 module.exports.lastCompleteWeekMonday = lastCompleteWeekMonday;
 module.exports.resolveLastCompleteWeeks = resolveLastCompleteWeeks;

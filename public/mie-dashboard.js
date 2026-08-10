@@ -6449,9 +6449,73 @@ init();
     return d.toLocaleDateString('es-UY');
   }
 
-  function renderSerpQueries(queries) {
+  function formatCompetitionLevel(level) {
+    if (level == null || level === '') return '—';
+    const key = String(level).toUpperCase();
+    if (key === 'LOW') return 'Baja';
+    if (key === 'MEDIUM') return 'Media';
+    if (key === 'HIGH') return 'Alta';
+    if (key === 'UNSPECIFIED' || key === 'UNKNOWN') return '—';
+    return String(level);
+  }
+
+  /** Bids are stored as Google Ads micros (raw). null → em dash, never NaN. */
+  function formatBidFromMicros(raw, currencyCode) {
+    if (raw == null || raw === '') return '—';
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return '—';
+    const amount = (n / 1000000).toFixed(2);
+    if (currencyCode) return amount + ' ' + String(currencyCode);
+    return amount + ' (moneda sin confirmar)';
+  }
+
+  function formatAvgMonthlySearches(value) {
+    if (value == null || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return String(Math.trunc(n));
+  }
+
+  function renderSerpQueryCpcMeta(estimate) {
+    if (!estimate) {
+      return (
+        '<p class="text-muted serp-queries-hint">Sin datos de CPC todavía</p>'
+      );
+    }
+    const vol = formatAvgMonthlySearches(estimate.avgMonthlySearches);
+    const comp = formatCompetitionLevel(estimate.competitionLevel);
+    const low = formatBidFromMicros(
+      estimate.lowTopOfPageBidRaw,
+      estimate.currencyCode,
+    );
+    const high = formatBidFromMicros(
+      estimate.highTopOfPageBidRaw,
+      estimate.currencyCode,
+    );
+    const fetched = formatQueryCreatedAt(estimate.fetchedAt);
+    return (
+      '<p class="text-muted serp-queries-hint">' +
+      'Vol. búsquedas: ' +
+      escapeHtml(vol) +
+      ' · Competencia: ' +
+      escapeHtml(comp) +
+      ' · Bid bajo: ' +
+      escapeHtml(low) +
+      ' · Bid alto: ' +
+      escapeHtml(high) +
+      ' · CPC al ' +
+      escapeHtml(fetched) +
+      '</p>'
+    );
+  }
+
+  function renderSerpQueries(queries, estimatesByQueryId) {
     if (!queriesListEl) return;
     const rows = Array.isArray(queries) ? queries.slice() : [];
+    const byId =
+      estimatesByQueryId && typeof estimatesByQueryId === 'object'
+        ? estimatesByQueryId
+        : Object.create(null);
     if (!rows.length) {
       queriesListEl.innerHTML =
         '<p class="text-muted">Todavía no hay queries en el catálogo.</p>';
@@ -6461,7 +6525,9 @@ init();
       .map(function (q) {
         const active = q && q.active !== false;
         const id = q && q.id != null ? String(q.id) : '';
+        const estimate = id && byId[id] ? byId[id] : null;
         return (
+          '<div>' +
           '<div class="serp-query-row' +
           (active ? '' : ' is-inactive') +
           '" data-id="' +
@@ -6482,6 +6548,8 @@ init();
           '">' +
           (active ? 'Activa' : 'Inactiva') +
           '</button>' +
+          '</div>' +
+          renderSerpQueryCpcMeta(estimate) +
           '</div>'
         );
       })
@@ -6536,20 +6604,40 @@ init();
   async function loadSerpQueries() {
     if (!queriesListEl) return;
     try {
-      const res = await fetch(API_BASE + '/reports/serp-queries', {
-        headers: { Accept: 'application/json' },
-      });
-      const body = await res.json().catch(function () {
+      const [queriesRes, estimatesRes] = await Promise.all([
+        fetch(API_BASE + '/reports/serp-queries', {
+          headers: { Accept: 'application/json' },
+        }),
+        fetch(API_BASE + '/reports/keyword-cpc-estimates', {
+          headers: { Accept: 'application/json' },
+        }),
+      ]);
+      const body = await queriesRes.json().catch(function () {
         return {};
       });
-      if (!res.ok) {
+      if (!queriesRes.ok) {
         throw new Error(
           body && body.error
             ? String(body.error)
             : 'No se pudieron cargar las queries.',
         );
       }
-      renderSerpQueries(body.queries);
+
+      const estimatesByQueryId = Object.create(null);
+      if (estimatesRes.ok) {
+        const estimatesBody = await estimatesRes.json().catch(function () {
+          return {};
+        });
+        const list = Array.isArray(estimatesBody.estimates)
+          ? estimatesBody.estimates
+          : [];
+        list.forEach(function (est) {
+          if (!est || est.monitoredQueryId == null) return;
+          estimatesByQueryId[String(est.monitoredQueryId)] = est;
+        });
+      }
+
+      renderSerpQueries(body.queries, estimatesByQueryId);
       populateHistoryQueryFilter(body.queries);
       refreshImportsListView();
       loadEntityPresence();
