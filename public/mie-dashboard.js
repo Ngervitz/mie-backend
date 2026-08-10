@@ -871,6 +871,8 @@ function formatSegmentLabel(segment) {
     prestamos: 'Préstamos',
     cooperativa: 'Cooperativa',
     deuda: 'Deuda',
+    billetera_digital: 'Billetera digital',
+    tarjeta_de_credito: 'Tarjeta de crédito',
   };
   if (!segment) return '—';
   return map[segment] || String(segment);
@@ -1133,6 +1135,8 @@ function renderAddEntityModal() {
     { value: 'prestamos', label: 'Préstamos' },
     { value: 'cooperativa', label: 'Cooperativa' },
     { value: 'deuda', label: 'Deuda' },
+    { value: 'billetera_digital', label: 'Billetera digital' },
+    { value: 'tarjeta_de_credito', label: 'Tarjeta de crédito' },
   ].map((opt) => {
     const selected = opt.value === m.segment ? ' selected' : '';
     return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
