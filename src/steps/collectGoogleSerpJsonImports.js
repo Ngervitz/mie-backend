@@ -10,6 +10,7 @@ const {
   normalizeDomain,
   normalizeSearchTerm,
   matchAdvertiserToEntities,
+  collectUnmatchedDomains,
   queueUnmatchedDomainsForReview,
   MALFORMED_DOMAIN,
 } = require('./collectGoogleSerpImports');
@@ -164,18 +165,6 @@ function buildAdvertiserSummary(results, entities) {
     unmatchedAdvertisers: unmatched,
     matchedAdvertisers: matched,
   };
-}
-
-function collectUnmatchedDomains(results, entities) {
-  const domains = new Set();
-  for (const row of results) {
-    const domain = normalizeDomain(row.advertiser_domain);
-    if (!domain || domain === MALFORMED_DOMAIN) continue;
-    if (!matchAdvertiserToEntities(row, entities)) {
-      domains.add(domain);
-    }
-  }
-  return [...domains];
 }
 
 function splitInsertedRows(inserted) {

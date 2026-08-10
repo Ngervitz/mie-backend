@@ -29,6 +29,12 @@ const SERP_IMPORT_SOURCE_SEED = 'google_serp_import';
 
 const MALFORMED_DOMAIN = '(url malformada)';
 
+/**
+ * Social / platform hosts never queued as competitor candidates.
+ * Compared after normalizeDomain(); also matches subdomains (m.facebook.com).
+ */
+const PLATFORM_DOMAINS_EXCLUDED = Object.freeze(['facebook.com', 'instagram.com']);
+
 function sha256Hex(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
@@ -432,6 +438,220 @@ function matchAdvertiserToEntities(ad, entities) {
   return null;
 }
 
+/**
+ * @param {string} domainOrUrl
+ * @returns {boolean}
+ */
+function isExcludedPlatformDomain(domainOrUrl) {
+  const d = normalizeDomain(domainOrUrl);
+  if (!d || d === MALFORMED_DOMAIN) return false;
+  for (const platform of PLATFORM_DOMAINS_EXCLUDED) {
+    if (d === platform || d.endsWith('.' + platform)) return true;
+  }
+  return false;
+}
+
+function collectUnmatchedDomains(results, entities) {
+  const domains = new Set();
+  for (const row of results) {
+    const domain = normalizeDomain(row.advertiser_domain);
+    if (!domain || domain === MALFORMED_DOMAIN) continue;
+    if (isExcludedPlatformDomain(domain)) continue;
+    if (!matchAdvertiserToEntities(row, entities)) {
+      domains.add(domain);
+    }
+  }
+  return [...domains];
+}
+
+/**
+ * Route unmatched domains into confirmed_search_terms for Pendientes triage.
+ * Re-checks canonical match + platform exclusion before insert (defense in depth;
+ * collectUnmatchedDomains already applies both).
+ * Batched: SELECT existing + INSERT; dedupes within the import via Set upstream.
+ */
+async function queueUnmatchedDomainsForReview(unmatchedDomains) {
+  const unique = [
+    ...new Set(
+      (unmatchedDomains || []).map((d) => normalizeDomain(d)).filter(Boolean),
+    ),
+  ].filter((d) => d !== MALFORMED_DOMAIN && !isExcludedPlatformDomain(d));
+
+  if (!unique.length) {
+    return { queued: 0, skipped: 0, domains: [] };
+  }
+
+  // Re-match against current entities so we never enqueue a domain that now
+  // has an exact website_domain hit (same function as ads/organic matching).
+  const entities = await loadMonitoredEntities();
+  const stillUnmatched = unique.filter((domain) => {
+    return !matchAdvertiserToEntities({ advertiser_domain: domain }, entities);
+  });
+
+  if (!stillUnmatched.length) {
+    return {
+      queued: 0,
+      skipped: unique.length,
+      domains: [],
+    };
+  }
+
+  const { data: existing, error: selErr } = await supabase
+    .from('confirmed_search_terms')
+    .select('term')
+    .eq('source_seed', SERP_IMPORT_SOURCE_SEED)
+    .in('term', stillUnmatched);
+  if (selErr) {
+    throw new Error(`Failed to check confirmed_search_terms: ${selErr.message}`);
+  }
+
+  const existingSet = new Set(
+    (existing || []).map((r) => normalizeDomain(r.term)),
+  );
+  const toInsert = stillUnmatched.filter((d) => !existingSet.has(d));
+  if (!toInsert.length) {
+    return {
+      queued: 0,
+      skipped: unique.length,
+      domains: [],
+    };
+  }
+
+  const rows = toInsert.map((term) => ({
+    term,
+    term_type: 'competitor_candidate',
+    decision: 'pending',
+    source_seed: SERP_IMPORT_SOURCE_SEED,
+    discovered_score: null,
+    entity_id: null,
+  }));
+
+  const { error: insErr } = await supabase.from('confirmed_search_terms').insert(rows);
+  if (insErr) {
+    // term UNIQUE spans all sources — skip rows that collide with Trends terms.
+    if (/duplicate|unique/i.test(insErr.message || '')) {
+      let queued = 0;
+      for (const row of rows) {
+        const { error: oneErr } = await supabase
+          .from('confirmed_search_terms')
+          .insert(row);
+        if (!oneErr) queued += 1;
+      }
+      return {
+        queued,
+        skipped: unique.length - queued,
+        domains: toInsert.slice(0, queued),
+      };
+    }
+    throw new Error(`Failed to queue SERP unmatched domains: ${insErr.message}`);
+  }
+
+  return {
+    queued: toInsert.length,
+    skipped: unique.length - toInsert.length,
+    domains: toInsert,
+  };
+}
+
+/**
+ * One-shot / idempotent: resolve pending google_serp_import rows that now
+ * exact-match an active monitored entity, or are excluded platform domains.
+ * Does not touch domain-distinct same-business cases or genuine unknowns.
+ *
+ * @returns {Promise<{
+ *   scanned: number,
+ *   resolvedMatched: number,
+ *   resolvedPlatform: number,
+ *   leftPending: number,
+ *   matched: { term: string, entityId: string, entityName: string }[],
+ *   platforms: string[],
+ *   remaining: string[],
+ * }>}
+ */
+async function resolvePendingSerpUnmatchedDomains() {
+  const { data: pendingRows, error: selErr } = await supabase
+    .from('confirmed_search_terms')
+    .select('id, term, decision, source_seed, entity_id')
+    .eq('source_seed', SERP_IMPORT_SOURCE_SEED)
+    .eq('decision', 'pending');
+  if (selErr) {
+    throw new Error(
+      `Failed to load pending SERP unmatched domains: ${selErr.message}`,
+    );
+  }
+
+  const pending = pendingRows || [];
+  const entities = (await loadMonitoredEntities()).filter(
+    (e) => e && e.active !== false,
+  );
+
+  const matched = [];
+  const platforms = [];
+  const remaining = [];
+
+  for (const row of pending) {
+    const term = row.term != null ? String(row.term) : '';
+    const domain = normalizeDomain(term);
+    if (!domain || domain === MALFORMED_DOMAIN) {
+      remaining.push(term);
+      continue;
+    }
+
+    if (isExcludedPlatformDomain(domain)) {
+      const { error: updErr } = await supabase
+        .from('confirmed_search_terms')
+        .update({ decision: 'discarded', entity_id: null })
+        .eq('id', row.id)
+        .eq('decision', 'pending');
+      if (updErr) {
+        throw new Error(
+          `Failed to discard platform domain ${domain}: ${updErr.message}`,
+        );
+      }
+      platforms.push(domain);
+      continue;
+    }
+
+    const hit = matchAdvertiserToEntities(
+      { advertiser_domain: domain },
+      entities,
+    );
+    if (hit) {
+      const { error: updErr } = await supabase
+        .from('confirmed_search_terms')
+        .update({
+          decision: 'added_as_competitor',
+          entity_id: hit.id,
+        })
+        .eq('id', row.id)
+        .eq('decision', 'pending');
+      if (updErr) {
+        throw new Error(
+          `Failed to resolve matched domain ${domain}: ${updErr.message}`,
+        );
+      }
+      matched.push({
+        term: domain,
+        entityId: hit.id,
+        entityName: hit.name,
+      });
+      continue;
+    }
+
+    remaining.push(domain);
+  }
+
+  return {
+    scanned: pending.length,
+    resolvedMatched: matched.length,
+    resolvedPlatform: platforms.length,
+    leftPending: remaining.length,
+    matched,
+    platforms,
+    remaining,
+  };
+}
+
 async function ensureSerpHtmlBucket() {
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
   if (listError) {
@@ -523,81 +743,6 @@ function buildAdvertiserSummary(results, entities) {
     unmatchedAdvertisers: unmatched,
     matchedAdvertisers: matched,
   };
-}
-
-function collectUnmatchedDomains(results, entities) {
-  const domains = new Set();
-  for (const row of results) {
-    const domain = normalizeDomain(row.advertiser_domain);
-    if (!domain || domain === MALFORMED_DOMAIN) continue;
-    if (!matchAdvertiserToEntities(row, entities)) {
-      domains.add(domain);
-    }
-  }
-  return [...domains];
-}
-
-/**
- * Route unmatched domains into confirmed_search_terms for Pendientes triage.
- * Batched: one SELECT + one INSERT; dedupes within the import via Set upstream.
- */
-async function queueUnmatchedDomainsForReview(unmatchedDomains) {
-  const unique = [
-    ...new Set(
-      (unmatchedDomains || []).map((d) => normalizeDomain(d)).filter(Boolean),
-    ),
-  ];
-  if (!unique.length) {
-    return { queued: 0, skipped: 0, domains: [] };
-  }
-
-  const { data: existing, error: selErr } = await supabase
-    .from('confirmed_search_terms')
-    .select('term')
-    .eq('source_seed', SERP_IMPORT_SOURCE_SEED)
-    .in('term', unique);
-  if (selErr) {
-    throw new Error(`Failed to check confirmed_search_terms: ${selErr.message}`);
-  }
-
-  const existingSet = new Set(
-    (existing || []).map((r) => normalizeDomain(r.term)),
-  );
-  const toInsert = unique.filter((d) => !existingSet.has(d));
-  if (!toInsert.length) {
-    return { queued: 0, skipped: unique.length, domains: [] };
-  }
-
-  const rows = toInsert.map((term) => ({
-    term,
-    term_type: 'competitor_candidate',
-    decision: 'pending',
-    source_seed: SERP_IMPORT_SOURCE_SEED,
-    discovered_score: null,
-    entity_id: null,
-  }));
-
-  const { error: insErr } = await supabase.from('confirmed_search_terms').insert(rows);
-  if (insErr) {
-    // term UNIQUE spans all sources — skip rows that collide with Trends terms.
-    if (/duplicate|unique/i.test(insErr.message || '')) {
-      let queued = 0;
-      for (const row of rows) {
-        const { error: oneErr } = await supabase
-          .from('confirmed_search_terms')
-          .insert(row);
-        if (!oneErr) queued += 1;
-      }
-      return {
-        queued,
-        skipped: unique.length - queued,
-        domains: toInsert.slice(0, queued),
-      };
-    }
-    throw new Error(`Failed to queue SERP unmatched domains: ${insErr.message}`);
-  }
-
-  return { queued: toInsert.length, skipped: unique.length - toInsert.length, domains: toInsert };
 }
 
 async function fetchCaptureResultCounts(captureId) {
@@ -1420,6 +1565,7 @@ module.exports = {
   MAX_FILE_BYTES,
   MALFORMED_DOMAIN,
   SERP_IMPORT_SOURCE_SEED,
+  PLATFORM_DOMAINS_EXCLUDED,
   PRESENCE_INCLUDED_PARSE_STATUSES,
   PRESENCE_EXCLUDED_PARSE_STATUSES,
   sha256Hex,
@@ -1429,7 +1575,10 @@ module.exports = {
   parseGoogleSerpHtml,
   parseOrganicResults,
   matchAdvertiserToEntities,
+  isExcludedPlatformDomain,
+  collectUnmatchedDomains,
   queueUnmatchedDomainsForReview,
+  resolvePendingSerpUnmatchedDomains,
   importGoogleSerpHtml,
   listGoogleSerpImports,
   getGoogleSerpImportAds,
