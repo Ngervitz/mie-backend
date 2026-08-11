@@ -9825,6 +9825,14 @@ init();
       evolutionChart.destroy();
       evolutionChart = null;
     }
+    if (
+      evolutionCanvas &&
+      typeof window.Chart === 'function' &&
+      typeof window.Chart.getChart === 'function'
+    ) {
+      const existing = window.Chart.getChart(evolutionCanvas);
+      if (existing) existing.destroy();
+    }
   }
 
   async function fetchEvolutionSummary(provider) {
@@ -10081,6 +10089,7 @@ init();
     }
 
     setEvolutionStatus('');
+    destroyEvolutionChart();
     const ctx = evolutionCanvas.getContext('2d');
     evolutionChart = new window.Chart(ctx, {
       type: 'line',
