@@ -9938,12 +9938,20 @@ init();
     return max || 1;
   }
 
+  /**
+   * Point radius from mention_count — same √ growth pattern as
+   * entityPresencePointRadius, scaled to the chart's max so week-to-week
+   * differences stay visible (mention counts are often >> SERP hits).
+   */
   function bubbleRadius(mentionCount, maxMentionCount) {
     if (!mentionCount || mentionCount <= 0) return 0;
-    var minR = 4;
-    var maxR = 16;
-    var ratio = mentionCount / maxMentionCount;
-    return Math.round(minR + ratio * (maxR - minR));
+    const n = Math.max(1, Number(mentionCount) || 1);
+    const maxN = Math.max(1, Number(maxMentionCount) || 1);
+    const minR = 4;
+    const maxR = 16;
+    const ratio = Math.sqrt(n) / Math.sqrt(maxN);
+    const raw = minR + ratio * (maxR - minR);
+    return Math.min(maxR, Math.max(minR, Math.round(raw)));
   }
 
   function destroyEvolutionChart() {
