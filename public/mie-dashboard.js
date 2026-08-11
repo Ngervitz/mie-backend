@@ -10044,13 +10044,15 @@ init();
         if (p && p.week_of) seriesByWeek[p.week_of] = p;
       });
 
-      const points = weeks.map(function (week, index) {
+      // Chart.js parsing:false crashes on interleaved nulls in data[].
+      const points = [];
+      weeks.forEach(function (week, index) {
         const point = seriesByWeek[week];
         if (!point || !(point.mention_count > 0) || point.avg_rank == null) {
-          return null;
+          return;
         }
         if (point.avg_rank > maxRank) maxRank = point.avg_rank;
-        return {
+        points.push({
           x: index + xOffset,
           y: point.avg_rank,
           r: bubbleRadius(point.mention_count, maxMentionCount),
@@ -10059,10 +10061,10 @@ init();
           mention_count: point.mention_count,
           avg_rank: point.avg_rank,
           successful_providers: coverageByWeek[week] || 0,
-        };
+        });
       });
 
-      if (!points.some(Boolean)) return;
+      if (!points.length) return;
 
       datasets.push({
         label: entity.name || entity.entity_id || 'Entidad',
