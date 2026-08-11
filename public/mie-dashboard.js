@@ -9948,7 +9948,7 @@ init();
     const n = Math.max(1, Number(mentionCount) || 1);
     const maxN = Math.max(1, Number(maxMentionCount) || 1);
     const minR = 4;
-    const maxR = 16;
+    const maxR = 24;
     const ratio = Math.sqrt(n) / Math.sqrt(maxN);
     const raw = minR + ratio * (maxR - minR);
     return Math.min(maxR, Math.max(minR, Math.round(raw)));
