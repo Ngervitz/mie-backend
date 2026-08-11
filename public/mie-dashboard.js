@@ -10115,6 +10115,49 @@ init();
       formatCredizonaAnalysisSummaryHtml(credizonaAnalysisSummary);
   }
 
+  const EVOLUTION_MENTION_LABELS_PLUGIN = {
+    id: 'evolutionMentionLabels',
+    afterDatasetsDraw: function (chart) {
+      const ctx = chart.ctx;
+      const area = chart.chartArea;
+      if (!ctx || !area) return;
+
+      chart.data.datasets.forEach(function (dataset, datasetIndex) {
+        const meta = chart.getDatasetMeta(datasetIndex);
+        if (!meta || meta.hidden) return;
+        const elements = meta.data || [];
+        elements.forEach(function (el, index) {
+          if (!el || !Number.isFinite(el.x) || !Number.isFinite(el.y)) return;
+          const raw = dataset.data && dataset.data[index];
+          if (!raw || !(raw.mention_count > 0)) return;
+
+          const label = String(Math.round(Number(raw.mention_count)));
+          const pointR =
+            (el.options && Number(el.options.radius)) ||
+            Number(raw.r) ||
+            4;
+          // Top-right of the point, clear of the marker and line.
+          const tx = el.x + Math.max(4, pointR * 0.35) + 3;
+          const ty = el.y - Math.max(4, pointR * 0.35) - 2;
+          if (tx < area.left || tx > area.right) return;
+          if (ty < area.top || ty > area.bottom) return;
+
+          ctx.save();
+          ctx.font =
+            '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(18, 20, 26, 0.9)';
+          ctx.strokeText(label, tx, ty);
+          ctx.fillStyle = '#f3f4f6';
+          ctx.fillText(label, tx, ty);
+          ctx.restore();
+        });
+      });
+    },
+  };
+
   function renderEvolutionLineChart(data, weeks, coverageByWeek) {
     let maxRank = 1;
     const datasets = [];
@@ -10190,6 +10233,7 @@ init();
     evolutionChart = new window.Chart(ctx, {
       type: 'line',
       data: { datasets: datasets },
+      plugins: [EVOLUTION_MENTION_LABELS_PLUGIN],
       options: {
         responsive: true,
         maintainAspectRatio: false,
