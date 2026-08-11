@@ -984,6 +984,7 @@
           </p>
           <div
             id="ai-visibility-evolution-filters"
+            class="mcl-filters competitor-activity-weekly-filters"
             style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
             <label class="mcl-field">
               <span class="mcl-field-label">Proveedor</span>
@@ -996,12 +997,6 @@
               </select>
             </label>
             <label class="mcl-field">
-              <span class="mcl-field-label">Competidor</span>
-              <select id="ai-visibility-filter-entity" class="mcl-input">
-                <option value="">Todos (top 5 / mostrar todos)</option>
-              </select>
-            </label>
-            <label class="mcl-field">
               <span class="mcl-field-label">Desde</span>
               <select id="ai-visibility-filter-week-from" class="mcl-input"></select>
             </label>
@@ -1010,15 +1005,31 @@
               <select id="ai-visibility-filter-week-to" class="mcl-input"></select>
             </label>
           </div>
+          <div
+            class="section-title-row"
+            style="margin:0 0 4px;gap:8px;flex-wrap:wrap">
+            <button
+              type="button"
+              id="ai-visibility-evolution-toggle"
+              class="btn btn-secondary"
+              hidden>
+              Mostrar todos
+            </button>
+            <button
+              type="button"
+              id="ai-visibility-evolution-select-all"
+              class="btn btn-secondary"
+              hidden>
+              Deseleccionar todos
+            </button>
+          </div>
+          <div
+            id="ai-visibility-evolution-toggles"
+            class="competitor-activity-weekly-toggles"></div>
           <div id="ai-visibility-evolution-status" class="text-muted"></div>
-          <button
-            type="button"
-            id="ai-visibility-evolution-toggle"
-            class="btn btn-secondary"
-            style="display:none;margin:8px 0">
-            Mostrar todos
-          </button>
-          <div style="position:relative;height:320px;width:100%">
+          <div
+            class="competitor-activity-weekly-chart-wrap"
+            id="ai-visibility-evolution-chart-wrap">
             <canvas
               id="ai-visibility-evolution-chart"
               aria-label="Posición promedio de competidores en respuestas de IA"

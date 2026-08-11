@@ -9557,8 +9557,10 @@ init();
   let evolutionLastData = null;
   let evolutionShowAll = false;
   let evolutionToggleAttached = false;
+  let evolutionSelectAllAttached = false;
   let evolutionFiltersAttached = false;
-  let evolutionFilterEntityId = '';
+  /** @type {Object.<string, boolean>} */
+  let evolutionChecked = Object.create(null);
 
   const evolutionCanvas = document.getElementById(
     'ai-visibility-evolution-chart',
@@ -9768,20 +9770,144 @@ init();
   const evolutionToggle = document.getElementById(
     'ai-visibility-evolution-toggle',
   );
+  const evolutionSelectAllBtn = document.getElementById(
+    'ai-visibility-evolution-select-all',
+  );
+  const evolutionTogglesEl = document.getElementById(
+    'ai-visibility-evolution-toggles',
+  );
+  const evolutionChartWrap = document.getElementById(
+    'ai-visibility-evolution-chart-wrap',
+  );
   const filterProvider = document.getElementById(
     'ai-visibility-filter-provider',
   );
-  const filterEntity = document.getElementById('ai-visibility-filter-entity');
   const filterWeekFrom = document.getElementById(
     'ai-visibility-filter-week-from',
   );
   const filterWeekTo = document.getElementById('ai-visibility-filter-week-to');
   const evolutionEnabled = !!(evolutionCanvas && evolutionStatus);
 
-  function getEntityColor(index) {
-    const goldenAngle = 137.5;
-    const hue = (index * goldenAngle) % 360;
-    return 'hsl(' + Math.round(hue) + ', 65%, 60%)';
+  function ensureEvolutionCheckedDefaults(entities) {
+    const list = entities || [];
+    const hasAny = Object.keys(evolutionChecked).length > 0;
+    list.forEach(function (ent, index) {
+      const id = String(ent.entity_id);
+      if (evolutionChecked[id] === undefined) {
+        // First population: top 5 by mention rank. Later newcomers: checked.
+        evolutionChecked[id] = hasAny ? true : index < 5;
+      }
+    });
+  }
+
+  function getEvolutionPoolEntities(data) {
+    const entities = Array.isArray(data && data.entities) ? data.entities : [];
+    if (evolutionShowAll || entities.length <= 5) return entities;
+    return entities.slice(0, 5);
+  }
+
+  function getEvolutionCheckedEntities(data) {
+    return getEvolutionPoolEntities(data).filter(function (entity) {
+      return evolutionChecked[String(entity.entity_id)] === true;
+    });
+  }
+
+  function evolutionAllPoolUnchecked(data) {
+    const pool = getEvolutionPoolEntities(data);
+    return (
+      pool.length > 0 &&
+      pool.every(function (ent) {
+        return evolutionChecked[String(ent.entity_id)] !== true;
+      })
+    );
+  }
+
+  function syncEvolutionToggle(entityCount) {
+    if (!evolutionToggle) return;
+    if (!(entityCount > 5)) {
+      evolutionToggle.hidden = true;
+      return;
+    }
+    evolutionToggle.hidden = false;
+    evolutionToggle.textContent = evolutionShowAll
+      ? 'Mostrar top 5'
+      : 'Mostrar todos';
+  }
+
+  function syncEvolutionSelectAllButton(data) {
+    if (!evolutionSelectAllBtn) return;
+    const pool = getEvolutionPoolEntities(data);
+    if (!pool.length) {
+      evolutionSelectAllBtn.hidden = true;
+      return;
+    }
+    evolutionSelectAllBtn.hidden = false;
+    evolutionSelectAllBtn.textContent = evolutionAllPoolUnchecked(data)
+      ? 'Seleccionar todos'
+      : 'Deseleccionar todos';
+  }
+
+  function toggleEvolutionSelectAll() {
+    if (!evolutionLastData) return;
+    const pool = getEvolutionPoolEntities(evolutionLastData);
+    if (!pool.length) return;
+    const selectAll = evolutionAllPoolUnchecked(evolutionLastData);
+    pool.forEach(function (ent) {
+      evolutionChecked[String(ent.entity_id)] = selectAll;
+    });
+    if (evolutionTogglesEl) {
+      evolutionTogglesEl
+        .querySelectorAll('input[data-series]')
+        .forEach(function (checkbox) {
+          checkbox.checked = selectAll;
+        });
+    }
+    syncEvolutionSelectAllButton(evolutionLastData);
+    renderEvolutionChart(evolutionLastData);
+  }
+
+  function renderEvolutionToggles(data) {
+    if (!evolutionTogglesEl) return;
+    const pool = getEvolutionPoolEntities(data);
+    ensureEvolutionCheckedDefaults(
+      Array.isArray(data && data.entities) ? data.entities : [],
+    );
+    evolutionTogglesEl.innerHTML = pool
+      .map(function (ent) {
+        const id = String(ent.entity_id);
+        const checked = evolutionChecked[id] === true;
+        const color = colorForString(ent.name || id);
+        return (
+          '<label class="competitor-activity-weekly-toggle">' +
+          '<input type="checkbox" data-series="' +
+          escapeHtml(id) +
+          '"' +
+          (checked ? ' checked' : '') +
+          ' />' +
+          '<span class="competitor-activity-weekly-swatch" style="background:' +
+          escapeHtml(color) +
+          '"></span>' +
+          escapeHtml(ent.name || 'Entidad') +
+          '</label>'
+        );
+      })
+      .join('');
+
+    evolutionTogglesEl
+      .querySelectorAll('input[data-series]')
+      .forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () {
+          const seriesKey = checkbox.getAttribute('data-series');
+          if (!seriesKey) return;
+          evolutionChecked[seriesKey] = checkbox.checked;
+          if (evolutionLastData) {
+            syncEvolutionSelectAllButton(evolutionLastData);
+            renderEvolutionChart(evolutionLastData);
+          }
+        });
+      });
+
+    syncEvolutionSelectAllButton(data);
   }
 
   function computeMaxMentionCount(data, weeks) {
@@ -9869,17 +9995,6 @@ init();
     return coverageByWeek;
   }
 
-  function getVisibleEntities(data) {
-    const entities = Array.isArray(data && data.entities) ? data.entities : [];
-    if (evolutionFilterEntityId) {
-      return entities.filter(function (entity) {
-        return String(entity.entity_id) === evolutionFilterEntityId;
-      });
-    }
-    if (evolutionShowAll || entities.length <= 5) return entities;
-    return entities.slice(0, 5);
-  }
-
   function getFilteredWeeks(data) {
     const weeks = Array.isArray(data && data.weeks) ? data.weeks.slice() : [];
     const from = filterWeekFrom ? filterWeekFrom.value : '';
@@ -9931,22 +10046,9 @@ init();
   }
 
   function populateEvolutionFilters(data) {
-    const entities = Array.isArray(data && data.entities) ? data.entities : [];
     const weeks = Array.isArray(data && data.weeks) ? data.weeks : [];
-
-    const prevEntity = filterEntity ? filterEntity.value : '';
-    populateSelectOptions(
-      filterEntity,
-      entities.map(function (e) {
-        return {
-          value: e.entity_id,
-          label: e.name || e.entity_id || 'Entidad',
-        };
-      }),
-      prevEntity,
-      'Todos (top 5 / mostrar todos)',
-    );
-    evolutionFilterEntityId = filterEntity ? filterEntity.value : '';
+    const entities = Array.isArray(data && data.entities) ? data.entities : [];
+    ensureEvolutionCheckedDefaults(entities);
 
     const prevFrom = filterWeekFrom ? filterWeekFrom.value : '';
     const prevTo = filterWeekTo ? filterWeekTo.value : '';
@@ -9961,18 +10063,8 @@ init();
     if (filterWeekTo && !filterWeekTo.value && weeks.length) {
       filterWeekTo.value = weeks[weeks.length - 1];
     }
-  }
 
-  function syncEvolutionToggle(entityCount) {
-    if (!evolutionToggle) return;
-    if (evolutionFilterEntityId || !(entityCount > 5)) {
-      evolutionToggle.style.display = 'none';
-      return;
-    }
-    evolutionToggle.style.display = '';
-    evolutionToggle.textContent = evolutionShowAll
-      ? 'Mostrar top 5'
-      : 'Mostrar todos';
+    renderEvolutionToggles(data);
   }
 
   function mentionSharePctSuffix(count, total) {
@@ -10019,22 +10111,14 @@ init();
     let maxRank = 1;
     const datasets = [];
     const maxMentionCount = computeMaxMentionCount(data, weeks);
-    const allEntities = Array.isArray(data && data.entities)
-      ? data.entities
-      : [];
-    const visibleEntities = getVisibleEntities(data);
+    const visibleEntities = getEvolutionCheckedEntities(data);
     const totalVisible = visibleEntities.length;
     const xJitter = 0.12;
     const maxOffset =
       totalVisible > 1 ? ((totalVisible - 1) / 2) * xJitter : 0;
 
     visibleEntities.forEach(function (entity, entityIndex) {
-      const colorIndex = Math.max(
-        0,
-        allEntities.findIndex(function (e) {
-          return String(e.entity_id) === String(entity.entity_id);
-        }),
-      );
+      const color = colorForString(entity.name || entity.entity_id);
       const xOffset =
         totalVisible > 1
           ? (entityIndex - (totalVisible - 1) / 2) * xJitter
@@ -10071,8 +10155,8 @@ init();
         data: points,
         showLine: true,
         spanGaps: false,
-        borderColor: getEntityColor(colorIndex),
-        backgroundColor: getEntityColor(colorIndex),
+        borderColor: color,
+        backgroundColor: color,
         borderWidth: 2,
         tension: 0.25,
         pointRadius: function (context) {
@@ -10087,9 +10171,11 @@ init();
 
     if (!datasets.length) {
       setEvolutionStatus('Todavía no hay respuestas exitosas.');
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
       return;
     }
 
+    if (evolutionChartWrap) evolutionChartWrap.hidden = false;
     setEvolutionStatus('');
     destroyEvolutionChart();
     const ctx = evolutionCanvas.getContext('2d');
@@ -10198,17 +10284,26 @@ init();
       setEvolutionStatus(
         'No se pudo cargar Chart.js. Revisá la conexión o el CDN.',
       );
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
       return;
     }
 
     const weekResult = getFilteredWeeks(data);
     if (weekResult.error) {
       setEvolutionStatus(weekResult.error);
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
       return;
     }
     const weeks = weekResult.weeks || [];
     if (!weeks.length) {
       setEvolutionStatus('Todavía no hay respuestas exitosas.');
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
+      return;
+    }
+
+    if (!getEvolutionCheckedEntities(data).length) {
+      setEvolutionStatus('Seleccioná al menos un competidor');
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
       return;
     }
 
@@ -10232,20 +10327,15 @@ init();
       if (requestId !== evolutionRequestId) return;
       evolutionShowAll = false;
       evolutionLastData = data;
-      if (
-        evolutionFilterEntityId &&
-        !(Array.isArray(data.entities) ? data.entities : []).some(function (e) {
-          return String(e.entity_id) === evolutionFilterEntityId;
-        })
-      ) {
-        evolutionFilterEntityId = '';
-      }
+      evolutionChecked = Object.create(null);
+      ensureEvolutionCheckedDefaults(data.entities || []);
       renderEvolutionChart(data);
     } catch (error) {
       if (requestId !== evolutionRequestId) return;
       destroyEvolutionChart();
       evolutionLastData = null;
       setEvolutionStatus('Error: ' + error.message);
+      if (evolutionChartWrap) evolutionChartWrap.hidden = true;
     }
   }
 
@@ -10257,16 +10347,17 @@ init();
     evolutionToggleAttached = true;
   }
 
+  if (evolutionSelectAllBtn && !evolutionSelectAllAttached) {
+    evolutionSelectAllBtn.addEventListener('click', function () {
+      toggleEvolutionSelectAll();
+    });
+    evolutionSelectAllAttached = true;
+  }
+
   if (!evolutionFiltersAttached) {
     if (filterProvider) {
       filterProvider.addEventListener('change', function () {
         refreshEvolution({ force: true });
-      });
-    }
-    if (filterEntity) {
-      filterEntity.addEventListener('change', function () {
-        evolutionFilterEntityId = filterEntity.value || '';
-        if (evolutionLastData) renderEvolutionChart(evolutionLastData);
       });
     }
     function onWeekFilterChange() {
