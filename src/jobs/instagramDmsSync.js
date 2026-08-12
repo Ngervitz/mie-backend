@@ -2,6 +2,8 @@ const { randomUUID } = require('crypto');
 const logger = require('../lib/logger');
 const {
   getAccessToken,
+  getIgAccessTokenDiagnostic,
+  isIgAccessTokenAuthFailure,
   DMS_SYNC_JOB_NAME,
   DMS_SYNC_LOCK_TTL_SECONDS,
 } = require('../services/instagram-dms/config');
@@ -18,6 +20,16 @@ const {
   markConversationSyncError,
 } = require('../services/instagram-dms/sync');
 
+function attachTokenDiagnosticIfAuthFailure(err) {
+  if (!err || typeof err !== 'object') return null;
+  if (!isIgAccessTokenAuthFailure(err)) return null;
+  if (err.tokenDiagnostic) return err.tokenDiagnostic;
+  const tokenDiagnostic = getIgAccessTokenDiagnostic();
+  err.tokenDiagnostic = tokenDiagnostic;
+  logger.error('instagram_dms_sync token diagnostic', tokenDiagnostic);
+  return tokenDiagnostic;
+}
+
 /**
  * Job: instagram_dms_sync
  * Cadence: every 5 min via cron-job.org (prefer BEFORE comments_poll for budget).
@@ -25,10 +37,13 @@ const {
  */
 async function runInstagramDmsSync() {
   if (!getAccessToken()) {
+    const tokenDiagnostic = getIgAccessTokenDiagnostic();
+    logger.error('instagram_dms_sync token diagnostic', tokenDiagnostic);
     return {
       ok: false,
       error: 'IG_CREDIZONAUY_ACCESS_TOKEN is not configured',
       code: 'MISSING_IG_TOKEN',
+      tokenDiagnostic,
     };
   }
 
@@ -73,6 +88,7 @@ async function runInstagramDmsSync() {
         summary.message = err.message;
         return summary;
       }
+      attachTokenDiagnosticIfAuthFailure(err);
       logger.error('instagram_dms_sync listConversations failed', {
         error: err && err.message ? err.message : 'unknown',
         stack: err && err.stack ? err.stack : null,
@@ -121,6 +137,7 @@ async function runInstagramDmsSync() {
     logger.info('instagram_dms_sync completed', summary);
     return summary;
   } catch (err) {
+    attachTokenDiagnosticIfAuthFailure(err);
     // TEMP diagnostics — remove after Meta "unknown error" root cause is known
     const diagnostic = {
       message: err && err.message ? err.message : 'unknown',

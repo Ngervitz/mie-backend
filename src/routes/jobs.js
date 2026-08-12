@@ -19,6 +19,10 @@ const { runInstagramPostsSync } = require('../jobs/instagramPostsSync');
 const { runInstagramCommentsPoll } = require('../jobs/instagramCommentsPoll');
 const { runInstagramReplyRecovery } = require('../jobs/instagramReplyRecovery');
 const { runInstagramDmsSync } = require('../jobs/instagramDmsSync');
+const {
+  getIgAccessTokenDiagnostic,
+  isIgAccessTokenAuthFailure,
+} = require('../services/instagram-dms/config');
 const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
 const { runSerpImportSync } = require('../jobs/serpImportSync');
 const { runKeywordCpcSync } = require('../jobs/keywordCpcSync');
@@ -1036,7 +1040,7 @@ router.post('/run-instagram-dms-sync', async (req, res) => {
       httpStatus: err && err.httpStatus != null ? err.httpStatus : null,
       body: err && err.body != null ? err.body : null,
     });
-    return res.status(500).json({
+    const payload = {
       ok: false,
       error: err && err.message ? err.message : 'unknown',
       // TEMP: surface Meta diagnostics until Railway log access is confirmed
@@ -1044,7 +1048,15 @@ router.post('/run-instagram-dms-sync', async (req, res) => {
       httpStatus: err && err.httpStatus != null ? err.httpStatus : null,
       body: err && err.body != null ? err.body : null,
       stack: err && err.stack ? err.stack : null,
-    });
+    };
+    if (
+      (err && err.tokenDiagnostic) ||
+      isIgAccessTokenAuthFailure(err)
+    ) {
+      payload.tokenDiagnostic =
+        (err && err.tokenDiagnostic) || getIgAccessTokenDiagnostic();
+    }
+    return res.status(500).json(payload);
   }
 });
 

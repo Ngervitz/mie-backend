@@ -4,7 +4,7 @@
  * Does not touch social_comments / social_media_posts.
  */
 
-const { IG_USER_ID, getAccessToken } = require('../instagram-comments/config');
+const { IG_USER_ID, getAccessToken, getIgAccessTokenDiagnostic, isIgAccessTokenAuthFailure } = require('../instagram-comments/config');
 
 /** Job lock name for DM sync. */
 const DMS_SYNC_JOB_NAME = 'instagram_dms_sync';
@@ -21,6 +21,8 @@ const EXPIRING_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 module.exports = {
   IG_USER_ID,
   getAccessToken,
+  getIgAccessTokenDiagnostic,
+  isIgAccessTokenAuthFailure,
   DMS_SYNC_JOB_NAME,
   DMS_SYNC_LOCK_TTL_SECONDS,
   SEND_LOCK_TTL_SECONDS,
