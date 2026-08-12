@@ -41,6 +41,38 @@
   box-sizing: border-box;
 }
 
+/* Dark, discreet scrollbars (sidebar nav + any overflow in the shell). */
+#mie-dashboard-app {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+#mie-dashboard-app ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+#mie-dashboard-app ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#mie-dashboard-app ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+#mie-dashboard-app ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+#mie-dashboard-app ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ---------- App shell (sidebar + content) ---------- */
 #mie-dashboard-app .app-shell {
   display: flex;
