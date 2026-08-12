@@ -5,7 +5,7 @@
  */
 
 const IG_USER_ID =
-  (process.env.IG_CREDIZONAUY_USER_ID || '17841424813591063').trim();
+  (process.env.IG_CREDIZONAUY_USER_ID || '27296348433398160').trim();
 const GRAPH_API_VERSION = (process.env.IG_GRAPH_API_VERSION || 'v21.0').trim();
 const GRAPH_BASE_URL = `https://graph.instagram.com/${GRAPH_API_VERSION}`;
 
