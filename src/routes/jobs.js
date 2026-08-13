@@ -26,6 +26,9 @@ const {
 const { runLiquidityCycleSync } = require('../jobs/liquidityCycleSync');
 const { runSerpImportSync } = require('../jobs/serpImportSync');
 const { runKeywordCpcSync } = require('../jobs/keywordCpcSync');
+const {
+  runDiscoveredTermCpcSync,
+} = require('../jobs/discoveredTermCpcSync');
 const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
@@ -870,7 +873,7 @@ const runDiscoveryRefreshHandler = (req, res) => {
   });
 
   runDiscoveryRefresh()
-    .then((result) => {
+    .then(async (result) => {
       discoveryRefreshJobState.status = 'idle';
       discoveryRefreshJobState.finishedAt = new Date().toISOString();
       discoveryRefreshJobState.lastResult = result;
@@ -879,6 +882,26 @@ const runDiscoveryRefreshHandler = (req, res) => {
         failedCount: result.failedCount,
         rowsPersisted: result.rowsPersisted,
       });
+      // Auto-fetch CPC for newly pending Trends terms that lack estimates.
+      try {
+        const cpcResult = await runDiscoveredTermCpcSync();
+        discoveryRefreshJobState.lastResult = {
+          ...result,
+          discoveredTermCpc: cpcResult,
+        };
+        logger.info('discovered_term_cpc_sync after discovery refresh', {
+          syncRunId: cpcResult.syncRunId,
+          totalProcessed: cpcResult.totalProcessed,
+          imported: cpcResult.imported,
+          skippedAlreadyEstimated: cpcResult.skippedAlreadyEstimated,
+          errors: cpcResult.errors,
+        });
+      } catch (cpcErr) {
+        logger.error('discovered_term_cpc_sync after discovery refresh failed', {
+          error: cpcErr && cpcErr.message ? cpcErr.message : 'unknown',
+          code: cpcErr && cpcErr.code ? cpcErr.code : null,
+        });
+      }
     })
     .catch((err) => {
       discoveryRefreshJobState.status = 'idle';
@@ -1300,6 +1323,50 @@ router.post('/run-keyword-cpc-sync', async (req, res) => {
     return res.status(status).json(result);
   } catch (err) {
     logger.error('keyword_cpc_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+      googleAdsError: err && err.googleAdsError ? err.googleAdsError : null,
+      envDiagnostics:
+        err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : null,
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+      googleAdsError: err && err.googleAdsError ? err.googleAdsError : undefined,
+      envDiagnostics:
+        err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : undefined,
+    });
+  }
+});
+
+/**
+ * POST /jobs/run-discovered-term-cpc-sync
+ * Pending Trends discoveries without CPC → Keyword Planner → discovered_term_cpc_estimates.
+ * Skips terms that already have an estimate (no auto-refresh).
+ * Also chained after /jobs/run-discovery-refresh.
+ */
+router.post('/run-discovered-term-cpc-sync', async (req, res) => {
+  logger.info('POST /jobs/run-discovered-term-cpc-sync — started');
+  try {
+    const result = await runDiscoveredTermCpcSync();
+    logger.info('discovered_term_cpc_sync finished', {
+      syncRunId: result.syncRunId,
+      pendingTotal: result.pendingTotal,
+      skippedAlreadyEstimated: result.skippedAlreadyEstimated,
+      totalProcessed: result.totalProcessed,
+      imported: result.imported,
+      noData: result.noData,
+      errors: result.errors,
+      currencyCode: result.currencyCode,
+    });
+    const status =
+      result.ok === false && result.errors > 0 && result.imported === 0
+        ? 502
+        : 200;
+    return res.status(status).json(result);
+  } catch (err) {
+    logger.error('discovered_term_cpc_sync failed', {
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
       googleAdsError: err && err.googleAdsError ? err.googleAdsError : null,

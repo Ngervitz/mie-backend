@@ -1118,10 +1118,74 @@ router.get('/own-ad-changes', async (req, res) => {
  *   - server-side growth_percent / is_breakout (parseTrendsFormattedValue)
  *   - marca/frase heuristic (suggestion aid only, human-overridable)
  */
+function mapDiscoveredTermCpcEstimate(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    discoveryId: row.discovery_id != null ? String(row.discovery_id) : null,
+    termSnapshot: row.term_snapshot,
+    avgMonthlySearches:
+      row.avg_monthly_searches != null ? Number(row.avg_monthly_searches) : null,
+    lowTopOfPageBidRaw:
+      row.low_top_of_page_bid_raw != null
+        ? Number(row.low_top_of_page_bid_raw)
+        : null,
+    highTopOfPageBidRaw:
+      row.high_top_of_page_bid_raw != null
+        ? Number(row.high_top_of_page_bid_raw)
+        : null,
+    currencyCode:
+      row.currency_code != null && String(row.currency_code).trim()
+        ? String(row.currency_code).trim()
+        : null,
+    competitionLevel:
+      row.competition_level != null ? String(row.competition_level) : null,
+    syncRunId: row.sync_run_id != null ? String(row.sync_run_id) : null,
+    fetchedAt: row.fetched_at,
+  };
+}
+
+/**
+ * Latest discovered-term CPC estimate keyed by lowercased term_snapshot.
+ * @returns {Promise<Map<string, object>>}
+ */
+async function loadLatestDiscoveredTermCpcByTerm() {
+  const { data, error } = await supabase
+    .from('discovered_term_cpc_estimates')
+    .select(
+      [
+        'id',
+        'discovery_id',
+        'term_snapshot',
+        'avg_monthly_searches',
+        'low_top_of_page_bid_raw',
+        'high_top_of_page_bid_raw',
+        'currency_code',
+        'competition_level',
+        'sync_run_id',
+        'fetched_at',
+      ].join(', '),
+    )
+    .order('fetched_at', { ascending: false });
+  if (error) {
+    throw new Error(
+      `Failed to fetch discovered_term_cpc_estimates: ${error.message}`,
+    );
+  }
+  const latestByTerm = new Map();
+  (data || []).forEach((row) => {
+    if (!row || row.term_snapshot == null) return;
+    const key = String(row.term_snapshot).trim().toLowerCase();
+    if (!key || latestByTerm.has(key)) return;
+    latestByTerm.set(key, mapDiscoveredTermCpcEstimate(row));
+  });
+  return latestByTerm;
+}
+
 async function loadSearchDiscoveries() {
   const { data: discoveries, error: discErr } = await supabase
     .from('search_term_discoveries')
-    .select('seed, term, query_type, score, formatted_value, discovered_at')
+    .select('id, seed, term, query_type, score, formatted_value, discovered_at')
     .order('discovered_at', { ascending: false })
     .limit(2000);
   if (discErr) {
@@ -1160,6 +1224,16 @@ async function loadSearchDiscoveries() {
     (decided || []).map((d) => [String(d.term || '').trim().toLowerCase(), d]),
   );
 
+  let cpcByTerm = new Map();
+  try {
+    cpcByTerm = await loadLatestDiscoveredTermCpcByTerm();
+  } catch (cpcErr) {
+    // Table may not exist until migration is applied — Pendientes still load.
+    logger.warn('discovered_term_cpc_estimates unavailable for discoveries', {
+      error: cpcErr && cpcErr.message ? cpcErr.message : 'unknown',
+    });
+  }
+
   const seeds = new Set();
   const items = [];
   const itemTerms = new Set();
@@ -1173,6 +1247,7 @@ async function loadSearchDiscoveries() {
 
     const decidedRow = decisionByLowerTerm.get(lower);
     items.push({
+      discoveryId: row.id != null ? String(row.id) : null,
       term: row.term,
       seed: row.seed,
       queryType: row.query_type,
@@ -1189,6 +1264,7 @@ async function loadSearchDiscoveries() {
       // Heuristic aid: single capitalized word -> possible brand.
       suggestedKind:
         !/\s/.test(termStr) && /^[A-ZÁÉÍÓÚÑ]/.test(termStr) ? 'brand' : 'intent',
+      cpcEstimate: cpcByTerm.get(lower) || null,
     });
   }
 
@@ -1205,6 +1281,7 @@ async function loadSearchDiscoveries() {
     itemTerms.add(lower);
 
     items.push({
+      discoveryId: null,
       term: termStr,
       seed: 'google_serp_import',
       queryType: 'serp',
@@ -1221,6 +1298,7 @@ async function loadSearchDiscoveries() {
       termType: row.term_type || 'competitor_candidate',
       sourceSeed: 'google_serp_import',
       suggestedKind: 'brand',
+      cpcEstimate: cpcByTerm.get(lower) || null,
     });
   }
 

@@ -2505,6 +2505,16 @@
 }
 
 #mie-dashboard-app .cov-term { font-weight: var(--font-weight-medium); }
+#mie-dashboard-app .cov-cpc-meta {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: var(--font-weight-normal);
+  color: var(--text-muted, #9ca3af);
+  line-height: 1.35;
+}
+#mie-dashboard-app .cov-cpc-empty {
+  opacity: 0.9;
+}
 #mie-dashboard-app .cov-source { color: var(--text-muted); font-size: 13px; }
 
 #mie-dashboard-app .cov-badge {

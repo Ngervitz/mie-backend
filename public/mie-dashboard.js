@@ -4704,6 +4704,73 @@ init();
     return `${String(ds.supabaseUrl).replace(/\/+$/, '')}/storage/v1/object/public/${storagePath}`;
   }
 
+  function formatDiscoveryCpcDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return String(iso);
+    return d.toLocaleDateString('es-UY');
+  }
+
+  function formatDiscoveryCompetition(level) {
+    if (level == null || level === '') return '—';
+    const key = String(level).toUpperCase();
+    if (key === 'LOW') return 'Baja';
+    if (key === 'MEDIUM') return 'Media';
+    if (key === 'HIGH') return 'Alta';
+    if (key === 'UNSPECIFIED' || key === 'UNKNOWN') return '—';
+    return String(level);
+  }
+
+  function formatDiscoveryBidFromMicros(raw, currencyCode) {
+    if (raw == null || raw === '') return '—';
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return '—';
+    const amount = (n / 1000000).toFixed(2);
+    if (currencyCode) return amount + ' ' + String(currencyCode);
+    return amount + ' (moneda sin confirmar)';
+  }
+
+  function formatDiscoveryAvgSearches(value) {
+    if (value == null || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return String(Math.trunc(n));
+  }
+
+  /** Same visual pattern as Queries monitoreadas CPC meta. */
+  function renderDiscoveryCpcMeta(estimate) {
+    if (!estimate) {
+      return (
+        '<div class="cov-cpc-meta cov-cpc-empty">⏳ Sin datos de CPC todavía</div>'
+      );
+    }
+    const vol = formatDiscoveryAvgSearches(estimate.avgMonthlySearches);
+    const comp = formatDiscoveryCompetition(estimate.competitionLevel);
+    const low = formatDiscoveryBidFromMicros(
+      estimate.lowTopOfPageBidRaw,
+      estimate.currencyCode,
+    );
+    const high = formatDiscoveryBidFromMicros(
+      estimate.highTopOfPageBidRaw,
+      estimate.currencyCode,
+    );
+    const fetched = formatDiscoveryCpcDate(estimate.fetchedAt);
+    return (
+      '<div class="cov-cpc-meta">' +
+      '💰 Vol. búsquedas: ' +
+      escapeHtml(vol) +
+      ' · Competencia: ' +
+      escapeHtml(comp) +
+      ' · Bid bajo: ' +
+      escapeHtml(low) +
+      ' · Bid alto: ' +
+      escapeHtml(high) +
+      ' · CPC al ' +
+      escapeHtml(fetched) +
+      '</div>'
+    );
+  }
+
   function renderSuggestions() {
     if (!covState.suggestions.length) {
       suggestionsEl.innerHTML =
@@ -4730,7 +4797,10 @@ init();
         const selected = covState.decisions[s.term] || '';
         return `
           <tr>
-            <td class="cov-term">${escapeHtml(s.term)}</td>
+            <td class="cov-term">
+              <div>${escapeHtml(s.term)}</div>
+              ${renderDiscoveryCpcMeta(s.cpcEstimate || null)}
+            </td>
             <td class="cov-source">${sourceLabel}</td>
             <td><span class="cov-badge ${kind.cls}">${kind.label}</span> ${covered}</td>
             <td>

@@ -135,6 +135,25 @@ async function main() {
     }
   }
   console.log(`Rows persisted total: ${rowsPersisted}`);
+
+  // CPC for newly pending Trends terms (skips terms that already have estimates).
+  try {
+    const {
+      runDiscoveredTermCpcSync,
+    } = require('../src/jobs/discoveredTermCpcSync');
+    console.log('');
+    console.log('===== DISCOVERED TERM CPC =====');
+    const cpc = await runDiscoveredTermCpcSync();
+    console.log(
+      `CPC sync: processed=${cpc.totalProcessed} imported=${cpc.imported} skipped=${cpc.skippedAlreadyEstimated} errors=${cpc.errors}`,
+    );
+  } catch (cpcErr) {
+    console.error(
+      'discovered_term_cpc_sync failed (discovery rows still persisted):',
+      cpcErr && cpcErr.message ? cpcErr.message : cpcErr,
+    );
+  }
+
   process.exit(failed.length === SEEDS.length ? 1 : 0);
 }
 
