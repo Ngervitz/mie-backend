@@ -43,10 +43,11 @@ module.exports = {
   // Default true; only the string "false" (case-insensitive) disables.
   metaAgenteEnabled:
     String(process.env.META_AGENTE_ENABLED ?? 'true').toLowerCase() !== 'false',
-  // Optional at boot. If either is missing, auth middleware fail-closes:
-  // every request gets 503 { error: 'Login no configurado' } (no open access).
-  dashboardLoginPassword: process.env.DASHBOARD_LOGIN_PASSWORD || null,
+  // SESSION_SECRET required for cookie HMAC. Missing → 503 on gated routes.
   sessionSecret: process.env.SESSION_SECRET || null,
+  // ONE-TIME bootstrap only (POST /admin/bootstrap-first-admin).
+  // After the first admin exists, REMOVE this env var — it is not a login fallback.
+  dashboardLoginPassword: process.env.DASHBOARD_LOGIN_PASSWORD || null,
   // Optional at boot. When set, X-Cron-Key header can authenticate cron-job.org.
   cronSecret: process.env.CRON_SECRET || null,
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.

@@ -16,6 +16,7 @@
     "@google-analytics/data": "^6.1.0",
     "@supabase/supabase-js": "^2.108.2",
     "apify-client": "^2.23.4",
+    "bcryptjs": "^3.0.3",
     "cheerio": "^1.2.0",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.2",

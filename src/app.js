@@ -10,28 +10,61 @@ const competitorActivityPredictionsRouter = require('./routes/competitor-activit
 const marketPatternsRouter = require('./routes/market-patterns');
 const mlNotesRouter = require('./routes/ml-notes');
 const authRouter = require('./routes/auth');
+const { meHandler } = require('./routes/auth');
 const { requireAuth } = require('./middleware/auth');
+const {
+  requireDashboardPermission,
+  enforceMappedSectionPermission,
+} = require('./middleware/requireDashboardPermission');
 const logger = require('./lib/logger');
 
 const app = express();
 
 app.use(express.json());
+// login / logout / bootstrap (allowlisted inside requireAuth)
 app.use('/', authRouter);
 app.use(requireAuth);
+app.get('/api/auth/me', meHandler);
+
 app.use(express.static('public'));
-app.use('/jobs', jobsRouter);
-app.use('/reports', reportsRouter);
-app.use('/hugo', hugoRouter);
-app.use('/api/social-comments', socialCommentsRouter);
-app.use('/api/social-conversations', socialConversationsRouter);
-app.use('/api/liquidity-cycle', liquidityCycleRouter);
-app.use('/api/bcu-usura-rate', bcuUsuraRateRouter);
+
+// Mixed routers: section resolved from src/middleware/dashboardSections.js
+app.use('/jobs', enforceMappedSectionPermission, jobsRouter);
+app.use('/reports', enforceMappedSectionPermission, reportsRouter);
+app.use('/hugo', enforceMappedSectionPermission, hugoRouter);
+
+// Dedicated section mounts (explicit requireDashboardPermission)
+app.use(
+  '/api/social-comments',
+  requireDashboardPermission('inbox'),
+  socialCommentsRouter,
+);
+app.use(
+  '/api/social-conversations',
+  requireDashboardPermission('inbox'),
+  socialConversationsRouter,
+);
+app.use(
+  '/api/liquidity-cycle',
+  requireDashboardPermission('meta'),
+  liquidityCycleRouter,
+);
+app.use(
+  '/api/bcu-usura-rate',
+  requireDashboardPermission('meta'),
+  bcuUsuraRateRouter,
+);
 app.use(
   '/competitor-activity-predictions',
+  requireDashboardPermission('market'),
   competitorActivityPredictionsRouter,
 );
-app.use('/market-patterns', marketPatternsRouter);
-app.use('/ml-notes', mlNotesRouter);
+app.use(
+  '/market-patterns',
+  requireDashboardPermission('market'),
+  marketPatternsRouter,
+);
+app.use('/ml-notes', requireDashboardPermission('market'), mlNotesRouter);
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error', { error: err.message });

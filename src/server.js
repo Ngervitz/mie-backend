@@ -5,15 +5,22 @@ const smsRouter = require('./routes/sms');
 const smsContactsRouter = require('./routes/sms-contacts');
 const emailRouter = require('./routes/email');
 const aiVisibilityRouter = require('./routes/ai-visibility');
+const {
+  requireDashboardPermission,
+} = require('./middleware/requireDashboardPermission');
 
 // SMS campaigns (Notifyme) — registered here per module isolation scope.
-app.use('/sms', smsRouter);
+app.use('/sms', requireDashboardPermission('sms'), smsRouter);
 // SMS contacts import (Credizona CSV sync via IT) — /sms/contacts*
-app.use('/sms', smsContactsRouter);
+app.use('/sms', requireDashboardPermission('sms'), smsContactsRouter);
 // Email campaigns — registered here per module isolation scope.
-app.use('/email', emailRouter);
+app.use('/email', requireDashboardPermission('email'), emailRouter);
 // AI Visibility (weekly LLM prompts) — registered here per module isolation scope.
-app.use('/ai-visibility', aiVisibilityRouter);
+app.use(
+  '/ai-visibility',
+  requireDashboardPermission('ai-visibility'),
+  aiVisibilityRouter,
+);
 
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });

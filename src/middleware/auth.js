@@ -1,5 +1,6 @@
 /**
- * Shared-password dashboard auth (HMAC session cookie).
+ * Shared-password era → per-user dashboard auth (HMAC session cookie).
+ * Cookie payload: { user_id, issuedAt } only — never permissions / is_admin.
  * No express-session / JWT libraries — Node crypto only.
  */
 
@@ -23,14 +24,18 @@ const API_PATH_PREFIXES = [
 ];
 
 function authConfigured() {
-  return !!(env.dashboardLoginPassword && env.sessionSecret);
+  return !!env.sessionSecret;
 }
 
 /**
+ * @param {string} userId
  * @returns {string}
  */
-function createSessionToken() {
-  const payloadObj = { issuedAt: Date.now() };
+function createSessionToken(userId) {
+  const payloadObj = {
+    user_id: String(userId),
+    issuedAt: Date.now(),
+  };
   const payload = Buffer.from(JSON.stringify(payloadObj), 'utf8').toString(
     'base64url',
   );
@@ -43,14 +48,14 @@ function createSessionToken() {
 
 /**
  * @param {unknown} token
- * @returns {boolean}
+ * @returns {{ userId: string, issuedAt: number }|null}
  */
 function verifySessionToken(token) {
-  if (typeof token !== 'string' || !token) return false;
+  if (typeof token !== 'string' || !token) return null;
   const parts = token.split('.');
-  if (parts.length !== 2) return false;
+  if (parts.length !== 2) return null;
   const [payload, sig] = parts;
-  if (!payload || !sig) return false;
+  if (!payload || !sig) return null;
 
   let expected;
   try {
@@ -59,24 +64,27 @@ function verifySessionToken(token) {
       .update(payload)
       .digest('base64url');
   } catch {
-    return false;
+    return null;
   }
 
   const sigBuf = Buffer.from(sig);
   const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length) return false;
-  if (!crypto.timingSafeEqual(sigBuf, expBuf)) return false;
+  if (sigBuf.length !== expBuf.length) return null;
+  if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
 
   let parsed;
   try {
     parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
-    return false;
+    return null;
   }
-  const issuedAt = parsed && typeof parsed.issuedAt === 'number' ? parsed.issuedAt : NaN;
-  if (!Number.isFinite(issuedAt)) return false;
-  if (Date.now() - issuedAt > SESSION_TTL_MS) return false;
-  return true;
+  const issuedAt =
+    parsed && typeof parsed.issuedAt === 'number' ? parsed.issuedAt : NaN;
+  const userId =
+    parsed && parsed.user_id != null ? String(parsed.user_id).trim() : '';
+  if (!userId || !Number.isFinite(issuedAt)) return null;
+  if (Date.now() - issuedAt > SESSION_TTL_MS) return null;
+  return { userId, issuedAt };
 }
 
 /**
@@ -139,6 +147,9 @@ function isAllowlisted(req) {
   if (req.method === 'GET' && pathname === '/login.html') return true;
   if (req.method === 'POST' && pathname === '/login') return true;
   if (req.method === 'POST' && pathname === '/logout') return true;
+  if (req.method === 'POST' && pathname === '/admin/bootstrap-first-admin') {
+    return true;
+  }
   return false;
 }
 
@@ -157,7 +168,9 @@ function isValidCronKey(req) {
 }
 
 /**
- * Global auth gate. Fail closed if env secrets missing.
+ * Global auth gate. Fail closed if SESSION_SECRET missing.
+ * On success sets req.dashboardUserId (string) for session cookies.
+ * Cron bypass sets req.dashboardAuthViaCron = true (no user id).
  */
 function requireAuth(req, res, next) {
   if (!authConfigured()) {
@@ -170,11 +183,14 @@ function requireAuth(req, res, next) {
 
   // Cron bypass: any path, no session cookie required.
   if (isValidCronKey(req)) {
+    req.dashboardAuthViaCron = true;
     return next();
   }
 
   const token = readCookie(req, COOKIE_NAME);
-  if (token && verifySessionToken(token)) {
+  const session = token ? verifySessionToken(token) : null;
+  if (session) {
+    req.dashboardUserId = session.userId;
     return next();
   }
 
@@ -229,4 +245,5 @@ module.exports = {
   safeEqualPassword,
   buildSessionCookie,
   authConfigured,
+  isValidCronKey,
 };

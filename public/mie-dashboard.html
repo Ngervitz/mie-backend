@@ -1166,6 +1166,8 @@
   <script>
     (function () {
       'use strict';
+      // UX only: show/hide tabs from GET /api/auth/me.
+      // Real authorization is always enforced by the backend on each request.
       var tabs = document.querySelectorAll('[data-dashboard-tab]');
       var panels = {
         market: document.getElementById('market-panel'),
@@ -1180,6 +1182,18 @@
       };
       if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !tabs.length) return;
 
+      var SECTION_ORDER = [
+        'market',
+        'discoveries',
+        'ai-visibility',
+        'ga4',
+        'searchconsole',
+        'meta',
+        'sms',
+        'email',
+        'inbox',
+      ];
+      var allowedSet = null;
       var current = 'market';
 
       function syncMarketChrome(tabName) {
@@ -1189,8 +1203,33 @@
         marketChrome.classList.toggle('hidden', !show);
       }
 
+      function canAccess(sectionKey) {
+        if (!allowedSet) return true;
+        return allowedSet[sectionKey] === true;
+      }
+
+      function applyTabVisibility() {
+        tabs.forEach(function (btn) {
+          var key = btn.getAttribute('data-dashboard-tab');
+          var show = canAccess(key);
+          btn.hidden = !show;
+          btn.style.display = show ? '' : 'none';
+          btn.setAttribute('aria-hidden', show ? 'false' : 'true');
+        });
+        document
+          .querySelectorAll('#mie-dashboard-app .dashboard-tab-group')
+          .forEach(function (group) {
+            var anyVisible = false;
+            group.querySelectorAll('[data-dashboard-tab]').forEach(function (btn) {
+              if (!btn.hidden) anyVisible = true;
+            });
+            group.hidden = !anyVisible;
+            group.style.display = anyVisible ? '' : 'none';
+          });
+      }
+
       function activate(name) {
-        if (!panels[name]) return;
+        if (!panels[name] || !canAccess(name)) return;
         Object.keys(panels).forEach(function (key) {
           var show = key === name;
           panels[key].classList.toggle('hidden', !show);
@@ -1228,9 +1267,47 @@
         });
       });
 
-      // Initial paint: default tab is market; keep chrome in sync without
-      // waiting for a click (accordion no longer owns this visibility).
-      syncMarketChrome(current);
+      function pickDefaultSection() {
+        for (var i = 0; i < SECTION_ORDER.length; i++) {
+          if (canAccess(SECTION_ORDER[i])) return SECTION_ORDER[i];
+        }
+        return null;
+      }
+
+      fetch('/api/auth/me', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      })
+        .then(function (res) {
+          if (res.status === 401) {
+            window.location.href = '/login.html';
+            return null;
+          }
+          return res.json().then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (!result) return;
+          allowedSet = {};
+          if (result.ok && result.data && result.data.user && result.data.user.is_admin) {
+            SECTION_ORDER.forEach(function (k) {
+              allowedSet[k] = true;
+            });
+          } else if (result.ok && result.data && Array.isArray(result.data.permissions)) {
+            result.data.permissions.forEach(function (k) {
+              allowedSet[k] = true;
+            });
+          }
+          applyTabVisibility();
+          var first = pickDefaultSection();
+          if (first) activate(first);
+          else syncMarketChrome(null);
+        })
+        .catch(function () {
+          // Fail open on UX only if /me is unreachable; backend still gates APIs.
+          syncMarketChrome(current);
+        });
     })();
   </script>
   <script>
