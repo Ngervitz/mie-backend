@@ -252,16 +252,13 @@ function validateAnalysisOutput(parsed, measuredTermsExact) {
     err.code = 'LLM_VALIDATION_FAILED';
     throw err;
   }
-  if (comparativeRaw.length > MAX_COMPARATIVE) {
-    const err = new Error(
-      `comparative_analysis exceeds max ${MAX_COMPARATIVE}`,
-    );
-    err.code = 'LLM_VALIDATION_FAILED';
-    throw err;
-  }
+  const comparativeLimited =
+    comparativeRaw.length > MAX_COMPARATIVE
+      ? comparativeRaw.slice(0, MAX_COMPARATIVE)
+      : comparativeRaw;
 
   const comparative_analysis = [];
-  for (const item of comparativeRaw) {
+  for (const item of comparativeLimited) {
     if (!item || typeof item !== 'object') {
       const err = new Error('Invalid comparative_analysis item');
       err.code = 'LLM_VALIDATION_FAILED';
