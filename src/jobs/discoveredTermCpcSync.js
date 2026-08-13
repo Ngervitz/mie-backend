@@ -132,12 +132,15 @@ async function runDiscoveredTermCpcSync() {
 
   const already = await loadTermsWithExistingEstimates();
   const toFetch = [];
+  const queuedKeys = new Set();
   for (const item of pending) {
     const key = normalizeKeywordKey(item.term);
-    if (key && already.has(key)) {
+    if (!key) continue;
+    if (already.has(key) || queuedKeys.has(key)) {
       summary.skippedAlreadyEstimated += 1;
       continue;
     }
+    queuedKeys.add(key);
     toFetch.push(item);
   }
 
