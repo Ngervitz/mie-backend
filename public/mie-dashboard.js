@@ -11252,3 +11252,287 @@ init();
     window.location.href = '/login.html';
   });
 })();
+
+/* ----------------------------------------------------------------------------
+ * Administrar — usuarios del dashboard (solo is_admin; auth real en /api/admin)
+ * UX only for the tab; never hash passwords in the browser.
+ * ------------------------------------------------------------------------- */
+(function initAdminUsers() {
+  const panel = document.getElementById('admin-panel');
+  const tbody = document.getElementById('admin-users-tbody');
+  const listStatus = document.getElementById('admin-list-status');
+  const createStatus = document.getElementById('admin-create-status');
+  const createForm = document.getElementById('admin-create-form');
+  const createPermsEl = document.getElementById('admin-create-permissions');
+  const createPermsWrap = document.getElementById('admin-create-permissions-wrap');
+  const isAdminCb = document.getElementById('admin-create-is-admin');
+  const reloadBtn = document.getElementById('admin-reload-btn');
+  if (!panel || !tbody || !createForm || !createPermsEl) return;
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+  let sectionKeys = [];
+  let usersCache = [];
+
+  function setStatus(el, message, isError) {
+    if (!el) return;
+    el.textContent = message || '';
+    el.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function renderCreatePermissionChecks() {
+    createPermsEl.innerHTML = sectionKeys
+      .map(function (key) {
+        return (
+          '<label class="admin-perm-check">' +
+          '<input type="checkbox" name="admin-create-perm" value="' +
+          escapeHtml(key) +
+          '" /> ' +
+          escapeHtml(key) +
+          '</label>'
+        );
+      })
+      .join('');
+  }
+
+  function selectedCreatePermissions() {
+    return Array.prototype.slice
+      .call(createForm.querySelectorAll('input[name="admin-create-perm"]:checked'))
+      .map(function (el) {
+        return el.value;
+      });
+  }
+
+  function syncCreateAdminUi() {
+    const admin = isAdminCb && isAdminCb.checked;
+    if (createPermsWrap) {
+      createPermsWrap.hidden = Boolean(admin);
+      createPermsWrap.style.display = admin ? 'none' : '';
+    }
+  }
+
+  function renderUsers() {
+    tbody.innerHTML = '';
+    if (!usersCache.length) {
+      tbody.innerHTML = '<tr><td colspan="5">No hay usuarios.</td></tr>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    usersCache.forEach(function (u) {
+      const tr = document.createElement('tr');
+      tr.setAttribute('data-user-id', u.id);
+      const permsText = u.is_admin
+        ? '(acceso total)'
+        : (u.permissions || []).join(', ') || '—';
+      tr.innerHTML =
+        '<td>' +
+        escapeHtml(u.email) +
+        '</td>' +
+        '<td>' +
+        (u.is_admin ? 'sí' : 'no') +
+        '</td>' +
+        '<td>' +
+        (u.active ? 'sí' : 'no') +
+        '</td>' +
+        '<td class="admin-perms-cell">' +
+        escapeHtml(permsText) +
+        '</td>' +
+        '<td class="admin-actions-cell"></td>';
+      const actions = tr.querySelector('.admin-actions-cell');
+      if (!u.is_admin) {
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'btn';
+        editBtn.textContent = 'Permisos';
+        editBtn.addEventListener('click', function () {
+          editPermissions(u);
+        });
+        actions.appendChild(editBtn);
+      }
+      if (u.active) {
+        const deact = document.createElement('button');
+        deact.type = 'button';
+        deact.className = 'btn';
+        deact.textContent = 'Desactivar';
+        deact.addEventListener('click', function () {
+          deactivateUser(u);
+        });
+        actions.appendChild(deact);
+      } else {
+        const react = document.createElement('button');
+        react.type = 'button';
+        react.className = 'btn';
+        react.textContent = 'Reactivar';
+        react.addEventListener('click', function () {
+          patchUser(u.id, { active: true });
+        });
+        actions.appendChild(react);
+      }
+      frag.appendChild(tr);
+    });
+    tbody.appendChild(frag);
+  }
+
+  async function loadUsers() {
+    setStatus(listStatus, 'Cargando…', false);
+    try {
+      const res = await fetch(API + '/api/admin/users', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (res.status === 403) {
+        setStatus(listStatus, 'Sin permiso de administrador.', true);
+        return;
+      }
+      if (!res.ok) {
+        setStatus(
+          listStatus,
+          (data && data.error) || 'Error al listar usuarios',
+          true,
+        );
+        return;
+      }
+      sectionKeys = Array.isArray(data.sectionKeys) ? data.sectionKeys : [];
+      usersCache = Array.isArray(data.users) ? data.users : [];
+      renderCreatePermissionChecks();
+      renderUsers();
+      setStatus(listStatus, usersCache.length + ' usuario(s)', false);
+    } catch (_err) {
+      setStatus(listStatus, 'No se pudo conectar.', true);
+    }
+  }
+
+  async function patchUser(id, body) {
+    setStatus(listStatus, 'Guardando…', false);
+    try {
+      const res = await fetch(API + '/api/admin/users/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus(listStatus, (data && data.error) || 'Error al actualizar', true);
+        return;
+      }
+      await loadUsers();
+    } catch (_err) {
+      setStatus(listStatus, 'No se pudo conectar.', true);
+    }
+  }
+
+  function deactivateUser(u) {
+    if (!window.confirm('¿Desactivar a ' + u.email + '?')) return;
+    patchUser(u.id, { active: false });
+  }
+
+  async function editPermissions(u) {
+    const current = new Set(u.permissions || []);
+    const raw = window.prompt(
+      'Permisos para ' +
+        u.email +
+        ' (marcá con x las secciones; una por línea):',
+      sectionKeys
+        .map(function (key) {
+          return (current.has(key) ? 'x ' : '  ') + key;
+        })
+        .join('\n'),
+    );
+    if (raw == null) return;
+    const next = [];
+    String(raw)
+      .split(/\r?\n/)
+      .forEach(function (line) {
+        const m = /^\s*[xX*]\s+(\S+)/.exec(line);
+        if (m && sectionKeys.indexOf(m[1]) !== -1) next.push(m[1]);
+      });
+    setStatus(listStatus, 'Guardando permisos…', false);
+    try {
+      const res = await fetch(
+        API + '/api/admin/users/' + encodeURIComponent(u.id) + '/permissions',
+        {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ permissions: next }),
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus(
+          listStatus,
+          (data && data.error) || 'Error al guardar permisos',
+          true,
+        );
+        return;
+      }
+      await loadUsers();
+    } catch (_err) {
+      setStatus(listStatus, 'No se pudo conectar.', true);
+    }
+  }
+
+  createForm.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    setStatus(createStatus, 'Creando…', false);
+    const email = document.getElementById('admin-create-email').value;
+    const password = document.getElementById('admin-create-password').value;
+    const is_admin = Boolean(isAdminCb && isAdminCb.checked);
+    const permissions = is_admin ? [] : selectedCreatePermissions();
+    try {
+      const res = await fetch(API + '/api/admin/users', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, password, is_admin, permissions }),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus(
+          createStatus,
+          (data && data.error) || 'No se pudo crear',
+          true,
+        );
+        return;
+      }
+      createForm.reset();
+      syncCreateAdminUi();
+      setStatus(
+        createStatus,
+        'Usuario creado: ' + ((data.user && data.user.email) || email),
+        false,
+      );
+      await loadUsers();
+    } catch (_err) {
+      setStatus(createStatus, 'No se pudo conectar.', true);
+    }
+  });
+
+  if (isAdminCb) {
+    isAdminCb.addEventListener('change', syncCreateAdminUi);
+    syncCreateAdminUi();
+  }
+  if (reloadBtn) reloadBtn.addEventListener('click', loadUsers);
+
+  window.__openAdmin = function () {
+    loadUsers();
+  };
+})();

@@ -4157,3 +4157,39 @@
   height: 320px;
   width: 100%;
 }
+
+/* Administrar (users) */
+#mie-dashboard-app .admin-checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-direction: row;
+}
+#mie-dashboard-app .admin-checkbox-field .mcl-field-label {
+  margin: 0;
+}
+#mie-dashboard-app .admin-permissions-fieldset {
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+}
+#mie-dashboard-app .admin-permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+#mie-dashboard-app .admin-perm-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--text, #e8eaed);
+  cursor: pointer;
+}
+#mie-dashboard-app .admin-actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

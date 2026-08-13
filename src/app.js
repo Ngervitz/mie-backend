@@ -15,7 +15,9 @@ const { requireAuth } = require('./middleware/auth');
 const {
   requireDashboardPermission,
   enforceMappedSectionPermission,
+  requireAdmin,
 } = require('./middleware/requireDashboardPermission');
+const adminUsersRouter = require('./routes/admin-users');
 const logger = require('./lib/logger');
 
 const app = express();
@@ -25,6 +27,8 @@ app.use(express.json());
 app.use('/', authRouter);
 app.use(requireAuth);
 app.get('/api/auth/me', meHandler);
+// Admin-only user management (UX tab "Administrar"; real auth here)
+app.use('/api/admin', requireAdmin, adminUsersRouter);
 
 app.use(express.static('public'));
 

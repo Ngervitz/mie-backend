@@ -232,6 +232,31 @@
       </button>
         </div>
       </div>
+      <div class="dashboard-tab-group" data-group="sistema">
+        <button
+          type="button"
+          class="dashboard-tab-group-label"
+          aria-expanded="false"
+          data-group-toggle="sistema">
+          <span>⚙️ Sistema</span>
+          <span class="dashboard-tab-group-chevron" aria-hidden="true">▸</span>
+        </button>
+        <div class="dashboard-tab-group-buttons">
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="admin"
+        id="tab-admin"
+        hidden
+        style="display: none"
+        aria-hidden="true"
+        title="Solo administradores">
+        Administrar
+      </button>
+        </div>
+      </div>
         </nav>
         </div>
 
@@ -1150,6 +1175,88 @@
         </div>
       </div>
     </div>
+
+    <!-- Administrar: solo admins (UX via /api/auth/me; auth real en /api/admin/*). -->
+    <div
+      class="dashboard-panel hidden"
+      id="admin-panel"
+      role="tabpanel"
+      aria-labelledby="tab-admin"
+      hidden>
+      <div id="admin-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Administrar</h1>
+            <p class="mcl-subtitle">
+              Usuarios del dashboard Janus — crear colaboradores y asignar secciones
+            </p>
+          </div>
+        </header>
+
+        <section id="admin-create-section" class="sms-create-section" aria-label="Crear usuario">
+          <h2 class="sms-section-title">Nuevo usuario</h2>
+          <form id="admin-create-form" class="sms-create-form">
+            <label class="mcl-field">
+              <span class="mcl-field-label">Email</span>
+              <input
+                type="email"
+                id="admin-create-email"
+                class="mcl-input"
+                required
+                autocomplete="off"
+              />
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Contraseña</span>
+              <input
+                type="password"
+                id="admin-create-password"
+                class="mcl-input"
+                required
+                minlength="8"
+                autocomplete="new-password"
+              />
+            </label>
+            <label class="mcl-field admin-checkbox-field">
+              <input type="checkbox" id="admin-create-is-admin" />
+              <span class="mcl-field-label">Administrador (acceso total)</span>
+            </label>
+            <fieldset id="admin-create-permissions-wrap" class="admin-permissions-fieldset">
+              <legend class="mcl-field-label">Secciones</legend>
+              <div id="admin-create-permissions" class="admin-permissions-grid"></div>
+            </fieldset>
+            <div class="sms-form-actions">
+              <button type="submit" id="admin-create-btn" class="btn btn-primary">
+                Crear usuario
+              </button>
+            </div>
+          </form>
+          <div id="admin-create-status" class="mcl-status" aria-live="polite"></div>
+        </section>
+
+        <section id="admin-list-section" class="sms-list-section" aria-label="Listado de usuarios">
+          <div class="sms-list-toolbar">
+            <h2 class="sms-section-title">Usuarios</h2>
+            <button type="button" id="admin-reload-btn" class="btn">Recargar lista</button>
+          </div>
+          <div id="admin-list-status" class="mcl-status" aria-live="polite"></div>
+          <div class="table-wrap">
+            <table class="ga4-table" id="admin-users-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Admin</th>
+                  <th>Activo</th>
+                  <th>Permisos</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="admin-users-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
       </main>
     </div>
   </div>
@@ -1179,8 +1286,9 @@
         email: document.getElementById('email-panel'),
         inbox: document.getElementById('inbox-panel'),
         'ai-visibility': document.getElementById('ai-visibility-panel'),
+        admin: document.getElementById('admin-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !tabs.length) return;
 
       var SECTION_ORDER = [
         'market',
@@ -1192,9 +1300,11 @@
         'sms',
         'email',
         'inbox',
+        'admin',
       ];
       var allowedSet = null;
       var current = 'market';
+      var isAdminUser = false;
 
       function syncMarketChrome(tabName) {
         var marketChrome = document.getElementById('market-chrome');
@@ -1204,6 +1314,7 @@
       }
 
       function canAccess(sectionKey) {
+        if (sectionKey === 'admin') return isAdminUser === true;
         if (!allowedSet) return true;
         return allowedSet[sectionKey] === true;
       }
@@ -1251,6 +1362,7 @@
         if (name === 'sms' && window.__openSms) window.__openSms();
         if (name === 'email' && window.__openEmail) window.__openEmail();
         if (name === 'inbox' && window.__openInbox) window.__openInbox();
+        if (name === 'admin' && window.__openAdmin) window.__openAdmin();
         if (
           name === 'ai-visibility' &&
           typeof window.__openAiVisibility === 'function'
@@ -1290,9 +1402,12 @@
         .then(function (result) {
           if (!result) return;
           allowedSet = {};
-          if (result.ok && result.data && result.data.user && result.data.user.is_admin) {
+          isAdminUser = Boolean(
+            result.ok && result.data && result.data.user && result.data.user.is_admin,
+          );
+          if (isAdminUser) {
             SECTION_ORDER.forEach(function (k) {
-              allowedSet[k] = true;
+              if (k !== 'admin') allowedSet[k] = true;
             });
           } else if (result.ok && result.data && Array.isArray(result.data.permissions)) {
             result.data.permissions.forEach(function (k) {

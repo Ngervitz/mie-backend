@@ -82,7 +82,44 @@ async function enforceMappedSectionPermission(req, res, next) {
   }
 }
 
+/**
+ * Admin-only gate (dashboard_users.is_admin). Not a section_key permission.
+ * Cron bypass allowed for machine jobs that may call admin routes (none today).
+ *
+ * @type {import('express').RequestHandler}
+ */
+async function requireAdmin(req, res, next) {
+  try {
+    if (req.dashboardAuthViaCron || isValidCronKey(req)) {
+      return next();
+    }
+
+    const userId = req.dashboardUserId;
+    if (!userId) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    const user = await findUserById(userId);
+    if (!user || !user.active) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    if (user.is_admin !== true) {
+      return res.status(403).json({ error: 'Se requiere administrador' });
+    }
+
+    req.dashboardUser = user;
+    return next();
+  } catch (err) {
+    logger.error('requireAdmin failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Error de autorización' });
+  }
+}
+
 module.exports = {
   requireDashboardPermission,
   enforceMappedSectionPermission,
+  requireAdmin,
 };
