@@ -10,8 +10,8 @@ const { GoogleAdsApi, enums, ResourceNames } = require('google-ads-api');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 
-/** Uruguay country criterion — Google Ads geo target CSV. */
-const GEO_URUGUAY = ResourceNames.geoTargetConstant(2342);
+/** Uruguay country criterion — Google Ads geo target CSV (Criteria ID 2858). */
+const GEO_URUGUAY = ResourceNames.geoTargetConstant(2858);
 /** Spanish language constant. */
 const LANGUAGE_SPANISH = ResourceNames.languageConstant(1003);
 
