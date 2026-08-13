@@ -2563,6 +2563,53 @@
   background: var(--accent-danger-soft);
   color: var(--accent-danger);
 }
+
+#mie-dashboard-app .cpc-run-analysis {
+  margin: 10px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+#mie-dashboard-app .cpc-run-analysis-head {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .cpc-run-analysis-summary {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+#mie-dashboard-app .cpc-run-analysis-subtitle {
+  margin: 12px 0 6px;
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cpc-run-analysis-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cpc-run-analysis-rel {
+  color: var(--text);
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .cpc-unmeasured-disclaimer {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+}
+#mie-dashboard-app .cpc-unmeasured-item {
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .cpc-run-analysis-empty {
+  margin: 0;
+  font-size: 0.8rem;
+}
 #mie-dashboard-app .cov-source { color: var(--text-muted); font-size: 13px; }
 
 #mie-dashboard-app .cov-badge {

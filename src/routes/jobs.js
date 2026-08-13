@@ -29,6 +29,9 @@ const { runKeywordCpcSync } = require('../jobs/keywordCpcSync');
 const {
   runDiscoveredTermCpcSync,
 } = require('../jobs/discoveredTermCpcSync');
+const {
+  generateKeywordRunAnalysis,
+} = require('../services/keywordRunAnalysis');
 const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
@@ -1380,6 +1383,41 @@ router.post('/run-discovered-term-cpc-sync', async (req, res) => {
       googleAdsError: err && err.googleAdsError ? err.googleAdsError : undefined,
       envDiagnostics:
         err && Array.isArray(err.envDiagnostics) ? err.envDiagnostics : undefined,
+    });
+  }
+});
+
+/**
+ * POST /jobs/run-keyword-run-analysis
+ * Body/query: { syncRunId, sourceTable }
+ * Re-runs Claude analysis for an existing classified CPC sync (upsert sync_run_summaries).
+ * Does not touch classification columns.
+ */
+router.post('/run-keyword-run-analysis', async (req, res) => {
+  const syncRunId = String(
+    (req.body && req.body.syncRunId) || req.query.syncRunId || '',
+  ).trim();
+  const sourceTable = String(
+    (req.body && req.body.sourceTable) || req.query.sourceTable || '',
+  ).trim();
+  logger.info('POST /jobs/run-keyword-run-analysis — started', {
+    syncRunId,
+    sourceTable,
+  });
+  try {
+    const result = await generateKeywordRunAnalysis({ syncRunId, sourceTable });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('keyword run analysis job failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+      syncRunId,
+      sourceTable,
+    });
+    return res.status(502).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
     });
   }
 });

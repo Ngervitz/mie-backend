@@ -22,6 +22,9 @@ const {
 const {
   classifyAndPersistSyncRun,
 } = require('../lib/keywordOpportunityClassification');
+const {
+  generateKeywordRunAnalysis,
+} = require('../services/keywordRunAnalysis');
 
 /**
  * @param {object|null} metrics
@@ -242,6 +245,36 @@ async function runKeywordCpcSync() {
         counts: classification.counts,
         transactionNote: classification.transactionNote,
       };
+      try {
+        const analysis = await generateKeywordRunAnalysis({
+          syncRunId,
+          sourceTable: 'keyword_cpc_estimates',
+        });
+        summary.llmAnalysis = {
+          ok: true,
+          skipped: Boolean(analysis.skipped),
+          summaryId: analysis.summaryId || null,
+          suggestionMetrics: analysis.suggestionMetrics || null,
+          modelUsed: analysis.modelUsed || null,
+        };
+      } catch (llmErr) {
+        const message =
+          llmErr && llmErr.message ? llmErr.message : 'llm analysis failed';
+        const code =
+          llmErr && llmErr.code ? llmErr.code : 'KEYWORD_RUN_ANALYSIS_FAILED';
+        logger.error('keyword_cpc_sync LLM analysis post-step failed', {
+          syncRunId,
+          error: message,
+          code,
+        });
+        // Classification already persisted — do not mark classification failed.
+        summary.llmAnalysis = {
+          ok: false,
+          error: message,
+          code,
+          classificationIntact: true,
+        };
+      }
     } catch (classErr) {
       const message =
         classErr && classErr.message ? classErr.message : 'classification failed';

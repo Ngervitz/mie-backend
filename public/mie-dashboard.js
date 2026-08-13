@@ -4676,6 +4676,7 @@ init();
   const applyBtn = document.getElementById('cov-apply-btn');
   const feedbackEl = document.getElementById('cov-apply-feedback');
   const draftsEl = document.getElementById('cov-drafts');
+  const runAnalysisEl = document.getElementById('cov-run-analysis');
 
   if (!statusEl || !suggestionsEl || !applyBtn || !draftsEl) {
     return;
@@ -4824,6 +4825,143 @@ init();
       window.setTimeout(function () {
         btn.textContent = prev;
       }, 1200);
+    }
+  }
+
+  function relationshipLabel(rel) {
+    if (rel === 'same_intent') return 'misma intención';
+    if (rel === 'related_intent') return 'intención relacionada';
+    if (rel === 'possible_redundancy') return 'posible redundancia';
+    return rel || '—';
+  }
+
+  function renderCpcRunAnalysis(el, summary, sourceLabel) {
+    if (!el) return;
+    if (!summary) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    const comps = Array.isArray(summary.comparativeAnalysis)
+      ? summary.comparativeAnalysis
+      : [];
+    const suggestions = Array.isArray(summary.suggestedNewTerms)
+      ? summary.suggestedNewTerms
+      : [];
+    const when = summary.generatedAt
+      ? String(summary.generatedAt).slice(0, 16).replace('T', ' ')
+      : '—';
+
+    const compsHtml = comps.length
+      ? '<ul class="cpc-run-analysis-list">' +
+        comps
+          .map(function (c) {
+            const pref =
+              c.preferred_measured_term || c.preferredMeasuredTerm || null;
+            const prefNote = pref
+              ? ' Preferir medida: <strong>' + escapeHtml(pref) + '</strong>.'
+              : '';
+            return (
+              '<li><span class="cpc-run-analysis-rel">' +
+              escapeHtml(relationshipLabel(c.relationship)) +
+              '</span>: ' +
+              escapeHtml(c.term_a || c.termA || '') +
+              ' ↔ ' +
+              escapeHtml(c.term_b || c.termB || '') +
+              '. ' +
+              escapeHtml(c.reason || '') +
+              prefNote +
+              '</li>'
+            );
+          })
+          .join('') +
+        '</ul>'
+      : '<p class="text-muted cpc-run-analysis-empty">Sin relaciones comparativas destacadas en esta corrida.</p>';
+
+    const suggHtml = suggestions.length
+      ? '<ul class="cpc-run-analysis-list cpc-unmeasured-list">' +
+        suggestions
+          .map(function (s, idx) {
+            const related = Array.isArray(s.related_to_terms)
+              ? s.related_to_terms
+              : Array.isArray(s.relatedToTerms)
+                ? s.relatedToTerms
+                : [];
+            const relatedNote = related.length
+              ? ' <span class="text-muted">(relacionado a: ' +
+                escapeHtml(related.join(', ')) +
+                ')</span>'
+              : '';
+            return (
+              '<li class="cpc-unmeasured-item">' +
+              '<div class="cov-term-row">' +
+              '<span class="cov-term-text">' +
+              escapeHtml(s.term || '') +
+              '</span>' +
+              '<button type="button" class="btn cov-copy-term-btn cpc-suggest-copy-btn" data-suggest-idx="' +
+              idx +
+              '" title="Copiar término">Copiar</button>' +
+              '</div>' +
+              '<div class="text-muted">' +
+              escapeHtml(s.reason || '') +
+              relatedNote +
+              '</div>' +
+              '</li>'
+            );
+          })
+          .join('') +
+        '</ul>'
+      : '<p class="text-muted cpc-run-analysis-empty">Sin sugerencias nuevas en esta corrida.</p>';
+
+    el.hidden = false;
+    el.innerHTML =
+      '<div class="cpc-run-analysis-head">' +
+      '<strong>Análisis Claude</strong> · ' +
+      escapeHtml(sourceLabel || '') +
+      ' · corrida ' +
+      escapeHtml(String(summary.syncRunId || '').slice(0, 8)) +
+      '… · ' +
+      escapeHtml(when) +
+      '</div>' +
+      '<p class="cpc-run-analysis-summary">' +
+      escapeHtml(summary.summaryText || '') +
+      '</p>' +
+      '<h3 class="cpc-run-analysis-subtitle">Comparativo</h3>' +
+      compsHtml +
+      '<h3 class="cpc-run-analysis-subtitle">Sugerencias sin medir</h3>' +
+      '<p class="text-muted cpc-unmeasured-disclaimer">Hipótesis para medir después con Keyword Planner. Aún no tienen CPC, volumen ni competencia.</p>' +
+      suggHtml;
+
+    el.querySelectorAll('.cpc-suggest-copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = Number(btn.getAttribute('data-suggest-idx'));
+        const item = suggestions[idx];
+        if (!item) return;
+        copyDiscoveryTerm(item.term, btn);
+      });
+    });
+  }
+
+  window.__mieRenderCpcRunAnalysis = renderCpcRunAnalysis;
+  window.__mieCopyDiscoveryTerm = copyDiscoveryTerm;
+
+  async function loadDiscoveredRunAnalysis() {
+    if (!runAnalysisEl) return;
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/reports/sync-run-summaries?sourceTable=discovered_term_cpc_estimates',
+        { headers: { Accept: 'application/json' } },
+      );
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      renderCpcRunAnalysis(
+        runAnalysisEl,
+        body && body.summary ? body.summary : null,
+        'Pendientes / Trends',
+      );
+    } catch (err) {
+      renderCpcRunAnalysis(runAnalysisEl, null);
     }
   }
 
@@ -5080,9 +5218,14 @@ init();
         ? `${covState.suggestions.length} sugerencias pendientes de decisión`
         : '';
       renderSuggestions();
+      loadDiscoveredRunAnalysis();
     } catch (err) {
       statusEl.textContent = 'No se pudieron cargar las sugerencias.';
       suggestionsEl.innerHTML = '';
+      if (runAnalysisEl) {
+        runAnalysisEl.hidden = true;
+        runAnalysisEl.innerHTML = '';
+      }
     }
   }
 
@@ -5785,6 +5928,7 @@ init();
   const selectedFilesEl = document.getElementById('serp-selected-files');
   const queriesStatusEl = document.getElementById('serp-queries-status');
   const queriesListEl = document.getElementById('serp-queries-list');
+  const serpRunAnalysisEl = document.getElementById('serp-run-analysis');
   const queryForm = document.getElementById('serp-query-form');
   const queryInput = document.getElementById('serp-query-input');
   const queryAddBtn = document.getElementById('serp-query-add-btn');
@@ -6845,6 +6989,7 @@ init();
       populateHistoryQueryFilter(body.queries);
       refreshImportsListView();
       loadEntityPresence();
+      loadKeywordRunAnalysis();
     } catch (err) {
       setQueriesStatus(
         err && err.message
@@ -6852,6 +6997,31 @@ init();
           : 'No se pudieron cargar las queries.',
         true,
       );
+    }
+  }
+
+  async function loadKeywordRunAnalysis() {
+    if (!serpRunAnalysisEl) return;
+    const render =
+      typeof window.__mieRenderCpcRunAnalysis === 'function'
+        ? window.__mieRenderCpcRunAnalysis
+        : null;
+    if (!render) return;
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/reports/sync-run-summaries?sourceTable=keyword_cpc_estimates',
+        { headers: { Accept: 'application/json' } },
+      );
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      render(
+        serpRunAnalysisEl,
+        body && body.summary ? body.summary : null,
+        'Queries monitoreadas',
+      );
+    } catch (err) {
+      render(serpRunAnalysisEl, null);
     }
   }
 

@@ -2565,6 +2565,101 @@ router.get('/keyword-cpc-estimates', async (req, res) => {
   }
 });
 
+/**
+ * GET /reports/sync-run-summaries?sourceTable=discovered_term_cpc_estimates|keyword_cpc_estimates
+ * Latest Claude comparative analysis for that CPC source (by generated_at DESC).
+ * Optional syncRunId to fetch a specific run.
+ */
+router.get('/sync-run-summaries', async (req, res) => {
+  const sourceTable = String(req.query.sourceTable || '').trim();
+  const syncRunIdRaw =
+    req.query.syncRunId != null ? String(req.query.syncRunId).trim() : '';
+  if (
+    sourceTable !== 'keyword_cpc_estimates' &&
+    sourceTable !== 'discovered_term_cpc_estimates'
+  ) {
+    return res.status(400).json({
+      error:
+        'Invalid sourceTable. Use keyword_cpc_estimates or discovered_term_cpc_estimates',
+    });
+  }
+
+  try {
+    let query = supabase
+      .from('sync_run_summaries')
+      .select(
+        [
+          'id',
+          'sync_run_id',
+          'source_table',
+          'summary_text',
+          'structured_analysis',
+          'suggested_new_terms',
+          'classification_version',
+          'model_used',
+          'generated_at',
+        ].join(', '),
+      )
+      .eq('source_table', sourceTable)
+      .order('generated_at', { ascending: false })
+      .limit(1);
+
+    if (syncRunIdRaw) {
+      query = supabase
+        .from('sync_run_summaries')
+        .select(
+          [
+            'id',
+            'sync_run_id',
+            'source_table',
+            'summary_text',
+            'structured_analysis',
+            'suggested_new_terms',
+            'classification_version',
+            'model_used',
+            'generated_at',
+          ].join(', '),
+        )
+        .eq('source_table', sourceTable)
+        .eq('sync_run_id', syncRunIdRaw)
+        .limit(1);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`Failed to fetch sync_run_summaries: ${error.message}`);
+    }
+    const row = Array.isArray(data) && data[0] ? data[0] : null;
+    if (!row) {
+      return res.status(200).json({ summary: null });
+    }
+
+    return res.status(200).json({
+      summary: {
+        id: row.id,
+        syncRunId: row.sync_run_id,
+        sourceTable: row.source_table,
+        summaryText: row.summary_text,
+        comparativeAnalysis: Array.isArray(row.structured_analysis)
+          ? row.structured_analysis
+          : [],
+        suggestedNewTerms: Array.isArray(row.suggested_new_terms)
+          ? row.suggested_new_terms
+          : [],
+        classificationVersion: row.classification_version,
+        modelUsed: row.model_used,
+        generatedAt: row.generated_at,
+      },
+    });
+  } catch (err) {
+    logger.error('Reports sync-run-summaries failed', {
+      error: err && err.message ? err.message : 'unknown',
+      sourceTable,
+    });
+    return res.status(500).json({ error: 'Failed to fetch sync run summary' });
+  }
+});
+
 module.exports = router;
 module.exports.lastCompleteWeekMonday = lastCompleteWeekMonday;
 module.exports.resolveLastCompleteWeeks = resolveLastCompleteWeeks;
