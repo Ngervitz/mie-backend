@@ -19,6 +19,9 @@ const {
   fetchKeywordHistoricalMetrics,
   KEYWORD_BATCH_MAX,
 } = require('../clients/googleAdsKeywordPlanner');
+const {
+  classifyAndPersistSyncRun,
+} = require('../lib/keywordOpportunityClassification');
 
 /**
  * @param {object|null} metrics
@@ -225,6 +228,46 @@ async function runKeywordCpcSync() {
     errors: summary.errors,
     currencyCode: summary.currencyCode,
   });
+
+  if (summary.ok && summary.totalProcessed > 0 && summary.errors === 0) {
+    try {
+      const classification = await classifyAndPersistSyncRun(
+        'keyword_cpc_estimates',
+        syncRunId,
+      );
+      summary.classification = {
+        ok: true,
+        version: classification.classificationVersion,
+        total: classification.total,
+        counts: classification.counts,
+        transactionNote: classification.transactionNote,
+      };
+    } catch (classErr) {
+      const message =
+        classErr && classErr.message ? classErr.message : 'classification failed';
+      const code =
+        classErr && classErr.code ? classErr.code : 'CLASSIFICATION_FAILED';
+      logger.error('keyword_cpc_sync classification post-step failed', {
+        syncRunId,
+        error: message,
+        code,
+        writeErrors: classErr && classErr.writeErrors ? classErr.writeErrors : null,
+      });
+      summary.ok = false;
+      summary.classification = {
+        ok: false,
+        error: message,
+        code,
+        pending: true,
+      };
+    }
+  } else if (summary.ok && summary.totalProcessed === 0) {
+    summary.classification = {
+      ok: true,
+      skipped: true,
+      reason: 'no_rows_to_classify',
+    };
+  }
 
   return summary;
 }

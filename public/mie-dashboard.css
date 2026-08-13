@@ -2540,6 +2540,29 @@
   color: var(--accent-danger);
   font-weight: var(--font-weight-medium);
 }
+
+#mie-dashboard-app .cpc-class-badge {
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+#mie-dashboard-app .cpc-class-badge.is-cpc-recommended {
+  background: var(--accent-success-soft);
+  color: var(--accent-success);
+}
+#mie-dashboard-app .cpc-class-badge.is-cpc-evaluate {
+  background: var(--accent-warn-soft);
+  color: var(--accent-warn);
+}
+#mie-dashboard-app .cpc-class-badge.is-cpc-low-priority,
+#mie-dashboard-app .cpc-class-badge.is-cpc-low-volume,
+#mie-dashboard-app .cpc-class-badge.is-cpc-no-bid {
+  background: rgba(155, 163, 178, 0.18);
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cpc-class-badge.is-cpc-high-comp {
+  background: var(--accent-danger-soft);
+  color: var(--accent-danger);
+}
 #mie-dashboard-app .cov-source { color: var(--text-muted); font-size: 13px; }
 
 #mie-dashboard-app .cov-badge {

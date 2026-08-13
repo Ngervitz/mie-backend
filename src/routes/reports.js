@@ -1142,6 +1142,19 @@ function mapDiscoveredTermCpcEstimate(row) {
       row.competition_level != null ? String(row.competition_level) : null,
     syncRunId: row.sync_run_id != null ? String(row.sync_run_id) : null,
     fetchedAt: row.fetched_at,
+    classificationStatus:
+      row.classification_status != null && String(row.classification_status).trim()
+        ? String(row.classification_status).trim()
+        : null,
+    efficiencyScore:
+      row.efficiency_score != null && Number.isFinite(Number(row.efficiency_score))
+        ? Number(row.efficiency_score)
+        : null,
+    classificationVersion:
+      row.classification_version != null &&
+      String(row.classification_version).trim()
+        ? String(row.classification_version).trim()
+        : null,
   };
 }
 
@@ -1164,6 +1177,9 @@ async function loadLatestDiscoveredTermCpcByTerm() {
         'competition_level',
         'sync_run_id',
         'fetched_at',
+        'classification_status',
+        'efficiency_score',
+        'classification_version',
       ].join(', '),
     )
     .order('fetched_at', { ascending: false });
@@ -2476,6 +2492,9 @@ router.get('/keyword-cpc-estimates', async (req, res) => {
           'competition_level',
           'sync_run_id',
           'fetched_at',
+          'classification_status',
+          'efficiency_score',
+          'classification_version',
         ].join(', '),
       )
       .order('fetched_at', { ascending: false });
@@ -2515,6 +2534,21 @@ router.get('/keyword-cpc-estimates', async (req, res) => {
             : null,
         syncRunId: row.sync_run_id != null ? String(row.sync_run_id) : null,
         fetchedAt: row.fetched_at,
+        classificationStatus:
+          row.classification_status != null &&
+          String(row.classification_status).trim()
+            ? String(row.classification_status).trim()
+            : null,
+        efficiencyScore:
+          row.efficiency_score != null &&
+          Number.isFinite(Number(row.efficiency_score))
+            ? Number(row.efficiency_score)
+            : null,
+        classificationVersion:
+          row.classification_version != null &&
+          String(row.classification_version).trim()
+            ? String(row.classification_version).trim()
+            : null,
       });
     });
 

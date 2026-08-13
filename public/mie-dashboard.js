@@ -4738,6 +4738,30 @@ init();
   }
 
   /** Same visual pattern as Queries monitoreadas CPC meta. */
+  function renderDiscoveryClassificationBadge(estimate) {
+    const status =
+      estimate && estimate.classificationStatus
+        ? String(estimate.classificationStatus)
+        : '';
+    const map = {
+      recommended: ['Recomendada', 'is-cpc-recommended'],
+      evaluate: ['Evaluar', 'is-cpc-evaluate'],
+      low_priority: ['Baja prioridad', 'is-cpc-low-priority'],
+      discarded_high_competition: ['Competencia alta', 'is-cpc-high-comp'],
+      discarded_low_volume: ['Volumen insuficiente', 'is-cpc-low-volume'],
+      insufficient_bid_data: ['Sin datos de bid', 'is-cpc-no-bid'],
+    };
+    const entry = map[status];
+    if (!entry) return '';
+    return (
+      '<span class="cov-badge cpc-class-badge ' +
+      entry[1] +
+      '">' +
+      escapeHtml(entry[0]) +
+      '</span>'
+    );
+  }
+
   function renderDiscoveryCpcMeta(estimate) {
     if (!estimate) {
       return (
@@ -4755,8 +4779,10 @@ init();
       estimate.currencyCode,
     );
     const fetched = formatDiscoveryCpcDate(estimate.fetchedAt);
+    const badge = renderDiscoveryClassificationBadge(estimate);
     return (
       '<div class="cov-cpc-meta">' +
+      (badge ? badge + ' ' : '') +
       '💰 Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
@@ -6627,6 +6653,30 @@ init();
     return String(Math.trunc(n));
   }
 
+  function renderSerpQueryClassificationBadge(estimate) {
+    const status =
+      estimate && estimate.classificationStatus
+        ? String(estimate.classificationStatus)
+        : '';
+    const map = {
+      recommended: ['Recomendada', 'is-cpc-recommended'],
+      evaluate: ['Evaluar', 'is-cpc-evaluate'],
+      low_priority: ['Baja prioridad', 'is-cpc-low-priority'],
+      discarded_high_competition: ['Competencia alta', 'is-cpc-high-comp'],
+      discarded_low_volume: ['Volumen insuficiente', 'is-cpc-low-volume'],
+      insufficient_bid_data: ['Sin datos de bid', 'is-cpc-no-bid'],
+    };
+    const entry = map[status];
+    if (!entry) return '';
+    return (
+      '<span class="cov-badge cpc-class-badge ' +
+      entry[1] +
+      '">' +
+      escapeHtml(entry[0]) +
+      '</span> '
+    );
+  }
+
   function renderSerpQueryCpcMeta(estimate) {
     if (!estimate) {
       return (
@@ -6645,8 +6695,10 @@ init();
       estimate.currencyCode,
     );
     const fetched = formatQueryCreatedAt(estimate.fetchedAt);
+    const badge = renderSerpQueryClassificationBadge(estimate);
     return (
       '<p class="text-muted serp-queries-hint">' +
+      badge +
       '💰 Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
