@@ -4761,14 +4761,44 @@ init();
       escapeHtml(vol) +
       ' · Competencia: ' +
       escapeHtml(comp) +
-      ' · Bid bajo: ' +
+      ' · Bid bajo: <span class="cpc-bid-low">' +
       escapeHtml(low) +
-      ' · Bid alto: ' +
+      '</span> · Bid alto: <span class="cpc-bid-high">' +
       escapeHtml(high) +
-      ' · CPC al ' +
+      '</span> · CPC al ' +
       escapeHtml(fetched) +
       '</div>'
     );
+  }
+
+  async function copyDiscoveryTerm(term, btn) {
+    const text = term != null ? String(term) : '';
+    if (!text) return;
+    const prev = btn.textContent;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      btn.textContent = 'Copiado';
+      window.setTimeout(function () {
+        btn.textContent = prev;
+      }, 1200);
+    } catch (err) {
+      btn.textContent = 'Error';
+      window.setTimeout(function () {
+        btn.textContent = prev;
+      }, 1200);
+    }
   }
 
   function renderSuggestions() {
@@ -4798,7 +4828,10 @@ init();
         return `
           <tr>
             <td class="cov-term">
-              <div>${escapeHtml(s.term)}</div>
+              <div class="cov-term-row">
+                <span class="cov-term-text">${escapeHtml(s.term)}</span>
+                <button type="button" class="btn cov-copy-term-btn" data-cov-idx="${idx}" title="Copiar término">Copiar</button>
+              </div>
               ${renderDiscoveryCpcMeta(s.cpcEstimate || null)}
             </td>
             <td class="cov-source">${sourceLabel}</td>
@@ -4834,6 +4867,15 @@ init();
           delete covState.decisions[suggestion.term];
         }
         applyBtn.disabled = covState.applying || !Object.keys(covState.decisions).length;
+      });
+    });
+
+    suggestionsEl.querySelectorAll('.cov-copy-term-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-cov-idx'));
+        const suggestion = covState.suggestions[idx];
+        if (!suggestion) return;
+        copyDiscoveryTerm(suggestion.term, btn);
       });
     });
 
@@ -6609,11 +6651,11 @@ init();
       escapeHtml(vol) +
       ' · Competencia: ' +
       escapeHtml(comp) +
-      ' · Bid bajo: ' +
+      ' · Bid bajo: <span class="cpc-bid-low">' +
       escapeHtml(low) +
-      ' · Bid alto: ' +
+      '</span> · Bid alto: <span class="cpc-bid-high">' +
       escapeHtml(high) +
-      ' · CPC al ' +
+      '</span> · CPC al ' +
       escapeHtml(fetched) +
       '</p>'
     );

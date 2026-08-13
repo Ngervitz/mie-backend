@@ -2505,6 +2505,21 @@
 }
 
 #mie-dashboard-app .cov-term { font-weight: var(--font-weight-medium); }
+#mie-dashboard-app .cov-term-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#mie-dashboard-app .cov-term-text {
+  min-width: 0;
+}
+#mie-dashboard-app .cov-copy-term-btn {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
 #mie-dashboard-app .cov-cpc-meta {
   margin-top: 0.35rem;
   font-size: 0.8rem;
@@ -2514,6 +2529,16 @@
 }
 #mie-dashboard-app .cov-cpc-empty {
   opacity: 0.9;
+}
+
+/* CPC bid highlights (Pendientes + Queries monitoreadas) */
+#mie-dashboard-app .cpc-bid-low {
+  color: var(--accent-success);
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .cpc-bid-high {
+  color: var(--accent-danger);
+  font-weight: var(--font-weight-medium);
 }
 #mie-dashboard-app .cov-source { color: var(--text-muted); font-size: 13px; }
 
