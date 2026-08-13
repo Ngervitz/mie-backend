@@ -236,6 +236,22 @@ function validateAnalysisOutput(parsed, measuredTermsExact) {
     err.code = 'LLM_VALIDATION_FAILED';
     throw err;
   }
+
+  /** @type {Map<string, string>} */
+  const exactByKey = new Map();
+  measuredTermsExact.forEach((t) => {
+    const k = normalizeKeywordKey(t);
+    if (k && !exactByKey.has(k)) exactByKey.set(k, t);
+  });
+
+  function resolveMeasuredTerm(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const trimmed = raw.trim();
+    if (measuredTermsExact.has(trimmed)) return trimmed;
+    const viaKey = exactByKey.get(normalizeKeywordKey(trimmed));
+    return viaKey || null;
+  }
+
   const summary =
     typeof parsed.summary_text === 'string' ? parsed.summary_text.trim() : '';
   if (!summary) {
@@ -264,19 +280,14 @@ function validateAnalysisOutput(parsed, measuredTermsExact) {
       err.code = 'LLM_VALIDATION_FAILED';
       throw err;
     }
-    const term_a = typeof item.term_a === 'string' ? item.term_a.trim() : '';
-    const term_b = typeof item.term_b === 'string' ? item.term_b.trim() : '';
+    const term_a = resolveMeasuredTerm(item.term_a);
+    const term_b = resolveMeasuredTerm(item.term_b);
     const relationship =
       typeof item.relationship === 'string' ? item.relationship.trim() : '';
     const reason = typeof item.reason === 'string' ? item.reason.trim() : '';
     if (!term_a || !term_b || !reason) {
-      const err = new Error('comparative_analysis fields incomplete');
-      err.code = 'LLM_VALIDATION_FAILED';
-      throw err;
-    }
-    if (!measuredTermsExact.has(term_a) || !measuredTermsExact.has(term_b)) {
       const err = new Error(
-        `comparative_analysis terms must exist in measured set: ${term_a} / ${term_b}`,
+        `comparative_analysis fields incomplete or unknown terms: ${item.term_a} / ${item.term_b}`,
       );
       err.code = 'LLM_VALIDATION_FAILED';
       throw err;
@@ -289,19 +300,15 @@ function validateAnalysisOutput(parsed, measuredTermsExact) {
     let preferred = item.preferred_measured_term;
     if (preferred === undefined) preferred = null;
     if (preferred !== null) {
-      if (typeof preferred !== 'string' || !preferred.trim()) {
-        const err = new Error('preferred_measured_term invalid');
-        err.code = 'LLM_VALIDATION_FAILED';
-        throw err;
-      }
-      preferred = preferred.trim();
-      if (preferred !== term_a && preferred !== term_b) {
+      const resolvedPref = resolveMeasuredTerm(preferred);
+      if (!resolvedPref || (resolvedPref !== term_a && resolvedPref !== term_b)) {
         const err = new Error(
           'preferred_measured_term must be term_a, term_b, or null',
         );
         err.code = 'LLM_VALIDATION_FAILED';
         throw err;
       }
+      preferred = resolvedPref;
     }
     comparative_analysis.push({
       term_a,
@@ -347,15 +354,10 @@ function validateAnalysisOutput(parsed, measuredTermsExact) {
       : [];
     const related_to_terms = [];
     for (const r of relatedRaw) {
-      if (typeof r !== 'string' || !r.trim()) {
-        const err = new Error('related_to_terms must be non-empty strings');
-        err.code = 'LLM_VALIDATION_FAILED';
-        throw err;
-      }
-      const rt = r.trim();
-      if (!measuredTermsExact.has(rt)) {
+      const rt = resolveMeasuredTerm(r);
+      if (!rt) {
         const err = new Error(
-          `related_to_terms must reference measured terms: ${rt}`,
+          `related_to_terms must reference measured terms: ${r}`,
         );
         err.code = 'LLM_VALIDATION_FAILED';
         throw err;
