@@ -4193,3 +4193,16 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+
+#mie-dashboard-app .cz-funnel-block {
+  margin-top: 20px;
+}
+#mie-dashboard-app .cz-funnel-totals {
+  margin: 8px 0 4px;
+}
+#mie-dashboard-app .mcl-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}

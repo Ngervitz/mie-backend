@@ -124,6 +124,15 @@
         class="dashboard-tab"
         role="tab"
         aria-selected="false"
+        data-dashboard-tab="cz-funnel"
+        id="tab-cz-funnel">
+        Funnel Credizona
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
         data-dashboard-tab="meta"
         id="tab-meta">
         <!-- Official Meta infinity logomark (unmodified artwork, incl. gradients).
@@ -665,6 +674,36 @@
 
         <div id="ga4-status" class="mcl-status" aria-live="polite"></div>
         <div id="ga4-results"></div>
+      </div>
+    </div>
+
+    <!-- Funnel Credizona: local aggregates from cz_funnel_* (no live CZ from browser). -->
+    <div
+      class="dashboard-panel hidden"
+      id="cz-funnel-panel"
+      role="tabpanel"
+      aria-labelledby="tab-cz-funnel"
+      hidden>
+      <div id="cz-funnel-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Funnel Credizona</h1>
+            <p class="mcl-subtitle">
+              Solicitudes, créditos otorgados y encuestas sincronizados desde Credizona
+              (GRANTED usa <code>updated</code> como aproximación temporal)
+            </p>
+          </div>
+          <div class="mcl-header-actions">
+            <button type="button" id="cz-funnel-sync-btn" class="btn btn-primary">
+              Sincronizar ahora
+            </button>
+            <button type="button" id="cz-funnel-reload-btn" class="btn">
+              Recargar
+            </button>
+          </div>
+        </header>
+        <div id="cz-funnel-status" class="mcl-status" aria-live="polite"></div>
+        <div id="cz-funnel-results"></div>
       </div>
     </div>
 
@@ -1287,8 +1326,9 @@
         inbox: document.getElementById('inbox-panel'),
         'ai-visibility': document.getElementById('ai-visibility-panel'),
         admin: document.getElementById('admin-panel'),
+        'cz-funnel': document.getElementById('cz-funnel-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !tabs.length) return;
 
       var SECTION_ORDER = [
         'market',
@@ -1296,6 +1336,7 @@
         'ai-visibility',
         'ga4',
         'searchconsole',
+        'cz-funnel',
         'meta',
         'sms',
         'email',
@@ -1359,6 +1400,7 @@
         }
         if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
+        if (name === 'cz-funnel' && window.__openCzFunnel) window.__openCzFunnel();
         if (name === 'sms' && window.__openSms) window.__openSms();
         if (name === 'email' && window.__openEmail) window.__openEmail();
         if (name === 'inbox' && window.__openInbox) window.__openInbox();

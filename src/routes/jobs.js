@@ -36,6 +36,8 @@ const { runFacebookPostsSync } = require('../jobs/facebookPostsSync');
 const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
+const { runCzFunnelSync } = require('../jobs/czFunnelSync');
+const { getCzApiBearerTokenDiagnostic } = require('../clients/czApiClient');
 const env = require('../config/env');
 const logger = require('../lib/logger');
 const supabase = require('../clients/supabase');
@@ -1244,6 +1246,60 @@ router.post('/run-cz-sync', async (req, res) => {
       ok: false,
       error: err && err.message ? err.message : 'unknown',
     });
+  }
+});
+
+/**
+ * Credizona funnel sync (decode Bearer API) — isolated from run-cz-sync.
+ * Auth: session cookie (dashboard) or X-Cron-Key.
+ * Section gate: cz-funnel via dashboardSections map.
+ */
+router.post('/run-cz-data-sync', async (req, res) => {
+  logger.info('POST /jobs/run-cz-data-sync — started');
+  try {
+    const result = await runCzFunnelSync();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('cz_funnel_data_sync finished', {
+      ok: result.ok,
+      grantedLoans: result.grantedLoans && {
+        status: result.grantedLoans.status,
+        pagesFetched: result.grantedLoans.pagesFetched,
+        itemsUpserted: result.grantedLoans.itemsUpserted,
+      },
+      solicitudes: result.solicitudes && {
+        status: result.solicitudes.status,
+        pagesFetched: result.solicitudes.pagesFetched,
+        itemsUpserted: result.solicitudes.itemsUpserted,
+      },
+      encuestas: result.encuestas && {
+        status: result.encuestas.status,
+        pagesFetched: result.encuestas.pagesFetched,
+        itemsUpserted: result.encuestas.itemsUpserted,
+      },
+      hasTokenDiagnostic: Boolean(result && result.tokenDiagnostic),
+    });
+    // result.tokenDiagnostic is attached by the job on Unauthorized / missing token
+    return res.status(200).json(result);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'unknown';
+    const authRelated =
+      /unauthorized/i.test(message) ||
+      /\b401\b/.test(message) ||
+      /CZ_API_BEARER_TOKEN/i.test(message);
+    const payload = {
+      ok: false,
+      error: message,
+    };
+    if (authRelated) {
+      payload.tokenDiagnostic = getCzApiBearerTokenDiagnostic();
+    }
+    logger.error('cz_funnel_data_sync failed', {
+      error: message,
+      hasTokenDiagnostic: Boolean(payload.tokenDiagnostic),
+    });
+    return res.status(500).json(payload);
   }
 });
 

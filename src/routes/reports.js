@@ -2660,6 +2660,117 @@ router.get('/sync-run-summaries', async (req, res) => {
   }
 });
 
+/**
+ * GET /reports/cz-funnel-summary
+ * Local aggregates only (no live CZ calls).
+ * GRANTED months use updated_at_src as temporal approximation (not exact GRANTED instant).
+ */
+router.get('/cz-funnel-summary', async (req, res) => {
+  try {
+    const [loansRes, solRes, encRes] = await Promise.all([
+      supabase
+        .from('cz_funnel_granted_loans')
+        .select('cz_id, monto_otorgado, updated_at_src'),
+      supabase
+        .from('cz_funnel_solicitudes')
+        .select('cz_id, fecha_reg'),
+      supabase
+        .from('cz_funnel_encuestas')
+        .select('cz_id, score_v2, completed_at'),
+    ]);
+
+    if (loansRes.error) throw new Error(loansRes.error.message);
+    if (solRes.error) throw new Error(solRes.error.message);
+    if (encRes.error) throw new Error(encRes.error.message);
+
+    function monthKey(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+
+    const solicitudesByMonth = new Map();
+    for (const row of solRes.data || []) {
+      const key = monthKey(row.fecha_reg);
+      if (!key) continue;
+      const bucket = solicitudesByMonth.get(key) || { month: key, total_solicitudes: 0 };
+      bucket.total_solicitudes += 1;
+      solicitudesByMonth.set(key, bucket);
+    }
+
+    const grantedByMonth = new Map();
+    for (const row of loansRes.data || []) {
+      const key = monthKey(row.updated_at_src);
+      if (!key) continue;
+      const bucket = grantedByMonth.get(key) || {
+        month: key,
+        total_granted: 0,
+        monto_total_otorgado: 0,
+      };
+      bucket.total_granted += 1;
+      bucket.monto_total_otorgado += Number(row.monto_otorgado) || 0;
+      grantedByMonth.set(key, bucket);
+    }
+
+    const encuestasByMonth = new Map();
+    for (const row of encRes.data || []) {
+      const key = monthKey(row.completed_at);
+      if (!key) continue;
+      const bucket = encuestasByMonth.get(key) || {
+        month: key,
+        total_encuestas: 0,
+        score_sum: 0,
+        score_n: 0,
+      };
+      bucket.total_encuestas += 1;
+      if (row.score_v2 != null && Number.isFinite(Number(row.score_v2))) {
+        bucket.score_sum += Number(row.score_v2);
+        bucket.score_n += 1;
+      }
+      encuestasByMonth.set(key, bucket);
+    }
+
+    const sortMonthAsc = (a, b) => String(a.month).localeCompare(String(b.month));
+
+    return res.status(200).json({
+      notes: {
+        grantedTemporalField:
+          'updated_at_src from API field updated — approximation, not exact GRANTED transition',
+        encuestaScoreField: 'score_v2',
+      },
+      totals: {
+        solicitudes: (solRes.data || []).length,
+        grantedLoans: (loansRes.data || []).length,
+        encuestas: (encRes.data || []).length,
+      },
+      solicitudesByMonth: [...solicitudesByMonth.values()].sort(sortMonthAsc),
+      grantedByMonth: [...grantedByMonth.values()]
+        .map((b) => ({
+          month: b.month,
+          total_granted: b.total_granted,
+          monto_total_otorgado: b.monto_total_otorgado,
+        }))
+        .sort(sortMonthAsc),
+      encuestasByMonth: [...encuestasByMonth.values()]
+        .map((b) => ({
+          month: b.month,
+          total_encuestas: b.total_encuestas,
+          score_promedio:
+            b.score_n > 0 ? Math.round((b.score_sum / b.score_n) * 100) / 100 : null,
+        }))
+        .sort(sortMonthAsc),
+    });
+  } catch (err) {
+    logger.error('Reports cz-funnel-summary failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to build CZ funnel summary' });
+  }
+});
+
 module.exports = router;
 module.exports.lastCompleteWeekMonday = lastCompleteWeekMonday;
 module.exports.resolveLastCompleteWeeks = resolveLastCompleteWeeks;

@@ -11536,3 +11536,152 @@ init();
     loadUsers();
   };
 })();
+
+/* ----------------------------------------------------------------------------
+ * Funnel Credizona — local summary + sync via session (no X-Cron-Key)
+ * ------------------------------------------------------------------------- */
+(function initCzFunnel() {
+  const panel = document.getElementById('cz-funnel-panel');
+  const statusEl = document.getElementById('cz-funnel-status');
+  const resultsEl = document.getElementById('cz-funnel-results');
+  const syncBtn = document.getElementById('cz-funnel-sync-btn');
+  const reloadBtn = document.getElementById('cz-funnel-reload-btn');
+  if (!panel || !statusEl || !resultsEl) return;
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function formatMoney(n) {
+    const v = Number(n) || 0;
+    return v.toLocaleString('es-UY');
+  }
+
+  function renderTable(title, headers, rows) {
+    if (!rows.length) {
+      return (
+        '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
+        escapeHtml(title) +
+        '</h2><p class="text-muted">Sin datos.</p></section>'
+      );
+    }
+    const head = headers
+      .map(function (h) {
+        return '<th>' + escapeHtml(h) + '</th>';
+      })
+      .join('');
+    const body = rows
+      .map(function (r) {
+        return (
+          '<tr>' +
+          r
+            .map(function (c) {
+              return '<td>' + escapeHtml(String(c)) + '</td>';
+            })
+            .join('') +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
+      escapeHtml(title) +
+      '</h2><div class="table-wrap"><table class="ga4-table"><thead><tr>' +
+      head +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div></section>'
+    );
+  }
+
+  async function loadSummary() {
+    setStatus('Cargando resumen…', false);
+    try {
+      const res = await fetch(API + '/reports/cz-funnel-summary', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus((data && data.error) || 'Error al cargar resumen', true);
+        return;
+      }
+      const totals = data.totals || {};
+      const solRows = (data.solicitudesByMonth || []).map(function (r) {
+        return [r.month, r.total_solicitudes];
+      });
+      const grantRows = (data.grantedByMonth || []).map(function (r) {
+        return [r.month, r.total_granted, formatMoney(r.monto_total_otorgado)];
+      });
+      const encRows = (data.encuestasByMonth || []).map(function (r) {
+        return [
+          r.month,
+          r.total_encuestas,
+          r.score_promedio == null ? '—' : r.score_promedio,
+        ];
+      });
+      resultsEl.innerHTML =
+        '<p class="cz-funnel-totals text-muted">Totales — solicitudes: ' +
+        escapeHtml(String(totals.solicitudes || 0)) +
+        ' · granted: ' +
+        escapeHtml(String(totals.grantedLoans || 0)) +
+        ' · encuestas: ' +
+        escapeHtml(String(totals.encuestas || 0)) +
+        '</p>' +
+        renderTable('Solicitudes por mes', ['Mes', 'Total'], solRows) +
+        renderTable(
+          'Créditos GRANTED por mes (updated ≈ tiempo)',
+          ['Mes', 'Total', 'Monto otorgado'],
+          grantRows,
+        ) +
+        renderTable(
+          'Encuestas por mes (score_v2)',
+          ['Mes', 'Total', 'Score promedio'],
+          encRows,
+        );
+      setStatus('OK', false);
+    } catch (_err) {
+      setStatus('No se pudo conectar.', true);
+    }
+  }
+
+  async function runSync() {
+    if (syncBtn) syncBtn.disabled = true;
+    setStatus('Sincronizando…', false);
+    try {
+      const res = await fetch(API + '/jobs/run-cz-data-sync', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus(
+          (data && (data.error || data.reason)) || 'Sync falló',
+          true,
+        );
+        return;
+      }
+      setStatus('Sync OK — recargando resumen…', false);
+      await loadSummary();
+    } catch (_err) {
+      setStatus('No se pudo sincronizar.', true);
+    } finally {
+      if (syncBtn) syncBtn.disabled = false;
+    }
+  }
+
+  if (syncBtn) syncBtn.addEventListener('click', runSync);
+  if (reloadBtn) reloadBtn.addEventListener('click', loadSummary);
+
+  window.__openCzFunnel = function () {
+    loadSummary();
+  };
+})();
