@@ -2600,6 +2600,30 @@
   color: var(--text);
   font-weight: var(--font-weight-medium);
 }
+#mie-dashboard-app .cpc-compare-card {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .cpc-compare-pref {
+  color: var(--accent-success);
+}
+#mie-dashboard-app .cpc-compare-action {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+#mie-dashboard-app .cpc-compare-table {
+  margin-top: 8px;
+}
+#mie-dashboard-app .cpc-compare-table th {
+  text-transform: none;
+  letter-spacing: 0;
+}
+#mie-dashboard-app .cpc-compare-reason {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 #mie-dashboard-app .cpc-unmeasured-disclaimer {
   margin: 0 0 8px;
   font-size: 0.75rem;

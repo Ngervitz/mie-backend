@@ -4835,6 +4835,147 @@ init();
     return rel || '—';
   }
 
+  function comparisonTerm(c, which) {
+    if (which === 'a') return c.term_a || c.termA || '';
+    return c.term_b || c.termB || '';
+  }
+
+  function comparisonPreferred(c) {
+    return c.preferred_measured_term || c.preferredMeasuredTerm || null;
+  }
+
+  /** same_intent with no preferred term = identical measured data (LLM signal). */
+  function isExactDuplicateComparison(c) {
+    return String(c.relationship || '') === 'same_intent' && !comparisonPreferred(c);
+  }
+
+  function estimateForMeasuredTerm(term) {
+    const key = String(term || '').trim().toLowerCase();
+    if (!key) return null;
+    const list = covState.suggestions || [];
+    for (let i = 0; i < list.length; i += 1) {
+      const s = list[i];
+      const t = String(s && s.term ? s.term : '').trim().toLowerCase();
+      if (t === key && s && s.cpcEstimate) return s.cpcEstimate;
+    }
+    return null;
+  }
+
+  function formatEfficiencyScore(value) {
+    if (value == null || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return String(Math.round(n * 100) / 100);
+  }
+
+  function renderComparisonMetricCell(est, field) {
+    if (!est) return '—';
+    if (field === 'vol') return formatDiscoveryAvgSearches(est.avgMonthlySearches);
+    if (field === 'comp') return formatDiscoveryCompetition(est.competitionLevel);
+    if (field === 'eff') return formatEfficiencyScore(est.efficiencyScore);
+    return '—';
+  }
+
+  function renderComparisonCard(c) {
+    const termA = comparisonTerm(c, 'a');
+    const termB = comparisonTerm(c, 'b');
+    const pref = comparisonPreferred(c);
+    const exactDup = isExactDuplicateComparison(c);
+    const rel = c.relationship || '';
+    const badgeCls = exactDup ? 'is-covered' : 'is-intent';
+    const estA = estimateForMeasuredTerm(termA);
+    const estB = estimateForMeasuredTerm(termB);
+    const thA =
+      pref && pref === termA
+        ? '<strong class="cpc-compare-pref">' + escapeHtml(termA) + '</strong>'
+        : escapeHtml(termA);
+    const thB =
+      pref && pref === termB
+        ? '<strong class="cpc-compare-pref">' + escapeHtml(termB) + '</strong>'
+        : escapeHtml(termB);
+
+    let headHtml;
+    let actionHtml;
+    if (pref) {
+      headHtml =
+        '<span class="cov-draft-term cpc-compare-pref">' +
+        escapeHtml(pref) +
+        '</span>' +
+        '<span class="cov-badge ' +
+        badgeCls +
+        '">' +
+        escapeHtml(relationshipLabel(rel)) +
+        '</span>';
+      actionHtml =
+        '<p class="cpc-compare-action">Priorizar <strong>' +
+        escapeHtml(pref) +
+        '</strong></p>';
+    } else {
+      headHtml =
+        '<span class="cov-draft-term">' +
+        escapeHtml(termA) +
+        ' · ' +
+        escapeHtml(termB) +
+        '</span>' +
+        '<span class="cov-badge ' +
+        badgeCls +
+        '">' +
+        escapeHtml(relationshipLabel(rel)) +
+        '</span>';
+      actionHtml = exactDup
+        ? '<p class="cpc-compare-action">Consolidar</p>'
+        : '';
+    }
+
+    const reason = c.reason ? String(c.reason) : '';
+    const reasonHtml = reason
+      ? '<p class="text-muted cpc-compare-reason">' + escapeHtml(reason) + '</p>'
+      : '';
+
+    return (
+      '<div class="cov-draft-card cpc-compare-card">' +
+      '<div class="cov-draft-main">' +
+      headHtml +
+      '</div>' +
+      actionHtml +
+      '<table class="ga4-table cpc-compare-table">' +
+      '<thead><tr><th></th><th>' +
+      thA +
+      '</th><th>' +
+      thB +
+      '</th></tr></thead>' +
+      '<tbody>' +
+      '<tr><td class="text-muted">Volumen</td><td class="ga4-num">' +
+      escapeHtml(renderComparisonMetricCell(estA, 'vol')) +
+      '</td><td class="ga4-num">' +
+      escapeHtml(renderComparisonMetricCell(estB, 'vol')) +
+      '</td></tr>' +
+      '<tr><td class="text-muted">Competencia</td><td>' +
+      escapeHtml(renderComparisonMetricCell(estA, 'comp')) +
+      '</td><td>' +
+      escapeHtml(renderComparisonMetricCell(estB, 'comp')) +
+      '</td></tr>' +
+      '<tr><td class="text-muted">efficiency_score</td><td class="ga4-num">' +
+      escapeHtml(renderComparisonMetricCell(estA, 'eff')) +
+      '</td><td class="ga4-num">' +
+      escapeHtml(renderComparisonMetricCell(estB, 'eff')) +
+      '</td></tr>' +
+      '</tbody></table>' +
+      reasonHtml +
+      '</div>'
+    );
+  }
+
+  function renderComparisonGroup(title, items) {
+    if (!items.length) return '';
+    return (
+      '<h4 class="cpc-run-analysis-subtitle">' +
+      escapeHtml(title) +
+      '</h4>' +
+      items.map(renderComparisonCard).join('')
+    );
+  }
+
   function renderCpcRunAnalysis(el, summary, sourceLabel) {
     if (!el) return;
     if (!summary) {
@@ -4852,30 +4993,15 @@ init();
       ? String(summary.generatedAt).slice(0, 16).replace('T', ' ')
       : '—';
 
+    const exactDups = [];
+    const related = [];
+    comps.forEach(function (c) {
+      if (isExactDuplicateComparison(c)) exactDups.push(c);
+      else related.push(c);
+    });
     const compsHtml = comps.length
-      ? '<ul class="cpc-run-analysis-list">' +
-        comps
-          .map(function (c) {
-            const pref =
-              c.preferred_measured_term || c.preferredMeasuredTerm || null;
-            const prefNote = pref
-              ? ' Preferir medida: <strong>' + escapeHtml(pref) + '</strong>.'
-              : '';
-            return (
-              '<li><span class="cpc-run-analysis-rel">' +
-              escapeHtml(relationshipLabel(c.relationship)) +
-              '</span>: ' +
-              escapeHtml(c.term_a || c.termA || '') +
-              ' ↔ ' +
-              escapeHtml(c.term_b || c.termB || '') +
-              '. ' +
-              escapeHtml(c.reason || '') +
-              prefNote +
-              '</li>'
-            );
-          })
-          .join('') +
-        '</ul>'
+      ? renderComparisonGroup('Duplicados exactos — consolidar', exactDups) +
+        renderComparisonGroup('Términos relacionados — priorizar uno', related)
       : '<p class="text-muted cpc-run-analysis-empty">Sin relaciones comparativas destacadas en esta corrida.</p>';
 
     const suggHtml = suggestions.length
