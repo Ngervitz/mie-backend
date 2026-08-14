@@ -20,6 +20,7 @@ const SECTION_KEYS = Object.freeze([
   'sms',
   'email',
   'inbox',
+  'cz-funnel',
 ]);
 
 /**
@@ -100,6 +101,10 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/jobs/run-facebook-posts-sync',
     '/jobs/run-facebook-comments-poll',
     '/jobs/run-facebook-reply-recovery',
+  ]),
+  'cz-funnel': Object.freeze([
+    '/reports/cz-funnel-summary',
+    '/jobs/run-cz-data-sync',
   ]),
 });
 
