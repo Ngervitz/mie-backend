@@ -2614,6 +2614,16 @@
 }
 #mie-dashboard-app .cpc-compare-table {
   margin-top: 8px;
+  table-layout: fixed;
+  width: 100%;
+}
+#mie-dashboard-app .cpc-compare-table th:first-child,
+#mie-dashboard-app .cpc-compare-table td:first-child {
+  width: 7.5rem;
+}
+/* Beat later `.ga4-table .ga4-num { text-align: right }` (same ID+2-class specificity). */
+#mie-dashboard-app .ga4-table.cpc-compare-table .ga4-num {
+  text-align: center;
 }
 #mie-dashboard-app .cpc-compare-table th {
   text-transform: none;
