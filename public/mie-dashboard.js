@@ -4867,18 +4867,92 @@ init();
   }
 
   function formatEfficiencyScore(value) {
-    if (value == null || value === '') return '—';
+    if (value == null || value === '') return '';
     const n = Number(value);
-    if (!Number.isFinite(n)) return '—';
-    return String(Math.round(n * 100) / 100);
+    if (!Number.isFinite(n)) return '';
+    return String(Math.round(n));
+  }
+
+  /** Same term shown twice (literal or case-insensitive). Not accent variants. */
+  function isSelfTermComparison(termA, termB) {
+    const a = String(termA || '').trim().toLowerCase();
+    const b = String(termB || '').trim().toLowerCase();
+    return Boolean(a) && a === b;
   }
 
   function renderComparisonMetricCell(est, field) {
-    if (!est) return '—';
-    if (field === 'vol') return formatDiscoveryAvgSearches(est.avgMonthlySearches);
-    if (field === 'comp') return formatDiscoveryCompetition(est.competitionLevel);
-    if (field === 'eff') return formatEfficiencyScore(est.efficiencyScore);
-    return '—';
+    if (!est) return 'Sin estimate en esta corrida';
+    if (field === 'vol') {
+      const vol = formatDiscoveryAvgSearches(est.avgMonthlySearches);
+      return vol === '—' ? 'Sin dato' : vol;
+    }
+    if (field === 'comp') {
+      const comp = formatDiscoveryCompetition(est.competitionLevel);
+      return comp === '—' ? 'Sin dato' : comp;
+    }
+    if (field === 'eff') {
+      const status =
+        est.classificationStatus != null
+          ? String(est.classificationStatus)
+          : '';
+      if (status === 'insufficient_bid_data') return 'Sin datos de bid';
+      if (status === 'discarded_high_competition') {
+        return 'No aplica (descartado)';
+      }
+      const eff = formatEfficiencyScore(est.efficiencyScore);
+      if (!eff) return 'Sin dato';
+      return eff;
+    }
+    return 'Sin dato';
+  }
+
+  function renderComparisonTermColumnHead(term, est, isPreferred) {
+    const termHtml = isPreferred
+      ? '<strong class="cpc-compare-pref">' + escapeHtml(term) + '</strong>'
+      : escapeHtml(term);
+    const classBadge = renderDiscoveryClassificationBadge(est);
+    return (
+      '<div class="cpc-compare-term-head">' +
+      '<span class="cpc-compare-term-label">' +
+      termHtml +
+      '</span>' +
+      (classBadge ? ' ' + classBadge : '') +
+      '</div>'
+    );
+  }
+
+  function formatCompactComparisonMetrics(est, opts) {
+    const options = opts || {};
+    if (!est) return 'Sin estimate en esta corrida';
+    const volRaw = formatDiscoveryAvgSearches(est.avgMonthlySearches);
+    const vol =
+      volRaw === '—'
+        ? 'Sin dato'
+        : Number(est.avgMonthlySearches).toLocaleString('es-UY') +
+          ' búsquedas';
+    const parts = [vol];
+    if (!options.omitCompetition) {
+      const compRaw = formatDiscoveryCompetition(est.competitionLevel);
+      parts.push(
+        compRaw === '—' ? 'Sin dato' : 'Competencia ' + compRaw.toLowerCase(),
+      );
+    }
+    let eff;
+    const status =
+      est.classificationStatus != null
+        ? String(est.classificationStatus)
+        : '';
+    if (status === 'insufficient_bid_data') eff = 'Sin datos de bid';
+    else if (status === 'discarded_high_competition') {
+      eff = 'No aplica (descartado)';
+    } else {
+      const n = formatEfficiencyScore(est.efficiencyScore);
+      eff = n
+        ? 'Eficiencia ' + Number(n).toLocaleString('es-UY')
+        : 'Sin dato';
+    }
+    parts.push(eff);
+    return parts.join(' · ');
   }
 
   function renderComparisonCard(c) {
@@ -4886,56 +4960,128 @@ init();
     const termB = comparisonTerm(c, 'b');
     const pref = comparisonPreferred(c);
     const exactDup = isExactDuplicateComparison(c);
+    const selfDup = isSelfTermComparison(termA, termB);
     const rel = c.relationship || '';
-    const badgeCls = exactDup ? 'is-covered' : 'is-intent';
+    const badgeCls = exactDup || selfDup ? 'is-covered' : 'is-intent';
     const estA = estimateForMeasuredTerm(termA);
     const estB = estimateForMeasuredTerm(termB);
-    const thA =
-      pref && pref === termA
-        ? '<strong class="cpc-compare-pref">' + escapeHtml(termA) + '</strong>'
-        : escapeHtml(termA);
-    const thB =
-      pref && pref === termB
-        ? '<strong class="cpc-compare-pref">' + escapeHtml(termB) + '</strong>'
-        : escapeHtml(termB);
-
-    let headHtml;
-    let actionHtml;
-    if (pref) {
-      headHtml =
-        '<span class="cov-draft-term cpc-compare-pref">' +
-        escapeHtml(pref) +
-        '</span>' +
-        '<span class="cov-badge ' +
-        badgeCls +
-        '">' +
-        escapeHtml(relationshipLabel(rel)) +
-        '</span>';
-      actionHtml =
-        '<p class="cpc-compare-action">Priorizar <strong>' +
-        escapeHtml(pref) +
-        '</strong></p>';
-    } else {
-      headHtml =
-        '<span class="cov-draft-term">' +
-        escapeHtml(termA) +
-        ' · ' +
-        escapeHtml(termB) +
-        '</span>' +
-        '<span class="cov-badge ' +
-        badgeCls +
-        '">' +
-        escapeHtml(relationshipLabel(rel)) +
-        '</span>';
-      actionHtml = exactDup
-        ? '<p class="cpc-compare-action">Consolidar</p>'
-        : '';
-    }
 
     const reason = c.reason ? String(c.reason) : '';
     const reasonHtml = reason
       ? '<p class="text-muted cpc-compare-reason">' + escapeHtml(reason) + '</p>'
       : '';
+
+    const relBadge =
+      '<span class="cov-badge ' +
+      badgeCls +
+      '">' +
+      escapeHtml(relationshipLabel(rel)) +
+      '</span>';
+
+    // Preventivo: mismo término dos veces en el analysis (no es “consolidar variantes”).
+    if (selfDup) {
+      return (
+        '<div class="cov-draft-card cpc-compare-card cpc-compare-self">' +
+        '<div class="cov-draft-main">' +
+        relBadge +
+        '</div>' +
+        '<p class="cpc-compare-self-warn">Este término aparece duplicado en el análisis — revisar datos de origen</p>' +
+        '<p class="cpc-compare-dup-title">' +
+        escapeHtml(termA) +
+        '</p>' +
+        (renderDiscoveryClassificationBadge(estA)
+          ? '<div class="cpc-compare-compact-badges">' +
+            renderDiscoveryClassificationBadge(estA) +
+            '</div>'
+          : '') +
+        '<p class="cpc-compare-compact-metrics">' +
+        escapeHtml(
+          formatCompactComparisonMetrics(estA, { omitCompetition: true }),
+        ) +
+        '</p>' +
+        reasonHtml +
+        '</div>'
+      );
+    }
+
+    // Duplicado exacto legítimo (variantes distintas, métricas iguales vía LLM signal).
+    if (exactDup) {
+      const statusA =
+        estA && estA.classificationStatus != null
+          ? String(estA.classificationStatus)
+          : '';
+      const statusB =
+        estB && estB.classificationStatus != null
+          ? String(estB.classificationStatus)
+          : '';
+      const statusesDiffer = statusA !== statusB;
+      let classBadgesHtml = '';
+      if (statusesDiffer) {
+        const badgeA = renderDiscoveryClassificationBadge(estA);
+        const badgeB = renderDiscoveryClassificationBadge(estB);
+        const parts = [];
+        if (badgeA) {
+          parts.push(
+            '<span class="cpc-compare-dup-status-pair">' +
+              '<span class="cpc-compare-dup-status-term">' +
+              escapeHtml(termA) +
+              '</span> ' +
+              badgeA +
+              '</span>',
+          );
+        }
+        if (badgeB) {
+          parts.push(
+            '<span class="cpc-compare-dup-status-pair">' +
+              '<span class="cpc-compare-dup-status-term">' +
+              escapeHtml(termB) +
+              '</span> ' +
+              badgeB +
+              '</span>',
+          );
+        }
+        classBadgesHtml = parts.length
+          ? '<div class="cpc-compare-compact-badges">' +
+            parts.join(' ') +
+            '</div>'
+          : '';
+      } else {
+        const classBadge =
+          renderDiscoveryClassificationBadge(estA) ||
+          renderDiscoveryClassificationBadge(estB);
+        classBadgesHtml = classBadge ? ' ' + classBadge : '';
+      }
+      return (
+        '<div class="cov-draft-card cpc-compare-card cpc-compare-exact-dup">' +
+        '<div class="cov-draft-main">' +
+        relBadge +
+        (statusesDiffer ? '' : classBadgesHtml) +
+        '</div>' +
+        (statusesDiffer ? classBadgesHtml : '') +
+        '<p class="cpc-compare-dup-title">Duplicado exacto — ' +
+        escapeHtml(termA) +
+        ' ↔ ' +
+        escapeHtml(termB) +
+        '</p>' +
+        '<p class="cpc-compare-compact-metrics">' +
+        escapeHtml(formatCompactComparisonMetrics(estA || estB)) +
+        '</p>' +
+        '<p class="cpc-compare-action">Consolidar</p>' +
+        reasonHtml +
+        '</div>'
+      );
+    }
+
+    // Comparación side-by-side (related / preferred / etc.).
+    const headHtml = relBadge;
+    const actionHtml = pref
+      ? '<p class="cpc-compare-action">Priorizar <strong>' +
+        escapeHtml(pref) +
+        '</strong></p>'
+      : '';
+
+    const thA = renderComparisonTermColumnHead(termA, estA, pref === termA);
+    const thB = renderComparisonTermColumnHead(termB, estB, pref === termB);
 
     return (
       '<div class="cov-draft-card cpc-compare-card">' +
@@ -4960,7 +5106,7 @@ init();
       '</td><td>' +
       escapeHtml(renderComparisonMetricCell(estB, 'comp')) +
       '</td></tr>' +
-      '<tr><td class="text-muted">efficiency_score</td><td class="ga4-num">' +
+      '<tr><td class="text-muted">Eficiencia</td><td class="ga4-num">' +
       escapeHtml(renderComparisonMetricCell(estA, 'eff')) +
       '</td><td class="ga4-num">' +
       escapeHtml(renderComparisonMetricCell(estB, 'eff')) +

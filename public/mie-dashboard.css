@@ -2618,6 +2618,54 @@
 #mie-dashboard-app .cpc-compare-table th {
   text-transform: none;
   letter-spacing: 0;
+  vertical-align: top;
+}
+#mie-dashboard-app .cpc-compare-term-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+#mie-dashboard-app .cpc-compare-term-label {
+  line-height: 1.35;
+}
+#mie-dashboard-app .cpc-compare-dup-title {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+  line-height: 1.35;
+}
+#mie-dashboard-app .cpc-compare-compact-metrics {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+#mie-dashboard-app .cpc-compare-compact-badges {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+#mie-dashboard-app .cpc-compare-dup-status-pair {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+#mie-dashboard-app .cpc-compare-dup-status-term {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cpc-compare-self-warn {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--accent-warn);
+  line-height: 1.4;
 }
 #mie-dashboard-app .cpc-compare-reason {
   margin: 8px 0 0;
