@@ -4835,6 +4835,46 @@ init();
     }
   }
 
+  /** Split free-form Claude summary into bullets; keep decimals like 14.8K intact. */
+  function splitAnalysisSummaryBullets(text) {
+    const s = String(text || '').trim();
+    if (!s) return [];
+    const rawParts = s.split('. ');
+    const merged = [];
+    for (let i = 0; i < rawParts.length; i++) {
+      let part = rawParts[i];
+      // Re-join false splits from decimals like "12. 5" (digit stub + digit stub).
+      while (
+        i + 1 < rawParts.length &&
+        /\d$/.test(part) &&
+        /^\d/.test(rawParts[i + 1])
+      ) {
+        part = part + '. ' + rawParts[i + 1];
+        i += 1;
+      }
+      merged.push(part);
+    }
+    return merged
+      .map(function (part) {
+        return part.replace(/\.$/, '').trim();
+      })
+      .filter(Boolean);
+  }
+
+  function renderAnalysisSummaryHtml(summaryText) {
+    const bullets = splitAnalysisSummaryBullets(summaryText);
+    if (!bullets.length) return '';
+    return (
+      '<ul class="cpc-run-analysis-summary-list">' +
+      bullets
+        .map(function (b) {
+          return '<li>' + escapeHtml(b) + '</li>';
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
   function relationshipLabel(rel) {
     if (rel === 'same_intent') return 'misma intención';
     if (rel === 'related_intent') return 'intención relacionada';
@@ -5066,7 +5106,7 @@ init();
         '<p class="cpc-compare-compact-metrics">' +
         escapeHtml(formatCompactComparisonMetrics(estA || estB)) +
         '</p>' +
-        '<p class="cpc-compare-action">Consolidar</p>' +
+        '<p class="cpc-compare-action">🔁 Consolidar</p>' +
         reasonHtml +
         '</div>'
       );
@@ -5075,7 +5115,7 @@ init();
     // Comparación side-by-side (related / preferred / etc.).
     const headHtml = relBadge;
     const actionHtml = pref
-      ? '<p class="cpc-compare-action">Priorizar <strong>' +
+      ? '<p class="cpc-compare-action">🎯 Priorizar <strong>' +
         escapeHtml(pref) +
         '</strong></p>'
       : '';
@@ -5151,8 +5191,8 @@ init();
       else related.push(c);
     });
     const compsHtml = comps.length
-      ? renderComparisonGroup('Duplicados exactos — consolidar', exactDups) +
-        renderComparisonGroup('Términos relacionados — priorizar uno', related)
+      ? renderComparisonGroup('🔁 Duplicados exactos', exactDups) +
+        renderComparisonGroup('🔀 Términos relacionados', related)
       : '<p class="text-muted cpc-run-analysis-empty">Sin relaciones comparativas destacadas en esta corrida.</p>';
 
     const suggHtml = suggestions.length
@@ -5200,9 +5240,7 @@ init();
       '… · ' +
       escapeHtml(when) +
       '</div>' +
-      '<p class="cpc-run-analysis-summary">' +
-      escapeHtml(summary.summaryText || '') +
-      '</p>' +
+      renderAnalysisSummaryHtml(summary.summaryText) +
       '<h3 class="cpc-run-analysis-subtitle">Comparativo</h3>' +
       compsHtml +
       '<h3 class="cpc-run-analysis-subtitle">Sugerencias sin medir</h3>' +
