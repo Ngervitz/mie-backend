@@ -2621,6 +2621,10 @@
 #mie-dashboard-app .cpc-compare-table td:first-child {
   width: 7.5rem;
 }
+/* Value columns (Volumen / Competencia / Eficiencia), not the label col. */
+#mie-dashboard-app .cpc-compare-table td:not(:first-child) {
+  text-align: center;
+}
 /* Beat later `.ga4-table .ga4-num { text-align: right }` (same ID+2-class specificity). */
 #mie-dashboard-app .ga4-table.cpc-compare-table .ga4-num {
   text-align: center;
