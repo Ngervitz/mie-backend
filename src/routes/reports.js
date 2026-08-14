@@ -1158,6 +1158,32 @@ function mapDiscoveredTermCpcEstimate(row) {
   };
 }
 
+const DISCOVERED_TERM_CPC_SELECT = [
+  'id',
+  'discovery_id',
+  'term_snapshot',
+  'avg_monthly_searches',
+  'low_top_of_page_bid_raw',
+  'high_top_of_page_bid_raw',
+  'currency_code',
+  'competition_level',
+  'sync_run_id',
+  'fetched_at',
+  'classification_status',
+  'efficiency_score',
+  'classification_version',
+].join(', ');
+
+/**
+ * Term key for discovered-term CPC maps — same rule as Pendientes attach and
+ * frontend estimateForMeasuredTerm: trim + lower case (accents preserved).
+ * @param {unknown} term
+ * @returns {string}
+ */
+function discoveredTermCpcLookupKey(term) {
+  return String(term || '').trim().toLowerCase();
+}
+
 /**
  * Latest discovered-term CPC estimate keyed by lowercased term_snapshot.
  * @returns {Promise<Map<string, object>>}
@@ -1165,23 +1191,7 @@ function mapDiscoveredTermCpcEstimate(row) {
 async function loadLatestDiscoveredTermCpcByTerm() {
   const { data, error } = await supabase
     .from('discovered_term_cpc_estimates')
-    .select(
-      [
-        'id',
-        'discovery_id',
-        'term_snapshot',
-        'avg_monthly_searches',
-        'low_top_of_page_bid_raw',
-        'high_top_of_page_bid_raw',
-        'currency_code',
-        'competition_level',
-        'sync_run_id',
-        'fetched_at',
-        'classification_status',
-        'efficiency_score',
-        'classification_version',
-      ].join(', '),
-    )
+    .select(DISCOVERED_TERM_CPC_SELECT)
     .order('fetched_at', { ascending: false });
   if (error) {
     throw new Error(
@@ -1191,11 +1201,43 @@ async function loadLatestDiscoveredTermCpcByTerm() {
   const latestByTerm = new Map();
   (data || []).forEach((row) => {
     if (!row || row.term_snapshot == null) return;
-    const key = String(row.term_snapshot).trim().toLowerCase();
+    const key = discoveredTermCpcLookupKey(row.term_snapshot);
     if (!key || latestByTerm.has(key)) return;
     latestByTerm.set(key, mapDiscoveredTermCpcEstimate(row));
   });
   return latestByTerm;
+}
+
+/**
+ * Discovered-term CPC estimates for one sync_run_id, keyed like
+ * loadLatestDiscoveredTermCpcByTerm (trim + lower case). Plain object for JSON.
+ * @param {string} syncRunId
+ * @returns {Promise<Record<string, object>>}
+ */
+async function loadDiscoveredTermCpcByTermForSyncRun(syncRunId) {
+  const runId = syncRunId != null ? String(syncRunId).trim() : '';
+  if (!runId) return {};
+
+  const { data, error } = await supabase
+    .from('discovered_term_cpc_estimates')
+    .select(DISCOVERED_TERM_CPC_SELECT)
+    .eq('sync_run_id', runId)
+    .order('fetched_at', { ascending: false });
+  if (error) {
+    throw new Error(
+      `Failed to fetch discovered_term_cpc_estimates for sync run: ${error.message}`,
+    );
+  }
+
+  /** @type {Record<string, object>} */
+  const byTerm = {};
+  (data || []).forEach((row) => {
+    if (!row || row.term_snapshot == null) return;
+    const key = discoveredTermCpcLookupKey(row.term_snapshot);
+    if (!key || byTerm[key]) return;
+    byTerm[key] = mapDiscoveredTermCpcEstimate(row);
+  });
+  return byTerm;
 }
 
 async function loadSearchDiscoveries() {
@@ -2634,6 +2676,25 @@ router.get('/sync-run-summaries', async (req, res) => {
       return res.status(200).json({ summary: null });
     }
 
+    /** @type {Record<string, object>|undefined} */
+    let estimatesByTerm;
+    if (sourceTable === 'discovered_term_cpc_estimates') {
+      try {
+        estimatesByTerm = await loadDiscoveredTermCpcByTermForSyncRun(
+          row.sync_run_id,
+        );
+      } catch (cpcErr) {
+        logger.warn(
+          'discovered_term_cpc_estimates unavailable for sync-run-summaries',
+          {
+            syncRunId: row.sync_run_id,
+            error: cpcErr && cpcErr.message ? cpcErr.message : 'unknown',
+          },
+        );
+        estimatesByTerm = {};
+      }
+    }
+
     return res.status(200).json({
       summary: {
         id: row.id,
@@ -2649,6 +2710,7 @@ router.get('/sync-run-summaries', async (req, res) => {
         classificationVersion: row.classification_version,
         modelUsed: row.model_used,
         generatedAt: row.generated_at,
+        ...(estimatesByTerm !== undefined ? { estimatesByTerm } : {}),
       },
     });
   } catch (err) {

@@ -4688,6 +4688,13 @@ init();
     applying: false,
     pollTimer: null,
     pollAttempts: 0,
+    /** sync_run_id of the Comparativo analysis currently shown (or null). */
+    analysisSyncRunId: null,
+    /**
+     * CPC estimates for analysisSyncRunId, keyed by trim().toLowerCase(term).
+     * null = analysis not loaded; object = use for Comparativo only.
+     */
+    analysisEstimatesByTerm: null,
   };
 
   // Human judgment aid only — always overridable by the dropdown choice.
@@ -4852,13 +4859,11 @@ init();
   function estimateForMeasuredTerm(term) {
     const key = String(term || '').trim().toLowerCase();
     if (!key) return null;
-    const list = covState.suggestions || [];
-    for (let i = 0; i < list.length; i += 1) {
-      const s = list[i];
-      const t = String(s && s.term ? s.term : '').trim().toLowerCase();
-      if (t === key && s && s.cpcEstimate) return s.cpcEstimate;
-    }
-    return null;
+    // Comparativo only: require the analysis-run map. While null/undefined
+    // (still loading / failed), return null — never suggestions / other runs.
+    const byTerm = covState.analysisEstimatesByTerm;
+    if (!byTerm || typeof byTerm !== 'object') return null;
+    return byTerm[key] || null;
   }
 
   function formatEfficiencyScore(value) {
@@ -5081,12 +5086,24 @@ init();
       );
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const body = await res.json();
-      renderCpcRunAnalysis(
-        runAnalysisEl,
-        body && body.summary ? body.summary : null,
-        'Pendientes / Trends',
-      );
+      const summary = body && body.summary ? body.summary : null;
+      if (summary) {
+        covState.analysisSyncRunId =
+          summary.syncRunId != null ? String(summary.syncRunId) : null;
+        covState.analysisEstimatesByTerm =
+          summary.estimatesByTerm &&
+          typeof summary.estimatesByTerm === 'object' &&
+          !Array.isArray(summary.estimatesByTerm)
+            ? summary.estimatesByTerm
+            : {};
+      } else {
+        covState.analysisSyncRunId = null;
+        covState.analysisEstimatesByTerm = null;
+      }
+      renderCpcRunAnalysis(runAnalysisEl, summary, 'Pendientes / Trends');
     } catch (err) {
+      covState.analysisSyncRunId = null;
+      covState.analysisEstimatesByTerm = null;
       renderCpcRunAnalysis(runAnalysisEl, null);
     }
   }
@@ -5348,6 +5365,8 @@ init();
     } catch (err) {
       statusEl.textContent = 'No se pudieron cargar las sugerencias.';
       suggestionsEl.innerHTML = '';
+      covState.analysisSyncRunId = null;
+      covState.analysisEstimatesByTerm = null;
       if (runAnalysisEl) {
         runAnalysisEl.hidden = true;
         runAnalysisEl.innerHTML = '';
