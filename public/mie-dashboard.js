@@ -4697,6 +4697,10 @@ init();
     analysisEstimatesByTerm: null,
   };
 
+  /** Session-only hide after successful "Medir ahora" (cleared on reload). */
+  const hiddenMeasuredSuggestionKeys = new Set();
+  let cpcMeasureFeedback = null;
+
   // Human judgment aid only — always overridable by the dropdown choice.
   function suggestKind(term) {
     const t = String(term || '').trim();
@@ -5197,14 +5201,22 @@ init();
     if (!summary) {
       el.hidden = true;
       el.innerHTML = '';
+      el.__mieCpcSummary = null;
+      el.__mieCpcSourceLabel = null;
       return;
     }
+    el.__mieCpcSummary = summary;
+    el.__mieCpcSourceLabel = sourceLabel;
     const comps = Array.isArray(summary.comparativeAnalysis)
       ? summary.comparativeAnalysis
       : [];
     const suggestions = Array.isArray(summary.suggestedNewTerms)
       ? summary.suggestedNewTerms
       : [];
+    const visibleSuggestions = suggestions.filter(function (s) {
+      const key = String(s.term || '').trim().toLowerCase();
+      return !hiddenMeasuredSuggestionKeys.has(key);
+    });
     const when = summary.generatedAt
       ? String(summary.generatedAt).slice(0, 16).replace('T', ' ')
       : '—';
@@ -5220,9 +5232,9 @@ init();
         renderComparisonGroup('🔀 Términos relacionados', related)
       : '<p class="text-muted cpc-run-analysis-empty">Sin relaciones comparativas destacadas en esta corrida.</p>';
 
-    const suggHtml = suggestions.length
+    const suggHtml = visibleSuggestions.length
       ? '<ul class="cpc-run-analysis-list cpc-unmeasured-list">' +
-        suggestions
+        visibleSuggestions
           .map(function (s, idx) {
             const related = Array.isArray(s.related_to_terms)
               ? s.related_to_terms
@@ -5243,6 +5255,9 @@ init();
               '<button type="button" class="btn cov-copy-term-btn cpc-suggest-copy-btn" data-suggest-idx="' +
               idx +
               '" title="Copiar término">Copiar</button>' +
+              '<button type="button" class="btn cov-copy-term-btn cpc-suggest-measure-btn" data-suggest-idx="' +
+              idx +
+              '" title="Medir con Keyword Planner">Medir ahora</button>' +
               '</div>' +
               '<div class="text-muted">' +
               escapeHtml(s.reason || '') +
@@ -5254,6 +5269,14 @@ init();
           .join('') +
         '</ul>'
       : '<p class="text-muted cpc-run-analysis-empty">Sin sugerencias nuevas en esta corrida.</p>';
+
+    const measureFeedbackHtml = cpcMeasureFeedback
+      ? '<p class="cpc-measure-feedback' +
+        (cpcMeasureFeedback.isError ? ' mcl-error' : '') +
+        '">' +
+        escapeHtml(cpcMeasureFeedback.text) +
+        '</p>'
+      : '';
 
     el.hidden = false;
     el.innerHTML =
@@ -5270,14 +5293,20 @@ init();
       compsHtml +
       '<h3 class="cpc-run-analysis-subtitle">Sugerencias sin medir</h3>' +
       '<p class="text-muted cpc-unmeasured-disclaimer">Hipótesis para medir después con Keyword Planner. Aún no tienen CPC, volumen ni competencia.</p>' +
+      measureFeedbackHtml +
       suggHtml;
 
     el.querySelectorAll('.cpc-suggest-copy-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const idx = Number(btn.getAttribute('data-suggest-idx'));
-        const item = suggestions[idx];
+        const item = visibleSuggestions[idx];
         if (!item) return;
         copyDiscoveryTerm(item.term, btn);
+      });
+    });
+    el.querySelectorAll('.cpc-suggest-measure-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        measureSuggestedTermNow(btn, visibleSuggestions);
       });
     });
   }
@@ -5413,6 +5442,148 @@ init();
     statusEl.classList.toggle('mcl-error', Boolean(isError));
   }
 
+  function suggestionMeasureKey(term) {
+    return String(term || '').trim().toLowerCase();
+  }
+
+  function rerenderCpcRunAnalysisPanels() {
+    document.querySelectorAll('.cpc-run-analysis').forEach(function (node) {
+      if (!node || !node.__mieCpcSummary) return;
+      renderCpcRunAnalysis(
+        node,
+        node.__mieCpcSummary,
+        node.__mieCpcSourceLabel,
+      );
+    });
+  }
+
+  function formatSerpCreateOutcome(body) {
+    const planner = body && body.plannerStatus === 'ok' ? 'ok' : 'error';
+    const serper = body && body.serperStatus === 'ok' ? 'ok' : 'error';
+    let msg = 'Query agregada. CPC: ' + planner + '. SERP: ' + serper;
+    if (planner === 'ok' && serper === 'ok') return msg + '.';
+    const bits = [];
+    if (planner !== 'ok' && body && body.plannerError) {
+      bits.push(String(body.plannerError));
+    }
+    if (serper !== 'ok' && body && body.serperError) {
+      bits.push(String(body.serperError));
+    }
+    if (bits.length) return msg + ' (' + bits.join('; ') + ').';
+    return msg + ' (ver logs).';
+  }
+
+  function formatMeasuredSuggestionStatus(body) {
+    const term = body && body.term ? String(body.term) : '';
+    const vol = formatDiscoveryAvgSearches(
+      body && body.avgMonthlySearches != null ? body.avgMonthlySearches : null,
+    );
+    const comp = formatDiscoveryCompetition(
+      body && body.competitionLevel != null ? body.competitionLevel : null,
+    );
+    const low = formatDiscoveryBidFromMicros(
+      body && body.lowTopOfPageBidRaw,
+      body && body.currencyCode,
+    );
+    const high = formatDiscoveryBidFromMicros(
+      body && body.highTopOfPageBidRaw,
+      body && body.currencyCode,
+    );
+    let msg =
+      (body && body.alreadyMeasured ? 'Ya estaba medido «' : 'Medido «') +
+      term +
+      '». Vol. búsquedas: ' +
+      vol +
+      ' · Competencia: ' +
+      comp +
+      ' · Bid: ' +
+      low +
+      ' – ' +
+      high;
+    if (body && body.classificationStatus) {
+      msg += ' · ' + String(body.classificationStatus);
+    }
+    return msg;
+  }
+
+  async function measureSuggestedTermNow(btn, visibleSuggestions) {
+    if (!btn || btn.disabled) return;
+    const idx = Number(btn.getAttribute('data-suggest-idx'));
+    const item = visibleSuggestions && visibleSuggestions[idx];
+    if (!item || !item.term) return;
+    const term = String(item.term);
+    const ok = window.confirm(
+      '¿Medir «' + term + '» ahora con Keyword Planner?\n\nEsto puede tardar hasta un minuto.',
+    );
+    if (!ok) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Midiendo…';
+    cpcMeasureFeedback = {
+      isError: false,
+      text: 'Midiendo «' + term + '»… esto puede tardar hasta un minuto.',
+    };
+    const feedbackEl = btn.closest('.cpc-run-analysis');
+    if (feedbackEl) {
+      let note = feedbackEl.querySelector('.cpc-measure-feedback');
+      if (!note) {
+        note = document.createElement('p');
+        note.className = 'cpc-measure-feedback';
+        const disclaimer = feedbackEl.querySelector('.cpc-unmeasured-disclaimer');
+        if (disclaimer && disclaimer.parentNode) {
+          disclaimer.parentNode.insertBefore(note, disclaimer.nextSibling);
+        } else {
+          feedbackEl.appendChild(note);
+        }
+      }
+      note.classList.remove('mcl-error');
+      note.textContent = cpcMeasureFeedback.text;
+    }
+    try {
+      const res = await fetch(
+        API_BASE + '/reports/search-discoveries/measure-suggestion',
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            term: term,
+            reason: item.reason || undefined,
+          }),
+        },
+      );
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (res.ok && body && body.ok === true && body.measured === true) {
+        hiddenMeasuredSuggestionKeys.add(suggestionMeasureKey(term));
+        cpcMeasureFeedback = {
+          isError: false,
+          text: formatMeasuredSuggestionStatus(body),
+        };
+        rerenderCpcRunAnalysisPanels();
+        return;
+      }
+      cpcMeasureFeedback = {
+        isError: true,
+        text:
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo medir el término.',
+      };
+      rerenderCpcRunAnalysisPanels();
+    } catch (err) {
+      cpcMeasureFeedback = {
+        isError: true,
+        text:
+          err && err.message ? err.message : 'No se pudo medir el término.',
+      };
+      rerenderCpcRunAnalysisPanels();
+    }
+  }
+
   async function addPendingTermToSerp(btn) {
     if (!btn || btn.disabled) return;
     const idx = Number(btn.getAttribute('data-cov-idx'));
@@ -5426,8 +5597,11 @@ init();
 
     const prevLabel = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Agregando…';
-    setCovStatus('Agregando a monitoreo SERP…', false);
+    btn.textContent = 'Agregando y midiendo…';
+    setCovStatus(
+      'Agregando y midiendo… esto puede tardar hasta un minuto',
+      false,
+    );
     try {
       const res = await fetch(API_BASE + '/reports/serp-queries', {
         method: 'POST',
@@ -5441,7 +5615,7 @@ init();
         return {};
       });
       if (res.status === 201) {
-        setCovStatus('Agregado a monitoreo SERP', false);
+        setCovStatus(formatSerpCreateOutcome(body), false);
         return;
       }
       if (res.status === 409 && body && body.code === 'QUERY_DUPLICATE') {
@@ -7185,6 +7359,22 @@ init();
     queriesStatusEl.classList.toggle('mcl-error', Boolean(isError));
   }
 
+  function formatSerpCreateOutcome(body) {
+    const planner = body && body.plannerStatus === 'ok' ? 'ok' : 'error';
+    const serper = body && body.serperStatus === 'ok' ? 'ok' : 'error';
+    let msg = 'Query agregada. CPC: ' + planner + '. SERP: ' + serper;
+    if (planner === 'ok' && serper === 'ok') return msg + '.';
+    const bits = [];
+    if (planner !== 'ok' && body && body.plannerError) {
+      bits.push(String(body.plannerError));
+    }
+    if (serper !== 'ok' && body && body.serperError) {
+      bits.push(String(body.serperError));
+    }
+    if (bits.length) return msg + ' (' + bits.join('; ') + ').';
+    return msg + ' (ver logs).';
+  }
+
   function formatQueryCreatedAt(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -7603,7 +7793,12 @@ init();
       }
       queriesBusy = true;
       if (queryAddBtn) queryAddBtn.disabled = true;
-      setQueriesStatus('Agregando…', false);
+      const prevAddLabel = queryAddBtn ? queryAddBtn.textContent : '';
+      if (queryAddBtn) queryAddBtn.textContent = 'Agregando y midiendo…';
+      setQueriesStatus(
+        'Agregando y midiendo… esto puede tardar hasta un minuto',
+        false,
+      );
       try {
         const res = await fetch(API_BASE + '/reports/serp-queries', {
           method: 'POST',
@@ -7616,16 +7811,24 @@ init();
         const body = await res.json().catch(function () {
           return {};
         });
-        if (!res.ok) {
-          throw new Error(
-            body && body.error
-              ? String(body.error)
-              : 'No se pudo agregar la query.',
-          );
+        if (res.status === 201) {
+          if (queryInput) queryInput.value = '';
+          setQueriesStatus(formatSerpCreateOutcome(body), false);
+          await loadSerpQueries();
+          return;
         }
-        if (queryInput) queryInput.value = '';
-        setQueriesStatus('Query agregada.', false);
-        await loadSerpQueries();
+        if (res.status === 409 && body && body.code === 'QUERY_DUPLICATE') {
+          setQueriesStatus(
+            'Ya se está monitoreando este término en SERP',
+            false,
+          );
+          return;
+        }
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo agregar la query.',
+        );
       } catch (err) {
         setQueriesStatus(
           err && err.message ? err.message : 'No se pudo agregar la query.',
@@ -7633,7 +7836,10 @@ init();
         );
       } finally {
         queriesBusy = false;
-        if (queryAddBtn) queryAddBtn.disabled = false;
+        if (queryAddBtn) {
+          queryAddBtn.disabled = false;
+          if (prevAddLabel) queryAddBtn.textContent = prevAddLabel;
+        }
       }
     });
   }

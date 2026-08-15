@@ -28,6 +28,10 @@ const {
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
 } = require('../steps/serpMonitoredQueries');
+const { measureSuggestedTerm } = require('../steps/measureSuggestedTerm');
+const {
+  enrichNewlyCreatedSerpQuery,
+} = require('../steps/serpQueryOnCreateEnrichment');
 const { computeAuctionPressure } = require('../services/auction-pressure');
 const {
   getPropertyId,
@@ -1389,6 +1393,36 @@ function sortRisingFirstByScore(items) {
 }
 
 /**
+ * POST /reports/search-discoveries/measure-suggestion
+ * Measure one Claude-suggested term (Keyword Planner, one keyword).
+ * Body: { term: string, reason?: string }
+ * Creates a minimal search_term_discoveries row (seed ai_suggestion) then
+ * inserts discovered_term_cpc_estimates. Absolute classification gates only.
+ */
+router.post('/search-discoveries/measure-suggestion', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const result = await measureSuggestedTerm({
+      term: body.term,
+      reason: body.reason,
+    });
+    return res.status(201).json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports search-discoveries/measure-suggestion failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+    });
+    return res.status(status).json({
+      ok: false,
+      measured: false,
+      error: err && err.message ? err.message : 'Failed to measure suggestion',
+      code: err && err.code ? err.code : 'MEASURE_FAILED',
+    });
+  }
+});
+
+/**
  * GET /reports/search-discoveries?view=pending|research — unified read
  * endpoint over search_term_discoveries.
  * - view=pending: only undecided terms (triage screen shape)
@@ -2239,7 +2273,39 @@ router.post('/serp-queries', async (req, res) => {
         ? req.body.notes
         : undefined;
     const row = await createSerpMonitoredQuery({ queryText, notes });
-    return res.status(201).json(row);
+    let enrichment;
+    try {
+      enrichment = await enrichNewlyCreatedSerpQuery({
+        id: row.id,
+        queryText: row.queryText,
+      });
+    } catch (enrichErr) {
+      logger.error('Reports serp-queries on-create enrichment failed', {
+        id: row.id,
+        error: enrichErr && enrichErr.message ? enrichErr.message : 'unknown',
+        code: enrichErr && enrichErr.code ? enrichErr.code : null,
+      });
+      enrichment = {
+        plannerStatus: 'error',
+        plannerError:
+          enrichErr && enrichErr.message
+            ? enrichErr.message
+            : 'enrichment failed',
+        serperStatus: 'error',
+        serperError:
+          enrichErr && enrichErr.message
+            ? enrichErr.message
+            : 'enrichment failed',
+      };
+    }
+    return res.status(201).json({
+      created: true,
+      ...row,
+      plannerStatus: enrichment.plannerStatus,
+      plannerError: enrichment.plannerError,
+      serperStatus: enrichment.serperStatus,
+      serperError: enrichment.serperError,
+    });
   } catch (err) {
     const status = err.statusCode || 500;
     logger.error('Reports serp-queries create failed', {

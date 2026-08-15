@@ -52,6 +52,81 @@ function bidRawToUnit(raw) {
 }
 
 /**
+ * Absolute pre-ranking gates only (HIGH / low volume / missing bid).
+ * Terms that pass return classification_status null — caller must NOT apply
+ * the 30/40/30 relative ranking when n=1 (that collapse is meaningless).
+ *
+ * @param {{
+ *   competition_level?: unknown,
+ *   avg_monthly_searches?: unknown,
+ *   high_top_of_page_bid_raw?: unknown,
+ * }} row
+ * @returns {{
+ *   classification_status: string|null,
+ *   efficiency_score: null,
+ *   classification_version: string|null,
+ *   bidUnit: number|null,
+ *   avgMonthlySearches: number|null,
+ *   competitionLevel: string|null,
+ * }}
+ */
+function applyAbsoluteClassificationGates(row) {
+  const comp =
+    row && row.competition_level != null
+      ? String(row.competition_level).trim().toUpperCase()
+      : null;
+  const avg =
+    row &&
+    row.avg_monthly_searches != null &&
+    Number.isFinite(Number(row.avg_monthly_searches))
+      ? Number(row.avg_monthly_searches)
+      : null;
+  const bidUnit = bidRawToUnit(row && row.high_top_of_page_bid_raw);
+
+  if (comp === 'HIGH') {
+    return {
+      classification_status: STATUS.DISCARDED_HIGH_COMPETITION,
+      efficiency_score: null,
+      classification_version: CLASSIFICATION_VERSION,
+      bidUnit,
+      avgMonthlySearches: avg,
+      competitionLevel: comp,
+    };
+  }
+
+  if (avg == null || avg < MIN_MONTHLY_SEARCHES) {
+    return {
+      classification_status: STATUS.DISCARDED_LOW_VOLUME,
+      efficiency_score: null,
+      classification_version: CLASSIFICATION_VERSION,
+      bidUnit,
+      avgMonthlySearches: avg,
+      competitionLevel: comp,
+    };
+  }
+
+  if (bidUnit == null) {
+    return {
+      classification_status: STATUS.INSUFFICIENT_BID_DATA,
+      efficiency_score: null,
+      classification_version: CLASSIFICATION_VERSION,
+      bidUnit: null,
+      avgMonthlySearches: avg,
+      competitionLevel: comp,
+    };
+  }
+
+  return {
+    classification_status: null,
+    efficiency_score: null,
+    classification_version: null,
+    bidUnit,
+    avgMonthlySearches: avg,
+    competitionLevel: comp,
+  };
+}
+
+/**
  * Pure classification of one sync_run's rows (no I/O).
  * @param {Array<{
  *   id: string,
@@ -81,67 +156,30 @@ function classifyRows(rows) {
   for (const row of list) {
     const id = String(row.id);
     const term = row.term != null ? String(row.term) : '';
-    const comp =
-      row.competition_level != null
-        ? String(row.competition_level).trim().toUpperCase()
-        : null;
-    const avg =
-      row.avg_monthly_searches != null &&
-      Number.isFinite(Number(row.avg_monthly_searches))
-        ? Number(row.avg_monthly_searches)
-        : null;
-    const bidUnit = bidRawToUnit(row.high_top_of_page_bid_raw);
+    const gate = applyAbsoluteClassificationGates(row);
 
-    if (comp === 'HIGH') {
+    if (gate.classification_status) {
       out.push({
         id,
         term,
-        classification_status: STATUS.DISCARDED_HIGH_COMPETITION,
-        efficiency_score: null,
-        classification_version: CLASSIFICATION_VERSION,
-        bidUnit,
-        avgMonthlySearches: avg,
-        competitionLevel: comp,
+        classification_status: gate.classification_status,
+        efficiency_score: gate.efficiency_score,
+        classification_version: gate.classification_version,
+        bidUnit: gate.bidUnit,
+        avgMonthlySearches: gate.avgMonthlySearches,
+        competitionLevel: gate.competitionLevel,
       });
       continue;
     }
 
-    if (avg == null || avg < MIN_MONTHLY_SEARCHES) {
-      out.push({
-        id,
-        term,
-        classification_status: STATUS.DISCARDED_LOW_VOLUME,
-        efficiency_score: null,
-        classification_version: CLASSIFICATION_VERSION,
-        bidUnit,
-        avgMonthlySearches: avg,
-        competitionLevel: comp,
-      });
-      continue;
-    }
-
-    if (bidUnit == null) {
-      out.push({
-        id,
-        term,
-        classification_status: STATUS.INSUFFICIENT_BID_DATA,
-        efficiency_score: null,
-        classification_version: CLASSIFICATION_VERSION,
-        bidUnit: null,
-        avgMonthlySearches: avg,
-        competitionLevel: comp,
-      });
-      continue;
-    }
-
-    const score = avg / bidUnit;
+    const score = gate.avgMonthlySearches / gate.bidUnit;
     scored.push({
       id,
       term,
       score,
-      avg,
-      comp,
-      bidUnit,
+      avg: gate.avgMonthlySearches,
+      comp: gate.competitionLevel,
+      bidUnit: gate.bidUnit,
     });
   }
 
@@ -347,6 +385,7 @@ module.exports = {
   BID_MICROS_PER_UNIT,
   STATUS,
   bidRawToUnit,
+  applyAbsoluteClassificationGates,
   classifyRows,
   classifyAndPersistSyncRun,
 };
