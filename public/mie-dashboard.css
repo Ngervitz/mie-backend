@@ -2481,6 +2481,9 @@
   color: var(--text-muted);
   font-size: 14px;
 }
+#mie-dashboard-app .cov-status.mcl-error {
+  color: var(--accent-danger);
+}
 
 #mie-dashboard-app .cov-table {
   width: 100%;
@@ -2538,6 +2541,19 @@
   font-weight: var(--font-weight-medium);
 }
 #mie-dashboard-app .cpc-bid-high {
+  color: var(--accent-danger);
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app .cpc-comp-low {
+  color: var(--accent-success);
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .cpc-comp-medium {
+  color: var(--accent-warn);
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .cpc-comp-high {
   color: var(--accent-danger);
   font-weight: var(--font-weight-medium);
 }
@@ -3209,6 +3225,17 @@
   color: var(--accent-success);
   background: var(--accent-success-soft);
   border-color: var(--accent-success);
+}
+#mie-dashboard-app .serp-query-queue-btn {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
 }
 
 #mie-dashboard-app .serp-upload-panel {

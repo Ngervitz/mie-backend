@@ -22,9 +22,11 @@ const {
 } = require('../steps/collectGoogleSerpImports');
 const { importGoogleSerpJson } = require('../steps/collectGoogleSerpJsonImports');
 const {
+  SERP_MONITORED_TERM_SOURCE_SEED,
   listSerpMonitoredQueries,
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
+  queueSerpQueryForLanding,
 } = require('../steps/serpMonitoredQueries');
 const { computeAuctionPressure } = require('../services/auction-pressure');
 const {
@@ -1326,23 +1328,34 @@ async function loadSearchDiscoveries() {
     });
   }
 
-  // Merge SERP-import unmatched domains queued for Pendientes (independent of Trends rows).
+  // Merge SERP-import unmatched domains + SERP-catalog terms queued for
+  // landing into Pendientes (independent of Trends discovery rows).
+  const pendingMergeSeeds = new Set([
+    'google_serp_import',
+    SERP_MONITORED_TERM_SOURCE_SEED,
+  ]);
   for (const row of decided || []) {
-    if (row.source_seed !== 'google_serp_import' || row.decision !== 'pending') continue;
+    if (!pendingMergeSeeds.has(row.source_seed) || row.decision !== 'pending') {
+      continue;
+    }
     const termStr = String(row.term || '').trim();
     const lower = termStr.toLowerCase();
     if (!termStr || itemTerms.has(lower)) continue;
 
-    const domain = normalizeDomain(termStr);
+    const isMonitoredTerm = row.source_seed === SERP_MONITORED_TERM_SOURCE_SEED;
+    const domain = !isMonitoredTerm ? normalizeDomain(termStr) : null;
     const entity = domain ? entityByWebsiteDomain.get(domain) || null : null;
-    seeds.add('google_serp_import');
+    seeds.add(row.source_seed);
     itemTerms.add(lower);
+
+    const termIsBrandHeuristic =
+      !/\s/.test(termStr) && /^[A-ZÁÉÍÓÚÑ]/.test(termStr);
 
     items.push({
       discoveryId: null,
       term: termStr,
-      seed: 'google_serp_import',
-      queryType: 'serp',
+      seed: row.source_seed,
+      queryType: isMonitoredTerm ? 'serp_monitored' : 'serp',
       score: row.discovered_score !== null && row.discovered_score !== undefined
         ? Number(row.discovered_score)
         : null,
@@ -1353,9 +1366,14 @@ async function loadSearchDiscoveries() {
       alreadyCovered: Boolean(entity),
       coveredByEntity: entity ? { id: entity.id, name: entity.name } : null,
       decision: 'pending',
-      termType: row.term_type || 'competitor_candidate',
-      sourceSeed: 'google_serp_import',
-      suggestedKind: 'brand',
+      termType:
+        row.term_type || (isMonitoredTerm ? 'generic' : 'competitor_candidate'),
+      sourceSeed: row.source_seed,
+      suggestedKind: isMonitoredTerm
+        ? termIsBrandHeuristic
+          ? 'brand'
+          : 'intent'
+        : 'brand',
       cpcEstimate: cpcByTerm.get(lower) || null,
     });
   }
@@ -2231,6 +2249,29 @@ router.post('/serp-queries', async (req, res) => {
     return res.status(status).json({
       error: err.message || 'Failed to create SERP query',
       code: err.code || 'CREATE_FAILED',
+    });
+  }
+});
+
+/**
+ * POST /reports/serp-queries/:id/queue-for-landing
+ * Insert query_text into confirmed_search_terms as pending (insert-only).
+ */
+router.post('/serp-queries/:id/queue-for-landing', async (req, res) => {
+  try {
+    const result = await queueSerpQueryForLanding(req.params.id);
+    const status = result.outcome === 'created' ? 201 : 200;
+    return res.status(status).json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports serp-queries queue-for-landing failed', {
+      id: req.params.id,
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to queue SERP query for landing',
+      code: err.code || 'QUEUE_FAILED',
     });
   }
 });

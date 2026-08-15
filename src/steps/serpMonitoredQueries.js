@@ -4,6 +4,37 @@ const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 const { normalizeSearchTerm } = require('./collectGoogleSerpImports');
 
+/** Provenance for Keywords queued from the SERP catalog into Pendientes. */
+const SERP_MONITORED_TERM_SOURCE_SEED = 'serp_monitored_term';
+
+function isUniqueViolation(error) {
+  if (!error) return false;
+  if (String(error.code || '') === '23505') return true;
+  return /duplicate|unique/i.test(String(error.message || ''));
+}
+
+function mapExistingTermOutcome(row) {
+  const decision = row && row.decision != null ? String(row.decision) : '';
+  const sourceSeed =
+    row && row.source_seed != null ? String(row.source_seed) : null;
+  if (decision === 'pending') {
+    return {
+      outcome: 'already_pending',
+      term: row.term,
+      termId: row.id,
+      decision: 'pending',
+      sourceSeed,
+    };
+  }
+  return {
+    outcome: 'already_processed',
+    term: row.term,
+    termId: row.id,
+    decision,
+    sourceSeed,
+  };
+}
+
 function mapQueryRow(row) {
   if (!row) return null;
   return {
@@ -175,10 +206,122 @@ async function patchSerpMonitoredQuery(id, patch = {}) {
   return mapQueryRow(data);
 }
 
+/**
+ * Insert the catalog query_text into confirmed_search_terms as pending.
+ * Never updates an existing row. UNIQUE races (23505) re-read the row and
+ * map to already_pending / already_processed.
+ */
+async function queueSerpQueryForLanding(id) {
+  const rowId = id != null ? String(id).trim() : '';
+  if (!rowId) {
+    const err = new Error('id es requerido');
+    err.statusCode = 400;
+    err.code = 'ID_REQUIRED';
+    throw err;
+  }
+
+  const { data: query, error: fetchError } = await supabase
+    .from('serp_monitored_queries')
+    .select('id, query_text')
+    .eq('id', rowId)
+    .maybeSingle();
+
+  if (fetchError) {
+    throw new Error(
+      `Failed to fetch serp_monitored_queries: ${fetchError.message}`,
+    );
+  }
+  if (!query) {
+    const err = new Error('Query no encontrada');
+    err.statusCode = 404;
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  const term = query.query_text != null ? String(query.query_text).trim() : '';
+  if (!term) {
+    const err = new Error('query_text inválido');
+    err.statusCode = 400;
+    err.code = 'QUERY_TEXT_INVALID';
+    throw err;
+  }
+
+  const { data: existing, error: existingErr } = await supabase
+    .from('confirmed_search_terms')
+    .select('id, term, decision, source_seed')
+    .eq('term', term)
+    .maybeSingle();
+
+  if (existingErr) {
+    throw new Error(
+      `Failed to check confirmed_search_terms: ${existingErr.message}`,
+    );
+  }
+  if (existing) {
+    return mapExistingTermOutcome(existing);
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from('confirmed_search_terms')
+    .insert({
+      term,
+      term_type: 'generic',
+      decision: 'pending',
+      source_seed: SERP_MONITORED_TERM_SOURCE_SEED,
+      discovered_score: null,
+      entity_id: null,
+    })
+    .select('id, term, decision, source_seed')
+    .single();
+
+  if (insErr) {
+    if (isUniqueViolation(insErr)) {
+      const { data: raced, error: racedErr } = await supabase
+        .from('confirmed_search_terms')
+        .select('id, term, decision, source_seed')
+        .eq('term', term)
+        .maybeSingle();
+      if (racedErr) {
+        throw new Error(
+          `Failed to re-read confirmed_search_terms after unique conflict: ${racedErr.message}`,
+        );
+      }
+      if (raced) {
+        return mapExistingTermOutcome(raced);
+      }
+      const raceErr = new Error(
+        'El término ya existe en Términos descubiertos',
+      );
+      raceErr.statusCode = 409;
+      raceErr.code = 'TERM_DUPLICATE';
+      throw raceErr;
+    }
+    throw new Error(
+      `Failed to insert confirmed_search_terms: ${insErr.message}`,
+    );
+  }
+
+  logger.info('SERP query queued for landing', {
+    queryId: rowId,
+    termId: inserted.id,
+    term,
+  });
+
+  return {
+    outcome: 'created',
+    term: inserted.term,
+    termId: inserted.id,
+    decision: inserted.decision,
+    sourceSeed: inserted.source_seed,
+  };
+}
+
 module.exports = {
+  SERP_MONITORED_TERM_SOURCE_SEED,
   listSerpMonitoredQueries,
   listActiveSerpMonitoredQueries,
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
+  queueSerpQueryForLanding,
   mapQueryRow,
 };

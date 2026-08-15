@@ -4729,6 +4729,25 @@ init();
     return String(level);
   }
 
+  function competitionLevelToneClass(level) {
+    const key = String(level == null ? '' : level).toUpperCase();
+    if (key === 'LOW') return 'cpc-comp-low';
+    if (key === 'MEDIUM') return 'cpc-comp-medium';
+    if (key === 'HIGH') return 'cpc-comp-high';
+    return '';
+  }
+
+  /** Escaped HTML for competition label; emptyLabel when level missing (default —). */
+  function renderCompetitionLevelHtml(level, emptyLabel) {
+    const label = formatDiscoveryCompetition(level);
+    if (label === '—') {
+      return escapeHtml(emptyLabel != null ? emptyLabel : '—');
+    }
+    const cls = competitionLevelToneClass(level);
+    if (!cls) return escapeHtml(label);
+    return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+  }
+
   function formatDiscoveryBidFromMicros(raw, currencyCode) {
     if (raw == null || raw === '') return '—';
     const n = Number(raw);
@@ -4777,7 +4796,6 @@ init();
       );
     }
     const vol = formatDiscoveryAvgSearches(estimate.avgMonthlySearches);
-    const comp = formatDiscoveryCompetition(estimate.competitionLevel);
     const low = formatDiscoveryBidFromMicros(
       estimate.lowTopOfPageBidRaw,
       estimate.currencyCode,
@@ -4794,7 +4812,7 @@ init();
       '💰 Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
-      escapeHtml(comp) +
+      renderCompetitionLevelHtml(estimate.competitionLevel) +
       ' · Bid bajo: <span class="cpc-bid-low">' +
       escapeHtml(low) +
       '</span> · Bid alto: <span class="cpc-bid-high">' +
@@ -4927,8 +4945,8 @@ init();
       return vol === '—' ? 'Sin dato' : vol;
     }
     if (field === 'comp') {
-      const comp = formatDiscoveryCompetition(est.competitionLevel);
-      return comp === '—' ? 'Sin dato' : comp;
+      // Already escaped HTML (may include tone span) — callers must not escapeHtml.
+      return renderCompetitionLevelHtml(est.competitionLevel, 'Sin dato');
     }
     if (field === 'eff') {
       const status =
@@ -4963,19 +4981,28 @@ init();
 
   function formatCompactComparisonMetrics(est, opts) {
     const options = opts || {};
-    if (!est) return 'Sin estimate en esta corrida';
+    if (!est) return escapeHtml('Sin estimate en esta corrida');
     const volRaw = formatDiscoveryAvgSearches(est.avgMonthlySearches);
     const vol =
       volRaw === '—'
         ? 'Sin dato'
         : Number(est.avgMonthlySearches).toLocaleString('es-UY') +
           ' búsquedas';
-    const parts = [vol];
+    const parts = [escapeHtml(vol)];
     if (!options.omitCompetition) {
       const compRaw = formatDiscoveryCompetition(est.competitionLevel);
-      parts.push(
-        compRaw === '—' ? 'Sin dato' : 'Competencia ' + compRaw.toLowerCase(),
-      );
+      if (compRaw === '—') {
+        parts.push(escapeHtml('Sin dato'));
+      } else {
+        const cls = competitionLevelToneClass(est.competitionLevel);
+        const word = compRaw.toLowerCase();
+        parts.push(
+          escapeHtml('Competencia ') +
+            (cls
+              ? '<span class="' + cls + '">' + escapeHtml(word) + '</span>'
+              : escapeHtml(word)),
+        );
+      }
     }
     let eff;
     const status =
@@ -4991,7 +5018,7 @@ init();
         ? 'Eficiencia ' + Number(n).toLocaleString('es-UY')
         : 'Sin dato';
     }
-    parts.push(eff);
+    parts.push(escapeHtml(eff));
     return parts.join(' · ');
   }
 
@@ -5035,9 +5062,7 @@ init();
             '</div>'
           : '') +
         '<p class="cpc-compare-compact-metrics">' +
-        escapeHtml(
-          formatCompactComparisonMetrics(estA, { omitCompetition: true }),
-        ) +
+        formatCompactComparisonMetrics(estA, { omitCompetition: true }) +
         '</p>' +
         reasonHtml +
         '</div>'
@@ -5104,7 +5129,7 @@ init();
         escapeHtml(termB) +
         '</p>' +
         '<p class="cpc-compare-compact-metrics">' +
-        escapeHtml(formatCompactComparisonMetrics(estA || estB)) +
+        formatCompactComparisonMetrics(estA || estB) +
         '</p>' +
         '<p class="cpc-compare-action">🔁 Consolidar</p>' +
         reasonHtml +
@@ -5142,9 +5167,9 @@ init();
       escapeHtml(renderComparisonMetricCell(estB, 'vol')) +
       '</td></tr>' +
       '<tr><td class="text-muted">Competencia</td><td>' +
-      escapeHtml(renderComparisonMetricCell(estA, 'comp')) +
+      renderComparisonMetricCell(estA, 'comp') +
       '</td><td>' +
-      escapeHtml(renderComparisonMetricCell(estB, 'comp')) +
+      renderComparisonMetricCell(estB, 'comp') +
       '</td></tr>' +
       '<tr><td class="text-muted">Eficiencia</td><td class="ga4-num">' +
       escapeHtml(renderComparisonMetricCell(estA, 'eff')) +
@@ -5212,9 +5237,9 @@ init();
             return (
               '<li class="cpc-unmeasured-item">' +
               '<div class="cov-term-row">' +
-              '<span class="cov-term-text">' +
+              '<strong class="cov-term-text">' +
               escapeHtml(s.term || '') +
-              '</span>' +
+              '</strong>' +
               '<button type="button" class="btn cov-copy-term-btn cpc-suggest-copy-btn" data-suggest-idx="' +
               idx +
               '" title="Copiar término">Copiar</button>' +
@@ -5307,9 +5332,11 @@ init();
         const sourceLabel =
           s.queryType === 'serp'
             ? `📥 SERP import · dominio sin match · seed: ${escapeHtml(s.seed)}`
-            : `${s.queryType === 'rising' ? '📈 Rising' : '🔝 Top'} · ${escapeHtml(
-                s.formattedValue || String(s.score ?? '—'),
-              )} · seed: ${escapeHtml(s.seed)}`;
+            : s.queryType === 'serp_monitored'
+              ? '📥 Query SERP · candidato a landing'
+              : `${s.queryType === 'rising' ? '📈 Rising' : '🔝 Top'} · ${escapeHtml(
+                  s.formattedValue || String(s.score ?? '—'),
+                )} · seed: ${escapeHtml(s.seed)}`;
         const covered = s.alreadyCovered
           ? `<span class="cov-badge is-covered" title="Ya existe en monitored_entities: ${escapeHtml(
               (s.coveredByEntity && s.coveredByEntity.name) || '',
@@ -5322,6 +5349,7 @@ init();
               <div class="cov-term-row">
                 <span class="cov-term-text">${escapeHtml(s.term)}</span>
                 <button type="button" class="btn cov-copy-term-btn" data-cov-idx="${idx}" title="Copiar término">Copiar</button>
+                <button type="button" class="btn cov-copy-term-btn cov-serp-monitor-btn" data-cov-idx="${idx}" title="Agregar a monitoreo SERP">Monitorear SERP</button>
               </div>
               ${renderDiscoveryCpcMeta(s.cpcEstimate || null)}
             </td>
@@ -5361,7 +5389,7 @@ init();
       });
     });
 
-    suggestionsEl.querySelectorAll('.cov-copy-term-btn').forEach((btn) => {
+    suggestionsEl.querySelectorAll('.cov-copy-term-btn:not(.cov-serp-monitor-btn)').forEach((btn) => {
       btn.addEventListener('click', () => {
         const idx = Number(btn.getAttribute('data-cov-idx'));
         const suggestion = covState.suggestions[idx];
@@ -5370,7 +5398,72 @@ init();
       });
     });
 
+    suggestionsEl.querySelectorAll('.cov-serp-monitor-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        addPendingTermToSerp(btn);
+      });
+    });
+
     applyBtn.disabled = covState.applying || !Object.keys(covState.decisions).length;
+  }
+
+  function setCovStatus(text, isError) {
+    if (!statusEl) return;
+    statusEl.textContent = text || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  async function addPendingTermToSerp(btn) {
+    if (!btn || btn.disabled) return;
+    const idx = Number(btn.getAttribute('data-cov-idx'));
+    const suggestion = covState.suggestions[idx];
+    if (!suggestion || !suggestion.term) return;
+    const term = String(suggestion.term);
+    const ok = window.confirm(
+      '¿Agregar «' + term + '» a monitoreo SERP?\n\nEl término sigue pendiente de decisión acá.',
+    );
+    if (!ok) return;
+
+    const prevLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Agregando…';
+    setCovStatus('Agregando a monitoreo SERP…', false);
+    try {
+      const res = await fetch(API_BASE + '/reports/serp-queries', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ queryText: term }),
+      });
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (res.status === 201) {
+        setCovStatus('Agregado a monitoreo SERP', false);
+        return;
+      }
+      if (res.status === 409 && body && body.code === 'QUERY_DUPLICATE') {
+        setCovStatus('Ya se está monitoreando este término en SERP', false);
+        return;
+      }
+      throw new Error(
+        body && body.error
+          ? String(body.error)
+          : 'No se pudo agregar a monitoreo SERP.',
+      );
+    } catch (err) {
+      setCovStatus(
+        err && err.message
+          ? err.message
+          : 'No se pudo agregar a monitoreo SERP.',
+        true,
+      );
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+    }
   }
 
   function draftStatusBadge(draft) {
@@ -7109,6 +7202,24 @@ init();
     return String(level);
   }
 
+  function competitionLevelToneClass(level) {
+    const key = String(level == null ? '' : level).toUpperCase();
+    if (key === 'LOW') return 'cpc-comp-low';
+    if (key === 'MEDIUM') return 'cpc-comp-medium';
+    if (key === 'HIGH') return 'cpc-comp-high';
+    return '';
+  }
+
+  function renderCompetitionLevelHtml(level, emptyLabel) {
+    const label = formatCompetitionLevel(level);
+    if (label === '—') {
+      return escapeHtml(emptyLabel != null ? emptyLabel : '—');
+    }
+    const cls = competitionLevelToneClass(level);
+    if (!cls) return escapeHtml(label);
+    return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+  }
+
   /** Bids are stored as Google Ads micros (raw). null → em dash, never NaN. */
   function formatBidFromMicros(raw, currencyCode) {
     if (raw == null || raw === '') return '—';
@@ -7158,7 +7269,6 @@ init();
       );
     }
     const vol = formatAvgMonthlySearches(estimate.avgMonthlySearches);
-    const comp = formatCompetitionLevel(estimate.competitionLevel);
     const low = formatBidFromMicros(
       estimate.lowTopOfPageBidRaw,
       estimate.currencyCode,
@@ -7175,7 +7285,7 @@ init();
       '💰 Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
-      escapeHtml(comp) +
+      renderCompetitionLevelHtml(estimate.competitionLevel) +
       ' · Bid bajo: <span class="cpc-bid-low">' +
       escapeHtml(low) +
       '</span> · Bid alto: <span class="cpc-bid-high">' +
@@ -7224,6 +7334,11 @@ init();
           (active ? '1' : '0') +
           '">' +
           (active ? 'Activa' : 'Inactiva') +
+          '</button>' +
+          '<button type="button" class="serp-query-queue-btn" data-id="' +
+          escapeHtml(id) +
+          '" title="Enviar a Términos descubiertos como candidato a landing">' +
+          'Candidato landing' +
           '</button>' +
           '</div>' +
           renderSerpQueryCpcMeta(estimate) +
@@ -7276,6 +7391,98 @@ init();
         }
       });
     });
+
+    queriesListEl.querySelectorAll('.serp-query-queue-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        queueSerpQueryForLanding(btn);
+      });
+    });
+  }
+
+  function landingDecisionLabel(decision) {
+    if (decision === 'monitor_trends') return 'Generar landing SEO';
+    if (decision === 'added_as_competitor') return 'Monitorear competidor';
+    if (decision === 'discarded') return 'Descartar';
+    if (decision === 'pending') return 'pendiente';
+    return decision ? String(decision) : 'procesado';
+  }
+
+  async function queueSerpQueryForLanding(btn) {
+    if (!btn || btn.disabled) return;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    const row = btn.closest('.serp-query-row');
+    const termEl = row ? row.querySelector('.serp-query-text') : null;
+    const term = termEl ? String(termEl.textContent || '').trim() : '';
+    const ok = window.confirm(
+      '¿Enviar «' +
+        (term || 'esta query') +
+        '» a Términos descubiertos como candidato a landing?\n\nNo modifica la query SERP ni decisiones ya tomadas.',
+    );
+    if (!ok) return;
+
+    const prevLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    setQueriesStatus('Enviando a Términos descubiertos…', false);
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/reports/serp-queries/' +
+          encodeURIComponent(id) +
+          '/queue-for-landing',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        },
+      );
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo enviar a Términos descubiertos.',
+        );
+      }
+      const outcome = body && body.outcome ? String(body.outcome) : '';
+      if (outcome === 'created') {
+        setQueriesStatus('Agregado a Términos descubiertos (pendiente)', false);
+        return;
+      }
+      if (outcome === 'already_pending') {
+        const seed =
+          body.sourceSeed != null ? String(body.sourceSeed) : '';
+        setQueriesStatus(
+          seed && seed !== 'serp_monitored_term'
+            ? 'Ya existe como pendiente en Términos descubiertos'
+            : 'Ya está pendiente en Términos descubiertos',
+          false,
+        );
+        return;
+      }
+      if (outcome === 'already_processed') {
+        setQueriesStatus(
+          'Ya existe en Términos descubiertos (decisión: ' +
+            landingDecisionLabel(body.decision) +
+            ')',
+          false,
+        );
+        return;
+      }
+      setQueriesStatus('Listo.', false);
+    } catch (err) {
+      setQueriesStatus(
+        err && err.message
+          ? err.message
+          : 'No se pudo enviar a Términos descubiertos.',
+        true,
+      );
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+    }
   }
 
   async function loadSerpQueries() {
