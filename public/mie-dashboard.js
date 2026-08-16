@@ -4793,6 +4793,24 @@ init();
     );
   }
 
+  function volumeSearchPrefixEmoji(estimate) {
+    const status =
+      estimate && estimate.classificationStatus
+        ? String(estimate.classificationStatus)
+        : '';
+    if (status === 'recommended') return '🟢';
+    if (status === 'evaluate') return '🟡';
+    if (status === 'discarded_high_competition') return '🔴';
+    if (
+      status === 'low_priority' ||
+      status === 'discarded_low_volume' ||
+      status === 'insufficient_bid_data'
+    ) {
+      return '⚪';
+    }
+    return '💰';
+  }
+
   function renderDiscoveryCpcMeta(estimate) {
     if (!estimate) {
       return (
@@ -4813,7 +4831,8 @@ init();
     return (
       '<div class="cov-cpc-meta">' +
       (badge ? badge + ' ' : '') +
-      '💰 Vol. búsquedas: ' +
+      volumeSearchPrefixEmoji(estimate) +
+      ' Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
       renderCompetitionLevelHtml(estimate.competitionLevel) +
@@ -4946,7 +4965,8 @@ init();
     if (!est) return 'Sin estimate en esta corrida';
     if (field === 'vol') {
       const vol = formatDiscoveryAvgSearches(est.avgMonthlySearches);
-      return vol === '—' ? 'Sin dato' : vol;
+      const text = vol === '—' ? 'Sin dato' : vol;
+      return volumeSearchPrefixEmoji(est) + ' ' + text;
     }
     if (field === 'comp') {
       // Already escaped HTML (may include tone span) — callers must not escapeHtml.
@@ -4992,7 +5012,9 @@ init();
         ? 'Sin dato'
         : Number(est.avgMonthlySearches).toLocaleString('es-UY') +
           ' búsquedas';
-    const parts = [escapeHtml(vol)];
+    const parts = [
+      escapeHtml(volumeSearchPrefixEmoji(est) + ' ' + vol),
+    ];
     if (!options.omitCompetition) {
       const compRaw = formatDiscoveryCompetition(est.competitionLevel);
       if (compRaw === '—') {
@@ -7451,6 +7473,24 @@ init();
     );
   }
 
+  function volumeSearchPrefixEmoji(estimate) {
+    const status =
+      estimate && estimate.classificationStatus
+        ? String(estimate.classificationStatus)
+        : '';
+    if (status === 'recommended') return '🟢';
+    if (status === 'evaluate') return '🟡';
+    if (status === 'discarded_high_competition') return '🔴';
+    if (
+      status === 'low_priority' ||
+      status === 'discarded_low_volume' ||
+      status === 'insufficient_bid_data'
+    ) {
+      return '⚪';
+    }
+    return '💰';
+  }
+
   function renderSerpQueryCpcMeta(estimate) {
     if (!estimate) {
       return (
@@ -7472,7 +7512,8 @@ init();
     return (
       '<p class="text-muted serp-queries-hint">' +
       badge +
-      '💰 Vol. búsquedas: ' +
+      volumeSearchPrefixEmoji(estimate) +
+      ' Vol. búsquedas: ' +
       escapeHtml(vol) +
       ' · Competencia: ' +
       renderCompetitionLevelHtml(estimate.competitionLevel) +

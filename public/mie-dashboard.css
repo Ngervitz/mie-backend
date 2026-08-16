@@ -2613,7 +2613,7 @@
   margin: 12px 0 6px;
   font-size: 0.85rem;
   font-weight: var(--font-weight-medium);
-  color: var(--text-muted);
+  color: var(--text);
 }
 #mie-dashboard-app .cpc-run-analysis-list {
   margin: 0;
