@@ -2,7 +2,10 @@
 
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
+const { normalizeKeywordKey } = require('../clients/googleAdsKeywordPlanner');
 const { normalizeSearchTerm } = require('./collectGoogleSerpImports');
+
+const DISCOVERED_ESTIMATE_KEYS_PAGE_SIZE = 1000;
 
 /** Provenance for Keywords queued from the SERP catalog into Pendientes. */
 const SERP_MONITORED_TERM_SOURCE_SEED = 'serp_monitored_term';
@@ -47,6 +50,34 @@ function mapQueryRow(row) {
   };
 }
 
+/**
+ * Same matching as findExistingDiscoveredTermEstimate / loadTermsWithExistingEstimates:
+ * normalizeKeywordKey(term_snapshot). One pass over discovered_term_cpc_estimates
+ * (paged only because PostgREST defaults to 1000 rows), then in-memory Set lookup.
+ * Not N+1 against the SERP query list.
+ */
+async function loadDiscoveredTermEstimateKeys() {
+  const keys = new Set();
+  for (let from = 0; ; from += DISCOVERED_ESTIMATE_KEYS_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('discovered_term_cpc_estimates')
+      .select('term_snapshot')
+      .range(from, from + DISCOVERED_ESTIMATE_KEYS_PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(
+        `Failed to load discovered_term_cpc_estimates snapshots: ${error.message}`,
+      );
+    }
+    const rows = data || [];
+    rows.forEach((row) => {
+      const key = normalizeKeywordKey(row && row.term_snapshot);
+      if (key) keys.add(key);
+    });
+    if (rows.length < DISCOVERED_ESTIMATE_KEYS_PAGE_SIZE) break;
+  }
+  return keys;
+}
+
 async function listSerpMonitoredQueries() {
   const { data, error } = await supabase
     .from('serp_monitored_queries')
@@ -59,29 +90,14 @@ async function listSerpMonitoredQueries() {
   }
 
   const queries = (data || []).map(mapQueryRow);
-  const terms = queries
-    .map((q) => (q && q.queryText != null ? String(q.queryText) : ''))
-    .filter(Boolean);
-  const queued = new Set();
-  if (terms.length) {
-    const { data: confirmed, error: confirmedErr } = await supabase
-      .from('confirmed_search_terms')
-      .select('term')
-      .in('term', terms);
-    if (confirmedErr) {
-      throw new Error(
-        `Failed to check confirmed_search_terms for SERP queries: ${confirmedErr.message}`,
-      );
-    }
-    (confirmed || []).forEach((row) => {
-      if (row && row.term != null) queued.add(String(row.term));
-    });
-  }
+  const measuredKeys = await loadDiscoveredTermEstimateKeys();
 
   return {
     queries: queries.map((q) => ({
       ...q,
-      alreadyQueuedForLanding: queued.has(q.queryText),
+      alreadyMeasuredFromLanding: measuredKeys.has(
+        normalizeKeywordKey(q && q.queryText),
+      ),
     })),
   };
 }

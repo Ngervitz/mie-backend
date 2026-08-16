@@ -7548,7 +7548,7 @@ init();
         const active = q && q.active !== false;
         const id = q && q.id != null ? String(q.id) : '';
         const estimate = id && byId[id] ? byId[id] : null;
-        const alreadyQueued = Boolean(q && q.alreadyQueuedForLanding);
+        const alreadyMeasured = Boolean(q && q.alreadyMeasuredFromLanding);
         return (
           '<div>' +
           '<div class="serp-query-row' +
@@ -7574,13 +7574,11 @@ init();
           '<button type="button" class="serp-query-queue-btn" data-id="' +
           escapeHtml(id) +
           '"' +
-          (alreadyQueued ? ' disabled' : '') +
+          (alreadyMeasured ? ' disabled' : '') +
           ' title="' +
-          (alreadyQueued
-            ? 'Ya enviado a Pendientes'
-            : 'Enviar a Pendientes') +
+          (alreadyMeasured ? 'Ya medido' : 'Enviar a Pendientes') +
           '">' +
-          (alreadyQueued ? 'Ya en Pendientes' : 'Enviar a Pendientes') +
+          (alreadyMeasured ? 'Ya medido' : 'Enviar a Pendientes') +
           '</button>' +
           '</div>' +
           renderSerpQueryCpcMeta(estimate) +
@@ -7668,6 +7666,8 @@ init();
     btn.textContent = 'Enviando…';
     setQueriesStatus('Enviando a Pendientes… esto puede tardar hasta un minuto', false);
     let queuedOk = false;
+    let measureErr = '';
+    let outcome = '';
     try {
       const res = await fetch(
         API_BASE +
@@ -7690,8 +7690,8 @@ init();
         );
       }
       queuedOk = true;
-      const outcome = body && body.outcome ? String(body.outcome) : '';
-      const measureErr =
+      outcome = body && body.outcome ? String(body.outcome) : '';
+      measureErr =
         body && body.measureError && body.measureError.error
           ? String(body.measureError.error)
           : '';
@@ -7731,13 +7731,18 @@ init();
         true,
       );
     } finally {
-      if (queuedOk) {
+      const nowMeasured =
+        queuedOk &&
+        !measureErr &&
+        (outcome === 'created' || outcome === 'already_pending');
+      if (nowMeasured) {
         btn.disabled = true;
-        btn.textContent = 'Ya en Pendientes';
-        btn.title = 'Ya enviado a Pendientes';
+        btn.textContent = 'Ya medido';
+        btn.title = 'Ya medido';
       } else {
         btn.disabled = false;
         btn.textContent = prevLabel;
+        btn.title = 'Enviar a Pendientes';
       }
     }
   }
