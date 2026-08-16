@@ -7549,6 +7549,7 @@ init();
         const id = q && q.id != null ? String(q.id) : '';
         const estimate = id && byId[id] ? byId[id] : null;
         const alreadyMeasured = Boolean(q && q.alreadyMeasuredFromLanding);
+        const alreadyHasCpc = Boolean(estimate);
         return (
           '<div>' +
           '<div class="serp-query-row' +
@@ -7570,6 +7571,15 @@ init();
           (active ? '1' : '0') +
           '">' +
           (active ? 'Activa' : 'Inactiva') +
+          '</button>' +
+          '<button type="button" class="serp-query-measure-cpc-btn" data-id="' +
+          escapeHtml(id) +
+          '"' +
+          (alreadyHasCpc ? ' disabled' : '') +
+          ' title="' +
+          (alreadyHasCpc ? 'Ya medido' : 'Medir CPC') +
+          '">' +
+          (alreadyHasCpc ? 'Ya medido' : 'Medir CPC') +
           '</button>' +
           '<button type="button" class="serp-query-queue-btn" data-id="' +
           escapeHtml(id) +
@@ -7632,6 +7642,12 @@ init();
       });
     });
 
+    queriesListEl.querySelectorAll('.serp-query-measure-cpc-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        measureSerpQueryCpc(btn);
+      });
+    });
+
     queriesListEl.querySelectorAll('.serp-query-queue-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         queueSerpQueryForLanding(btn);
@@ -7645,6 +7661,65 @@ init();
     if (decision === 'discarded') return 'Descartar';
     if (decision === 'pending') return 'pendiente';
     return decision ? String(decision) : 'procesado';
+  }
+
+  async function measureSerpQueryCpc(btn) {
+    if (!btn || btn.disabled || queriesBusy) return;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    const row = btn.closest('.serp-query-row');
+    const termEl = row ? row.querySelector('.serp-query-text') : null;
+    const term = termEl ? String(termEl.textContent || '').trim() : '';
+    const ok = window.confirm(
+      '¿Medir CPC de «' +
+        (term || 'esta query') +
+        '» con Keyword Planner?\n\nEsto puede tardar hasta un minuto. No envía el término a Pendientes.',
+    );
+    if (!ok) return;
+
+    const prevLabel = btn.textContent;
+    queriesBusy = true;
+    btn.disabled = true;
+    btn.textContent = 'Midiendo…';
+    setQueriesStatus('Midiendo CPC… esto puede tardar hasta un minuto', false);
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/reports/serp-queries/' +
+          encodeURIComponent(id) +
+          '/measure-cpc',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        },
+      );
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        throw new Error(
+          body && body.error
+            ? String(body.error)
+            : 'No se pudo medir el CPC.',
+        );
+      }
+      if (body && body.alreadyMeasured) {
+        setQueriesStatus('Ya tenía CPC medido', false);
+      } else {
+        setQueriesStatus('CPC medido', false);
+      }
+      await loadSerpQueries();
+    } catch (err) {
+      setQueriesStatus(
+        err && err.message ? err.message : 'No se pudo medir el CPC.',
+        true,
+      );
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+      btn.title = 'Medir CPC';
+    } finally {
+      queriesBusy = false;
+    }
   }
 
   async function queueSerpQueryForLanding(btn) {
@@ -7724,6 +7799,12 @@ init();
         );
       } else {
         setQueriesStatus('Listo.', false);
+      }
+      if (
+        !measureErr &&
+        (outcome === 'created' || outcome === 'already_pending')
+      ) {
+        await loadSerpQueries();
       }
     } catch (err) {
       setQueriesStatus(

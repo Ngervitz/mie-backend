@@ -6,13 +6,13 @@
  * No classifyAndPersistSyncRun / Claude (n=1 ranking is not comparable).
  */
 
-const { randomUUID } = require('crypto');
-const supabase = require('../clients/supabase');
 const env = require('../config/env');
 const logger = require('../lib/logger');
-const { fetchKeywordHistoricalMetrics } = require('../clients/googleAdsKeywordPlanner');
 const { fetchSerperSearch } = require('../jobs/serpImportSync');
 const { importGoogleSerpJson } = require('./collectGoogleSerpJsonImports');
+const {
+  measureKeywordPlannerTerm,
+} = require('./measureKeywordPlannerTerm');
 
 function errorMessage(err) {
   if (err && err.message) return String(err.message);
@@ -21,54 +21,6 @@ function errorMessage(err) {
 
 function errorCode(err) {
   return err && err.code ? String(err.code) : null;
-}
-
-/**
- * @param {{ id: string, queryText: string }} query
- */
-async function fetchAndInsertKeywordCpc(query) {
-  const fetched = await fetchKeywordHistoricalMetrics([query.queryText]);
-  const metrics = fetched.resultsByKeyword.get(query.queryText) || null;
-  const syncRunId = randomUUID();
-
-  const { data, error } = await supabase
-    .from('keyword_cpc_estimates')
-    .insert({
-      monitored_query_id: query.id,
-      query_text_snapshot: query.queryText,
-      avg_monthly_searches:
-        metrics && metrics.avgMonthlySearches != null
-          ? metrics.avgMonthlySearches
-          : null,
-      low_top_of_page_bid_raw:
-        metrics && metrics.lowTopOfPageBidRaw != null
-          ? metrics.lowTopOfPageBidRaw
-          : null,
-      high_top_of_page_bid_raw:
-        metrics && metrics.highTopOfPageBidRaw != null
-          ? metrics.highTopOfPageBidRaw
-          : null,
-      currency_code: fetched.currencyCode,
-      competition_level:
-        metrics && metrics.competitionLevel != null
-          ? metrics.competitionLevel
-          : null,
-      sync_run_id: syncRunId,
-    })
-    .select('id')
-    .single();
-
-  if (error || !data) {
-    const err = new Error(
-      error && error.message
-        ? error.message
-        : 'Failed to insert keyword_cpc_estimates',
-    );
-    err.code = 'KEYWORD_CPC_INSERT_FAILED';
-    throw err;
-  }
-
-  return { estimateId: data.id, syncRunId };
 }
 
 /**
@@ -100,7 +52,10 @@ async function fetchAndImportSerper(query) {
  */
 async function enrichNewlyCreatedSerpQuery(query) {
   const [plannerSettled, serperSettled] = await Promise.allSettled([
-    fetchAndInsertKeywordCpc(query),
+    measureKeywordPlannerTerm({
+      term: query.queryText,
+      writeKeywordCpc: { monitoredQueryId: query.id },
+    }),
     fetchAndImportSerper(query),
   ]);
 
@@ -115,9 +70,14 @@ async function enrichNewlyCreatedSerpQuery(query) {
       code: errorCode(plannerSettled.reason),
     });
   } else {
+    const keywordCpc =
+      plannerSettled.value && plannerSettled.value.keywordCpc
+        ? plannerSettled.value.keywordCpc
+        : null;
     logger.info('serp query on-create Keyword Planner ok', {
       queryId: query.id,
-      estimateId: plannerSettled.value && plannerSettled.value.estimateId,
+      estimateId: keywordCpc && keywordCpc.estimateId,
+      alreadyMeasured: Boolean(keywordCpc && keywordCpc.alreadyMeasured),
     });
   }
 

@@ -3226,7 +3226,8 @@
   background: var(--accent-success-soft);
   border-color: var(--accent-success);
 }
-#mie-dashboard-app .serp-query-queue-btn {
+#mie-dashboard-app .serp-query-queue-btn,
+#mie-dashboard-app .serp-query-measure-cpc-btn {
   flex: 0 0 auto;
   font: inherit;
   font-size: 0.75rem;
@@ -3237,7 +3238,8 @@
   color: var(--text);
   cursor: pointer;
 }
-#mie-dashboard-app .serp-query-queue-btn:disabled {
+#mie-dashboard-app .serp-query-queue-btn:disabled,
+#mie-dashboard-app .serp-query-measure-cpc-btn:disabled {
   opacity: 0.55;
   cursor: default;
 }

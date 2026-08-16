@@ -24,6 +24,7 @@ const { importGoogleSerpJson } = require('../steps/collectGoogleSerpJsonImports'
 const {
   SERP_MONITORED_TERM_SOURCE_SEED,
   listSerpMonitoredQueries,
+  getSerpMonitoredQueryById,
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
@@ -32,6 +33,9 @@ const {
   measureSuggestedTerm,
   SERP_MONITORED_TERM_SEED,
 } = require('../steps/measureSuggestedTerm');
+const {
+  measureKeywordPlannerTerm,
+} = require('../steps/measureKeywordPlannerTerm');
 const {
   enrichNewlyCreatedSerpQuery,
 } = require('../steps/serpQueryOnCreateEnrichment');
@@ -2334,9 +2338,10 @@ router.post('/serp-queries/:id/queue-for-landing', async (req, res) => {
     let measureError = null;
     if (result.outcome === 'created' || result.outcome === 'already_pending') {
       try {
-        measured = await measureSuggestedTerm({
+        measured = await measureKeywordPlannerTerm({
           term: result.term,
-          seed: SERP_MONITORED_TERM_SEED,
+          writeDiscovered: { seed: SERP_MONITORED_TERM_SEED },
+          writeKeywordCpc: { monitoredQueryId: req.params.id },
         });
       } catch (measureErr) {
         measureError = {
@@ -2357,12 +2362,18 @@ router.post('/serp-queries/:id/queue-for-landing', async (req, res) => {
         });
       }
     }
+    const discovered = measured && measured.discovered ? measured.discovered : null;
+    const keywordCpc = measured && measured.keywordCpc ? measured.keywordCpc : null;
     const status = result.outcome === 'created' ? 201 : 200;
     return res.status(status).json({
       ...result,
-      measured: Boolean(measured && measured.measured),
-      alreadyMeasured: measured ? Boolean(measured.alreadyMeasured) : false,
+      measured: Boolean(discovered && discovered.estimateId),
+      alreadyMeasured: Boolean(discovered && discovered.alreadyMeasured),
       classificationStatus: measured ? measured.classificationStatus : null,
+      keywordCpcAlreadyMeasured: Boolean(
+        keywordCpc && keywordCpc.alreadyMeasured,
+      ),
+      keywordCpcEstimateId: keywordCpc ? keywordCpc.estimateId : null,
       measureError,
     });
   } catch (err) {
@@ -2375,6 +2386,48 @@ router.post('/serp-queries/:id/queue-for-landing', async (req, res) => {
     return res.status(status).json({
       error: err.message || 'Failed to queue SERP query for landing',
       code: err.code || 'QUEUE_FAILED',
+    });
+  }
+});
+
+/**
+ * POST /reports/serp-queries/:id/measure-cpc
+ * Measure this catalog query into keyword_cpc_estimates (on-demand skip if
+ * a row already exists for monitored_query_id). Does not touch Pendientes.
+ */
+router.post('/serp-queries/:id/measure-cpc', async (req, res) => {
+  try {
+    const query = await getSerpMonitoredQueryById(req.params.id);
+    const measured = await measureKeywordPlannerTerm({
+      term: query.queryText,
+      writeKeywordCpc: { monitoredQueryId: query.id },
+    });
+    const keywordCpc = measured.keywordCpc || {};
+    const alreadyMeasured = Boolean(keywordCpc.alreadyMeasured);
+    return res.status(alreadyMeasured ? 200 : 201).json({
+      ok: true,
+      alreadyMeasured,
+      fetched: Boolean(measured.fetched),
+      estimateId: keywordCpc.estimateId || null,
+      term: measured.term,
+      avgMonthlySearches: measured.avgMonthlySearches,
+      lowTopOfPageBidRaw: measured.lowTopOfPageBidRaw,
+      highTopOfPageBidRaw: measured.highTopOfPageBidRaw,
+      currencyCode: measured.currencyCode,
+      competitionLevel: measured.competitionLevel,
+      classificationStatus: measured.classificationStatus,
+      syncRunId: measured.syncRunId,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    logger.error('Reports serp-queries measure-cpc failed', {
+      id: req.params.id,
+      error: err.message,
+      code: err.code || null,
+    });
+    return res.status(status).json({
+      error: err.message || 'Failed to measure SERP query CPC',
+      code: err.code || 'MEASURE_CPC_FAILED',
     });
   }
 });

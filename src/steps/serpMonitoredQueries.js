@@ -357,10 +357,41 @@ async function queueSerpQueryForLanding(id) {
   };
 }
 
+async function getSerpMonitoredQueryById(id) {
+  const rowId = id != null ? String(id).trim() : '';
+  if (!rowId) {
+    const err = new Error('id es requerido');
+    err.statusCode = 400;
+    err.code = 'ID_REQUIRED';
+    throw err;
+  }
+
+  const { data: query, error: fetchError } = await supabase
+    .from('serp_monitored_queries')
+    .select('id, query_text, query_text_normalized, active, notes, created_at')
+    .eq('id', rowId)
+    .maybeSingle();
+
+  if (fetchError) {
+    throw new Error(
+      `Failed to fetch serp_monitored_queries: ${fetchError.message}`,
+    );
+  }
+  if (!query) {
+    const err = new Error('Query no encontrada');
+    err.statusCode = 404;
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  return mapQueryRow(query);
+}
+
 module.exports = {
   SERP_MONITORED_TERM_SOURCE_SEED,
   listSerpMonitoredQueries,
   listActiveSerpMonitoredQueries,
+  getSerpMonitoredQueryById,
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
