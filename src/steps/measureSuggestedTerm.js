@@ -18,6 +18,8 @@ const {
 } = require('../lib/keywordOpportunityClassification');
 
 const AI_SUGGESTION_SEED = 'ai_suggestion';
+const SERP_MONITORED_TERM_SEED = 'serp_monitored_term';
+const ALLOWED_SEEDS = new Set([AI_SUGGESTION_SEED, SERP_MONITORED_TERM_SEED]);
 
 function httpError(message, statusCode, code) {
   const err = new Error(message);
@@ -72,7 +74,7 @@ async function findExistingDiscoveredTermEstimate(term) {
 }
 
 /**
- * @param {{ term: unknown, reason?: unknown }} body
+ * @param {{ term: unknown, reason?: unknown, seed?: unknown }} body
  * @returns {Promise<{
  *   ok: true,
  *   measured: true,
@@ -88,10 +90,17 @@ async function findExistingDiscoveredTermEstimate(term) {
  *   syncRunId: string,
  * }>}
  */
-async function measureSuggestedTerm({ term: termRaw, reason } = {}) {
+async function measureSuggestedTerm({ term: termRaw, reason, seed: seedRaw } = {}) {
   const term = termRaw != null ? String(termRaw).trim() : '';
   if (!term) {
     throw httpError('term es requerido', 400, 'TERM_REQUIRED');
+  }
+  const seed =
+    seedRaw != null && String(seedRaw).trim()
+      ? String(seedRaw).trim()
+      : AI_SUGGESTION_SEED;
+  if (!ALLOWED_SEEDS.has(seed)) {
+    throw httpError('seed no soportado', 400, 'INVALID_SEED');
   }
 
   const existing = await findExistingDiscoveredTermEstimate(term);
@@ -135,7 +144,7 @@ async function measureSuggestedTerm({ term: termRaw, reason } = {}) {
   const { data: discovery, error: discErr } = await supabase
     .from('search_term_discoveries')
     .insert({
-      seed: AI_SUGGESTION_SEED,
+      seed,
       term,
       query_type: 'top',
       score: null,
@@ -163,6 +172,7 @@ async function measureSuggestedTerm({ term: termRaw, reason } = {}) {
   logger.info('measureSuggestedTerm discovery created', {
     discoveryId,
     term,
+    seed,
     reason: reasonNote,
   });
 
@@ -272,5 +282,6 @@ async function measureSuggestedTerm({ term: termRaw, reason } = {}) {
 
 module.exports = {
   AI_SUGGESTION_SEED,
+  SERP_MONITORED_TERM_SEED,
   measureSuggestedTerm,
 };

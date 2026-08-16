@@ -4784,6 +4784,7 @@ init();
     };
     const entry = map[status];
     if (!entry) return '';
+    if (status === 'discarded_high_competition') return '';
     return (
       '<span class="cov-badge cpc-class-badge ' +
       entry[1] +
@@ -5468,6 +5469,29 @@ init();
     return String(term || '').trim().toLowerCase();
   }
 
+  async function refreshPendingSuggestionsPreserveUi() {
+    const res = await fetch(
+      API_BASE + '/reports/search-discoveries?view=pending',
+      { headers: { Accept: 'application/json' } },
+    );
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const body = await res.json();
+    const prev = covState.decisions || {};
+    covState.suggestions = Array.isArray(body.suggestions)
+      ? body.suggestions
+      : [];
+    const keep = {};
+    covState.suggestions.forEach(function (s) {
+      if (s && s.term && prev[s.term]) keep[s.term] = prev[s.term];
+    });
+    covState.decisions = keep;
+    const count = covState.suggestions.length;
+    statusEl.textContent = count
+      ? count + ' sugerencias pendientes de decisión'
+      : '';
+    renderSuggestions();
+  }
+
   function rerenderCpcRunAnalysisPanels() {
     document.querySelectorAll('.cpc-run-analysis').forEach(function (node) {
       if (!node || !node.__mieCpcSummary) return;
@@ -5493,39 +5517,6 @@ init();
     }
     if (bits.length) return msg + ' (' + bits.join('; ') + ').';
     return msg + ' (ver logs).';
-  }
-
-  function formatMeasuredSuggestionStatus(body) {
-    const term = body && body.term ? String(body.term) : '';
-    const vol = formatDiscoveryAvgSearches(
-      body && body.avgMonthlySearches != null ? body.avgMonthlySearches : null,
-    );
-    const comp = formatDiscoveryCompetition(
-      body && body.competitionLevel != null ? body.competitionLevel : null,
-    );
-    const low = formatDiscoveryBidFromMicros(
-      body && body.lowTopOfPageBidRaw,
-      body && body.currencyCode,
-    );
-    const high = formatDiscoveryBidFromMicros(
-      body && body.highTopOfPageBidRaw,
-      body && body.currencyCode,
-    );
-    let msg =
-      (body && body.alreadyMeasured ? 'Ya estaba medido «' : 'Medido «') +
-      term +
-      '». Vol. búsquedas: ' +
-      vol +
-      ' · Competencia: ' +
-      comp +
-      ' · Bid: ' +
-      low +
-      ' – ' +
-      high;
-    if (body && body.classificationStatus) {
-      msg += ' · ' + String(body.classificationStatus);
-    }
-    return msg;
   }
 
   async function measureSuggestedTermNow(btn, visibleSuggestions) {
@@ -5583,8 +5574,19 @@ init();
         hiddenMeasuredSuggestionKeys.add(suggestionMeasureKey(term));
         cpcMeasureFeedback = {
           isError: false,
-          text: formatMeasuredSuggestionStatus(body),
+          text: 'Medido «' + term + '» — buscalo en Pendientes',
         };
+        try {
+          await refreshPendingSuggestionsPreserveUi();
+        } catch (refreshErr) {
+          cpcMeasureFeedback = {
+            isError: false,
+            text:
+              'Medido «' +
+              term +
+              '» — recargá Pendientes si no aparece en la lista',
+          };
+        }
         rerenderCpcRunAnalysisPanels();
         return;
       }
@@ -6534,6 +6536,7 @@ init();
   const statusEl = document.getElementById('serp-import-status');
   const summaryEl = document.getElementById('serp-import-summary');
   const listEl = document.getElementById('serp-imports-list');
+  const importsToggleBtn = document.getElementById('serp-imports-toggle');
   const detailSection = document.getElementById('serp-ads-detail');
   const adsTableEl = document.getElementById('serp-ads-table');
   const organicTableEl = document.getElementById('serp-organic-table');
@@ -7464,6 +7467,7 @@ init();
     };
     const entry = map[status];
     if (!entry) return '';
+    if (status === 'discarded_high_competition') return '';
     return (
       '<span class="cov-badge cpc-class-badge ' +
       entry[1] +
@@ -7544,6 +7548,7 @@ init();
         const active = q && q.active !== false;
         const id = q && q.id != null ? String(q.id) : '';
         const estimate = id && byId[id] ? byId[id] : null;
+        const alreadyQueued = Boolean(q && q.alreadyQueuedForLanding);
         return (
           '<div>' +
           '<div class="serp-query-row' +
@@ -7568,8 +7573,14 @@ init();
           '</button>' +
           '<button type="button" class="serp-query-queue-btn" data-id="' +
           escapeHtml(id) +
-          '" title="Enviar a Términos descubiertos como candidato a landing">' +
-          'Candidato landing' +
+          '"' +
+          (alreadyQueued ? ' disabled' : '') +
+          ' title="' +
+          (alreadyQueued
+            ? 'Ya enviado a Pendientes'
+            : 'Enviar a Pendientes') +
+          '">' +
+          (alreadyQueued ? 'Ya en Pendientes' : 'Enviar a Pendientes') +
           '</button>' +
           '</div>' +
           renderSerpQueryCpcMeta(estimate) +
@@ -7648,14 +7659,15 @@ init();
     const ok = window.confirm(
       '¿Enviar «' +
         (term || 'esta query') +
-        '» a Términos descubiertos como candidato a landing?\n\nNo modifica la query SERP ni decisiones ya tomadas.',
+        '» a Pendientes?\n\nSe mide con Keyword Planner si todavía no tiene estimate. No modifica la query SERP ni decisiones ya tomadas.',
     );
     if (!ok) return;
 
     const prevLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Enviando…';
-    setQueriesStatus('Enviando a Términos descubiertos…', false);
+    setQueriesStatus('Enviando a Pendientes… esto puede tardar hasta un minuto', false);
+    let queuedOk = false;
     try {
       const res = await fetch(
         API_BASE +
@@ -7674,45 +7686,59 @@ init();
         throw new Error(
           body && body.error
             ? String(body.error)
-            : 'No se pudo enviar a Términos descubiertos.',
+            : 'No se pudo enviar a Pendientes.',
         );
       }
+      queuedOk = true;
       const outcome = body && body.outcome ? String(body.outcome) : '';
+      const measureErr =
+        body && body.measureError && body.measureError.error
+          ? String(body.measureError.error)
+          : '';
       if (outcome === 'created') {
-        setQueriesStatus('Agregado a Términos descubiertos (pendiente)', false);
-        return;
-      }
-      if (outcome === 'already_pending') {
-        const seed =
-          body.sourceSeed != null ? String(body.sourceSeed) : '';
+        if (measureErr) {
+          setQueriesStatus(
+            'Agregado a Pendientes. No se pudo medir: ' + measureErr,
+            true,
+          );
+        } else if (body.alreadyMeasured) {
+          setQueriesStatus('Agregado a Pendientes (ya estaba medido)', false);
+        } else {
+          setQueriesStatus('Agregado a Pendientes', false);
+        }
+      } else if (outcome === 'already_pending') {
+        if (measureErr) {
+          setQueriesStatus(
+            'Ya está pendiente en Pendientes. No se pudo medir: ' + measureErr,
+            true,
+          );
+        } else {
+          setQueriesStatus('Ya está pendiente en Pendientes', false);
+        }
+      } else if (outcome === 'already_processed') {
         setQueriesStatus(
-          seed && seed !== 'serp_monitored_term'
-            ? 'Ya existe como pendiente en Términos descubiertos'
-            : 'Ya está pendiente en Términos descubiertos',
-          false,
-        );
-        return;
-      }
-      if (outcome === 'already_processed') {
-        setQueriesStatus(
-          'Ya existe en Términos descubiertos (decisión: ' +
+          'Ya existe en Pendientes (decisión: ' +
             landingDecisionLabel(body.decision) +
             ')',
           false,
         );
-        return;
+      } else {
+        setQueriesStatus('Listo.', false);
       }
-      setQueriesStatus('Listo.', false);
     } catch (err) {
       setQueriesStatus(
-        err && err.message
-          ? err.message
-          : 'No se pudo enviar a Términos descubiertos.',
+        err && err.message ? err.message : 'No se pudo enviar a Pendientes.',
         true,
       );
     } finally {
-      btn.disabled = false;
-      btn.textContent = prevLabel;
+      if (queuedOk) {
+        btn.disabled = true;
+        btn.textContent = 'Ya en Pendientes';
+        btn.title = 'Ya enviado a Pendientes';
+      } else {
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
     }
   }
 
@@ -8009,6 +8035,25 @@ init();
     }
   }
 
+  function setImportsExpanded(expanded) {
+    const on = Boolean(expanded);
+    if (listEl) {
+      if (on) listEl.removeAttribute('hidden');
+      else listEl.setAttribute('hidden', '');
+    }
+    if (importsToggleBtn) {
+      importsToggleBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+      importsToggleBtn.textContent = on ? 'Ocultar' : 'Mostrar';
+    }
+  }
+
+  if (importsToggleBtn) {
+    importsToggleBtn.addEventListener('click', function () {
+      const open = importsToggleBtn.getAttribute('aria-expanded') === 'true';
+      setImportsExpanded(!open);
+    });
+  }
+
   if (toggleImportBtn) {
     toggleImportBtn.addEventListener('click', () => {
       setFormExpanded(!formExpanded);
@@ -8055,6 +8100,7 @@ init();
   }
 
   setFormExpanded(false);
+  setImportsExpanded(false);
   updateSelectedFilesUi();
   updateSubmitEnabled();
 

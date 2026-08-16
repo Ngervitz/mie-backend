@@ -3237,6 +3237,10 @@
   color: var(--text);
   cursor: pointer;
 }
+#mie-dashboard-app .serp-query-queue-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 
 #mie-dashboard-app .serp-upload-panel {
   margin-bottom: 16px;
@@ -3537,6 +3541,12 @@
 
 #mie-dashboard-app .serp-history-section {
   margin-top: 8px;
+}
+#mie-dashboard-app .serp-history-section .section-title-row {
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .serp-history-section .section-title-row .cov-section-title {
+  margin: 0;
 }
 
 #mie-dashboard-app .serp-entity-presence-section {

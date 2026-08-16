@@ -28,7 +28,10 @@ const {
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
 } = require('../steps/serpMonitoredQueries');
-const { measureSuggestedTerm } = require('../steps/measureSuggestedTerm');
+const {
+  measureSuggestedTerm,
+  SERP_MONITORED_TERM_SEED,
+} = require('../steps/measureSuggestedTerm');
 const {
   enrichNewlyCreatedSerpQuery,
 } = require('../steps/serpQueryOnCreateEnrichment');
@@ -2321,13 +2324,47 @@ router.post('/serp-queries', async (req, res) => {
 
 /**
  * POST /reports/serp-queries/:id/queue-for-landing
- * Insert query_text into confirmed_search_terms as pending (insert-only).
+ * Insert query_text into confirmed_search_terms as pending (insert-only),
+ * then measure via Keyword Planner unless the term is already_processed.
  */
 router.post('/serp-queries/:id/queue-for-landing', async (req, res) => {
   try {
     const result = await queueSerpQueryForLanding(req.params.id);
+    let measured = null;
+    let measureError = null;
+    if (result.outcome === 'created' || result.outcome === 'already_pending') {
+      try {
+        measured = await measureSuggestedTerm({
+          term: result.term,
+          seed: SERP_MONITORED_TERM_SEED,
+        });
+      } catch (measureErr) {
+        measureError = {
+          error:
+            measureErr && measureErr.message
+              ? measureErr.message
+              : 'Failed to measure term',
+          code:
+            measureErr && measureErr.code
+              ? measureErr.code
+              : 'MEASURE_FAILED',
+        };
+        logger.error('Reports serp-queries queue-for-landing measure failed', {
+          id: req.params.id,
+          term: result.term,
+          error: measureError.error,
+          code: measureError.code,
+        });
+      }
+    }
     const status = result.outcome === 'created' ? 201 : 200;
-    return res.status(status).json(result);
+    return res.status(status).json({
+      ...result,
+      measured: Boolean(measured && measured.measured),
+      alreadyMeasured: measured ? Boolean(measured.alreadyMeasured) : false,
+      classificationStatus: measured ? measured.classificationStatus : null,
+      measureError,
+    });
   } catch (err) {
     const status = err.statusCode || 500;
     logger.error('Reports serp-queries queue-for-landing failed', {

@@ -58,7 +58,32 @@ async function listSerpMonitoredQueries() {
     throw new Error(`Failed to list serp_monitored_queries: ${error.message}`);
   }
 
-  return { queries: (data || []).map(mapQueryRow) };
+  const queries = (data || []).map(mapQueryRow);
+  const terms = queries
+    .map((q) => (q && q.queryText != null ? String(q.queryText) : ''))
+    .filter(Boolean);
+  const queued = new Set();
+  if (terms.length) {
+    const { data: confirmed, error: confirmedErr } = await supabase
+      .from('confirmed_search_terms')
+      .select('term')
+      .in('term', terms);
+    if (confirmedErr) {
+      throw new Error(
+        `Failed to check confirmed_search_terms for SERP queries: ${confirmedErr.message}`,
+      );
+    }
+    (confirmed || []).forEach((row) => {
+      if (row && row.term != null) queued.add(String(row.term));
+    });
+  }
+
+  return {
+    queries: queries.map((q) => ({
+      ...q,
+      alreadyQueuedForLanding: queued.has(q.queryText),
+    })),
+  };
 }
 
 /** Active catalog rows only (Serper sync job). */

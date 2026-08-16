@@ -325,7 +325,7 @@
       <main class="app" id="mie-market-root"></main>
 
       <div id="serp-import-landing" class="serp-landing mcl-landing hidden" hidden>
-        <header class="mcl-header">
+        <header class="mcl-header" hidden>
           <div class="mcl-header-left">
             <h1 class="mcl-title">Importar búsqueda de Google</h1>
             <p class="mcl-subtitle">
@@ -335,7 +335,7 @@
           </div>
         </header>
 
-        <div class="serp-toolbar">
+        <div class="serp-toolbar" hidden>
           <button type="button" id="serp-toggle-import-btn" class="btn">
             + Nueva importación
           </button>
@@ -407,7 +407,7 @@
           </form>
         </div>
 
-        <div id="serp-import-status" class="mcl-status" aria-live="polite"></div>
+        <div id="serp-import-status" class="mcl-status" aria-live="polite" hidden></div>
         <div id="serp-import-summary" class="serp-summary" hidden></div>
 
         <section class="serp-entity-presence-section" id="serp-entity-presence-section">
@@ -492,8 +492,18 @@
         </section>
 
         <section class="serp-history-section">
-          <h2 class="cov-section-title">Importaciones anteriores</h2>
-          <div id="serp-imports-list" class="serp-imports-table-wrap"></div>
+          <div class="section-title-row">
+            <h2 class="cov-section-title">Importaciones anteriores</h2>
+            <button
+              type="button"
+              id="serp-imports-toggle"
+              class="btn btn-secondary"
+              aria-expanded="false"
+              aria-controls="serp-imports-list">
+              Mostrar
+            </button>
+          </div>
+          <div id="serp-imports-list" class="serp-imports-table-wrap" hidden></div>
         </section>
 
         <section class="serp-presence-section">
