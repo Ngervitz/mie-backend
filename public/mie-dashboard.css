@@ -2753,6 +2753,19 @@
   font-size: 13px;
 }
 
+#mie-dashboard-app .cov-wizard-term {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .cov-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 #mie-dashboard-app .cov-empty {
   padding: 20px;
   background: var(--surface);

@@ -889,6 +889,15 @@ function slugifyEntityName(name) {
     .replace(/^-|-$/g, '');
 }
 
+const ENTITY_SEGMENT_OPTIONS = [
+  { value: 'prestamos', label: 'Préstamos' },
+  { value: 'cooperativa', label: 'Cooperativa' },
+  { value: 'deuda', label: 'Deuda' },
+  { value: 'billetera_digital', label: 'Billetera digital' },
+  { value: 'tarjeta_de_credito', label: 'Tarjeta de crédito' },
+  { value: 'comparador_marketplace', label: 'Comparador/Marketplace' },
+];
+
 function looksLikeUrl(value) {
   const s = String(value || '').trim();
   if (!s) return false;
@@ -946,6 +955,136 @@ function closeAddEntityModal() {
   render();
 }
 
+function normalizeWebsiteDomainInput(raw) {
+  const websiteDomainRaw = String(raw || '').trim();
+  if (!websiteDomainRaw) return { ok: true, domain: null };
+  let candidate = websiteDomainRaw.toLowerCase();
+  if (!/^https?:\/\//i.test(candidate)) candidate = 'https://' + candidate;
+  try {
+    let host = new URL(candidate).hostname;
+    if (host.startsWith('www.')) host = host.slice(4);
+    if (!host || !host.includes('.')) {
+      return {
+        ok: false,
+        error: 'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).',
+      };
+    }
+    return { ok: true, domain: host };
+  } catch {
+    return {
+      ok: false,
+      error: 'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).',
+    };
+  }
+}
+
+function termLooksLikeHostname(term) {
+  const raw = String(term || '').trim();
+  if (!raw || /\s/.test(raw)) return false;
+  const normalized = normalizeWebsiteDomainInput(raw);
+  return Boolean(normalized.ok && normalized.domain);
+}
+
+function hostnamePrefillFromTerm(term) {
+  if (!termLooksLikeHostname(term)) return '';
+  const normalized = normalizeWebsiteDomainInput(term);
+  return normalized.ok && normalized.domain ? normalized.domain : '';
+}
+
+function validateMonitoredEntityFields({
+  name: nameRaw,
+  segment: segmentRaw,
+  adLibraryUrl: adLibraryUrlRaw,
+  websiteDomain: websiteDomainRaw,
+} = {}) {
+  const name = String(nameRaw || '').trim();
+  const segment = String(segmentRaw || '').trim();
+  const adLibraryUrl = String(adLibraryUrlRaw || '').trim();
+  if (!name || !segment || !adLibraryUrl) {
+    return {
+      ok: false,
+      error: 'Completá nombre, categoría y URL de Ad Library.',
+    };
+  }
+  if (!looksLikeUrl(adLibraryUrl)) {
+    return {
+      ok: false,
+      error: 'La URL de Ad Library no parece válida (usá http:// o https://).',
+    };
+  }
+  const slug = slugifyEntityName(name);
+  if (!slug) {
+    return {
+      ok: false,
+      error: 'No se pudo generar un slug válido a partir del nombre.',
+    };
+  }
+  const domain = normalizeWebsiteDomainInput(websiteDomainRaw);
+  if (!domain.ok) return { ok: false, error: domain.error };
+  return {
+    ok: true,
+    error: null,
+    name,
+    segment,
+    adLibraryUrl,
+    slug,
+    websiteDomain: domain.domain,
+  };
+}
+
+/**
+ * Shared create for "+ Agregar" and Pendientes "Monitorear competidor".
+ * @returns {Promise<{ id: string, name?: string, slug?: string }>}
+ */
+async function createMonitoredEntity({
+  name,
+  segment,
+  adLibraryUrl,
+  websiteDomain,
+} = {}) {
+  const checked = validateMonitoredEntityFields({
+    name,
+    segment,
+    adLibraryUrl,
+    websiteDomain,
+  });
+  if (!checked.ok) {
+    throw new Error(checked.error);
+  }
+  const payload = {
+    name: checked.name,
+    slug: checked.slug,
+    entity_type: 'marca',
+    segment: checked.segment,
+    sector: 'financiero',
+    ad_library_url: checked.adLibraryUrl,
+    is_self: false,
+    active: true,
+  };
+  if (checked.websiteDomain) payload.website_domain = checked.websiteDomain;
+
+  let rows;
+  try {
+    rows = await supabaseRestPost('monitored_entities', payload);
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : '');
+    const isSlugUniqueConflict =
+      /HTTP\s*409/.test(msg) && /23505/.test(msg) && /slug/i.test(msg);
+    throw new Error(
+      isSlugUniqueConflict
+        ? 'Ya existe una entidad con ese nombre'
+        : 'No se pudo crear la entidad. Intentá de nuevo o revisá los datos.',
+    );
+  }
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row || row.id == null) {
+    throw new Error('No se pudo crear la entidad');
+  }
+  return row;
+}
+
+window.__mieCreateMonitoredEntity = createMonitoredEntity;
+
 async function toggleEntityActive() {
   const entity = findGaugeEntity(state.entityModal.entityId);
   if (!entity || state.entityModal.busy) return;
@@ -979,50 +1118,16 @@ async function toggleEntityActive() {
 async function submitAddEntity() {
   if (state.addEntityModal.busy) return;
 
-  const name = String(state.addEntityModal.name || '').trim();
-  const segment = String(state.addEntityModal.segment || '').trim();
-  const adLibraryUrl = String(state.addEntityModal.adLibraryUrl || '').trim();
-  const websiteDomainRaw = String(state.addEntityModal.websiteDomain || '').trim();
-
-  if (!name || !segment || !adLibraryUrl) {
-    state.addEntityModal.error = 'Completá nombre, categoría y URL de Ad Library.';
+  const checked = validateMonitoredEntityFields({
+    name: state.addEntityModal.name,
+    segment: state.addEntityModal.segment,
+    adLibraryUrl: state.addEntityModal.adLibraryUrl,
+    websiteDomain: state.addEntityModal.websiteDomain,
+  });
+  if (!checked.ok) {
+    state.addEntityModal.error = checked.error;
     render();
     return;
-  }
-  if (!looksLikeUrl(adLibraryUrl)) {
-    state.addEntityModal.error = 'La URL de Ad Library no parece válida (usá http:// o https://).';
-    render();
-    return;
-  }
-
-  const slug = slugifyEntityName(name);
-  if (!slug) {
-    state.addEntityModal.error = 'No se pudo generar un slug válido a partir del nombre.';
-    render();
-    return;
-  }
-
-  // Optional: normalize hostname (strip protocol/www) for exact SERP matching.
-  let websiteDomain = null;
-  if (websiteDomainRaw) {
-    let candidate = websiteDomainRaw.toLowerCase();
-    if (!/^https?:\/\//i.test(candidate)) candidate = 'https://' + candidate;
-    try {
-      let host = new URL(candidate).hostname;
-      if (host.startsWith('www.')) host = host.slice(4);
-      websiteDomain = host || null;
-    } catch (err) {
-      state.addEntityModal.error =
-        'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).';
-      render();
-      return;
-    }
-    if (!websiteDomain || !websiteDomain.includes('.')) {
-      state.addEntityModal.error =
-        'Dominio web no válido. Usá algo como alprestamo.uy (sin ruta).';
-      render();
-      return;
-    }
   }
 
   state.addEntityModal.busy = true;
@@ -1030,24 +1135,18 @@ async function submitAddEntity() {
   render();
 
   try {
-    const payload = {
-      name,
-      slug,
-      entity_type: 'marca',
-      segment,
-      sector: 'financiero',
-      ad_library_url: adLibraryUrl,
-      is_self: false,
-      active: true,
-    };
-    if (websiteDomain) payload.website_domain = websiteDomain;
-
-    await supabaseRestPost('monitored_entities', payload);
+    await createMonitoredEntity({
+      name: checked.name,
+      segment: checked.segment,
+      adLibraryUrl: checked.adLibraryUrl,
+      websiteDomain: checked.websiteDomain,
+    });
     closeAddEntityModal();
     await loadIntensityGauges(state.selectedDate);
   } catch (err) {
     state.addEntityModal.busy = false;
-    state.addEntityModal.error = err && err.message ? err.message : 'No se pudo crear la entidad';
+    state.addEntityModal.error =
+      err && err.message ? err.message : 'No se pudo crear la entidad';
     render();
   }
 }
@@ -1132,14 +1231,7 @@ function renderAddEntityModal() {
   const errorHtml = m.error
     ? `<div class="ad-modal-error">${escapeHtml(m.error)}</div>`
     : '';
-  const segmentOptions = [
-    { value: 'prestamos', label: 'Préstamos' },
-    { value: 'cooperativa', label: 'Cooperativa' },
-    { value: 'deuda', label: 'Deuda' },
-    { value: 'billetera_digital', label: 'Billetera digital' },
-    { value: 'tarjeta_de_credito', label: 'Tarjeta de crédito' },
-    { value: 'comparador_marketplace', label: 'Comparador/Marketplace' },
-  ].map((opt) => {
+  const segmentOptions = ENTITY_SEGMENT_OPTIONS.map((opt) => {
     const selected = opt.value === m.segment ? ' selected' : '';
     return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
   }).join('');
@@ -4688,6 +4780,7 @@ init();
     applying: false,
     pollTimer: null,
     pollAttempts: 0,
+    cancelWizard: null,
     /** sync_run_id of the Comparativo analysis currently shown (or null). */
     analysisSyncRunId: null,
     /**
@@ -5881,64 +5974,326 @@ init();
     covState.pollTimer = setTimeout(poll, 5000);
   }
 
+  function coveredEntityId(suggestion) {
+    if (!suggestion || !suggestion.alreadyCovered) return null;
+    const id = suggestion.coveredByEntity && suggestion.coveredByEntity.id;
+    return id ? String(id) : null;
+  }
+
+  function decideTermType(term, suggestion) {
+    if (suggestion && suggestion.termType === 'competitor_candidate') {
+      return 'competitor_candidate';
+    }
+    if (suggestion && suggestKind(term).cls === 'is-brand') {
+      return 'competitor_candidate';
+    }
+    return 'generic';
+  }
+
+  function promptCompetitorWizard(terms) {
+    return new Promise((resolve) => {
+      const host = document.getElementById('mie-dashboard-app') || document.body;
+      const previous = document.getElementById('cov-competitor-wizard-root');
+      if (previous && previous.parentNode) previous.parentNode.removeChild(previous);
+
+      const root = document.createElement('div');
+      root.id = 'cov-competitor-wizard-root';
+      host.appendChild(root);
+
+      const draftsByTerm = Object.create(null);
+      let step = 0;
+      let formError = '';
+      let settled = false;
+
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        covState.cancelWizard = null;
+        if (root.parentNode) root.parentNode.removeChild(root);
+        resolve(result);
+      }
+
+      covState.cancelWizard = function cancelWizard() {
+        finish(null);
+      };
+
+      function readForm(form) {
+        const fd = new FormData(form);
+        return {
+          name: String(fd.get('name') || ''),
+          segment: String(fd.get('segment') || ''),
+          adLibraryUrl: String(fd.get('adLibraryUrl') || ''),
+          websiteDomain: String(fd.get('websiteDomain') || ''),
+        };
+      }
+
+      function renderStep() {
+        const term = terms[step];
+        const saved = draftsByTerm[term];
+        const values = saved || {
+          name: term,
+          segment: 'prestamos',
+          adLibraryUrl: '',
+          websiteDomain: hostnamePrefillFromTerm(term),
+        };
+        const total = terms.length;
+        const isLast = step === total - 1;
+        const segmentOptions = ENTITY_SEGMENT_OPTIONS.map((opt) => {
+          const selected = opt.value === values.segment ? ' selected' : '';
+          return (
+            '<option value="' +
+            escapeHtml(opt.value) +
+            '"' +
+            selected +
+            '>' +
+            escapeHtml(opt.label) +
+            '</option>'
+          );
+        }).join('');
+        const errorHtml = formError
+          ? '<div class="ad-modal-error">' + escapeHtml(formError) + '</div>'
+          : '';
+
+        root.innerHTML =
+          '<div class="ad-modal-backdrop" data-action="cov-wizard-cancel" role="presentation">' +
+          '<div class="ad-modal" role="dialog" aria-modal="true" aria-labelledby="cov-wizard-title">' +
+          '<div class="ad-modal-header">' +
+          '<h3 class="ad-modal-title" id="cov-wizard-title">Alta de competidor ' +
+          (step + 1) +
+          ' de ' +
+          total +
+          '</h3>' +
+          '<button type="button" class="ad-modal-close" data-action="cov-wizard-cancel" aria-label="Cancelar">' +
+          '<i class="ti ti-x" aria-hidden="true"></i>' +
+          '</button>' +
+          '</div>' +
+          '<p class="cov-wizard-term">Término: <strong>' +
+          escapeHtml(term) +
+          '</strong></p>' +
+          '<form id="cov-competitor-wizard-form" class="entity-form">' +
+          '<label class="mcl-field entity-form-field" for="cov-wizard-name">' +
+          '<span class="mcl-field-label">Nombre</span>' +
+          '<input class="mcl-input" type="text" name="name" id="cov-wizard-name" value="' +
+          escapeHtml(values.name) +
+          '" required autocomplete="organization" placeholder="Ej. Credifast" />' +
+          '</label>' +
+          '<label class="mcl-field entity-form-field" for="cov-wizard-segment">' +
+          '<span class="mcl-field-label">Categoría</span>' +
+          '<select class="mcl-select" name="segment" id="cov-wizard-segment">' +
+          segmentOptions +
+          '</select>' +
+          '</label>' +
+          '<label class="mcl-field entity-form-field" for="cov-wizard-url">' +
+          '<span class="mcl-field-label">Ad Library URL</span>' +
+          '<input class="mcl-input" type="url" name="adLibraryUrl" id="cov-wizard-url" value="' +
+          escapeHtml(values.adLibraryUrl) +
+          '" required placeholder="https://www.facebook.com/ads/library/..." />' +
+          '</label>' +
+          '<label class="mcl-field entity-form-field" for="cov-wizard-website-domain">' +
+          '<span class="mcl-field-label">Dominio web (opcional, match SERP)</span>' +
+          '<input class="mcl-input" type="text" name="websiteDomain" id="cov-wizard-website-domain" value="' +
+          escapeHtml(values.websiteDomain || '') +
+          '" placeholder="ej. alprestamo.uy" autocomplete="off" />' +
+          '</label>' +
+          errorHtml +
+          '<div class="ad-modal-actions cov-wizard-actions">' +
+          '<button type="button" class="btn" data-action="cov-wizard-cancel">Cancelar</button>' +
+          '<button type="submit" class="btn btn-primary">' +
+          (isLast ? 'Continuar y aplicar' : 'Siguiente') +
+          '</button>' +
+          '</div>' +
+          '</form>' +
+          '</div>' +
+          '</div>';
+
+        const backdrop = root.querySelector('.ad-modal-backdrop');
+        const modal = root.querySelector('.ad-modal');
+        const form = root.querySelector('#cov-competitor-wizard-form');
+        if (!form) return;
+        if (modal) {
+          modal.addEventListener('click', (ev) => ev.stopPropagation());
+        }
+        if (backdrop) {
+          backdrop.addEventListener('click', (ev) => {
+            if (ev.target === backdrop) finish(null);
+          });
+        }
+        root.querySelectorAll('[data-action="cov-wizard-cancel"]').forEach((el) => {
+          if (el === backdrop) return;
+          el.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            finish(null);
+          });
+        });
+        form.addEventListener('submit', (ev) => {
+          ev.preventDefault();
+          const raw = readForm(form);
+          const checked = validateMonitoredEntityFields(raw);
+          if (!checked.ok) {
+            formError = checked.error;
+            draftsByTerm[term] = raw;
+            renderStep();
+            return;
+          }
+          formError = '';
+          draftsByTerm[term] = {
+            name: checked.name,
+            segment: checked.segment,
+            adLibraryUrl: checked.adLibraryUrl,
+            websiteDomain: checked.websiteDomain || '',
+          };
+          if (step + 1 >= total) {
+            finish(draftsByTerm);
+            return;
+          }
+          step += 1;
+          renderStep();
+        });
+
+        const urlInput = form.querySelector('#cov-wizard-url');
+        if (urlInput) urlInput.focus();
+      }
+
+      renderStep();
+    });
+  }
+
+  function resetApplyUi() {
+    covState.applying = false;
+    applyBtn.textContent = 'Aplicar decisiones';
+    applyBtn.disabled = !Object.keys(covState.decisions).length;
+  }
+
   async function applyDecisions() {
     const entries = Object.entries(covState.decisions);
     if (!entries.length || covState.applying) return;
 
+    const needWizard = entries
+      .filter(([, decision]) => decision === 'added_as_competitor')
+      .map(([term]) => term)
+      .filter((term) => {
+        const suggestion = covState.suggestions.find((s) => s.term === term);
+        return !coveredEntityId(suggestion);
+      });
+
     covState.applying = true;
     applyBtn.disabled = true;
-    applyBtn.textContent = 'Aplicando…';
+    applyBtn.textContent = needWizard.length ? 'Alta de competidores…' : 'Aplicando…';
     feedbackEl.textContent = '';
     renderSuggestions();
 
-    let ok = 0;
-    let failed = 0;
-    let landingsStarted = 0;
+    try {
+      let draftsByTerm = Object.create(null);
+      if (needWizard.length) {
+        const drafts = await promptCompetitorWizard(needWizard);
+        if (!drafts) {
+          feedbackEl.textContent =
+            'No se aplicó ninguna decisión (alta de competidores cancelada).';
+          return;
+        }
+        draftsByTerm = drafts;
+      }
 
-    for (const [term, decision] of entries) {
-      const suggestion = covState.suggestions.find((s) => s.term === term);
-      try {
-        const res = await fetch(`${API_BASE}/reports/coverage-suggestions/decide`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
+      applyBtn.textContent = 'Aplicando…';
+
+      let ok = 0;
+      let failed = 0;
+      let createdCount = 0;
+      let landingsStarted = 0;
+      const extraNotes = [];
+
+      for (const [term, decision] of entries) {
+        const suggestion = covState.suggestions.find((s) => s.term === term);
+        let entityId = null;
+        let createdThis = false;
+
+        if (decision === 'added_as_competitor') {
+          entityId = coveredEntityId(suggestion);
+          if (!entityId) {
+            const draft = draftsByTerm[term];
+            if (!draft) {
+              failed += 1;
+              extraNotes.push('«' + term + '» sin datos de alta');
+              continue;
+            }
+            try {
+              const row = await createMonitoredEntity(draft);
+              entityId = row && row.id != null ? String(row.id) : '';
+              if (!entityId) throw new Error('Sin id de entidad');
+              createdThis = true;
+              createdCount += 1;
+            } catch (err) {
+              failed += 1;
+              extraNotes.push(
+                '«' +
+                  term +
+                  '» no se creó el competidor' +
+                  (err && err.message ? ': ' + err.message : ''),
+              );
+              continue;
+            }
+          }
+        }
+
+        try {
+          const payload = {
             term,
             decision,
-            termType:
-              suggestion && suggestion.termType === 'competitor_candidate'
-                ? 'competitor_candidate'
-                : suggestion && suggestKind(term).cls === 'is-brand'
-                  ? 'competitor_candidate'
-                  : 'generic',
+            termType: decideTermType(term, suggestion),
             sourceSeed:
-              suggestion && suggestion.sourceSeed ? suggestion.sourceSeed : suggestion ? suggestion.seed : null,
+              suggestion && suggestion.sourceSeed
+                ? suggestion.sourceSeed
+                : suggestion
+                  ? suggestion.seed
+                  : null,
             discoveredScore: suggestion ? suggestion.score : null,
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = await res.json();
-        ok += 1;
-        if (body.landingGeneration === 'started') landingsStarted += 1;
-      } catch (err) {
-        failed += 1;
+          };
+          if (entityId) payload.entityId = entityId;
+          const res = await fetch(`${API_BASE}/reports/coverage-suggestions/decide`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const body = await res.json();
+          ok += 1;
+          if (body.landingGeneration === 'started') landingsStarted += 1;
+        } catch (err) {
+          failed += 1;
+          if (createdThis) {
+            extraNotes.push('«' + term + '» creado pero la decisión no se registró');
+          }
+        }
       }
+
+      const parts = [
+        `${ok} decisión(es) registradas`,
+        `${createdCount} competidor(es) creados`,
+        `${failed} fallaron`,
+      ];
+      if (landingsStarted) {
+        parts.push(
+          `${landingsStarted} borrador(es) de landing en generación — aparecerán abajo en "Borradores de landing SEO" en unos segundos`,
+        );
+        schedulePoll();
+      }
+      feedbackEl.textContent = extraNotes.length
+        ? parts.join(' · ') + ' · ' + extraNotes.join('; ')
+        : parts.join(' · ');
+
+      if (createdCount) {
+        try {
+          await loadIntensityGauges(state.selectedDate);
+        } catch (ignore) {
+          /* gauges are independent of the decision batch */
+        }
+      }
+      await loadSuggestions();
+      await loadDrafts();
+    } finally {
+      resetApplyUi();
+      if (covState.suggestions.length) renderSuggestions();
     }
-
-    covState.applying = false;
-    applyBtn.textContent = 'Aplicar decisiones';
-
-    const parts = [`${ok} decisión(es) registradas`];
-    if (failed) parts.push(`${failed} fallaron`);
-    if (landingsStarted) {
-      parts.push(
-        `${landingsStarted} borrador(es) de landing en generación — aparecerán abajo en "Borradores de landing SEO" en unos segundos`,
-      );
-      schedulePoll();
-    }
-    feedbackEl.textContent = parts.join(' · ');
-
-    await loadSuggestions();
-    await loadDrafts();
   }
 
   applyBtn.addEventListener('click', applyDecisions);
@@ -5950,6 +6305,9 @@ init();
       loadDrafts();
     },
     stop: () => {
+      if (typeof covState.cancelWizard === 'function') {
+        covState.cancelWizard();
+      }
       if (covState.pollTimer) {
         clearTimeout(covState.pollTimer);
         covState.pollTimer = null;

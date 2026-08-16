@@ -1491,15 +1491,18 @@ router.get('/coverage-suggestions', async (req, res) => {
 });
 
 const COVERAGE_DECISIONS = new Set(['monitor_trends', 'added_as_competitor', 'discarded']);
+const COVERAGE_ENTITY_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * POST /reports/coverage-suggestions/decide
- * Body: { term, decision, termType?, sourceSeed?, discoveredScore? }
+ * Body: { term, decision, termType?, sourceSeed?, discoveredScore?, entityId? }
  * Records the decision and responds immediately. For decision='monitor_trends'
  * the landing draft generation runs asynchronously (fire-and-forget) AFTER
  * checking no active draft already exists for the term (double-click /
- * HTTP-retry protection). decision='added_as_competitor' does NOT insert
- * into monitored_entities — the existing "+ Agregar" flow handles that.
+ * HTTP-retry protection). Entity creation for added_as_competitor happens on
+ * the client via createMonitoredEntity; optional entityId is stored on the
+ * confirmed_search_terms row (no insert into monitored_entities here).
  */
 router.post('/coverage-suggestions/decide', async (req, res) => {
   const body = req.body || {};
@@ -1522,20 +1525,29 @@ router.post('/coverage-suggestions/decide', async (req, res) => {
     ? Number(body.discoveredScore)
     : null;
 
+  let entityId = null;
+  if (body.entityId != null && String(body.entityId).trim() !== '') {
+    const rawEntityId = String(body.entityId).trim();
+    if (!COVERAGE_ENTITY_ID_RE.test(rawEntityId)) {
+      return res.status(400).json({ error: 'Invalid entityId' });
+    }
+    entityId = rawEntityId;
+  }
+
   try {
+    const upsertRow = {
+      term,
+      term_type: termType,
+      decision,
+      source_seed: sourceSeed,
+      discovered_score: discoveredScore,
+    };
+    if (entityId) upsertRow.entity_id = entityId;
+
     const { data: upserted, error } = await supabase
       .from('confirmed_search_terms')
-      .upsert(
-        {
-          term,
-          term_type: termType,
-          decision,
-          source_seed: sourceSeed,
-          discovered_score: discoveredScore,
-        },
-        { onConflict: 'term' },
-      )
-      .select('id, term, decision')
+      .upsert(upsertRow, { onConflict: 'term' })
+      .select('id, term, decision, entity_id')
       .single();
 
     if (error) {
@@ -1560,11 +1572,17 @@ router.post('/coverage-suggestions/decide', async (req, res) => {
       }
     }
 
-    logger.info('Coverage suggestion decided', { term, decision, landingGeneration });
+    logger.info('Coverage suggestion decided', {
+      term,
+      decision,
+      entityId: upserted.entity_id || null,
+      landingGeneration,
+    });
     return res.json({
       termId: upserted.id,
       term: upserted.term,
       decision: upserted.decision,
+      entityId: upserted.entity_id || null,
       landingGeneration,
     });
   } catch (err) {
