@@ -78,6 +78,49 @@ async function loadDiscoveredTermEstimateKeys() {
   return keys;
 }
 
+const SERP_NORMALIZED_IN_CHUNK = 200;
+
+/**
+ * Bulk lookup: which of `terms` already exist in serp_monitored_queries
+ * under the same normalization as createSerpMonitoredQuery (query_text_normalized).
+ * Chunked `.in(...)`, not N+1.
+ * @param {string[]} terms
+ * @returns {Promise<Set<string>>} normalized keys present in the catalog
+ */
+async function loadExistingSerpNormalizedKeysForTerms(terms) {
+  const unique = [];
+  const seen = new Set();
+  (Array.isArray(terms) ? terms : []).forEach((t) => {
+    const n = normalizeSearchTerm(t);
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    unique.push(n);
+  });
+  const found = new Set();
+  if (!unique.length) return found;
+
+  for (let i = 0; i < unique.length; i += SERP_NORMALIZED_IN_CHUNK) {
+    const chunk = unique.slice(i, i + SERP_NORMALIZED_IN_CHUNK);
+    const { data, error } = await supabase
+      .from('serp_monitored_queries')
+      .select('query_text_normalized')
+      .in('query_text_normalized', chunk);
+    if (error) {
+      throw new Error(
+        `Failed to lookup serp_monitored_queries: ${error.message}`,
+      );
+    }
+    (data || []).forEach((row) => {
+      const n =
+        row && row.query_text_normalized != null
+          ? String(row.query_text_normalized)
+          : '';
+      if (n) found.add(n);
+    });
+  }
+  return found;
+}
+
 async function listSerpMonitoredQueries() {
   const { data, error } = await supabase
     .from('serp_monitored_queries')
@@ -396,4 +439,5 @@ module.exports = {
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
   mapQueryRow,
+  loadExistingSerpNormalizedKeysForTerms,
 };

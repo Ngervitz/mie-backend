@@ -3871,6 +3871,7 @@ init();
 
   function setMarketView(view) {
     const v = view === 'google' || view === 'ml' ? view : 'meta';
+    window.__mieMarketView = v;
     setVisible(marketRoot, v === 'meta');
     setVisible(googleLanding, v === 'google');
     setVisible(mlLanding, v === 'ml');
@@ -4877,7 +4878,13 @@ init();
     };
     const entry = map[status];
     if (!entry) return '';
-    if (status === 'discarded_high_competition') return '';
+    if (
+      status === 'discarded_high_competition' ||
+      status === 'evaluate' ||
+      status === 'discarded_low_volume'
+    ) {
+      return '';
+    }
     return (
       '<span class="cov-badge cpc-class-badge ' +
       entry[1] +
@@ -4892,17 +4899,29 @@ init();
       estimate && estimate.classificationStatus
         ? String(estimate.classificationStatus)
         : '';
-    if (status === 'recommended') return '🟢';
-    if (status === 'evaluate') return '🟡';
-    if (status === 'discarded_high_competition') return '🔴';
-    if (
+    let emoji = '⏩';
+    let unclassified = true;
+    if (status === 'recommended') {
+      emoji = '🟢';
+      unclassified = false;
+    } else if (status === 'evaluate') {
+      emoji = '🟡';
+      unclassified = false;
+    } else if (status === 'discarded_high_competition') {
+      emoji = '🔴';
+      unclassified = false;
+    } else if (
       status === 'low_priority' ||
       status === 'discarded_low_volume' ||
       status === 'insufficient_bid_data'
     ) {
-      return '⚪';
+      emoji = '⚪';
+      unclassified = false;
     }
-    return '💰';
+    const cls = unclassified
+      ? 'cpc-vol-emoji cov-badge cpc-class-badge is-cpc-unclassified'
+      : 'cpc-vol-emoji';
+    return '<span class="' + cls + '">' + emoji + '</span>';
   }
 
   function renderDiscoveryCpcMeta(estimate) {
@@ -5107,7 +5126,7 @@ init();
         : Number(est.avgMonthlySearches).toLocaleString('es-UY') +
           ' búsquedas';
     const parts = [
-      escapeHtml(volumeSearchPrefixEmoji(est) + ' ' + vol),
+      volumeSearchPrefixEmoji(est) + ' ' + escapeHtml(vol),
     ];
     if (!options.omitCompetition) {
       const compRaw = formatDiscoveryCompetition(est.competitionLevel);
@@ -5488,13 +5507,18 @@ init();
             )}">ya monitoreada</span>`
           : '';
         const selected = covState.decisions[s.term] || '';
+        const alreadySerp = Boolean(s.alreadyMonitoredInSerp);
         return `
           <tr>
             <td class="cov-term">
               <div class="cov-term-row">
                 <span class="cov-term-text">${escapeHtml(s.term)}</span>
                 <button type="button" class="btn cov-copy-term-btn" data-cov-idx="${idx}" title="Copiar término">Copiar</button>
-                <button type="button" class="btn cov-copy-term-btn cov-serp-monitor-btn" data-cov-idx="${idx}" title="Agregar a monitoreo SERP">Monitorear SERP</button>
+                <button type="button" class="btn cov-copy-term-btn cov-serp-monitor-btn" data-cov-idx="${idx}"${
+                  alreadySerp ? ' disabled' : ''
+                } title="${alreadySerp ? 'Ya en SERP' : 'Agregar a monitoreo SERP'}">${
+                  alreadySerp ? 'Ya en SERP' : 'Monitorear SERP'
+                }</button>
               </div>
               ${renderDiscoveryCpcMeta(s.cpcEstimate || null)}
             </td>
@@ -5732,10 +5756,15 @@ init();
         return {};
       });
       if (res.status === 201) {
+        suggestion.alreadyMonitoredInSerp = true;
         setCovStatus(formatSerpCreateOutcome(body), false);
+        if (typeof window.__loadSerpQueries === 'function') {
+          window.__loadSerpQueries();
+        }
         return;
       }
       if (res.status === 409 && body && body.code === 'QUERY_DUPLICATE') {
+        suggestion.alreadyMonitoredInSerp = true;
         setCovStatus('Ya se está monitoreando este término en SERP', false);
         return;
       }
@@ -5752,8 +5781,14 @@ init();
         true,
       );
     } finally {
-      btn.disabled = false;
-      btn.textContent = prevLabel;
+      if (suggestion.alreadyMonitoredInSerp) {
+        btn.disabled = true;
+        btn.textContent = 'Ya en SERP';
+        btn.title = 'Ya en SERP';
+      } else {
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
     }
   }
 
@@ -7825,7 +7860,13 @@ init();
     };
     const entry = map[status];
     if (!entry) return '';
-    if (status === 'discarded_high_competition') return '';
+    if (
+      status === 'discarded_high_competition' ||
+      status === 'evaluate' ||
+      status === 'discarded_low_volume'
+    ) {
+      return '';
+    }
     return (
       '<span class="cov-badge cpc-class-badge ' +
       entry[1] +
@@ -7840,17 +7881,29 @@ init();
       estimate && estimate.classificationStatus
         ? String(estimate.classificationStatus)
         : '';
-    if (status === 'recommended') return '🟢';
-    if (status === 'evaluate') return '🟡';
-    if (status === 'discarded_high_competition') return '🔴';
-    if (
+    let emoji = '⏩';
+    let unclassified = true;
+    if (status === 'recommended') {
+      emoji = '🟢';
+      unclassified = false;
+    } else if (status === 'evaluate') {
+      emoji = '🟡';
+      unclassified = false;
+    } else if (status === 'discarded_high_competition') {
+      emoji = '🔴';
+      unclassified = false;
+    } else if (
       status === 'low_priority' ||
       status === 'discarded_low_volume' ||
       status === 'insufficient_bid_data'
     ) {
-      return '⚪';
+      emoji = '⚪';
+      unclassified = false;
     }
-    return '💰';
+    const cls = unclassified
+      ? 'cpc-vol-emoji cov-badge cpc-class-badge is-cpc-unclassified'
+      : 'cpc-vol-emoji';
+    return '<span class="' + cls + '">' + emoji + '</span>';
   }
 
   function renderSerpQueryCpcMeta(estimate) {
@@ -7944,9 +7997,11 @@ init();
           '"' +
           (alreadyMeasured ? ' disabled' : '') +
           ' title="' +
-          (alreadyMeasured ? 'Ya medido' : 'Enviar a Pendientes') +
+          (alreadyMeasured
+            ? 'Ya medido'
+            : 'Envía a Pendientes y mide CPC con Keyword Planner si aún no tiene estimate') +
           '">' +
-          (alreadyMeasured ? 'Ya medido' : 'Enviar a Pendientes') +
+          (alreadyMeasured ? 'Ya medido' : 'Enviar y medir') +
           '</button>' +
           '</div>' +
           renderSerpQueryCpcMeta(estimate) +
@@ -8181,7 +8236,8 @@ init();
       } else {
         btn.disabled = false;
         btn.textContent = prevLabel;
-        btn.title = 'Enviar a Pendientes';
+        btn.title =
+          'Envía a Pendientes y mide CPC con Keyword Planner si aún no tiene estimate';
       }
     }
   }
@@ -9166,6 +9222,7 @@ init();
     loadImports();
     loadPresence();
   };
+  window.__loadSerpQueries = loadSerpQueries;
 })();
 /* ----------------------------------------------------------------------------
  * Campañas SMS — Notifyme via GET/POST /sms/*

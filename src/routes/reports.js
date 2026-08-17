@@ -19,6 +19,7 @@ const {
   getGoogleSerpCompetitorPresence,
   getGoogleSerpEntityPresence,
   normalizeDomain,
+  normalizeSearchTerm,
 } = require('../steps/collectGoogleSerpImports');
 const { importGoogleSerpJson } = require('../steps/collectGoogleSerpJsonImports');
 const {
@@ -28,6 +29,7 @@ const {
   createSerpMonitoredQuery,
   patchSerpMonitoredQuery,
   queueSerpQueryForLanding,
+  loadExistingSerpNormalizedKeysForTerms,
 } = require('../steps/serpMonitoredQueries');
 const {
   measureSuggestedTerm,
@@ -1388,6 +1390,24 @@ async function loadSearchDiscoveries() {
       cpcEstimate: cpcByTerm.get(lower) || null,
     });
   }
+
+  let serpMonitoredKeys = new Set();
+  try {
+    serpMonitoredKeys = await loadExistingSerpNormalizedKeysForTerms(
+      items.map((i) => i.term),
+    );
+  } catch (serpLookupErr) {
+    logger.warn('serp_monitored_queries lookup unavailable for discoveries', {
+      error:
+        serpLookupErr && serpLookupErr.message
+          ? serpLookupErr.message
+          : 'unknown',
+    });
+  }
+  items.forEach((item) => {
+    const n = normalizeSearchTerm(item && item.term);
+    item.alreadyMonitoredInSerp = Boolean(n && serpMonitoredKeys.has(n));
+  });
 
   return { items, seeds: Array.from(seeds).sort() };
 }

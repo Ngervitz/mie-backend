@@ -1409,6 +1409,14 @@
           window.__leaveDiscoveries();
         }
         if (name === 'discoveries' && window.__openDiscoveries) window.__openDiscoveries();
+        if (name === 'market') {
+          if (
+            window.__mieMarketView === 'google' &&
+            typeof window.__openGoogleSerp === 'function'
+          ) {
+            window.__openGoogleSerp();
+          }
+        }
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
         if (name === 'cz-funnel' && window.__openCzFunnel) window.__openCzFunnel();
         if (name === 'sms' && window.__openSms) window.__openSms();
