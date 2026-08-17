@@ -5079,7 +5079,7 @@ init();
     if (field === 'vol') {
       const vol = formatDiscoveryAvgSearches(est.avgMonthlySearches);
       const text = vol === '—' ? 'Sin dato' : vol;
-      return volumeSearchPrefixEmoji(est) + ' ' + text;
+      return volumeSearchPrefixEmoji(est) + ' ' + escapeHtml(text);
     }
     if (field === 'comp') {
       // Already escaped HTML (may include tone span) — callers must not escapeHtml.
@@ -5301,9 +5301,9 @@ init();
       '</th></tr></thead>' +
       '<tbody>' +
       '<tr><td class="text-muted">Volumen</td><td class="ga4-num">' +
-      escapeHtml(renderComparisonMetricCell(estA, 'vol')) +
+      renderComparisonMetricCell(estA, 'vol') +
       '</td><td class="ga4-num">' +
-      escapeHtml(renderComparisonMetricCell(estB, 'vol')) +
+      renderComparisonMetricCell(estB, 'vol') +
       '</td></tr>' +
       '<tr><td class="text-muted">Competencia</td><td>' +
       renderComparisonMetricCell(estA, 'comp') +
