@@ -105,7 +105,12 @@ function logExecution({
   errorMessage,
   fromCache,
   forcedByMemory,
+  toolArgs,
 }) {
+  const args =
+    toolArgs && typeof toolArgs === 'object' && !Array.isArray(toolArgs)
+      ? { ...toolArgs }
+      : {};
   return {
     tool_name: toolName,
     status,
@@ -115,6 +120,7 @@ function logExecution({
     error_message: errorMessage || null,
     from_cache: Boolean(fromCache),
     forced_by_memory: Boolean(forcedByMemory),
+    tool_args: args,
   };
 }
 
@@ -282,6 +288,7 @@ async function runAssistTurn(opts) {
             : null,
         fromCache: false,
         forcedByMemory,
+        toolArgs: args,
       }),
     );
     return { envelope, retried, fromCache: false };

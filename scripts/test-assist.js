@@ -362,6 +362,7 @@ async function testEngineLoopAndLog() {
   assert.strictEqual(log.status, 'success');
   assert.strictEqual(log.retried, false);
   assert.strictEqual(log.error_message, null);
+  assert.deepStrictEqual(log.tool_args, {});
   assert.ok(log.started_at);
   assert.ok(log.finished_at);
 }
@@ -777,6 +778,9 @@ async function testMemoryForcedUsesIndexedEntityNotSnapshotArgs() {
   assert.strictEqual(result.toolExecutionsUsed, 1);
   assert.strictEqual(result.toolRoundsUsed, 0);
   assert.strictEqual(result.toolExecutions[0].forced_by_memory, true);
+  assert.deepStrictEqual(result.toolExecutions[0].tool_args, {
+    entity: 'Pass Card',
+  });
 
   const first = captured[0];
   assert.ok(first.tools.length > 0);
