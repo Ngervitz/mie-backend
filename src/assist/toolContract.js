@@ -13,18 +13,24 @@ const STATUSES = Object.freeze([
  * @param {string} sourceTable
  * @param {string} [checkedAt]
  */
-function meta(sourceTable, checkedAt) {
-  return {
+function meta(sourceTable, extras) {
+  const out = {
     source_table: sourceTable,
-    checked_at: checkedAt || new Date().toISOString(),
+    checked_at: (extras && extras.checked_at) || new Date().toISOString(),
   };
+  if (extras && extras.truncated === true) {
+    out.truncated = true;
+    out.total_available =
+      extras.total_available != null ? Number(extras.total_available) : 0;
+  }
+  return out;
 }
 
 function success(data, sourceTable, extras) {
   return {
     status: 'success',
     data,
-    meta: meta(sourceTable, extras && extras.checked_at),
+    meta: meta(sourceTable, extras),
   };
 }
 
@@ -32,7 +38,7 @@ function empty(sourceTable, extras) {
   return {
     status: 'empty',
     data: null,
-    meta: meta(sourceTable, extras && extras.checked_at),
+    meta: meta(sourceTable, extras),
   };
 }
 
@@ -41,7 +47,7 @@ function error(errorMessage, sourceTable, extras) {
     status: 'error',
     data: null,
     error_message: String(errorMessage || 'Unknown error'),
-    meta: meta(sourceTable, extras && extras.checked_at),
+    meta: meta(sourceTable, extras),
   };
 }
 
@@ -52,7 +58,7 @@ function notImplemented(errorMessage, sourceTable, extras) {
     error_message: String(
       errorMessage || 'This capability is not implemented',
     ),
-    meta: meta(sourceTable, extras && extras.checked_at),
+    meta: meta(sourceTable, extras),
   };
 }
 

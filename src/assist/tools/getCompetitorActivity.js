@@ -13,17 +13,24 @@ const {
 
 const SOURCE_TABLE = 'events';
 const PAGE_SIZE = 1000;
+const UNFILTERED_TOP_N = 30;
 
 const TOOL_DEFINITION = Object.freeze({
   name: 'get_competitor_activity',
   description:
     'Actividad de competidores (anuncios nuevos) en las dos últimas semanas civiles completas (lun–dom, America/Montevideo). ' +
-    'status success con ceros = entidades elegibles observadas, sin new_ad en esas semanas. ' +
-    'status empty = no hay competidores activos elegibles. ' +
-    'status error = no se pudo consultar; no implica ausencia de actividad.',
+    'status success con ceros es observación real. status empty = no hay competidores activos elegibles. ' +
+    'Parámetro opcional entity: nombre exacto de monitored_entities (prioridad absoluta, no se recorta). ' +
+    'Sin entity: top 30 por |this_week - prior_week|; meta.truncated si hay más.',
   input_schema: {
     type: 'object',
-    properties: {},
+    properties: {
+      entity: {
+        type: 'string',
+        description:
+          'Nombre exacto del competidor (monitored_entities.name). Si se envía, no se aplica el recorte top 30.',
+      },
+    },
     additionalProperties: false,
   },
 });
@@ -132,20 +139,61 @@ async function queryCompetitorActivity(client, now) {
     }
   }
 
-  const rows = Array.from(byName.entries())
-    .map(([name, counts]) => ({
-      name,
-      new_ads_this_week: counts.new_ads_this_week,
-      new_ads_prior_week: counts.new_ads_prior_week,
-    }))
-    .sort((a, b) => {
-      if (b.new_ads_this_week !== a.new_ads_this_week) {
-        return b.new_ads_this_week - a.new_ads_this_week;
-      }
-      return a.name.localeCompare(b.name, 'es');
-    });
+  const rows = Array.from(byName.entries()).map(([name, counts]) => ({
+    name,
+    new_ads_this_week: counts.new_ads_this_week,
+    new_ads_prior_week: counts.new_ads_prior_week,
+  }));
 
   return { kind: 'rows', rows };
+}
+
+function changeMagnitude(row) {
+  return Math.abs(
+    Number(row.new_ads_this_week || 0) - Number(row.new_ads_prior_week || 0),
+  );
+}
+
+function sortUnfiltered(rows) {
+  return rows.slice().sort((a, b) => {
+    const da = changeMagnitude(a);
+    const db = changeMagnitude(b);
+    if (db !== da) return db - da;
+    if (b.new_ads_this_week !== a.new_ads_this_week) {
+      return b.new_ads_this_week - a.new_ads_this_week;
+    }
+    return a.name.localeCompare(b.name, 'es');
+  });
+}
+
+/**
+ * entity filter has absolute priority (never truncated).
+ * Unfiltered: top 30 by |Δ| DESC, this_week DESC, name ASC.
+ */
+function applyActivityPayload(rows, input) {
+  const list = Array.isArray(rows) ? rows : [];
+  const entity =
+    input && typeof input.entity === 'string' ? input.entity.trim() : '';
+  if (entity) {
+    return {
+      rows: list.filter((r) => r && r.name === entity),
+      truncated: false,
+      total_available: list.length,
+    };
+  }
+  const sorted = sortUnfiltered(list);
+  if (sorted.length > UNFILTERED_TOP_N) {
+    return {
+      rows: sorted.slice(0, UNFILTERED_TOP_N),
+      truncated: true,
+      total_available: sorted.length,
+    };
+  }
+  return {
+    rows: sorted,
+    truncated: false,
+    total_available: sorted.length,
+  };
 }
 
 /**
@@ -160,7 +208,7 @@ function isForceToolErrorEnabled(deps) {
   return Boolean(deps && deps.forceToolError === true);
 }
 
-async function getCompetitorActivity(_input, deps) {
+async function getCompetitorActivity(input, deps) {
   const client =
     deps && deps.supabase ? deps.supabase : getDefaultSupabase();
   const now = deps && deps.now ? deps.now : new Date();
@@ -178,7 +226,11 @@ async function getCompetitorActivity(_input, deps) {
     if (value.kind === 'empty') {
       return empty(SOURCE_TABLE);
     }
-    return success(value.rows, SOURCE_TABLE);
+    const payload = applyActivityPayload(value.rows, input || {});
+    return success(payload.rows, SOURCE_TABLE, {
+      truncated: payload.truncated,
+      total_available: payload.total_available,
+    });
   } catch (err) {
     return error(
       err && err.message ? err.message : 'Failed to query competitor activity',
@@ -190,7 +242,9 @@ async function getCompetitorActivity(_input, deps) {
 module.exports = {
   TOOL_DEFINITION,
   SOURCE_TABLE,
+  UNFILTERED_TOP_N,
   weekBounds,
   queryCompetitorActivity,
+  applyActivityPayload,
   getCompetitorActivity,
 };

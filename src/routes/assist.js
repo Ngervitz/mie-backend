@@ -10,8 +10,9 @@ const router = express.Router();
 
 /**
  * POST /assist/chat
- * Body: { message, conversationHistory?, debug? }
+ * Body: { message, conversationHistory?, debug?, conversationId?, forceToolError? }
  * No conversation persistence. History is client-supplied.
+ * conversationId is a session UUID for logs/memories only — not a chat thread.
  */
 router.post('/chat', async (req, res) => {
   const cfg = resolveAssistAnthropicConfig();
@@ -42,15 +43,21 @@ router.post('/chat', async (req, res) => {
     const result = await runAssistTurn({
       message,
       conversationHistory,
+      conversationId: body.conversationId,
       forceToolError,
     });
     const payload = {
       reply: result.reply,
       stopReason: result.stopReason,
+      conversationId: result.conversationId,
     };
     if (debug) {
       payload.toolExecutions = result.toolExecutions;
       payload.rounds = result.rounds;
+      payload.toolRoundsUsed = result.toolRoundsUsed;
+      payload.toolExecutionsUsed = result.toolExecutionsUsed;
+      payload.budgetEvents = result.budgetEvents;
+      payload.turnNumber = result.turnNumber;
     }
     return res.status(200).json(payload);
   } catch (err) {
