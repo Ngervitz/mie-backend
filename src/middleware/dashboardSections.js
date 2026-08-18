@@ -46,6 +46,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/competitor-activity-predictions',
     '/market-patterns',
     '/ml-notes',
+    '/assist',
     '/jobs/run-sync',
     '/jobs/status',
     '/jobs/run-activity',
@@ -126,6 +127,7 @@ const SECTION_MOUNT_PREFIXES = Object.freeze({
     '/competitor-activity-predictions',
     '/market-patterns',
     '/ml-notes',
+    '/assist',
   ]),
   meta: Object.freeze(['/api/liquidity-cycle', '/api/bcu-usura-rate']),
 });

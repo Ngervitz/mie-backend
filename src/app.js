@@ -9,6 +9,7 @@ const bcuUsuraRateRouter = require('./routes/bcu-usura-rate');
 const competitorActivityPredictionsRouter = require('./routes/competitor-activity-predictions');
 const marketPatternsRouter = require('./routes/market-patterns');
 const mlNotesRouter = require('./routes/ml-notes');
+const assistRouter = require('./routes/assist');
 const authRouter = require('./routes/auth');
 const { meHandler } = require('./routes/auth');
 const { requireAuth } = require('./middleware/auth');
@@ -69,6 +70,7 @@ app.use(
   marketPatternsRouter,
 );
 app.use('/ml-notes', requireDashboardPermission('market'), mlNotesRouter);
+app.use('/assist', requireDashboardPermission('market'), assistRouter);
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error', { error: err.message });
