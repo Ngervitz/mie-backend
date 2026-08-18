@@ -4,6 +4,7 @@ const express = require('express');
 const logger = require('../lib/logger');
 const { runAssistTurn } = require('../assist/engine');
 const { resolveAssistAnthropicConfig } = require('../assist/anthropicClient');
+const { isValidCronKey } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -26,11 +27,10 @@ router.post('/chat', async (req, res) => {
     ? body.conversationHistory
     : [];
   const debug = body.debug === true;
+  // Harness-only: cron key + debug + forceToolError. Session dashboard users
+  // cannot trigger this even if they send the body field.
   const forceToolError =
-    debug === true &&
-    body.forceToolError === true &&
-    String(process.env.ASSIST_ALLOW_FORCE_TOOL_ERROR || '').toLowerCase() ===
-      'true';
+    debug === true && body.forceToolError === true && isValidCronKey(req);
 
   logger.info('POST /assist/chat', {
     historyItems: conversationHistory.length,

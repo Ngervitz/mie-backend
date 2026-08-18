@@ -167,10 +167,7 @@ async function getCompetitorActivity(_input, deps) {
   const onRetry = deps && deps.onRetry;
 
   if (isForceToolErrorEnabled(deps)) {
-    return error(
-      'Forced tool error (ASSIST_ALLOW_FORCE_TOOL_ERROR)',
-      SOURCE_TABLE,
-    );
+    return error('Forced tool error (debug harness)', SOURCE_TABLE);
   }
 
   try {
