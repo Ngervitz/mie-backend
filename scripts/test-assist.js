@@ -281,6 +281,7 @@ async function testEngineLoopAndLog() {
     const envelope = JSON.parse(block.content);
     assert.strictEqual(envelope.status, 'success');
     assert.strictEqual(envelope.data[0].new_ads_this_week, 0);
+    assert.strictEqual(envelope.retried, false);
     return {
       stop_reason: 'end_turn',
       content: [
@@ -340,6 +341,7 @@ async function testEngineContinuesAfterToolError() {
       messages[messages.length - 1].content[0].content,
     );
     assert.strictEqual(envelope.status, 'error');
+    assert.strictEqual(envelope.retried, false);
     return {
       stop_reason: 'end_turn',
       content: [

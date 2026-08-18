@@ -211,7 +211,10 @@ async function runAssistTurn(opts) {
       toolResults.push({
         type: 'tool_result',
         tool_use_id: block.id,
-        content: JSON.stringify(envelope),
+        content: JSON.stringify({
+          ...envelope,
+          retried: Boolean(retried),
+        }),
       });
     }
 
