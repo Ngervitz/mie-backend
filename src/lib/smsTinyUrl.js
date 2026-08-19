@@ -1,14 +1,16 @@
 'use strict';
 
+const logger = require('./logger');
+
 /**
- * is.gd shortening for SMS campaign links (temporary; TinyURL served ads).
+ * Cleanuri shortening for SMS campaign links.
  * Preview uses a fixed UTM campaign UUID and an in-process cache keyed by
- * trimmed destination_url so the same preview destination never hits is.gd twice.
+ * trimmed destination_url so the same preview destination is not shortened twice.
  * Real campaign sends must call shortenWithTinyUrl(finalUrl) with the campaign UUID
  * and must not reuse preview shorts.
  */
 
-const SHORTEN_TIMEOUT_MS = 4000;
+const SHORTEN_TIMEOUT_MS = 10000;
 
 /** Fixed UUID for preview UTM only — never used as a real campaign id. */
 const PREVIEW_UTM_CAMPAIGN_UUID = '00000000-0000-4000-8000-000000000001';
@@ -38,47 +40,64 @@ function composeFinalUrl(destinationUrl, campaignUuid) {
   return url.toString();
 }
 
+function fallback(kind, reason) {
+  logger.warn('SMS shortener fallback', { kind: kind, provider: 'cleanuri' });
+  return { shortUrl: null, reason: reason, kind: kind };
+}
+
 /**
- * Shorten a URL via is.gd public API (format=simple).
- * Returns { shortUrl } on success, or { shortUrl: null, reason } on any failure.
+ * Shorten a URL via Cleanuri (POST form-urlencoded).
+ * Returns { shortUrl, reason, kind } — kind is set on fallback only.
  * Never throws — callers must fall back to the long URL.
  */
 async function shortenWithTinyUrl(longUrl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SHORTEN_TIMEOUT_MS);
   try {
-    const endpoint =
-      'https://is.gd/create.php?format=simple&url=' +
-      encodeURIComponent(longUrl);
+    const endpoint = 'https://cleanuri.com/api/v1/shorten';
     const res = await fetch(endpoint, {
-      method: 'GET',
+      method: 'POST',
       signal: controller.signal,
-      headers: { Accept: 'text/plain' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'url=' + encodeURIComponent(longUrl),
     });
-    const text = String((await res.text()) || '').trim();
+    const raw = String((await res.text()) || '').trim();
+    let parsed = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch (_err) {
+      parsed = null;
+    }
+
     if (!res.ok) {
-      return {
-        shortUrl: null,
-        reason: `is.gd HTTP ${res.status}`,
-      };
+      return fallback('shortener_error', 'cleanuri HTTP ' + String(res.status));
     }
-    if (!text || /^error/i.test(text) || !/^https?:\/\//i.test(text)) {
-      return {
-        shortUrl: null,
-        reason: text
-          ? `is.gd: ${text}`
-          : 'is.gd returned empty or non-URL body',
-      };
+    if (!parsed || typeof parsed !== 'object') {
+      return fallback('shortener_invalid_response', 'cleanuri non-json body');
     }
-    return { shortUrl: text, reason: null };
+    if (parsed.error != null && String(parsed.error).trim() !== '') {
+      return fallback('shortener_error', 'cleanuri error field');
+    }
+    const resultUrl =
+      parsed.result_url != null ? String(parsed.result_url).trim() : '';
+    if (!looksLikeHttpUrl(resultUrl)) {
+      return fallback(
+        'shortener_invalid_response',
+        'cleanuri missing or invalid result_url',
+      );
+    }
+    return { shortUrl: resultUrl, reason: null, kind: null };
   } catch (err) {
-    const reason =
-      err && err.name === 'AbortError'
-        ? `is.gd timeout after ${SHORTEN_TIMEOUT_MS}ms`
-        : err && err.message
-          ? String(err.message)
-          : 'is.gd request failed';
-    return { shortUrl: null, reason };
+    if (err && err.name === 'AbortError') {
+      return fallback(
+        'shortener_timeout',
+        'cleanuri timeout after ' + String(SHORTEN_TIMEOUT_MS) + 'ms',
+      );
+    }
+    return fallback('shortener_error', 'cleanuri request failed');
   } finally {
     clearTimeout(timer);
   }
@@ -102,7 +121,7 @@ function clearPreviewShortCache() {
 
 /**
  * Preview short for a destination URL. Same trimmed destination_url reuses
- * the cached short and does not call is.gd again.
+ * the cached short and does not call the shortener again.
  * Failures are not cached so a later preview can retry.
  *
  * @param {string} destinationUrl
@@ -145,7 +164,7 @@ async function getOrCreatePreviewShortUrl(destinationUrl, options) {
         ? null
         : shortened && shortened.reason
           ? shortened.reason
-          : 'is.gd request failed',
+          : 'shortener request failed',
     };
   }
 
@@ -170,7 +189,7 @@ async function getOrCreatePreviewShortUrl(destinationUrl, options) {
         ? null
         : shortened && shortened.reason
           ? shortened.reason
-          : 'is.gd request failed',
+          : 'shortener request failed',
     };
   } finally {
     previewShortInflight.delete(key);

@@ -9595,7 +9595,7 @@ init();
       return 'Estimación provisional (URL larga; acortando…)';
     }
     if (linkKind === 'long-fallback') {
-      return 'Estimación sobre URL larga (TinyURL no disponible)';
+      return 'Estimación sobre URL larga (Link corto no disponible)';
     }
     return 'Estimación sobre vista previa';
   }

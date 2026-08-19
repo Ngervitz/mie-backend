@@ -487,8 +487,8 @@ router.post('/campaigns', async (req, res) => {
         shortUrl = shortened.shortUrl;
       } else {
         shortUrl = null;
-        logger.warn('is.gd shorten failed; falling back to final_url', {
-          reason: shortened.reason,
+        logger.warn('SMS shortener fallback; using final_url', {
+          kind: shortened.kind || 'shortener_error',
           campaign_id: campaignId,
         });
       }
