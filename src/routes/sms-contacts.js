@@ -182,6 +182,10 @@ function normalizeSourceRecordId(value) {
   return trimmed === '' ? null : trimmed;
 }
 
+function normalizeOptionalText(value) {
+  return normalizeSourceRecordId(value);
+}
+
 async function sendAlertWebhook(payload) {
   if (!ALERT_WEBHOOK_URL) {
     return false;
@@ -246,21 +250,28 @@ async function upsertContactBatch(batch, importBatchId) {
 
   const nowIso = new Date().toISOString();
 
-  // Split so PostgREST never fills omitted source_record_id as null on conflict.
-  const withSource = [];
-  const withoutSource = [];
+  // Split by which optional keys are present so PostgREST never fills omitted
+  // source_record_id / nombre / apellido as null on conflict.
+  const groups = new Map();
   for (const r of deduped) {
-    const base = {
+    const row = {
       phone: r.phone,
-      source_system: 'credizona2_datos',
+      source_system:
+        r.source_system != null ? r.source_system : 'credizona2_datos',
       last_seen_at: nowIso,
       import_batch_id: importBatchId,
     };
-    if (r.source_record_id != null) {
-      withSource.push({ ...base, source_record_id: r.source_record_id });
-    } else {
-      withoutSource.push(base);
-    }
+    if (r.source_record_id != null) row.source_record_id = r.source_record_id;
+    if (r.nombre != null) row.nombre = r.nombre;
+    if (r.apellido != null) row.apellido = r.apellido;
+    const key = [
+      r.source_record_id != null ? 's' : '',
+      r.nombre != null ? 'n' : '',
+      r.apellido != null ? 'a' : '',
+    ].join('');
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(row);
+    else groups.set(key, [row]);
   }
 
   async function runUpsert(rows) {
@@ -273,8 +284,9 @@ async function upsertContactBatch(batch, importBatchId) {
     }
   }
 
-  await runUpsert(withSource);
-  await runUpsert(withoutSource);
+  for (const rows of groups.values()) {
+    await runUpsert(rows);
+  }
 
   let inserted = 0;
   let updated = 0;
@@ -287,7 +299,9 @@ async function upsertContactBatch(batch, importBatchId) {
 
 /**
  * POST /sms/contacts/import
- * multipart field "file" — CSV with header: phone, source_record_id
+ * multipart field "file" — CSV with header: phone (required);
+ * optional: source_record_id, nombre, apellido, source_system.
+ * Missing/blank source_system falls back to credizona2_datos.
  */
 router.post(
   '/contacts/import',
@@ -391,6 +405,9 @@ router.post(
               const source_record_id = normalizeSourceRecordId(
                 record.source_record_id,
               );
+              const nombre = normalizeOptionalText(record.nombre);
+              const apellido = normalizeOptionalText(record.apellido);
+              const source_system = normalizeOptionalText(record.source_system);
 
               rowsReceived += 1;
 
@@ -409,6 +426,9 @@ router.post(
               pending.push({
                 phone,
                 source_record_id,
+                nombre,
+                apellido,
+                source_system,
               });
 
               if (pending.length >= BATCH_SIZE) {
