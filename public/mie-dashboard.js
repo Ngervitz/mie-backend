@@ -9382,7 +9382,7 @@ init();
     destPasteWrap.hidden = list;
     destListWrap.hidden = !list;
     if (list) refreshEligibleCount();
-    updateEncodingHint();
+    schedulePreviewShort();
   }
 
   async function refreshEligibleCount() {
@@ -9471,6 +9471,18 @@ init();
     }
   }
 
+  const PREVIEW_SHORT_DEBOUNCE_MS = 700;
+  const previewShortCache = new Map();
+  const previewShortFailed = new Set();
+  const previewShortInflight = new Map();
+  let previewShortTimer = null;
+  let previewShortPendingKey = null;
+  let lastPreviewFetchKey = null;
+
+  function currentDestinationKey() {
+    return String(destinationUrlInput.value || '').trim();
+  }
+
   function composePreviewUrl(destinationUrl, utmCampaign) {
     const raw = String(destinationUrl || '').trim();
     if (!looksLikeHttpUrl(raw)) return null;
@@ -9493,6 +9505,20 @@ init();
     return body + ' ' + url;
   }
 
+  function encodingHintPrefix(linkKind) {
+    if (linkKind === 'final') return 'Segmentos definitivos';
+    if (linkKind === 'short-preview') {
+      return 'Estimación sobre link acortado de preview (no es el de la campaña)';
+    }
+    if (linkKind === 'shortening') {
+      return 'Estimación provisional (URL larga; acortando…)';
+    }
+    if (linkKind === 'long-fallback') {
+      return 'Estimación sobre URL larga (TinyURL no disponible)';
+    }
+    return 'Estimación sobre vista previa';
+  }
+
   function updateEncodingHint(options) {
     const opts = options || {};
     const phones =
@@ -9505,27 +9531,55 @@ init();
           )
         : parsePhones(phonesInput.value);
     const messageBody = messageInput.value;
-    const destinationRaw = destinationUrlInput.value;
+    const destKey = currentDestinationKey();
     const overrideUrl = opts.finalUrl != null ? String(opts.finalUrl) : null;
     const utmValue =
       opts.utmCampaignValue != null ? String(opts.utmCampaignValue) : 'PENDING';
-    const previewUrl =
-      overrideUrl || composePreviewUrl(destinationRaw, utmValue);
+
+    let previewUrl = null;
+    let linkKind = 'none';
+    if (overrideUrl) {
+      previewUrl = overrideUrl;
+      linkKind = 'final';
+    } else if (previewShortCache.has(destKey)) {
+      previewUrl = previewShortCache.get(destKey);
+      linkKind = 'short-preview';
+    } else if (looksLikeHttpUrl(destKey) && previewShortPendingKey === destKey) {
+      previewUrl = composePreviewUrl(destKey, utmValue);
+      linkKind = 'shortening';
+    } else if (looksLikeHttpUrl(destKey) && previewShortFailed.has(destKey)) {
+      previewUrl = composePreviewUrl(destKey, utmValue);
+      linkKind = 'long-fallback';
+    } else {
+      previewUrl = composePreviewUrl(destKey, utmValue);
+      linkKind = previewUrl ? 'long-preview' : 'none';
+    }
+
     const composed = buildComposedMessage(messageBody, previewUrl || '');
     const est = estimateSmsSegments(composed);
-    const isFinal = Boolean(overrideUrl);
+    const isFinal = linkKind === 'final';
 
     if (composePreviewText) {
       composePreviewText.textContent = composed || '(escribí el mensaje y la URL de destino)';
     }
     if (composePreviewLabel) {
-      composePreviewLabel.textContent = isFinal
-        ? 'Mensaje definitivo enviado (cuerpo + URL final con UTM)'
-        : 'Vista previa del mensaje (cuerpo + URL con utm_campaign=PENDING)';
+      if (isFinal) {
+        composePreviewLabel.textContent =
+          'Mensaje definitivo enviado (cuerpo + URL final con UTM)';
+      } else if (linkKind === 'short-preview') {
+        composePreviewLabel.textContent =
+          'Vista previa (cuerpo + link acortado de preview; no es el link de la campaña)';
+      } else if (linkKind === 'shortening') {
+        composePreviewLabel.textContent =
+          'Vista previa provisional (cuerpo + URL larga; acortando…)';
+      } else {
+        composePreviewLabel.textContent =
+          'Vista previa del mensaje (cuerpo + URL con utm_campaign=PENDING)';
+      }
     }
 
     encodingHint.textContent =
-      (isFinal ? 'Segmentos definitivos' : 'Estimación sobre vista previa') +
+      encodingHintPrefix(linkKind) +
       ': ' +
       est.chars +
       ' caracteres · ' +
@@ -9546,6 +9600,92 @@ init();
       batchWarn.hidden = true;
       batchWarn.textContent = '';
     }
+  }
+
+  async function fetchPreviewShort(key) {
+    if (previewShortCache.has(key)) {
+      if (previewShortPendingKey === key) previewShortPendingKey = null;
+      if (currentDestinationKey() === key) updateEncodingHint();
+      return;
+    }
+    if (previewShortInflight.has(key)) {
+      await previewShortInflight.get(key);
+      if (previewShortPendingKey === key) previewShortPendingKey = null;
+      if (currentDestinationKey() === key) updateEncodingHint();
+      return;
+    }
+    if (lastPreviewFetchKey === key && previewShortFailed.has(key)) {
+      if (previewShortPendingKey === key) previewShortPendingKey = null;
+      if (currentDestinationKey() === key) updateEncodingHint();
+      return;
+    }
+    lastPreviewFetchKey = key;
+    previewShortPendingKey = key;
+    if (currentDestinationKey() === key) updateEncodingHint();
+
+    const pending = (async function () {
+      try {
+        const res = await fetch(API_BASE + '/sms/preview-short-url', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ destination_url: key }),
+        });
+        const body = await readJsonSafe(res);
+        const shortUrl =
+          body && body.short_url != null && String(body.short_url).trim() !== ''
+            ? String(body.short_url).trim()
+            : '';
+        if (shortUrl) {
+          previewShortCache.set(key, shortUrl);
+          previewShortFailed.delete(key);
+        } else {
+          previewShortFailed.add(key);
+        }
+      } catch (_err) {
+        previewShortFailed.add(key);
+      }
+    })();
+
+    previewShortInflight.set(key, pending);
+    try {
+      await pending;
+    } finally {
+      previewShortInflight.delete(key);
+    }
+    if (previewShortPendingKey === key) {
+      previewShortPendingKey = null;
+    }
+    if (currentDestinationKey() === key) {
+      updateEncodingHint();
+    }
+  }
+
+  function schedulePreviewShort() {
+    if (previewShortTimer) {
+      clearTimeout(previewShortTimer);
+      previewShortTimer = null;
+    }
+    const key = currentDestinationKey();
+    if (!looksLikeHttpUrl(key)) {
+      previewShortPendingKey = null;
+      updateEncodingHint();
+      return;
+    }
+    if (previewShortCache.has(key)) {
+      previewShortPendingKey = null;
+      updateEncodingHint();
+      return;
+    }
+    previewShortPendingKey = key;
+    updateEncodingHint();
+    previewShortTimer = setTimeout(function () {
+      previewShortTimer = null;
+      fetchPreviewShort(key);
+    }, PREVIEW_SHORT_DEBOUNCE_MS);
   }
 
   async function readJsonSafe(res) {
@@ -10218,7 +10358,7 @@ init();
 
   messageInput.addEventListener('input', () => updateEncodingHint());
   phonesInput.addEventListener('input', () => updateEncodingHint());
-  destinationUrlInput.addEventListener('input', () => updateEncodingHint());
+  destinationUrlInput.addEventListener('input', () => schedulePreviewShort());
   form.querySelectorAll('input[name="sms-dest-mode"]').forEach(function (el) {
     el.addEventListener('change', syncDestModeUi);
   });

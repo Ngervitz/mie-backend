@@ -27,6 +27,13 @@ const {
   countEligibleContacts,
   listEligibleContacts,
 } = require('../lib/smsCampaignContacts');
+const {
+  PREVIEW_UTM_CAMPAIGN_UUID,
+  looksLikeHttpUrl,
+  composeFinalUrl,
+  shortenWithTinyUrl,
+  getOrCreatePreviewShortUrl,
+} = require('../lib/smsTinyUrl');
 
 const router = express.Router();
 
@@ -193,72 +200,6 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
   };
 }
 
-function looksLikeHttpUrl(raw) {
-  if (typeof raw !== 'string' || !raw.trim()) return false;
-  try {
-    const u = new URL(raw.trim());
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * Preserve existing query params; set/overwrite utm_source, utm_medium, utm_campaign.
- */
-function composeFinalUrl(destinationUrl, campaignUuid) {
-  const url = new URL(String(destinationUrl).trim());
-  url.searchParams.set('utm_source', 'sms');
-  url.searchParams.set('utm_medium', 'sms');
-  url.searchParams.set('utm_campaign', String(campaignUuid));
-  return url.toString();
-}
-
-const TINYURL_TIMEOUT_MS = 4000;
-
-/**
- * Shorten a URL via TinyURL public API.
- * Returns { shortUrl } on success, or { shortUrl: null, reason } on any failure.
- * Never throws — callers must fall back to the long URL.
- */
-async function shortenWithTinyUrl(longUrl) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TINYURL_TIMEOUT_MS);
-  try {
-    const endpoint =
-      'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
-    const res = await fetch(endpoint, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: { Accept: 'text/plain' },
-    });
-    if (!res.ok) {
-      return {
-        shortUrl: null,
-        reason: `TinyURL HTTP ${res.status}`,
-      };
-    }
-    const text = String((await res.text()) || '').trim();
-    if (!text || !/^https?:\/\//i.test(text)) {
-      return {
-        shortUrl: null,
-        reason: 'TinyURL returned empty or non-URL body',
-      };
-    }
-    return { shortUrl: text, reason: null };
-  } catch (err) {
-    const reason =
-      err && err.name === 'AbortError'
-        ? `TinyURL timeout after ${TINYURL_TIMEOUT_MS}ms`
-        : err && err.message
-          ? String(err.message)
-          : 'TinyURL request failed';
-    return { shortUrl: null, reason };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function buildGa4DataClient() {
   const rawJson = process.env.GA4_SERVICE_ACCOUNT_JSON;
   if (!rawJson) {
@@ -308,6 +249,39 @@ router.get('/contacts/eligible', async (req, res) => {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Failed to count eligible contacts' });
+  }
+});
+
+/**
+ * POST /sms/preview-short-url
+ * Shorten destination_url with a fixed preview UTM UUID. Does not create a campaign
+ * and does not affect real send links. Same destination reuses the in-process cache.
+ */
+router.post('/preview-short-url', async (req, res) => {
+  const destinationUrlRaw = req.body && req.body.destination_url;
+  if (!looksLikeHttpUrl(destinationUrlRaw)) {
+    return res.status(400).json({
+      error: 'destination_url must be an http(s) URL',
+    });
+  }
+  const destinationUrl = String(destinationUrlRaw).trim();
+  try {
+    const result = await getOrCreatePreviewShortUrl(destinationUrl);
+    return res.json(
+      jsonSafe({
+        destination_url: destinationUrl,
+        utm_campaign_value: PREVIEW_UTM_CAMPAIGN_UUID,
+        preview_url: result.previewUrl,
+        short_url: result.shortUrl,
+        cached: result.cached,
+        reason: result.shortUrl ? null : result.reason,
+      }),
+    );
+  } catch (err) {
+    logger.error('POST /sms/preview-short-url failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to preview short URL' });
   }
 });
 
@@ -506,6 +480,7 @@ router.post('/campaigns', async (req, res) => {
       utmCampaignValue = campaignId;
       finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
 
+      // Real send: always shorten this campaign's final URL. Do not reuse preview shorts.
       const shortened = await shortenWithTinyUrl(finalUrl);
       if (shortened.shortUrl) {
         shortUrl = shortened.shortUrl;
