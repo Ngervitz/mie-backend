@@ -199,11 +199,34 @@ function validateMessagesInput(messages) {
       return value;
     };
 
+    let contactId = null;
+    if (m.contact_id != null && m.contact_id !== '') {
+      if (typeof m.contact_id !== 'string') {
+        throw new NotifymeError(
+          `messages[${i}].contact_id must be a string or null`,
+          { kind: 'validation', status: 400 },
+        );
+      }
+      const trimmedId = m.contact_id.trim();
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          trimmedId,
+        )
+      ) {
+        throw new NotifymeError(`messages[${i}].contact_id must be a UUID`, {
+          kind: 'validation',
+          status: 400,
+        });
+      }
+      contactId = trimmedId;
+    }
+
     // Do not normalize, infer, or enrich optional identity fields.
     normalized.push({
       phone: phone.trim(),
       text,
       scheduledAt,
+      contact_id: contactId,
       source_system: optionalString('source_system', m.source_system),
       source_record_id: optionalString('source_record_id', m.source_record_id),
       czuid: optionalString('czuid', m.czuid),
@@ -272,6 +295,7 @@ async function insertCampaignMessages(campaignId, normalizedMessages) {
     text: m.text,
     scheduled_at: m.scheduledAt,
     status: 'pending',
+    contact_id: m.contact_id,
     source_system: m.source_system,
     source_record_id: m.source_record_id,
     czuid: m.czuid,
@@ -281,7 +305,7 @@ async function insertCampaignMessages(campaignId, normalizedMessages) {
     .from('sms_messages')
     .insert(rows)
     .select(
-      'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, source_system, source_record_id, czuid',
+      'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, contact_id, source_system, source_record_id, czuid',
     );
 
   if (error) {

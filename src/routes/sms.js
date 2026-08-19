@@ -17,6 +17,16 @@ const {
   NotifymeError,
   assertUniqueIdString,
 } = require('../services/notifyme-client');
+const {
+  MAX_FROM_CONTACTS_LIMIT,
+  applyNombrePlaceholder,
+  parseSourceSystem,
+  parseLimit,
+  normalizeDirectedPhones,
+  loadContactsByPhones,
+  countEligibleContacts,
+  listEligibleContacts,
+} = require('../lib/smsCampaignContacts');
 
 const router = express.Router();
 
@@ -59,6 +69,7 @@ function mapMessageRow(row) {
     last_polled_at: row.last_polled_at,
     source_system: row.source_system,
     source_record_id: row.source_record_id,
+    contact_id: row.contact_id != null ? row.contact_id : null,
     czuid: row.czuid,
     created_at: row.created_at,
   };
@@ -68,7 +79,7 @@ async function loadCampaignMessages(campaignId) {
   const { data, error } = await supabase
     .from('sms_messages')
     .select(
-      'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, delivered_at, fail_reason, response_text, response_received_at, last_polled_at, source_system, source_record_id, czuid, created_at',
+      'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, delivered_at, fail_reason, response_text, response_received_at, last_polled_at, source_system, source_record_id, contact_id, czuid, created_at',
     )
     .eq('campaign_id', campaignId)
     .order('submission_order', { ascending: true });
@@ -275,9 +286,37 @@ function getGa4PropertyId() {
 }
 
 /**
+ * GET /sms/contacts/eligible?source_system=
+ * Count of contacts matching the same eligibility used by POST from_contacts.
+ */
+router.get('/contacts/eligible', async (req, res) => {
+  const sourceSystem = parseSourceSystem(req.query && req.query.source_system);
+  if (!sourceSystem) {
+    return res.status(400).json({ error: 'source_system is required' });
+  }
+  try {
+    const count = await countEligibleContacts(sourceSystem);
+    return res.json(
+      jsonSafe({
+        source_system: sourceSystem,
+        count,
+        max_limit: MAX_FROM_CONTACTS_LIMIT,
+      }),
+    );
+  } catch (err) {
+    logger.error('GET /sms/contacts/eligible failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to count eligible contacts' });
+  }
+});
+
+/**
  * POST /sms/campaigns
  * Legacy: { name, messages: [{ phone, text, ... }] }
- * New:    { name, destination_url, message_body, phones: ["..."] }
+ * Paste:  { name, destination_url, message_body, phones: ["..."] }
+ * List:   { name, destination_url, message_body, from_contacts: { source_system, limit } }
+ * Direct: { name, destination_url, message_body, from_contacts: { phones: ["..."] } }
  */
 router.post('/campaigns', async (req, res) => {
   const name = req.body && req.body.name;
@@ -290,10 +329,17 @@ router.post('/campaigns', async (req, res) => {
     return res.status(400).json({ error: 'name must be a non-empty string' });
   }
 
+  const fromContactsRaw = req.body && req.body.from_contacts;
+  const useFromContacts =
+    fromContactsRaw != null &&
+    typeof fromContactsRaw === 'object' &&
+    !Array.isArray(fromContactsRaw);
+
   const useNewShape =
     Array.isArray(phones) ||
     messageBody != null ||
-    destinationUrlRaw != null;
+    destinationUrlRaw != null ||
+    useFromContacts;
 
   // Prefer legacy when a non-empty messages array is provided (backward compatible).
   const useLegacy =
@@ -301,7 +347,8 @@ router.post('/campaigns', async (req, res) => {
 
   if (!useLegacy && !useNewShape) {
     return res.status(400).json({
-      error: 'Provide either messages[] or { destination_url, message_body, phones[] }',
+      error:
+        'Provide messages[], { destination_url, message_body, phones[] }, or from_contacts',
     });
   }
 
@@ -335,6 +382,15 @@ router.post('/campaigns', async (req, res) => {
       }
       campaign = data[0];
     } else {
+      if (
+        useFromContacts &&
+        Array.isArray(phones) &&
+        phones.length > 0
+      ) {
+        return res.status(400).json({
+          error: 'from_contacts cannot be combined with phones[]',
+        });
+      }
       if (!looksLikeHttpUrl(destinationUrlRaw)) {
         return res.status(400).json({
           error: 'destination_url must be a valid http(s) URL',
@@ -345,18 +401,103 @@ router.post('/campaigns', async (req, res) => {
           error: 'message_body must be a non-empty string',
         });
       }
-      if (!Array.isArray(phones) || phones.length === 0) {
-        return res.status(400).json({
-          error: 'phones must be a non-empty array',
-        });
-      }
-      const normalizedPhones = phones
-        .map((p) => (p == null ? '' : String(p).trim()))
-        .filter((p) => p.length > 0);
-      if (!normalizedPhones.length) {
-        return res.status(400).json({
-          error: 'phones must contain at least one non-empty value',
-        });
+
+      let normalizedPhones = null;
+      let selectedContacts = null;
+      if (useFromContacts) {
+        if (Array.isArray(fromContactsRaw.phones)) {
+          const hasAutoFields =
+            parseSourceSystem(fromContactsRaw.source_system) != null ||
+            (fromContactsRaw.limit != null &&
+              String(fromContactsRaw.limit).trim() !== '');
+          if (hasAutoFields) {
+            return res.status(400).json({
+              error:
+                'from_contacts.phones cannot be combined with source_system or limit',
+            });
+          }
+          const directedPhones = normalizeDirectedPhones(fromContactsRaw.phones);
+          if (!directedPhones.length) {
+            return res.status(400).json({
+              error: 'from_contacts.phones must contain at least one non-empty value',
+            });
+          }
+          if (directedPhones.length > MAX_FROM_CONTACTS_LIMIT) {
+            return res.status(400).json({
+              error:
+                'from_contacts.phones cannot exceed ' +
+                String(MAX_FROM_CONTACTS_LIMIT) +
+                ' numbers',
+            });
+          }
+          let loaded;
+          try {
+            loaded = await loadContactsByPhones(directedPhones);
+          } catch (lookupErr) {
+            throw new NotifymeError(
+              lookupErr && lookupErr.message
+                ? lookupErr.message
+                : 'sms_contacts phone lookup failed',
+              { kind: 'database', status: 500 },
+            );
+          }
+          if (loaded.missing_phones.length) {
+            return res.status(400).json({
+              error: 'Unknown sms_contacts phones',
+              missing_phones: loaded.missing_phones,
+            });
+          }
+          selectedContacts = loaded.contacts;
+        } else {
+          const sourceSystem = parseSourceSystem(fromContactsRaw.source_system);
+          const limit = parseLimit(
+            fromContactsRaw.limit,
+            MAX_FROM_CONTACTS_LIMIT,
+          );
+          if (!sourceSystem) {
+            return res.status(400).json({
+              error: 'from_contacts.source_system is required',
+            });
+          }
+          if (limit == null) {
+            return res.status(400).json({
+              error:
+                'from_contacts.limit must be an integer from 1 to ' +
+                String(MAX_FROM_CONTACTS_LIMIT),
+            });
+          }
+          try {
+            selectedContacts = await listEligibleContacts(sourceSystem, limit);
+          } catch (listErr) {
+            throw new NotifymeError(
+              listErr && listErr.message
+                ? listErr.message
+                : 'eligible contacts query failed',
+              { kind: 'database', status: 500 },
+            );
+          }
+          if (!selectedContacts.length) {
+            return res.status(400).json({
+              error: 'No eligible contacts for that source_system',
+              source_system: sourceSystem,
+              count: 0,
+            });
+          }
+        }
+      } else {
+        if (!Array.isArray(phones) || phones.length === 0) {
+          return res.status(400).json({
+            error: 'phones must be a non-empty array',
+          });
+        }
+        normalizedPhones = phones
+          .map((p) => (p == null ? '' : String(p).trim()))
+          .filter((p) => p.length > 0);
+        if (!normalizedPhones.length) {
+          return res.status(400).json({
+            error: 'phones must contain at least one non-empty value',
+          });
+        }
       }
 
       // Generate UUID first so UTM and DB row share the same id in one insert.
@@ -377,11 +518,29 @@ router.post('/campaigns', async (req, res) => {
       }
 
       const linkForMessage = shortUrl || finalUrl;
-      const composedText = `${messageBody} ${linkForMessage}`;
-      messages = normalizedPhones.map((phone) => ({
-        phone,
-        text: composedText,
-      }));
+      if (selectedContacts) {
+        messages = selectedContacts.map((c) => {
+          const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre);
+          const recordId =
+            c.source_record_id == null || c.source_record_id === ''
+              ? null
+              : String(c.source_record_id);
+          return {
+            phone: String(c.phone).trim(),
+            text: `${bodyWithName} ${linkForMessage}`,
+            contact_id: c.id,
+            source_system:
+              c.source_system == null ? null : String(c.source_system),
+            source_record_id: recordId,
+          };
+        });
+      } else {
+        const composedText = `${messageBody} ${linkForMessage}`;
+        messages = normalizedPhones.map((phone) => ({
+          phone,
+          text: composedText,
+        }));
+      }
 
       const { data, error } = await supabase
         .from('sms_campaigns')

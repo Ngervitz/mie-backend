@@ -9233,6 +9233,11 @@ init();
   const form = document.getElementById('sms-create-form');
   const nameInput = document.getElementById('sms-name');
   const phonesInput = document.getElementById('sms-phones');
+  const destPasteWrap = document.getElementById('sms-dest-paste-wrap');
+  const destListWrap = document.getElementById('sms-dest-list-wrap');
+  const sourceSystemInput = document.getElementById('sms-source-system');
+  const fromLimitInput = document.getElementById('sms-from-limit');
+  const eligibleStatus = document.getElementById('sms-eligible-status');
   const messageInput = document.getElementById('sms-message');
   const destinationUrlInput = document.getElementById('sms-destination-url');
   const composePreviewText = document.getElementById('sms-compose-preview-text');
@@ -9260,6 +9265,11 @@ init();
     !form ||
     !nameInput ||
     !phonesInput ||
+    !destPasteWrap ||
+    !destListWrap ||
+    !sourceSystemInput ||
+    !fromLimitInput ||
+    !eligibleStatus ||
     !messageInput ||
     !destinationUrlInput ||
     !composePreviewText ||
@@ -9362,6 +9372,50 @@ init();
       .filter((line) => line.length > 0);
   }
 
+  function destMode() {
+    const checked = form.querySelector('input[name="sms-dest-mode"]:checked');
+    return checked && checked.value === 'list' ? 'list' : 'paste';
+  }
+
+  function syncDestModeUi() {
+    const list = destMode() === 'list';
+    destPasteWrap.hidden = list;
+    destListWrap.hidden = !list;
+    if (list) refreshEligibleCount();
+    updateEncodingHint();
+  }
+
+  async function refreshEligibleCount() {
+    const sourceSystem = String(sourceSystemInput.value || '').trim();
+    if (!sourceSystem) {
+      eligibleStatus.textContent = '';
+      return;
+    }
+    eligibleStatus.textContent = 'Consultando elegibles…';
+    try {
+      const res = await fetch(
+        API_BASE +
+          '/sms/contacts/eligible?source_system=' +
+          encodeURIComponent(sourceSystem),
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+      );
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        eligibleStatus.textContent =
+          (body && body.error) || 'No se pudo contar elegibles.';
+        return;
+      }
+      const count = body && body.count != null ? Number(body.count) : 0;
+      eligibleStatus.textContent =
+        count +
+        ' contacto(s) elegibles (sin SMS previo) en «' +
+        sourceSystem +
+        '».';
+    } catch (_err) {
+      eligibleStatus.textContent = 'No se pudo contar elegibles.';
+    }
+  }
+
   function estimateSmsSegments(text) {
     const chars = Array.from(String(text || ''));
     let gsmSeptets = 0;
@@ -9441,7 +9495,15 @@ init();
 
   function updateEncodingHint(options) {
     const opts = options || {};
-    const phones = parsePhones(phonesInput.value);
+    const phones =
+      destMode() === 'list'
+        ? Array(
+            Math.max(
+              0,
+              parseInt(String(fromLimitInput.value || '0'), 10) || 0,
+            ),
+          )
+        : parsePhones(phonesInput.value);
     const messageBody = messageInput.value;
     const destinationRaw = destinationUrlInput.value;
     const overrideUrl = opts.finalUrl != null ? String(opts.finalUrl) : null;
@@ -9942,17 +10004,34 @@ init();
     if (createBusy) return;
 
     const name = String(nameInput.value || '').trim();
-    const phones = parsePhones(phonesInput.value);
     const messageBody = messageInput.value;
     const destinationUrl = String(destinationUrlInput.value || '').trim();
+    const listMode = destMode() === 'list';
+    const phones = listMode ? [] : parsePhones(phonesInput.value);
+    const sourceSystem = String(sourceSystemInput.value || '').trim();
+    const fromLimit = parseInt(String(fromLimitInput.value || ''), 10);
 
     if (!name) {
       setStatus(createStatus, 'El nombre de la campaña es obligatorio.', true);
       return;
     }
-    if (!phones.length) {
+    if (!listMode && !phones.length) {
       setStatus(createStatus, 'Ingresá al menos un teléfono (una línea no vacía).', true);
       return;
+    }
+    if (listMode) {
+      if (!sourceSystem) {
+        setStatus(createStatus, 'Elegí un source_system.', true);
+        return;
+      }
+      if (!Number.isFinite(fromLimit) || fromLimit < 1 || fromLimit > 2000) {
+        setStatus(
+          createStatus,
+          'La cantidad debe ser un entero entre 1 y 2000.',
+          true,
+        );
+        return;
+      }
     }
     if (!String(messageBody || '').trim()) {
       setStatus(createStatus, 'El mensaje no puede estar vacío.', true);
@@ -9979,12 +10058,24 @@ init();
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: name,
-          destination_url: destinationUrl,
-          message_body: messageBody,
-          phones: phones,
-        }),
+        body: JSON.stringify(
+          listMode
+            ? {
+                name: name,
+                destination_url: destinationUrl,
+                message_body: messageBody,
+                from_contacts: {
+                  source_system: sourceSystem,
+                  limit: fromLimit,
+                },
+              }
+            : {
+                name: name,
+                destination_url: destinationUrl,
+                message_body: messageBody,
+                phones: phones,
+              },
+        ),
       });
       const body = await readJsonSafe(res);
 
@@ -10128,7 +10219,14 @@ init();
   messageInput.addEventListener('input', () => updateEncodingHint());
   phonesInput.addEventListener('input', () => updateEncodingHint());
   destinationUrlInput.addEventListener('input', () => updateEncodingHint());
-  updateEncodingHint();
+  form.querySelectorAll('input[name="sms-dest-mode"]').forEach(function (el) {
+    el.addEventListener('change', syncDestModeUi);
+  });
+  sourceSystemInput.addEventListener('change', () => {
+    if (destMode() === 'list') refreshEligibleCount();
+  });
+  fromLimitInput.addEventListener('input', () => updateEncodingHint());
+  syncDestModeUi();
 
   window.__openSms = () => {
     showListView();

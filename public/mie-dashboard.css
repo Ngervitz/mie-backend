@@ -3859,6 +3859,32 @@
   gap: 6px;
 }
 
+#mie-dashboard-app .sms-dest-mode-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 16px;
+  font-size: 0.9rem;
+}
+
+#mie-dashboard-app .sms-dest-list-wrap:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#mie-dashboard-app .sms-field[hidden],
+#mie-dashboard-app .sms-dest-list-wrap[hidden] {
+  display: none !important;
+}
+
+#mie-dashboard-app .mcl-field-hint,
+#mie-dashboard-app .sms-eligible-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 #mie-dashboard-app .sms-textarea {
   min-height: 96px;
   resize: vertical;

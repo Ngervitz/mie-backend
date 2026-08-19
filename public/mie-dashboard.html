@@ -850,13 +850,46 @@
               <span class="mcl-field-label">📋 Nombre de campaña</span>
               <input type="text" id="sms-name" class="mcl-input" required autocomplete="off" />
             </label>
-            <label class="mcl-field sms-field">
-              <span class="mcl-field-label">📞 Destinos (un teléfono por línea)</span>
-              <textarea id="sms-phones" class="mcl-input sms-textarea" rows="6" required></textarea>
+            <fieldset class="mcl-field sms-field">
+              <legend class="mcl-field-label">📞 Destinos</legend>
+              <label class="sms-dest-mode-opt">
+                <input type="radio" name="sms-dest-mode" value="paste" checked />
+                Pegar teléfonos
+              </label>
+              <label class="sms-dest-mode-opt">
+                <input type="radio" name="sms-dest-mode" value="list" />
+                Lista de contactos (sms_contacts)
+              </label>
+            </fieldset>
+            <label class="mcl-field sms-field" id="sms-dest-paste-wrap">
+              <span class="mcl-field-label">Teléfonos (uno por línea)</span>
+              <textarea id="sms-phones" class="mcl-input sms-textarea" rows="6"></textarea>
             </label>
+            <div id="sms-dest-list-wrap" class="sms-dest-list-wrap" hidden>
+              <label class="mcl-field sms-field">
+                <span class="mcl-field-label">source_system</span>
+                <select id="sms-source-system" class="mcl-input">
+                  <option value="credizona2_datos">credizona2_datos</option>
+                  <option value="prestafacil">prestafacil</option>
+                </select>
+              </label>
+              <label class="mcl-field sms-field">
+                <span class="mcl-field-label">Cantidad</span>
+                <input
+                  type="number"
+                  id="sms-from-limit"
+                  class="mcl-input"
+                  min="1"
+                  max="2000"
+                  value="100"
+                />
+              </label>
+              <p id="sms-eligible-status" class="sms-eligible-status" aria-live="polite"></p>
+            </div>
             <label class="mcl-field sms-field">
               <span class="mcl-field-label">✉️ Mensaje</span>
               <textarea id="sms-message" class="mcl-input sms-textarea" rows="4" required></textarea>
+              <span class="mcl-field-hint">Usá {{nombre}} para insertar el nombre del contacto (capitalizado). Si no hay nombre, el placeholder se omite.</span>
             </label>
             <label class="mcl-field sms-field">
               <span class="mcl-field-label">🔗 URL de destino</span>
