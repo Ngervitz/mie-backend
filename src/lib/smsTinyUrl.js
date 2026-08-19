@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * TinyURL shortening for SMS campaign links.
+ * is.gd shortening for SMS campaign links (temporary; TinyURL served ads).
  * Preview uses a fixed UTM campaign UUID and an in-process cache keyed by
- * trimmed destination_url so the same preview destination never hits TinyURL twice.
+ * trimmed destination_url so the same preview destination never hits is.gd twice.
  * Real campaign sends must call shortenWithTinyUrl(finalUrl) with the campaign UUID
  * and must not reuse preview shorts.
  */
 
-const TINYURL_TIMEOUT_MS = 4000;
+const SHORTEN_TIMEOUT_MS = 4000;
 
 /** Fixed UUID for preview UTM only — never used as a real campaign id. */
 const PREVIEW_UTM_CAMPAIGN_UUID = '00000000-0000-4000-8000-000000000001';
@@ -39,42 +39,45 @@ function composeFinalUrl(destinationUrl, campaignUuid) {
 }
 
 /**
- * Shorten a URL via TinyURL public API.
+ * Shorten a URL via is.gd public API (format=simple).
  * Returns { shortUrl } on success, or { shortUrl: null, reason } on any failure.
  * Never throws — callers must fall back to the long URL.
  */
 async function shortenWithTinyUrl(longUrl) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TINYURL_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), SHORTEN_TIMEOUT_MS);
   try {
     const endpoint =
-      'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
+      'https://is.gd/create.php?format=simple&url=' +
+      encodeURIComponent(longUrl);
     const res = await fetch(endpoint, {
       method: 'GET',
       signal: controller.signal,
       headers: { Accept: 'text/plain' },
     });
+    const text = String((await res.text()) || '').trim();
     if (!res.ok) {
       return {
         shortUrl: null,
-        reason: `TinyURL HTTP ${res.status}`,
+        reason: `is.gd HTTP ${res.status}`,
       };
     }
-    const text = String((await res.text()) || '').trim();
-    if (!text || !/^https?:\/\//i.test(text)) {
+    if (!text || /^error/i.test(text) || !/^https?:\/\//i.test(text)) {
       return {
         shortUrl: null,
-        reason: 'TinyURL returned empty or non-URL body',
+        reason: text
+          ? `is.gd: ${text}`
+          : 'is.gd returned empty or non-URL body',
       };
     }
     return { shortUrl: text, reason: null };
   } catch (err) {
     const reason =
       err && err.name === 'AbortError'
-        ? `TinyURL timeout after ${TINYURL_TIMEOUT_MS}ms`
+        ? `is.gd timeout after ${SHORTEN_TIMEOUT_MS}ms`
         : err && err.message
           ? String(err.message)
-          : 'TinyURL request failed';
+          : 'is.gd request failed';
     return { shortUrl: null, reason };
   } finally {
     clearTimeout(timer);
@@ -99,7 +102,7 @@ function clearPreviewShortCache() {
 
 /**
  * Preview short for a destination URL. Same trimmed destination_url reuses
- * the cached short and does not call TinyURL again.
+ * the cached short and does not call is.gd again.
  * Failures are not cached so a later preview can retry.
  *
  * @param {string} destinationUrl
@@ -142,7 +145,7 @@ async function getOrCreatePreviewShortUrl(destinationUrl, options) {
         ? null
         : shortened && shortened.reason
           ? shortened.reason
-          : 'TinyURL request failed',
+          : 'is.gd request failed',
     };
   }
 
@@ -167,7 +170,7 @@ async function getOrCreatePreviewShortUrl(destinationUrl, options) {
         ? null
         : shortened && shortened.reason
           ? shortened.reason
-          : 'TinyURL request failed',
+          : 'is.gd request failed',
     };
   } finally {
     previewShortInflight.delete(key);

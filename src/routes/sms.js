@@ -487,7 +487,7 @@ router.post('/campaigns', async (req, res) => {
         shortUrl = shortened.shortUrl;
       } else {
         shortUrl = null;
-        logger.warn('TinyURL shorten failed; falling back to final_url', {
+        logger.warn('is.gd shorten failed; falling back to final_url', {
           reason: shortened.reason,
           campaign_id: campaignId,
         });
