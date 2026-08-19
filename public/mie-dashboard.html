@@ -1307,7 +1307,62 @@
       </div>
     </div>
       </main>
+
+      <aside
+        id="assist-panel"
+        class="assist-panel"
+        hidden
+        aria-hidden="true"
+        aria-label="Janus Assist">
+        <header class="assist-panel-header">
+          <h2 class="assist-panel-title">Janus Assist</h2>
+          <div class="assist-panel-actions">
+            <button
+              type="button"
+              id="assist-new-btn"
+              class="btn"
+              title="Cierra esta conversación y empieza otra. No colapsa el panel.">
+              Nueva conversación
+            </button>
+            <button
+              type="button"
+              id="assist-collapse-btn"
+              class="assist-icon-btn"
+              aria-label="Colapsar panel"
+              title="Colapsar panel (conserva la conversación)">
+              <i class="ti ti-chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        </header>
+        <div id="assist-thread" class="assist-thread" aria-live="polite"></div>
+        <p id="assist-error" class="assist-error" hidden role="alert"></p>
+        <form id="assist-form" class="assist-composer">
+          <label class="assist-sr-only" for="assist-input">Mensaje para Assist</label>
+          <textarea
+            id="assist-input"
+            class="assist-input"
+            rows="3"
+            maxlength="8000"
+            placeholder="Preguntá sobre competidores…"
+            autocomplete="off"></textarea>
+          <button type="submit" id="assist-send-btn" class="btn btn-primary" disabled>
+            Enviar
+          </button>
+        </form>
+      </aside>
     </div>
+
+    <button
+      type="button"
+      id="assist-fab"
+      class="assist-fab"
+      hidden
+      aria-hidden="true"
+      aria-label="Abrir Janus Assist"
+      title="Janus Assist">
+      <i class="ti ti-sparkles" aria-hidden="true"></i>
+      <span class="assist-fab-label">Assist</span>
+    </button>
   </div>
 
   <script>
@@ -1317,8 +1372,11 @@
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
   <script src="mie-dashboard.js"></script>
   <script src="meta-agent.js"></script>
+  <script src="janus-assist.js"></script>
   <script>
     (function () {
       'use strict';
@@ -1475,6 +1533,9 @@
             });
           }
           applyTabVisibility();
+          if (typeof window.__janusAssistApplyAccess === 'function') {
+            window.__janusAssistApplyAccess(canAccess('market'));
+          }
           var first = pickDefaultSection();
           if (first) activate(first);
           else syncMarketChrome(null);
@@ -1482,6 +1543,9 @@
         .catch(function () {
           // Fail open on UX only if /me is unreachable; backend still gates APIs.
           syncMarketChrome(current);
+          if (typeof window.__janusAssistApplyAccess === 'function') {
+            window.__janusAssistApplyAccess(true);
+          }
         });
     })();
   </script>
