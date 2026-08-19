@@ -9505,6 +9505,87 @@ init();
     return body + ' ' + url;
   }
 
+  // Keep in sync with src/lib/smsCampaignContacts.js applyNombrePlaceholder.
+  const NOMBRE_PLACEHOLDER = '{{nombre}}';
+  const SMS_MAX_MESSAGE_CHARS = 160;
+  const PREVIEW_EXAMPLE_NOMBRE = 'María del Valle';
+
+  function titleCaseNombre(raw) {
+    const trimmed = String(raw == null ? '' : raw).trim();
+    if (!trimmed) return '';
+    return trimmed
+      .split(/\s+/)
+      .map(function (word) {
+        const lower = word.toLocaleLowerCase('es');
+        if (!lower) return '';
+        return lower.charAt(0).toLocaleUpperCase('es') + lower.slice(1);
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function countSmsChars(text) {
+    return Array.from(String(text == null ? '' : text)).length;
+  }
+
+  function replaceNombre(messageBody, inserted) {
+    const body = String(messageBody == null ? '' : messageBody);
+    let out;
+    if (inserted) {
+      out = body.split(NOMBRE_PLACEHOLDER).join(inserted);
+    } else {
+      out = body.split(NOMBRE_PLACEHOLDER).join('');
+      out = out.replace(/[ \t]{2,}/g, ' ');
+      out = out.replace(/ +([,.;:!?])/g, '$1');
+      out = out.replace(/^ +/, '');
+    }
+    return out.replace(/ +$/g, '').replace(/  +/g, ' ');
+  }
+
+  function applyNombrePlaceholder(messageBody, nombreRaw, options) {
+    const opts = options || {};
+    const shouldFit = opts.link != null || opts.maxChars != null;
+    const titled = titleCaseNombre(nombreRaw);
+    if (!shouldFit) {
+      return replaceNombre(messageBody, titled);
+    }
+
+    const link = opts.link != null ? String(opts.link) : '';
+    const maxCharsRaw =
+      opts.maxChars != null ? Number(opts.maxChars) : SMS_MAX_MESSAGE_CHARS;
+    const maxChars =
+      Number.isFinite(maxCharsRaw) && maxCharsRaw > 0
+        ? maxCharsRaw
+        : SMS_MAX_MESSAGE_CHARS;
+
+    const titledChars = Array.from(titled);
+    if (titledChars.length < 2) {
+      return replaceNombre(messageBody, '');
+    }
+
+    function fits(resolvedBody) {
+      return countSmsChars(buildComposedMessage(resolvedBody, link)) <= maxChars;
+    }
+
+    let resolved = replaceNombre(messageBody, titled);
+    if (fits(resolved)) return resolved;
+
+    for (let n = titledChars.length - 1; n >= 2; n -= 1) {
+      resolved = replaceNombre(messageBody, titledChars.slice(0, n).join(''));
+      if (fits(resolved)) return resolved;
+    }
+    return replaceNombre(messageBody, '');
+  }
+
+  function resolvePreviewMessageBody(messageBody, previewUrl) {
+    const body = String(messageBody == null ? '' : messageBody);
+    if (body.indexOf(NOMBRE_PLACEHOLDER) === -1) return body;
+    return applyNombrePlaceholder(body, PREVIEW_EXAMPLE_NOMBRE, {
+      link: previewUrl || '',
+      maxChars: SMS_MAX_MESSAGE_CHARS,
+    });
+  }
+
   function encodingHintPrefix(linkKind) {
     if (linkKind === 'final') return 'Segmentos definitivos';
     if (linkKind === 'short-preview') {
@@ -9555,9 +9636,12 @@ init();
       linkKind = previewUrl ? 'long-preview' : 'none';
     }
 
-    const composed = buildComposedMessage(messageBody, previewUrl || '');
+    const resolvedBody = resolvePreviewMessageBody(messageBody, previewUrl || '');
+    const composed = buildComposedMessage(resolvedBody, previewUrl || '');
     const est = estimateSmsSegments(composed);
     const isFinal = linkKind === 'final';
+    const hasNombrePlaceholder =
+      String(messageBody || '').indexOf(NOMBRE_PLACEHOLDER) !== -1;
 
     if (composePreviewText) {
       composePreviewText.textContent = composed || '(escribí el mensaje y la URL de destino)';
@@ -9567,14 +9651,16 @@ init();
         composePreviewLabel.textContent =
           'Mensaje definitivo enviado (cuerpo + URL final con UTM)';
       } else if (linkKind === 'short-preview') {
-        composePreviewLabel.textContent =
-          'Vista previa (cuerpo + link acortado de preview; no es el link de la campaña)';
+        composePreviewLabel.textContent = hasNombrePlaceholder
+          ? 'Vista previa (link acortado de preview; nombre de ejemplo «María del Valle», puede truncarse)'
+          : 'Vista previa (cuerpo + link acortado de preview; no es el link de la campaña)';
       } else if (linkKind === 'shortening') {
         composePreviewLabel.textContent =
           'Vista previa provisional (cuerpo + URL larga; acortando…)';
       } else {
-        composePreviewLabel.textContent =
-          'Vista previa del mensaje (cuerpo + URL con utm_campaign=PENDING)';
+        composePreviewLabel.textContent = hasNombrePlaceholder
+          ? 'Vista previa (nombre de ejemplo «María del Valle»; puede truncarse a 160 caracteres)'
+          : 'Vista previa del mensaje (cuerpo + URL con utm_campaign=PENDING)';
       }
     }
 
@@ -10299,7 +10385,7 @@ init();
         });
         if (composePreviewText) {
           composePreviewText.textContent = buildComposedMessage(
-            messageBody,
+            resolvePreviewMessageBody(messageBody, sentUrl),
             sentUrl,
           );
         }

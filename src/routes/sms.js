@@ -19,6 +19,7 @@ const {
 } = require('../services/notifyme-client');
 const {
   MAX_FROM_CONTACTS_LIMIT,
+  SMS_MAX_MESSAGE_CHARS,
   applyNombrePlaceholder,
   parseSourceSystem,
   parseLimit,
@@ -495,7 +496,10 @@ router.post('/campaigns', async (req, res) => {
       const linkForMessage = shortUrl || finalUrl;
       if (selectedContacts) {
         messages = selectedContacts.map((c) => {
-          const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre);
+          const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre, {
+            link: linkForMessage,
+            maxChars: SMS_MAX_MESSAGE_CHARS,
+          });
           const recordId =
             c.source_record_id == null || c.source_record_id === ''
               ? null

@@ -6,6 +6,8 @@
 
 const MAX_FROM_CONTACTS_LIMIT = 2000;
 const NOMBRE_PLACEHOLDER = '{{nombre}}';
+/** Notifyme does not deliver SMS over this many characters (no concatenation). */
+const SMS_MAX_MESSAGE_CHARS = 160;
 
 function titleCaseNombre(raw) {
   const trimmed = String(raw == null ? '' : raw).trim();
@@ -21,13 +23,20 @@ function titleCaseNombre(raw) {
     .join(' ');
 }
 
-/**
- * Replace {{nombre}} with title-cased first/full name.
- * Missing name: drop placeholder and collapse leftover spaces before punctuation.
- */
-function applyNombrePlaceholder(messageBody, nombreRaw) {
+function composeSmsText(resolvedBody, link) {
+  const body = String(resolvedBody == null ? '' : resolvedBody);
+  const url = String(link == null ? '' : link);
+  if (!url) return body;
+  if (!body) return url;
+  return body + ' ' + url;
+}
+
+function countSmsChars(text) {
+  return Array.from(String(text == null ? '' : text)).length;
+}
+
+function replaceNombre(messageBody, inserted) {
   const body = String(messageBody == null ? '' : messageBody);
-  const inserted = titleCaseNombre(nombreRaw);
   let out;
   if (inserted) {
     out = body.split(NOMBRE_PLACEHOLDER).join(inserted);
@@ -38,6 +47,49 @@ function applyNombrePlaceholder(messageBody, nombreRaw) {
     out = out.replace(/^ +/, '');
   }
   return out.replace(/ +$/g, '').replace(/  +/g, ' ');
+}
+
+/**
+ * Replace {{nombre}} with title-cased first/full name.
+ * Missing name: drop placeholder and collapse leftover spaces before punctuation.
+ *
+ * Optional third argument `{ link, maxChars }` fits the composed SMS
+ * (resolved body + space + link, same as send) into maxChars by truncating
+ * the name from the end. Names of 0–1 characters are omitted.
+ * Returns the resolved body only — caller still appends the link.
+ */
+function applyNombrePlaceholder(messageBody, nombreRaw, options) {
+  const opts = options || {};
+  const shouldFit = opts.link != null || opts.maxChars != null;
+  const titled = titleCaseNombre(nombreRaw);
+  if (!shouldFit) {
+    return replaceNombre(messageBody, titled);
+  }
+
+  const link = opts.link != null ? String(opts.link) : '';
+  const maxCharsRaw = opts.maxChars != null ? Number(opts.maxChars) : SMS_MAX_MESSAGE_CHARS;
+  const maxChars =
+    Number.isFinite(maxCharsRaw) && maxCharsRaw > 0
+      ? maxCharsRaw
+      : SMS_MAX_MESSAGE_CHARS;
+
+  const titledChars = Array.from(titled);
+  if (titledChars.length < 2) {
+    return replaceNombre(messageBody, '');
+  }
+
+  function fits(resolvedBody) {
+    return countSmsChars(composeSmsText(resolvedBody, link)) <= maxChars;
+  }
+
+  let resolved = replaceNombre(messageBody, titled);
+  if (fits(resolved)) return resolved;
+
+  for (let n = titledChars.length - 1; n >= 2; n -= 1) {
+    resolved = replaceNombre(messageBody, titledChars.slice(0, n).join(''));
+    if (fits(resolved)) return resolved;
+  }
+  return replaceNombre(messageBody, '');
 }
 
 function parseSourceSystem(raw) {
@@ -123,8 +175,10 @@ async function listEligibleContacts(sourceSystem, limit) {
 module.exports = {
   MAX_FROM_CONTACTS_LIMIT,
   NOMBRE_PLACEHOLDER,
+  SMS_MAX_MESSAGE_CHARS,
   titleCaseNombre,
   applyNombrePlaceholder,
+  composeSmsText,
   parseSourceSystem,
   parseLimit,
   normalizeDirectedPhones,
