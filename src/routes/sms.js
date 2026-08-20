@@ -34,6 +34,7 @@ const {
   looksLikeHttpUrl,
   composeFinalUrl,
   shortenWithTinyUrl,
+  attachShortLinkCampaignId,
   getOrCreatePreviewShortUrl,
 } = require('../lib/smsTinyUrl');
 
@@ -554,6 +555,9 @@ router.post('/campaigns', async (req, res) => {
         );
       }
       campaign = data[0];
+      if (shortUrl && finalUrl) {
+        await attachShortLinkCampaignId(finalUrl, campaignId);
+      }
     }
   } catch (err) {
     if (!(err instanceof NotifymeError) && err && err.message) {

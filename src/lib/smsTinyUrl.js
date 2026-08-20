@@ -1,16 +1,22 @@
 'use strict';
 
+const crypto = require('crypto');
 const logger = require('./logger');
 
 /**
- * Cleanuri shortening for SMS campaign links.
+ * Owned SMS short links (sms_short_links + GET /s/:code).
  * Preview uses a fixed UTM campaign UUID and an in-process cache keyed by
  * trimmed destination_url so the same preview destination is not shortened twice.
  * Real campaign sends must call shortenWithTinyUrl(finalUrl) with the campaign UUID
- * and must not reuse preview shorts.
+ * in the composed URL and must not reuse preview shorts.
  */
 
-const SHORTEN_TIMEOUT_MS = 10000;
+const DEFAULT_SHORT_LINK_BASE =
+  'https://mie-backend-production.up.railway.app';
+const SHORT_CODE_LENGTH = 6;
+const SHORT_CODE_ALPHABET =
+  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const SHORT_INSERT_RETRIES = 8;
 
 /** Fixed UUID for preview UTM only — never used as a real campaign id. */
 const PREVIEW_UTM_CAMPAIGN_UUID = '00000000-0000-4000-8000-000000000001';
@@ -40,66 +46,134 @@ function composeFinalUrl(destinationUrl, campaignUuid) {
   return url.toString();
 }
 
+function getShortLinkBaseUrl() {
+  const raw = process.env.SMS_SHORT_LINK_BASE_URL;
+  const trimmed =
+    raw != null ? String(raw).trim().replace(/\/+$/, '') : '';
+  return trimmed || DEFAULT_SHORT_LINK_BASE;
+}
+
+function composePublicShortUrl(shortCode) {
+  return getShortLinkBaseUrl() + '/s/' + String(shortCode);
+}
+
+function generateShortCode(length) {
+  const n = Number.isFinite(length) && length > 0 ? length : SHORT_CODE_LENGTH;
+  let out = '';
+  for (let i = 0; i < n; i += 1) {
+    out += SHORT_CODE_ALPHABET[crypto.randomInt(SHORT_CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
+function isUniqueViolation(error) {
+  if (!error) return false;
+  if (String(error.code || '') === '23505') return true;
+  if (Number(error.status) === 409) return true;
+  const msg = String(error.message || '').toLowerCase();
+  return msg.includes('duplicate') || msg.includes('unique');
+}
+
 function fallback(kind, reason) {
-  logger.warn('SMS shortener fallback', { kind: kind, provider: 'cleanuri' });
+  logger.warn('SMS shortener fallback', { kind: kind, provider: 'mie' });
   return { shortUrl: null, reason: reason, kind: kind };
 }
 
+async function lookupExistingShort(supabase, longUrl) {
+  const { data, error } = await supabase
+    .from('sms_short_links')
+    .select('short_code')
+    .eq('destination_url', longUrl)
+    .maybeSingle();
+  if (error || !data || !data.short_code) return null;
+  return String(data.short_code);
+}
+
 /**
- * Shorten a URL via Cleanuri (POST form-urlencoded).
- * Returns { shortUrl, reason, kind } — kind is set on fallback only.
+ * Create or reuse an owned short link for the already-composed destination URL.
+ * Preview: campaign_id stays NULL (preview UUID is not an sms_campaigns row).
+ * Send: insert with campaign_id NULL, then attachShortLinkCampaignId after the campaign row exists.
  * Never throws — callers must fall back to the long URL.
  */
 async function shortenWithTinyUrl(longUrl) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SHORTEN_TIMEOUT_MS);
+  const dest = String(longUrl || '').trim();
+  if (!looksLikeHttpUrl(dest)) {
+    return fallback('shortener_invalid_response', 'invalid destination_url');
+  }
   try {
-    const endpoint = 'https://cleanuri.com/api/v1/shorten';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'url=' + encodeURIComponent(longUrl),
-    });
-    const raw = String((await res.text()) || '').trim();
-    let parsed = null;
-    try {
-      parsed = raw ? JSON.parse(raw) : null;
-    } catch (_err) {
-      parsed = null;
+    const supabase = require('../clients/supabase');
+    const existing = await lookupExistingShort(supabase, dest);
+    if (existing) {
+      return {
+        shortUrl: composePublicShortUrl(existing),
+        reason: null,
+        kind: null,
+      };
     }
 
-    if (!res.ok) {
-      return fallback('shortener_error', 'cleanuri HTTP ' + String(res.status));
+    for (let attempt = 0; attempt < SHORT_INSERT_RETRIES; attempt += 1) {
+      const code = generateShortCode(SHORT_CODE_LENGTH);
+      const { data, error } = await supabase
+        .from('sms_short_links')
+        .insert({
+          short_code: code,
+          destination_url: dest,
+          campaign_id: null,
+        })
+        .select('short_code')
+        .limit(1);
+
+      if (!error && data && data[0] && data[0].short_code) {
+        return {
+          shortUrl: composePublicShortUrl(data[0].short_code),
+          reason: null,
+          kind: null,
+        };
+      }
+
+      if (isUniqueViolation(error)) {
+        const raced = await lookupExistingShort(supabase, dest);
+        if (raced) {
+          return {
+            shortUrl: composePublicShortUrl(raced),
+            reason: null,
+            kind: null,
+          };
+        }
+        continue;
+      }
+
+      return fallback('shortener_error', 'sms_short_links insert failed');
     }
-    if (!parsed || typeof parsed !== 'object') {
-      return fallback('shortener_invalid_response', 'cleanuri non-json body');
+
+    return fallback('shortener_error', 'sms_short_links code collision');
+  } catch (_err) {
+    return fallback('shortener_error', 'sms_short_links request failed');
+  }
+}
+
+async function attachShortLinkCampaignId(destinationUrl, campaignId) {
+  const dest = String(destinationUrl || '').trim();
+  const id = String(campaignId || '').trim();
+  if (!dest || !id) return;
+  try {
+    const supabase = require('../clients/supabase');
+    const { error } = await supabase
+      .from('sms_short_links')
+      .update({ campaign_id: id })
+      .eq('destination_url', dest)
+      .is('campaign_id', null);
+    if (error) {
+      logger.warn('SMS short link campaign_id attach failed', {
+        kind: 'shortener_error',
+        provider: 'mie',
+      });
     }
-    if (parsed.error != null && String(parsed.error).trim() !== '') {
-      return fallback('shortener_error', 'cleanuri error field');
-    }
-    const resultUrl =
-      parsed.result_url != null ? String(parsed.result_url).trim() : '';
-    if (!looksLikeHttpUrl(resultUrl)) {
-      return fallback(
-        'shortener_invalid_response',
-        'cleanuri missing or invalid result_url',
-      );
-    }
-    return { shortUrl: resultUrl, reason: null, kind: null };
-  } catch (err) {
-    if (err && err.name === 'AbortError') {
-      return fallback(
-        'shortener_timeout',
-        'cleanuri timeout after ' + String(SHORTEN_TIMEOUT_MS) + 'ms',
-      );
-    }
-    return fallback('shortener_error', 'cleanuri request failed');
-  } finally {
-    clearTimeout(timer);
+  } catch (_err) {
+    logger.warn('SMS short link campaign_id attach failed', {
+      kind: 'shortener_error',
+      provider: 'mie',
+    });
   }
 }
 
@@ -198,9 +272,13 @@ async function getOrCreatePreviewShortUrl(destinationUrl, options) {
 
 module.exports = {
   PREVIEW_UTM_CAMPAIGN_UUID,
+  SHORT_CODE_LENGTH,
   looksLikeHttpUrl,
   composeFinalUrl,
+  composePublicShortUrl,
+  generateShortCode,
   shortenWithTinyUrl,
+  attachShortLinkCampaignId,
   getOrCreatePreviewShortUrl,
   clearPreviewShortCache,
 };

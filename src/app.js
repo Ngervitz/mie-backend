@@ -20,10 +20,13 @@ const {
 } = require('./middleware/requireDashboardPermission');
 const adminUsersRouter = require('./routes/admin-users');
 const logger = require('./lib/logger');
+const smsShortLinksRouter = require('./routes/sms-short-links');
 
 const app = express();
 
 app.use(express.json());
+// Public SMS short-link redirects — must run before requireAuth.
+app.use(smsShortLinksRouter);
 // login / logout / bootstrap (allowlisted inside requireAuth)
 app.use('/', authRouter);
 app.use(requireAuth);
