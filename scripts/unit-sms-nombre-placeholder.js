@@ -9,6 +9,7 @@ const {
   titleCaseNombre,
   applyNombrePlaceholder,
   composeSmsText,
+  messageBodyHasHttpUrl,
   normalizeDirectedPhones,
   SMS_MAX_MESSAGE_CHARS,
 } = require('../src/lib/smsCampaignContacts');
@@ -111,5 +112,42 @@ const withLink = applyNombrePlaceholder(linkCountsTemplate, 'María del Valle', 
 assert.ok(withoutLink.indexOf('María Del Valle') !== -1);
 assert.ok(withLink.length < withoutLink.length);
 assert.ok(composedLen(withLink, tightLink) <= SMS_MAX_MESSAGE_CHARS);
+
+assert.strictEqual(
+  messageBodyHasHttpUrl(
+    'Hola, entra a https://www.credizona.com.uy/solicitudes hoy',
+  ),
+  true,
+);
+assert.strictEqual(messageBodyHasHttpUrl('mira HTTP://ejemplo.com'), true);
+assert.strictEqual(messageBodyHasHttpUrl('Hola {{nombre}}, sin link'), false);
+assert.strictEqual(messageBodyHasHttpUrl('www.credizona.com.uy'), false);
+assert.strictEqual(messageBodyHasHttpUrl(''), false);
+assert.strictEqual(messageBodyHasHttpUrl(null), false);
+
+const manualBody =
+  'Hola {{nombre}}! Entra a https://www.credizona.com.uy/solicitudes';
+const resolvedManual = applyNombrePlaceholder(manualBody, 'Ana', {
+  maxChars: SMS_MAX_MESSAGE_CHARS,
+});
+assert.strictEqual(
+  resolvedManual,
+  'Hola Ana! Entra a https://www.credizona.com.uy/solicitudes',
+);
+assert.ok(!resolvedManual.includes('tinyurl'));
+assert.strictEqual(
+  composeSmsText(resolvedManual, ''),
+  resolvedManual,
+);
+
+const autoBody = applyNombrePlaceholder('Hola {{nombre}}', 'Ana', {
+  link: shortLink,
+  maxChars: SMS_MAX_MESSAGE_CHARS,
+});
+assert.strictEqual(autoBody, 'Hola Ana');
+assert.strictEqual(
+  composeSmsText(autoBody, shortLink),
+  'Hola Ana ' + shortLink,
+);
 
 console.log('OK unit-sms-nombre-placeholder');

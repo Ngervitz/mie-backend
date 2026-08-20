@@ -9505,6 +9505,10 @@ init();
     return body + ' ' + url;
   }
 
+  function messageBodyHasHttpUrl(text) {
+    return /https?:\/\//i.test(String(text == null ? '' : text));
+  }
+
   // Keep in sync with src/lib/smsCampaignContacts.js applyNombrePlaceholder.
   const NOMBRE_PLACEHOLDER = '{{nombre}}';
   const SMS_MAX_MESSAGE_CHARS = 160;
@@ -9580,8 +9584,9 @@ init();
   function resolvePreviewMessageBody(messageBody, previewUrl) {
     const body = String(messageBody == null ? '' : messageBody);
     if (body.indexOf(NOMBRE_PLACEHOLDER) === -1) return body;
+    const skipAutoLink = messageBodyHasHttpUrl(body);
     return applyNombrePlaceholder(body, PREVIEW_EXAMPLE_NOMBRE, {
-      link: previewUrl || '',
+      link: skipAutoLink ? '' : previewUrl || '',
       maxChars: SMS_MAX_MESSAGE_CHARS,
     });
   }
@@ -9596,6 +9601,9 @@ init();
     }
     if (linkKind === 'long-fallback') {
       return 'Estimación sobre URL larga (Link corto no disponible)';
+    }
+    if (linkKind === 'manual-link') {
+      return 'Estimación sobre el mensaje (sin link automático)';
     }
     return 'Estimación sobre vista previa';
   }
@@ -9636,6 +9644,12 @@ init();
       linkKind = previewUrl ? 'long-preview' : 'none';
     }
 
+    const skipAutoLink = messageBodyHasHttpUrl(messageBody);
+    if (skipAutoLink) {
+      previewUrl = '';
+      linkKind = 'manual-link';
+    }
+
     const resolvedBody = resolvePreviewMessageBody(messageBody, previewUrl || '');
     const composed = buildComposedMessage(resolvedBody, previewUrl || '');
     const est = estimateSmsSegments(composed);
@@ -9654,6 +9668,9 @@ init();
         composePreviewLabel.textContent = hasNombrePlaceholder
           ? 'Vista previa (link acortado de preview; nombre de ejemplo «María del Valle», puede truncarse)'
           : 'Vista previa (cuerpo + link acortado de preview; no es el link de la campaña)';
+      } else if (linkKind === 'manual-link') {
+        composePreviewLabel.textContent =
+          'Vista previa (el mensaje ya incluye un link; no se agrega el automático)';
       } else if (linkKind === 'shortening') {
         composePreviewLabel.textContent =
           'Vista previa provisional (cuerpo + URL larga; acortando…)';
@@ -9756,6 +9773,11 @@ init();
       previewShortTimer = null;
     }
     const key = currentDestinationKey();
+    if (messageBodyHasHttpUrl(messageInput.value)) {
+      previewShortPendingKey = null;
+      updateEncodingHint();
+      return;
+    }
     if (!looksLikeHttpUrl(key)) {
       previewShortPendingKey = null;
       updateEncodingHint();
@@ -10378,7 +10400,18 @@ init();
 
       // Keep preview showing the URL actually sent; clear inputs after.
       form.reset();
-      if (sentUrl) {
+      if (messageBodyHasHttpUrl(messageBody)) {
+        if (composePreviewText) {
+          composePreviewText.textContent =
+            resolvePreviewMessageBody(messageBody, '') ||
+            '(escribí el mensaje y la URL de destino)';
+        }
+        if (composePreviewLabel) {
+          composePreviewLabel.textContent =
+            'Mensaje enviado (sin link automático; el cuerpo ya incluía una URL)';
+        }
+        updateEncodingHint();
+      } else if (sentUrl) {
         updateEncodingHint({
           finalUrl: sentUrl,
           utmCampaignValue: utmValue || idText,

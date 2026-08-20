@@ -21,6 +21,7 @@ const {
   MAX_FROM_CONTACTS_LIMIT,
   SMS_MAX_MESSAGE_CHARS,
   applyNombrePlaceholder,
+  messageBodyHasHttpUrl,
   parseSourceSystem,
   parseLimit,
   normalizeDirectedPhones,
@@ -479,25 +480,30 @@ router.post('/campaigns', async (req, res) => {
       const campaignId = randomUUID();
       storedDestinationUrl = String(destinationUrlRaw).trim();
       utmCampaignValue = campaignId;
-      finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
 
-      // Real send: always shorten this campaign's final URL. Do not reuse preview shorts.
-      const shortened = await shortenWithTinyUrl(finalUrl);
-      if (shortened.shortUrl) {
-        shortUrl = shortened.shortUrl;
-      } else {
-        shortUrl = null;
-        logger.warn('SMS shortener fallback; using final_url', {
-          kind: shortened.kind || 'shortener_error',
-          campaign_id: campaignId,
-        });
+      const skipAutoLink = messageBodyHasHttpUrl(messageBody);
+      let linkForMessage = '';
+      if (!skipAutoLink) {
+        finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
+
+        // Real send: always shorten this campaign's final URL. Do not reuse preview shorts.
+        const shortened = await shortenWithTinyUrl(finalUrl);
+        if (shortened.shortUrl) {
+          shortUrl = shortened.shortUrl;
+        } else {
+          shortUrl = null;
+          logger.warn('SMS shortener fallback; using final_url', {
+            kind: shortened.kind || 'shortener_error',
+            campaign_id: campaignId,
+          });
+        }
+        linkForMessage = shortUrl || finalUrl;
       }
 
-      const linkForMessage = shortUrl || finalUrl;
       if (selectedContacts) {
         messages = selectedContacts.map((c) => {
           const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre, {
-            link: linkForMessage,
+            link: skipAutoLink ? '' : linkForMessage,
             maxChars: SMS_MAX_MESSAGE_CHARS,
           });
           const recordId =
@@ -506,7 +512,9 @@ router.post('/campaigns', async (req, res) => {
               : String(c.source_record_id);
           return {
             phone: String(c.phone).trim(),
-            text: `${bodyWithName} ${linkForMessage}`,
+            text: skipAutoLink
+              ? bodyWithName
+              : `${bodyWithName} ${linkForMessage}`,
             contact_id: c.id,
             source_system:
               c.source_system == null ? null : String(c.source_system),
@@ -514,7 +522,9 @@ router.post('/campaigns', async (req, res) => {
           };
         });
       } else {
-        const composedText = `${messageBody} ${linkForMessage}`;
+        const composedText = skipAutoLink
+          ? String(messageBody)
+          : `${messageBody} ${linkForMessage}`;
         messages = normalizedPhones.map((phone) => ({
           phone,
           text: composedText,

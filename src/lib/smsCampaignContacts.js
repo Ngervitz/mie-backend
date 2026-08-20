@@ -31,6 +31,10 @@ function composeSmsText(resolvedBody, link) {
   return body + ' ' + url;
 }
 
+function messageBodyHasHttpUrl(text) {
+  return /https?:\/\//i.test(String(text == null ? '' : text));
+}
+
 function countSmsChars(text) {
   return Array.from(String(text == null ? '' : text)).length;
 }
@@ -179,6 +183,7 @@ module.exports = {
   titleCaseNombre,
   applyNombrePlaceholder,
   composeSmsText,
+  messageBodyHasHttpUrl,
   parseSourceSystem,
   parseLimit,
   normalizeDirectedPhones,
