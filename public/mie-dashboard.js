@@ -13287,14 +13287,27 @@ init();
   async function loadSummary() {
     setStatus('Cargando resumen…', false);
     try {
-      const res = await fetch(API + '/reports/cz-funnel-summary', {
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-      });
-      const data = await res.json().catch(function () {
+      const [sumRes, utilRes] = await Promise.all([
+        fetch(API + '/reports/cz-funnel-summary', {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        }),
+        fetch(API + '/reports/cz-funnel-channel-utility', {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        }).catch(function () {
+          return null;
+        }),
+      ]);
+      const data = await sumRes.json().catch(function () {
         return {};
       });
-      if (!res.ok) {
+      const utilData =
+        utilRes &&
+        (await utilRes.json().catch(function () {
+          return {};
+        }));
+      if (!sumRes.ok) {
         setStatus((data && data.error) || 'Error al cargar resumen', true);
         return;
       }
@@ -13312,6 +13325,43 @@ init();
           r.score_promedio == null ? '—' : r.score_promedio,
         ];
       });
+      const utilTitle =
+        'Utilidad por canal — Fecha aproximada (creación de solicitud, no otorgamiento real) — pendiente de corrección';
+      const utilHeaders = [
+        'Mes',
+        'Canal',
+        'Cant. Otorgados',
+        'Monto Otorgado',
+        'Revenue (6%)',
+        'Gasto',
+        'Utilidad',
+      ];
+      let utilBlock;
+      if (!utilRes || !utilRes.ok) {
+        const utilErr =
+          (utilData && utilData.error) || 'Error al cargar utilidad por canal';
+        utilBlock =
+          '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
+          escapeHtml(utilTitle) +
+          '</h2><p class="text-muted">' +
+          escapeHtml(String(utilErr)) +
+          '</p></section>';
+      } else {
+        const utilRows = (utilData.rows || []).map(function (r) {
+          const monthRaw = r.period_month == null ? '' : String(r.period_month);
+          const month = monthRaw.length >= 7 ? monthRaw.slice(0, 7) : monthRaw;
+          return [
+            month,
+            r.channel == null ? '' : String(r.channel),
+            r.granted_count == null ? 0 : r.granted_count,
+            formatMoney(r.monto_total_otorgado),
+            formatMoney(r.revenue),
+            formatMoney(r.spend),
+            formatMoney(r.utility),
+          ];
+        });
+        utilBlock = renderTable(utilTitle, utilHeaders, utilRows);
+      }
       resultsEl.innerHTML =
         '<p class="cz-funnel-totals text-muted">Totales — solicitudes: ' +
         escapeHtml(String(totals.solicitudes || 0)) +
@@ -13330,7 +13380,8 @@ init();
           'Encuestas por mes (score_v2)',
           ['Mes', 'Total', 'Score promedio'],
           encRows,
-        );
+        ) +
+        utilBlock;
       setStatus('OK', false);
     } catch (_err) {
       setStatus('No se pudo conectar.', true);

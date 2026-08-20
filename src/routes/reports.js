@@ -2984,9 +2984,11 @@ router.get('/cz-funnel-summary', async (req, res) => {
       if (!iso) return null;
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return null;
-      const y = d.getUTCFullYear();
-      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      return `${y}-${m}`;
+      const ymd = d.toLocaleDateString('en-CA', {
+        timeZone: 'America/Montevideo',
+      });
+      if (!ymd || ymd.length < 7) return null;
+      return ymd.slice(0, 7);
     }
 
     const solicitudesByMonth = new Map();
@@ -3065,6 +3067,31 @@ router.get('/cz-funnel-summary', async (req, res) => {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Failed to build CZ funnel summary' });
+  }
+});
+
+/**
+ * GET /reports/cz-funnel-channel-utility
+ * Live rows from cz_funnel_channel_utility_live (America/Montevideo months).
+ */
+router.get('/cz-funnel-channel-utility', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('cz_funnel_channel_utility_live')
+      .select(
+        'period_month, channel, attribution_version, granted_count, monto_total_otorgado, revenue, spend, utility',
+      )
+      .order('period_month', { ascending: true })
+      .order('channel', { ascending: true });
+    if (error) throw new Error(error.message);
+    return res.status(200).json({ rows: data || [] });
+  } catch (err) {
+    logger.error('Reports cz-funnel-channel-utility failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      error: 'Failed to load CZ funnel channel utility',
+    });
   }
 });
 

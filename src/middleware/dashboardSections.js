@@ -105,6 +105,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
   ]),
   'cz-funnel': Object.freeze([
     '/reports/cz-funnel-summary',
+    '/reports/cz-funnel-channel-utility',
     '/jobs/run-cz-data-sync',
   ]),
 });
