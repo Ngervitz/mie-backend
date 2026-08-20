@@ -87,6 +87,32 @@ async function writeCursor(sourceName, patch) {
 }
 
 /**
+ * Mark old-base sms_contacts (credizona2_datos / prestafacil) whose
+ * source_record_id matches a CI from this solicitudes upsert.
+ * Safe integers only; empty list is a no-op.
+ */
+async function excludeOldBaseContactsByCi(cis) {
+  const unique = [];
+  const seen = new Set();
+  for (let i = 0; i < cis.length; i += 1) {
+    const n = cis[i];
+    if (!Number.isSafeInteger(n)) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    unique.push(n);
+  }
+  if (!unique.length) return;
+  const { error } = await supabase.rpc('sms_contacts_exclude_old_base_by_ci', {
+    p_cis: unique,
+  });
+  if (error) {
+    throw new Error(
+      `sms_contacts_exclude_old_base_by_ci failed: ${error.message}`,
+    );
+  }
+}
+
+/**
  * Parse CZ datetime-ish strings to ISO or null.
  * @param {unknown} raw
  * @returns {string|null}
@@ -166,6 +192,11 @@ async function upsertSolicitudes(items) {
   if (error) {
     throw new Error(`${SOURCE_SOLICITUDES} upsert failed: ${error.message}`);
   }
+  await excludeOldBaseContactsByCi(
+    rows
+      .map((r) => r.ci)
+      .filter((ci) => ci != null),
+  );
   return rows.length;
 }
 
