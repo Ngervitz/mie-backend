@@ -13231,6 +13231,7 @@ init();
   const panel = document.getElementById('cz-funnel-panel');
   const statusEl = document.getElementById('cz-funnel-status');
   const resultsEl = document.getElementById('cz-funnel-results');
+  const monthKpisEl = document.getElementById('cz-funnel-month-kpis');
   const syncBtn = document.getElementById('cz-funnel-sync-btn');
   const reloadBtn = document.getElementById('cz-funnel-reload-btn');
   if (!panel || !statusEl || !resultsEl) return;
@@ -13244,17 +13245,271 @@ init();
 
   function formatMoney(n) {
     if (n == null || n === '') return '—';
-    const v = Number(n);
-    if (!Number.isFinite(v)) return '—';
-    return v.toLocaleString('es-UY');
+    const rounded = Math.round(Number(n));
+    if (!Number.isFinite(rounded)) return '—';
+    return (
+      (rounded < 0 ? '-' : '') +
+      '$' +
+      Math.abs(rounded).toLocaleString('es-UY', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      })
+    );
+  }
+
+  function currentMonthMontevideo() {
+    const ymd = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'America/Montevideo',
+    });
+    return ymd && ymd.length >= 7 ? ymd.slice(0, 7) : '';
+  }
+
+  function formatCzMonthLabel(yyyyMm) {
+    const parts = String(yyyyMm || '').split('-');
+    if (parts.length < 2) return String(yyyyMm || '');
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!Number.isFinite(y) || !Number.isFinite(m)) return String(yyyyMm);
+    const d = new Date(Date.UTC(y, m - 1, 1));
+    return d.toLocaleDateString('es-UY', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  }
+
+  function numOrZero(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function perGranted(numerator, grantedCount) {
+    if (numerator == null || numerator === '') return '—';
+    const den = Number(grantedCount);
+    if (!Number.isFinite(den) || den <= 0) return '—';
+    const num = Number(numerator);
+    if (!Number.isFinite(num)) return '—';
+    return formatMoney(num / den);
+  }
+
+  function emptyChannelMetrics() {
+    return {
+      granted_count: 0,
+      monto_total_otorgado: 0,
+      spend: 0,
+      utility: 0,
+    };
+  }
+
+  function metricsFromUtilRow(row) {
+    if (!row || typeof row !== 'object') return emptyChannelMetrics();
+    return {
+      granted_count: numOrZero(row.granted_count),
+      monto_total_otorgado: numOrZero(row.monto_total_otorgado),
+      spend: row.spend == null ? null : numOrZero(row.spend),
+      utility: row.utility == null ? null : numOrZero(row.utility),
+    };
+  }
+
+  function addMetrics(a, b) {
+    const spendA = a.spend;
+    const spendB = b.spend;
+    const utilA = a.utility;
+    const utilB = b.utility;
+    return {
+      granted_count: a.granted_count + b.granted_count,
+      monto_total_otorgado: a.monto_total_otorgado + b.monto_total_otorgado,
+      spend: spendA == null || spendB == null ? null : spendA + spendB,
+      utility: utilA == null || utilB == null ? null : utilA + utilB,
+    };
+  }
+
+  function currentMonthChannelMetrics(utilRowsRaw, monthKey) {
+    const by = {
+      meta: emptyChannelMetrics(),
+      sms: emptyChannelMetrics(),
+      sin_atribuir: emptyChannelMetrics(),
+    };
+    (utilRowsRaw || []).forEach(function (r) {
+      const monthRaw = r.period_month == null ? '' : String(r.period_month);
+      const month = monthRaw.length >= 7 ? monthRaw.slice(0, 7) : monthRaw;
+      if (month !== monthKey) return;
+      const ch = r.channel == null ? '' : String(r.channel);
+      if (ch === 'meta' || ch === 'sms' || ch === 'sin_atribuir') {
+        by[ch] = metricsFromUtilRow(r);
+      }
+    });
+    return {
+      by: by,
+      total: addMetrics(addMetrics(by.meta, by.sms), by.sin_atribuir),
+    };
+  }
+
+  function renderKpiCard(value, label, tone) {
+    const t = tone || 'neutral';
+    return (
+      '<div class="kpi-card is-' +
+      escapeHtml(t) +
+      '"><div class="kpi-value">' +
+      escapeHtml(String(value)) +
+      '</div><div class="kpi-label">' +
+      escapeHtml(label) +
+      '</div></div>'
+    );
+  }
+
+  function renderKpiSection(title, innerHtml) {
+    return (
+      '<section class="cz-funnel-kpi-section">' +
+      '<h3 class="sms-section-title">' +
+      escapeHtml(title) +
+      '</h3>' +
+      '<div class="kpi-grid sms-monthly-kpi-grid">' +
+      innerHtml +
+      '</div></section>'
+    );
+  }
+
+  function renderKpiSectionError(title, err) {
+    return (
+      '<section class="cz-funnel-kpi-section">' +
+      '<h3 class="sms-section-title">' +
+      escapeHtml(title) +
+      '</h3><p class="text-muted">' +
+      escapeHtml(err) +
+      '</p></section>'
+    );
+  }
+
+  function renderResultado(by, tot) {
+    return renderKpiSection(
+      'Resultado',
+      renderKpiCard(formatMoney(tot.utility), '💰 Utilidad total', 'success') +
+        renderKpiCard(formatMoney(by.meta.utility), '📊 Utilidad · Meta', 'success') +
+        renderKpiCard(formatMoney(by.sms.utility), '📊 Utilidad · SMS', 'success') +
+        renderKpiCard(
+          formatMoney(by.sin_atribuir.utility),
+          '📊 Utilidad · sin_atribuir',
+          'success',
+        ) +
+        renderKpiCard(formatMoney(tot.spend), '💸 Gasto total', 'danger') +
+        renderKpiCard(formatMoney(by.meta.spend), '💸 Gasto · Meta', 'danger') +
+        renderKpiCard(formatMoney(by.sms.spend), '💸 Gasto · SMS', 'danger') +
+        renderKpiCard(
+          formatMoney(by.sin_atribuir.spend),
+          '💸 Gasto · sin_atribuir',
+          'danger',
+        ),
+    );
+  }
+
+  function renderNegocio(by, tot) {
+    return renderKpiSection(
+      'Negocio',
+      renderKpiCard(
+        formatMoney(tot.monto_total_otorgado),
+        '🏦 Monto colocado (total)',
+        'accent',
+      ) +
+        renderKpiCard(
+          formatMoney(by.meta.monto_total_otorgado),
+          '🏦 Monto colocado · Meta',
+          'accent',
+        ) +
+        renderKpiCard(
+          formatMoney(by.sms.monto_total_otorgado),
+          '🏦 Monto colocado · SMS',
+          'accent',
+        ) +
+        renderKpiCard(
+          formatMoney(by.sin_atribuir.monto_total_otorgado),
+          '🏦 Monto colocado · sin_atribuir',
+          'accent',
+        ) +
+        renderKpiCard(String(tot.granted_count), '🔢 Préstamos otorgados (total)', 'accent') +
+        renderKpiCard(String(by.meta.granted_count), '🔢 Otorgados · Meta', 'accent') +
+        renderKpiCard(String(by.sms.granted_count), '🔢 Otorgados · SMS', 'accent') +
+        renderKpiCard(
+          String(by.sin_atribuir.granted_count),
+          '🔢 Otorgados · sin_atribuir',
+          'accent',
+        ) +
+        renderKpiCard(
+          perGranted(tot.monto_total_otorgado, tot.granted_count),
+          '💳 Ticket promedio (total)',
+          'accent',
+        ) +
+        renderKpiCard(
+          perGranted(by.meta.monto_total_otorgado, by.meta.granted_count),
+          '💳 Ticket promedio · Meta',
+          'accent',
+        ) +
+        renderKpiCard(
+          perGranted(by.sms.monto_total_otorgado, by.sms.granted_count),
+          '💳 Ticket promedio · SMS',
+          'accent',
+        ) +
+        renderKpiCard(
+          perGranted(
+            by.sin_atribuir.monto_total_otorgado,
+            by.sin_atribuir.granted_count,
+          ),
+          '💳 Ticket promedio · sin_atribuir',
+          'accent',
+        ) +
+        renderKpiCard(
+          perGranted(tot.spend, tot.granted_count),
+          '🎯 Costo por otorgado (total)',
+          'danger',
+        ) +
+        renderKpiCard(
+          perGranted(by.meta.spend, by.meta.granted_count),
+          '🎯 Costo por otorgado · Meta',
+          'danger',
+        ) +
+        renderKpiCard(
+          perGranted(by.sms.spend, by.sms.granted_count),
+          '🎯 Costo por otorgado · SMS',
+          'danger',
+        ) +
+        renderKpiCard(
+          perGranted(by.sin_atribuir.spend, by.sin_atribuir.granted_count),
+          '🎯 Costo por otorgado · sin_atribuir',
+          'danger',
+        ),
+    );
+  }
+
+  function renderCalidad(encRow) {
+    const count = encRow ? numOrZero(encRow.total_encuestas) : 0;
+    const scoreRaw = encRow && encRow.score_promedio;
+    const scoreNum = Number(scoreRaw);
+    const score =
+      scoreRaw == null || !Number.isFinite(scoreNum) ? '—' : String(scoreRaw);
+    return renderKpiSection(
+      'Calidad',
+      renderKpiCard(String(count), '📋 Encuestas del mes', 'neutral') +
+        renderKpiCard(score, '⭐ Score promedio', 'accent'),
+    );
+  }
+
+  function renderCollapsibleBlock(title, innerHtml) {
+    return (
+      '<details class="cz-funnel-block">' +
+      '<summary class="sms-section-title">' +
+      '<span class="cz-funnel-chevron" aria-hidden="true">▸</span>' +
+      escapeHtml(title) +
+      '</summary>' +
+      innerHtml +
+      '</details>'
+    );
   }
 
   function renderTable(title, headers, rows) {
     if (!rows.length) {
-      return (
-        '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
-        escapeHtml(title) +
-        '</h2><p class="text-muted">Sin datos.</p></section>'
+      return renderCollapsibleBlock(
+        title,
+        '<p class="text-muted">Sin datos.</p>',
       );
     }
     const head = headers
@@ -13275,14 +13530,13 @@ init();
         );
       })
       .join('');
-    return (
-      '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
-      escapeHtml(title) +
-      '</h2><div class="table-wrap"><table class="ga4-table"><thead><tr>' +
-      head +
-      '</tr></thead><tbody>' +
-      body +
-      '</tbody></table></div></section>'
+    return renderCollapsibleBlock(
+      title,
+      '<div class="table-wrap"><table class="ga4-table"><thead><tr>' +
+        head +
+        '</tr></thead><tbody>' +
+        body +
+        '</tbody></table></div>',
     );
   }
 
@@ -13311,8 +13565,11 @@ init();
         }));
       if (!sumRes.ok) {
         setStatus((data && data.error) || 'Error al cargar resumen', true);
+        if (monthKpisEl) monthKpisEl.innerHTML = '';
+        resultsEl.innerHTML = '';
         return;
       }
+      const monthKey = currentMonthMontevideo();
       const totals = data.totals || {};
       const solRows = (data.solicitudesByMonth || []).map(function (r) {
         return [r.month, r.total_solicitudes];
@@ -13339,15 +13596,17 @@ init();
         'Utilidad',
       ];
       let utilBlock;
+      let resultadoNegocioHtml;
       if (!utilRes || !utilRes.ok) {
         const utilErr =
           (utilData && utilData.error) || 'Error al cargar utilidad por canal';
-        utilBlock =
-          '<section class="cz-funnel-block"><h2 class="sms-section-title">' +
-          escapeHtml(utilTitle) +
-          '</h2><p class="text-muted">' +
-          escapeHtml(String(utilErr)) +
-          '</p></section>';
+        utilBlock = renderCollapsibleBlock(
+          utilTitle,
+          '<p class="text-muted">' + escapeHtml(String(utilErr)) + '</p>',
+        );
+        resultadoNegocioHtml =
+          renderKpiSectionError('Resultado', String(utilErr)) +
+          renderKpiSectionError('Negocio', String(utilErr));
       } else {
         const utilRows = (utilData.rows || []).map(function (r) {
           const monthRaw = r.period_month == null ? '' : String(r.period_month);
@@ -13370,6 +13629,22 @@ init();
           utilBlock +=
             '<p class="cz-funnel-totals text-muted">Gasto/utilidad Meta en — = falta cotización BCU (USD→UYU) para algún día con spend.</p>';
         }
+        const agg = currentMonthChannelMetrics(utilData.rows || [], monthKey);
+        resultadoNegocioHtml =
+          renderResultado(agg.by, agg.total) + renderNegocio(agg.by, agg.total);
+      }
+      const encRow = (data.encuestasByMonth || []).find(function (r) {
+        return r.month === monthKey;
+      });
+      if (monthKpisEl) {
+        monthKpisEl.innerHTML =
+          '<section class="cz-funnel-month-summary">' +
+          '<h2 class="sms-section-title">Mes corriente — ' +
+          escapeHtml(formatCzMonthLabel(monthKey)) +
+          '</h2>' +
+          resultadoNegocioHtml +
+          renderCalidad(encRow) +
+          '</section>';
       }
       resultsEl.innerHTML =
         '<p class="cz-funnel-totals text-muted">Totales — solicitudes: ' +
@@ -13391,7 +13666,7 @@ init();
           encRows,
         ) +
         utilBlock;
-      setStatus('OK', false);
+      setStatus('', false);
     } catch (_err) {
       setStatus('No se pudo conectar.', true);
     }

@@ -4396,6 +4396,38 @@
 #mie-dashboard-app .cz-funnel-block {
   margin-top: 20px;
 }
+#mie-dashboard-app .cz-funnel-block > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+#mie-dashboard-app .cz-funnel-block > summary::-webkit-details-marker,
+#mie-dashboard-app .cz-funnel-block > summary::marker {
+  display: none;
+  content: '';
+}
+#mie-dashboard-app .cz-funnel-block .cz-funnel-chevron {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+#mie-dashboard-app .cz-funnel-block[open] > summary .cz-funnel-chevron {
+  transform: rotate(90deg);
+}
+#mie-dashboard-app .cz-funnel-month-summary {
+  margin-top: 12px;
+}
+#mie-dashboard-app .cz-funnel-kpi-section {
+  margin-top: 16px;
+}
+#mie-dashboard-app .cz-funnel-kpi-section .sms-section-title {
+  margin-bottom: 10px;
+}
 #mie-dashboard-app .cz-funnel-totals {
   margin: 8px 0 4px;
 }
