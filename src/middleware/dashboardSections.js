@@ -107,6 +107,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/reports/cz-funnel-summary',
     '/reports/cz-funnel-channel-utility',
     '/jobs/run-cz-data-sync',
+    '/jobs/run-bcu-usd-rate-sync',
   ]),
 });
 

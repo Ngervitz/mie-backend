@@ -37,6 +37,7 @@ const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
+const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
 const { getCzApiBearerTokenDiagnostic } = require('../clients/czApiClient');
 const env = require('../config/env');
 const logger = require('../lib/logger');
@@ -1300,6 +1301,35 @@ router.post('/run-cz-data-sync', async (req, res) => {
       hasTokenDiagnostic: Boolean(payload.tokenDiagnostic),
     });
     return res.status(500).json(payload);
+  }
+});
+
+/**
+ * BCU USD/UYU daily close → bcu_usd_uyu_daily.
+ * Used by cz_funnel_channel_utility_live only (not Meta Ads UI).
+ */
+router.post('/run-bcu-usd-rate-sync', async (req, res) => {
+  logger.info('POST /jobs/run-bcu-usd-rate-sync — started');
+  try {
+    const result = await runBcuUsdRateSync();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('bcu_usd_rate_sync finished', {
+      ok: result.ok,
+      closeDate: result.closeDate,
+      backfilled: result.backfilled,
+      daily: result.daily,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('bcu_usd_rate_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
   }
 });
 

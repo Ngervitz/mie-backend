@@ -13243,7 +13243,9 @@ init();
   }
 
   function formatMoney(n) {
-    const v = Number(n) || 0;
+    if (n == null || n === '') return '—';
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '—';
     return v.toLocaleString('es-UY');
   }
 
@@ -13361,6 +13363,13 @@ init();
           ];
         });
         utilBlock = renderTable(utilTitle, utilHeaders, utilRows);
+        const missingFx = (utilData.rows || []).some(function (r) {
+          return r.channel === 'meta' && (r.spend == null || r.utility == null);
+        });
+        if (missingFx) {
+          utilBlock +=
+            '<p class="cz-funnel-totals text-muted">Gasto/utilidad Meta en — = falta cotización BCU (USD→UYU) para algún día con spend.</p>';
+        }
       }
       resultsEl.innerHTML =
         '<p class="cz-funnel-totals text-muted">Totales — solicitudes: ' +
