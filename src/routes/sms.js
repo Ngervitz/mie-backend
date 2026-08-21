@@ -47,6 +47,39 @@ const router = express.Router();
 const DELIVERED_STATUS_VALUES = ['DELIVERED'];
 const deliveredStatusSet = new Set(DELIVERED_STATUS_VALUES);
 
+const MAX_WAVE_INTERVAL_SECONDS = 86400;
+
+function parseWaveSize(raw) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw !== 'number' && typeof raw !== 'string') return undefined;
+  const n = typeof raw === 'number' ? raw : parseInt(String(raw).trim(), 10);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
+function parseIntervalSeconds(raw) {
+  if (raw == null || raw === '') return 0;
+  if (typeof raw !== 'number' && typeof raw !== 'string') return undefined;
+  const n = typeof raw === 'number' ? raw : parseInt(String(raw).trim(), 10);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_WAVE_INTERVAL_SECONDS) {
+    return undefined;
+  }
+  return n;
+}
+
+function applyWaveScheduledAt(messages, waveSize, intervalSeconds) {
+  if (!Array.isArray(messages) || !messages.length) return messages;
+  if (waveSize == null || intervalSeconds < 1) return messages;
+  if (messages.length <= waveSize) return messages;
+  const t0 = Date.now();
+  return messages.map(function (m, i) {
+    const wave = Math.floor(i / waveSize);
+    return Object.assign({}, m, {
+      scheduledAt: new Date(t0 + wave * intervalSeconds * 1000).toISOString(),
+    });
+  });
+}
+
 function mapServiceError(err, res) {
   if (err instanceof NotifymeError) {
     const body = {
@@ -304,6 +337,26 @@ router.post('/campaigns', async (req, res) => {
 
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'name must be a non-empty string' });
+  }
+
+  const waveSize = parseWaveSize(req.body && req.body.wave_size);
+  if (waveSize === undefined) {
+    return res.status(400).json({
+      error: 'wave_size must be an integer ≥ 1, or omitted',
+    });
+  }
+  const intervalSeconds = parseIntervalSeconds(
+    req.body && req.body.interval_seconds,
+  );
+  if (intervalSeconds === undefined) {
+    return res.status(400).json({
+      error: 'interval_seconds must be an integer from 0 to 86400',
+    });
+  }
+  if (intervalSeconds > 0 && waveSize == null) {
+    return res.status(400).json({
+      error: 'SMS por tanda es obligatorio si el intervalo es mayor a 0',
+    });
   }
 
   const fromContactsRaw = req.body && req.body.from_contacts;
@@ -567,6 +620,7 @@ router.post('/campaigns', async (req, res) => {
   }
 
   try {
+    messages = applyWaveScheduledAt(messages, waveSize, intervalSeconds);
     const summary = await sendBatch(campaign.id, messages);
     const payload = {
       campaign: {

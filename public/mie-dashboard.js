@@ -9237,6 +9237,8 @@ init();
   const destListWrap = document.getElementById('sms-dest-list-wrap');
   const sourceSystemInput = document.getElementById('sms-source-system');
   const fromLimitInput = document.getElementById('sms-from-limit');
+  const waveSizeInput = document.getElementById('sms-wave-size');
+  const waveIntervalInput = document.getElementById('sms-wave-interval-seconds');
   const eligibleStatus = document.getElementById('sms-eligible-status');
   const messageInput = document.getElementById('sms-message');
   const destinationUrlInput = document.getElementById('sms-destination-url');
@@ -9269,6 +9271,8 @@ init();
     !destListWrap ||
     !sourceSystemInput ||
     !fromLimitInput ||
+    !waveSizeInput ||
+    !waveIntervalInput ||
     !eligibleStatus ||
     !messageInput ||
     !destinationUrlInput ||
@@ -10294,6 +10298,43 @@ init();
       return;
     }
 
+    const waveSizeRaw = String(waveSizeInput.value || '').trim();
+    const intervalRaw = String(waveIntervalInput.value || '').trim();
+    let waveSize = null;
+    if (waveSizeRaw !== '') {
+      waveSize = parseInt(waveSizeRaw, 10);
+      if (!Number.isInteger(waveSize) || waveSize < 1) {
+        setStatus(
+          createStatus,
+          'SMS por tanda debe ser un entero ≥ 1, o vacío.',
+          true,
+        );
+        return;
+      }
+    }
+    const intervalSeconds =
+      intervalRaw === '' ? 0 : parseInt(intervalRaw, 10);
+    if (
+      !Number.isInteger(intervalSeconds) ||
+      intervalSeconds < 0 ||
+      intervalSeconds > 86400
+    ) {
+      setStatus(
+        createStatus,
+        'El intervalo debe ser un entero entre 0 y 86400 segundos.',
+        true,
+      );
+      return;
+    }
+    if (intervalSeconds > 0 && waveSize == null) {
+      setStatus(
+        createStatus,
+        'SMS por tanda es obligatorio si el intervalo es mayor a 0.',
+        true,
+      );
+      return;
+    }
+
     createBusy = true;
     submitBtn.disabled = true;
     submitBtn.textContent = 'Enviando…';
@@ -10312,6 +10353,8 @@ init();
                 name: name,
                 destination_url: destinationUrl,
                 message_body: messageBody,
+                wave_size: waveSize,
+                interval_seconds: intervalSeconds,
                 from_contacts: {
                   source_system: sourceSystem,
                   limit: fromLimit,
@@ -10321,6 +10364,8 @@ init();
                 name: name,
                 destination_url: destinationUrl,
                 message_body: messageBody,
+                wave_size: waveSize,
+                interval_seconds: intervalSeconds,
                 phones: phones,
               },
         ),

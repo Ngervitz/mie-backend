@@ -908,6 +908,34 @@
               <pre id="sms-compose-preview-text" class="sms-compose-preview-text"></pre>
             </div>
             <p id="sms-encoding-hint" class="sms-encoding-hint" aria-live="polite"></p>
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">SMS por tanda</span>
+              <input
+                type="number"
+                id="sms-wave-size"
+                class="mcl-input"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                autocomplete="off"
+              />
+              <span class="mcl-field-hint">Vacío = todos los mensajes en una sola tanda (como ahora).</span>
+            </label>
+            <label class="mcl-field sms-field">
+              <span class="mcl-field-label">Intervalo entre tandas (segundos)</span>
+              <input
+                type="number"
+                id="sms-wave-interval-seconds"
+                class="mcl-input"
+                min="0"
+                max="86400"
+                step="1"
+                value="0"
+                inputmode="numeric"
+                autocomplete="off"
+              />
+              <span class="mcl-field-hint">0 = sin intervalo. Si es mayor a 0, hace falta SMS por tanda. Notifyme programa cada tanda con ese espacio.</span>
+            </label>
             <p id="sms-batch-warn" class="sms-batch-warn" hidden></p>
             <div class="sms-form-actions">
               <button type="submit" id="sms-submit-btn" class="btn btn-primary">Enviar campaña</button>
