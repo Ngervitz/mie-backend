@@ -4421,12 +4421,102 @@
 }
 #mie-dashboard-app .cz-funnel-month-summary {
   margin-top: 12px;
+  --bg-success: var(--accent-success-soft);
+  --text-success: var(--accent-success);
+  --bg-danger: var(--accent-danger-soft);
+  --text-danger: var(--accent-danger);
+  --surface-1: var(--surface);
 }
 #mie-dashboard-app .cz-funnel-kpi-section {
   margin-top: 16px;
 }
 #mie-dashboard-app .cz-funnel-kpi-section .sms-section-title {
   margin-bottom: 10px;
+}
+#mie-dashboard-app .cz-funnel-metric-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1100px;
+}
+#mie-dashboard-app .cz-funnel-metric-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  gap: var(--gap);
+}
+#mie-dashboard-app .cz-funnel-kpi-total,
+#mie-dashboard-app .cz-funnel-kpi-break {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+#mie-dashboard-app .cz-funnel-kpi-total {
+  padding: 18px 20px;
+  border-radius: 12px;
+}
+#mie-dashboard-app .cz-funnel-kpi-break {
+  padding: 14px;
+  border-radius: var(--radius);
+}
+#mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-kpi-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+#mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-value {
+  margin-top: 8px;
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-kpi-value {
+  margin-top: 6px;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+#mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-label {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-kpi-label {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cz-funnel-kpi-total.is-pos {
+  background: var(--bg-success);
+  color: var(--text-success);
+}
+#mie-dashboard-app .cz-funnel-kpi-total.is-pos .cz-funnel-kpi-label {
+  color: var(--text-success);
+}
+#mie-dashboard-app .cz-funnel-kpi-total.is-neg {
+  background: var(--bg-danger);
+  color: var(--text-danger);
+}
+#mie-dashboard-app .cz-funnel-kpi-total.is-neg .cz-funnel-kpi-label {
+  color: var(--text-danger);
+}
+#mie-dashboard-app .cz-funnel-kpi-total.is-missing .cz-funnel-kpi-value,
+#mie-dashboard-app .cz-funnel-kpi-break.is-missing .cz-funnel-kpi-value {
+  color: var(--text-muted);
+}
+#mie-dashboard-app .cz-funnel-kpi-break.is-neg .cz-funnel-kpi-value {
+  color: var(--text-danger);
+}
+@media (max-width: 720px) {
+  #mie-dashboard-app .cz-funnel-metric-row {
+    grid-template-columns: 1fr;
+  }
 }
 #mie-dashboard-app .cz-funnel-totals {
   margin: 8px 0 4px;

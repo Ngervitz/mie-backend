@@ -13358,13 +13358,15 @@ init();
     );
   }
 
-  function renderKpiSection(title, innerHtml) {
+  function renderKpiSection(title, innerHtml, gridClass) {
     return (
       '<section class="cz-funnel-kpi-section">' +
       '<h3 class="sms-section-title">' +
       escapeHtml(title) +
       '</h3>' +
-      '<div class="kpi-grid sms-monthly-kpi-grid">' +
+      '<div class="' +
+      escapeHtml(gridClass || 'kpi-grid sms-monthly-kpi-grid') +
+      '">' +
       innerHtml +
       '</div></section>'
     );
@@ -13381,102 +13383,150 @@ init();
     );
   }
 
+  function isMissingDisplay(value) {
+    return value == null || value === '' || String(value) === '—';
+  }
+
+  function utilitySign(raw) {
+    if (raw == null || raw === '') return '';
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return '';
+    return n < 0 ? 'neg' : 'pos';
+  }
+
+  function renderKpiTotalCard(emoji, value, label, kind, raw) {
+    let extra = ' is-neutral';
+    if (kind === 'utility' && !isMissingDisplay(value)) {
+      extra = utilitySign(raw) === 'neg' ? ' is-neg' : ' is-pos';
+    }
+    if (isMissingDisplay(value)) extra += ' is-missing';
+    return (
+      '<div class="cz-funnel-kpi-total' +
+      extra +
+      '">' +
+      '<div class="cz-funnel-kpi-emoji" aria-hidden="true">' +
+      escapeHtml(emoji) +
+      '</div>' +
+      '<div class="cz-funnel-kpi-value">' +
+      escapeHtml(String(value)) +
+      '</div>' +
+      '<div class="cz-funnel-kpi-label">' +
+      escapeHtml(label) +
+      '</div></div>'
+    );
+  }
+
+  function renderKpiBreakdownCard(emoji, value, label, kind, raw) {
+    let extra = '';
+    if (isMissingDisplay(value)) extra += ' is-missing';
+    else if (kind === 'utility' && utilitySign(raw) === 'neg') extra += ' is-neg';
+    return (
+      '<div class="cz-funnel-kpi-break' +
+      extra +
+      '">' +
+      '<div class="cz-funnel-kpi-emoji" aria-hidden="true">' +
+      escapeHtml(emoji) +
+      '</div>' +
+      '<div class="cz-funnel-kpi-value">' +
+      escapeHtml(String(value)) +
+      '</div>' +
+      '<div class="cz-funnel-kpi-label">' +
+      escapeHtml(label) +
+      '</div></div>'
+    );
+  }
+
+  function renderMetricRow(opts) {
+    const kind = opts.kind || 'neutral';
+    const emoji = opts.emoji;
+    return (
+      '<div class="cz-funnel-metric-row">' +
+      renderKpiTotalCard(emoji, opts.total, opts.label, kind, opts.totalRaw) +
+      renderKpiBreakdownCard(emoji, opts.meta, 'Meta', kind, opts.metaRaw) +
+      renderKpiBreakdownCard(emoji, opts.sms, 'SMS', kind, opts.smsRaw) +
+      renderKpiBreakdownCard(
+        emoji,
+        opts.sin,
+        'sin_atribuir',
+        kind,
+        opts.sinRaw,
+      ) +
+      '</div>'
+    );
+  }
+
   function renderResultado(by, tot) {
     return renderKpiSection(
       'Resultado',
-      renderKpiCard(formatMoney(tot.utility), '💰 Utilidad total', 'success') +
-        renderKpiCard(formatMoney(by.meta.utility), '📊 Utilidad · Meta', 'success') +
-        renderKpiCard(formatMoney(by.sms.utility), '📊 Utilidad · SMS', 'success') +
-        renderKpiCard(
-          formatMoney(by.sin_atribuir.utility),
-          '📊 Utilidad · sin_atribuir',
-          'success',
-        ) +
-        renderKpiCard(formatMoney(tot.spend), '💸 Gasto total', 'danger') +
-        renderKpiCard(formatMoney(by.meta.spend), '💸 Gasto · Meta', 'danger') +
-        renderKpiCard(formatMoney(by.sms.spend), '💸 Gasto · SMS', 'danger') +
-        renderKpiCard(
-          formatMoney(by.sin_atribuir.spend),
-          '💸 Gasto · sin_atribuir',
-          'danger',
-        ),
+      renderMetricRow({
+        kind: 'utility',
+        emoji: '💰',
+        label: 'Utilidad',
+        total: formatMoney(tot.utility),
+        totalRaw: tot.utility,
+        meta: formatMoney(by.meta.utility),
+        metaRaw: by.meta.utility,
+        sms: formatMoney(by.sms.utility),
+        smsRaw: by.sms.utility,
+        sin: formatMoney(by.sin_atribuir.utility),
+        sinRaw: by.sin_atribuir.utility,
+      }) +
+        renderMetricRow({
+          kind: 'neutral',
+          emoji: '💸',
+          label: 'Gasto',
+          total: formatMoney(tot.spend),
+          meta: formatMoney(by.meta.spend),
+          sms: formatMoney(by.sms.spend),
+          sin: formatMoney(by.sin_atribuir.spend),
+        }),
+      'cz-funnel-metric-stack',
     );
   }
 
   function renderNegocio(by, tot) {
     return renderKpiSection(
       'Negocio',
-      renderKpiCard(
-        formatMoney(tot.monto_total_otorgado),
-        '🏦 Monto colocado (total)',
-        'accent',
-      ) +
-        renderKpiCard(
-          formatMoney(by.meta.monto_total_otorgado),
-          '🏦 Monto colocado · Meta',
-          'accent',
-        ) +
-        renderKpiCard(
-          formatMoney(by.sms.monto_total_otorgado),
-          '🏦 Monto colocado · SMS',
-          'accent',
-        ) +
-        renderKpiCard(
-          formatMoney(by.sin_atribuir.monto_total_otorgado),
-          '🏦 Monto colocado · sin_atribuir',
-          'accent',
-        ) +
-        renderKpiCard(String(tot.granted_count), '🔢 Préstamos otorgados (total)', 'accent') +
-        renderKpiCard(String(by.meta.granted_count), '🔢 Otorgados · Meta', 'accent') +
-        renderKpiCard(String(by.sms.granted_count), '🔢 Otorgados · SMS', 'accent') +
-        renderKpiCard(
-          String(by.sin_atribuir.granted_count),
-          '🔢 Otorgados · sin_atribuir',
-          'accent',
-        ) +
-        renderKpiCard(
-          perGranted(tot.monto_total_otorgado, tot.granted_count),
-          '💳 Ticket promedio (total)',
-          'accent',
-        ) +
-        renderKpiCard(
-          perGranted(by.meta.monto_total_otorgado, by.meta.granted_count),
-          '💳 Ticket promedio · Meta',
-          'accent',
-        ) +
-        renderKpiCard(
-          perGranted(by.sms.monto_total_otorgado, by.sms.granted_count),
-          '💳 Ticket promedio · SMS',
-          'accent',
-        ) +
-        renderKpiCard(
-          perGranted(
+      renderMetricRow({
+        kind: 'neutral',
+        emoji: '🏦',
+        label: 'Monto colocado',
+        total: formatMoney(tot.monto_total_otorgado),
+        meta: formatMoney(by.meta.monto_total_otorgado),
+        sms: formatMoney(by.sms.monto_total_otorgado),
+        sin: formatMoney(by.sin_atribuir.monto_total_otorgado),
+      }) +
+        renderMetricRow({
+          kind: 'neutral',
+          emoji: '🔢',
+          label: 'Otorgados',
+          total: String(tot.granted_count),
+          meta: String(by.meta.granted_count),
+          sms: String(by.sms.granted_count),
+          sin: String(by.sin_atribuir.granted_count),
+        }) +
+        renderMetricRow({
+          kind: 'neutral',
+          emoji: '💳',
+          label: 'Ticket promedio',
+          total: perGranted(tot.monto_total_otorgado, tot.granted_count),
+          meta: perGranted(by.meta.monto_total_otorgado, by.meta.granted_count),
+          sms: perGranted(by.sms.monto_total_otorgado, by.sms.granted_count),
+          sin: perGranted(
             by.sin_atribuir.monto_total_otorgado,
             by.sin_atribuir.granted_count,
           ),
-          '💳 Ticket promedio · sin_atribuir',
-          'accent',
-        ) +
-        renderKpiCard(
-          perGranted(tot.spend, tot.granted_count),
-          '🎯 Costo por otorgado (total)',
-          'danger',
-        ) +
-        renderKpiCard(
-          perGranted(by.meta.spend, by.meta.granted_count),
-          '🎯 Costo por otorgado · Meta',
-          'danger',
-        ) +
-        renderKpiCard(
-          perGranted(by.sms.spend, by.sms.granted_count),
-          '🎯 Costo por otorgado · SMS',
-          'danger',
-        ) +
-        renderKpiCard(
-          perGranted(by.sin_atribuir.spend, by.sin_atribuir.granted_count),
-          '🎯 Costo por otorgado · sin_atribuir',
-          'danger',
-        ),
+        }) +
+        renderMetricRow({
+          kind: 'neutral',
+          emoji: '🎯',
+          label: 'Costo por otorgado',
+          total: perGranted(tot.spend, tot.granted_count),
+          meta: perGranted(by.meta.spend, by.meta.granted_count),
+          sms: perGranted(by.sms.spend, by.sms.granted_count),
+          sin: perGranted(by.sin_atribuir.spend, by.sin_atribuir.granted_count),
+        }),
+      'cz-funnel-metric-stack',
     );
   }
 
