@@ -6,6 +6,7 @@
  * POST   /api/admin/users
  * PATCH  /api/admin/users/:id
  * PATCH  /api/admin/users/:id/permissions
+ * PATCH  /api/admin/users/:id/password
  */
 
 const express = require('express');
@@ -18,6 +19,7 @@ const {
   replaceUserPermissions,
   updateUser,
   listPermissionSectionKeys,
+  setUserPassword,
 } = require('../services/dashboardUsers');
 const logger = require('../lib/logger');
 
@@ -134,6 +136,43 @@ router.patch('/users/:id/permissions', async (req, res) => {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'No se pudieron actualizar permisos' });
+  }
+});
+
+router.patch('/users/:id/password', async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!UUID_RE.test(id)) {
+    return res.status(400).json({ error: 'id inválido' });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const password = body.password != null ? String(body.password) : '';
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'password mínimo 8 caracteres' });
+  }
+
+  try {
+    const target = await findUserById(id);
+    if (!target) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const updated = await setUserPassword(id, passwordHash);
+
+    return res.status(200).json({
+      user: {
+        id: updated.id,
+        email: updated.email,
+        is_admin: updated.is_admin === true,
+        active: updated.active === true,
+      },
+    });
+  } catch (err) {
+    logger.error('PATCH /api/admin/users/:id/password failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'No se pudo actualizar la contraseña' });
   }
 });
 

@@ -13035,6 +13035,14 @@ init();
         });
         actions.appendChild(editBtn);
       }
+      const pwdBtn = document.createElement('button');
+      pwdBtn.type = 'button';
+      pwdBtn.className = 'btn';
+      pwdBtn.textContent = 'Cambiar contraseña';
+      pwdBtn.addEventListener('click', function () {
+        changePassword(u);
+      });
+      actions.appendChild(pwdBtn);
       if (u.active) {
         const deact = document.createElement('button');
         deact.type = 'button';
@@ -13111,6 +13119,51 @@ init();
         return;
       }
       await loadUsers();
+    } catch (_err) {
+      setStatus(listStatus, 'No se pudo conectar.', true);
+    }
+  }
+
+  function changePassword(u) {
+    const raw = window.prompt(
+      'Nueva contraseña para ' + u.email + ' (mínimo 8 caracteres):',
+    );
+    if (raw == null) return;
+    const password = String(raw);
+    if (password.length < 8) {
+      setStatus(listStatus, 'password mínimo 8 caracteres', true);
+      return;
+    }
+    patchPassword(u.id, password);
+  }
+
+  async function patchPassword(id, password) {
+    setStatus(listStatus, 'Guardando…', false);
+    try {
+      const res = await fetch(
+        API + '/api/admin/users/' + encodeURIComponent(id) + '/password',
+        {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ password: password }),
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        setStatus(
+          listStatus,
+          (data && data.error) || 'Error al actualizar la contraseña',
+          true,
+        );
+        return;
+      }
+      setStatus(listStatus, 'Contraseña actualizada', false);
     } catch (_err) {
       setStatus(listStatus, 'No se pudo conectar.', true);
     }

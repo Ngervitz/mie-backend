@@ -181,6 +181,25 @@ async function updateUser(userId, patch) {
   return data;
 }
 
+/**
+ * @param {string} userId
+ * @param {string} passwordHash
+ * @returns {Promise<object>}
+ */
+async function setUserPassword(userId, passwordHash) {
+  const { data, error } = await supabase
+    .from('dashboard_users')
+    .update({
+      password_hash: passwordHash,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .select('id, email, is_admin, active, updated_at')
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 module.exports = {
   findUserByEmail,
   findUserById,
@@ -191,4 +210,5 @@ module.exports = {
   listUsersWithPermissions,
   replaceUserPermissions,
   updateUser,
+  setUserPassword,
 };
