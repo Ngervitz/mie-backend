@@ -54,7 +54,7 @@ async function main() {
     resolveSectionForPath('/ai-visibility/prompts'),
     'ai-visibility',
   );
-  assert.strictEqual(SECTION_KEYS.length, 9);
+  assert.strictEqual(SECTION_KEYS.length, 10);
 
   const hash = await hashPassword('UnitTest!password1');
   assert.ok(await verifyPassword('UnitTest!password1', hash));
