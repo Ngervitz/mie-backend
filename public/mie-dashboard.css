@@ -4458,7 +4458,7 @@
   border-radius: 12px;
 }
 #mie-dashboard-app .cz-funnel-kpi-break {
-  padding: 14px;
+  padding: 10px;
   border-radius: var(--radius);
 }
 #mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-emoji {
@@ -4466,8 +4466,22 @@
   line-height: 1;
 }
 #mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-kpi-emoji {
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-channel-icon {
+  display: block;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text);
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-channel-icon.ti {
+  width: 14px;
+  height: 14px;
+}
+#mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-channel-icon-meta {
+  width: 21px;
+  height: 14px;
 }
 #mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-value {
   margin-top: 8px;
@@ -4478,9 +4492,10 @@
 }
 #mie-dashboard-app .cz-funnel-kpi-break .cz-funnel-kpi-value {
   margin-top: 6px;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 500;
   line-height: 1.2;
+  color: var(--text);
 }
 #mie-dashboard-app .cz-funnel-kpi-total .cz-funnel-kpi-label {
   margin-top: 8px;
