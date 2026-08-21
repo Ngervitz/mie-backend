@@ -4558,7 +4558,23 @@
   font-size: 0.9rem;
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* Facet fills from public/assets/janus-logo-dark.svg */
+  --assist-fab-gradient: linear-gradient(
+    90deg,
+    #5DCAA5 0%,
+    #1D9E75 16%,
+    #0F6E56 33%,
+    #ED93B1 50%,
+    #D4537E 66%,
+    #993556 100%
+  );
+  box-shadow:
+    0 8px 20px rgba(93, 202, 165, 0.28),
+    0 6px 18px rgba(237, 147, 177, 0.22);
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 #mie-dashboard-app .assist-fab[hidden] {
@@ -4568,10 +4584,31 @@
 #mie-dashboard-app .assist-fab:hover {
   background: var(--surface);
   border-color: var(--text-faint);
+  box-shadow:
+    0 8px 24px rgba(93, 202, 165, 0.38),
+    0 6px 20px rgba(237, 147, 177, 0.3);
+}
+
+#mie-dashboard-app .assist-fab:focus {
+  outline: none;
+}
+
+#mie-dashboard-app .assist-fab:focus-visible {
+  outline: 2px solid #5DCAA5;
+  outline-offset: 3px;
 }
 
 #mie-dashboard-app .assist-fab .ti {
   font-size: 1.15rem;
+}
+
+#mie-dashboard-app .assist-fab .ti,
+#mie-dashboard-app .assist-fab .assist-fab-label {
+  background-image: var(--assist-fab-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 #mie-dashboard-app .assist-panel {
