@@ -33,10 +33,17 @@ const {
   PREVIEW_UTM_CAMPAIGN_UUID,
   looksLikeHttpUrl,
   composeFinalUrl,
+  composePublicShortUrl,
   shortenWithTinyUrl,
   attachShortLinkCampaignId,
   getOrCreatePreviewShortUrl,
 } = require('../lib/smsTinyUrl');
+const {
+  isIndividualTrackingEnabled,
+  prepareIndividualSmsTracking,
+  markCampaignPrepError,
+  TrackingPrepError,
+} = require('../lib/smsMarketingImpacts');
 
 const router = express.Router();
 
@@ -388,6 +395,7 @@ router.post('/campaigns', async (req, res) => {
   let storedDestinationUrl = null;
   let utmCampaignValue = null;
   let shortUrl = null;
+  let individualTracking = false;
 
   try {
     if (useLegacy) {
@@ -536,80 +544,204 @@ router.post('/campaigns', async (req, res) => {
       utmCampaignValue = campaignId;
 
       const skipAutoLink = messageBodyHasHttpUrl(messageBody);
-      let linkForMessage = '';
-      if (!skipAutoLink) {
-        finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
+      individualTracking = isIndividualTrackingEnabled();
 
-        // Real send: always shorten this campaign's final URL. Do not reuse preview shorts.
-        const shortened = await shortenWithTinyUrl(finalUrl);
-        if (shortened.shortUrl) {
-          shortUrl = shortened.shortUrl;
+      function mapContactRecordId(c) {
+        return c.source_record_id == null || c.source_record_id === ''
+          ? null
+          : String(c.source_record_id);
+      }
+
+      if (individualTracking) {
+        if (!skipAutoLink) {
+          finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
+        }
+        shortUrl = null;
+        const recipientCount = selectedContacts
+          ? selectedContacts.length
+          : normalizedPhones.length;
+        const { data, error } = await supabase
+          .from('sms_campaigns')
+          .insert({
+            id: campaignId,
+            name: name.trim(),
+            total_messages: recipientCount,
+            status: 'sending',
+            destination_url: storedDestinationUrl,
+            utm_campaign_value: utmCampaignValue,
+            short_url: null,
+          })
+          .select(
+            'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+          )
+          .limit(1);
+
+        if (error || !data || !data[0]) {
+          throw new NotifymeError(
+            `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
+            { kind: 'database', status: 500 },
+          );
+        }
+        campaign = data[0];
+
+        const recipients = selectedContacts
+          ? selectedContacts.map((c) => ({
+              phone: String(c.phone).trim(),
+              contact_id: c.id,
+              source_system:
+                c.source_system == null ? null : String(c.source_system),
+              source_record_id: mapContactRecordId(c),
+              nombre: c.nombre,
+            }))
+          : normalizedPhones.map((phone) => ({
+              phone: phone,
+              contact_id: null,
+            }));
+
+        let trackingPlans;
+        try {
+          trackingPlans = await prepareIndividualSmsTracking({
+            campaignId: campaignId,
+            recipients: recipients,
+            destinationUrl: skipAutoLink ? null : finalUrl,
+            skipShorts: skipAutoLink,
+          });
+        } catch (prepErr) {
+          await markCampaignPrepError(campaignId);
+          const message =
+            prepErr && prepErr.message
+              ? String(prepErr.message)
+              : 'Individual tracking prep failed';
+          return res.status(500).json(
+            jsonSafe({
+              error: message,
+              kind:
+                prepErr instanceof TrackingPrepError ||
+                prepErr instanceof NotifymeError
+                  ? prepErr.kind
+                  : 'database',
+              campaign: {
+                id: campaign.id,
+                name: campaign.name,
+                created_at: campaign.created_at,
+                total_messages: campaign.total_messages,
+                status: 'error',
+                destination_url: storedDestinationUrl,
+                utm_campaign_value: utmCampaignValue,
+                short_url: null,
+              },
+              individual_tracking: true,
+            }),
+          );
+        }
+
+        if (selectedContacts) {
+          messages = selectedContacts.map((c, i) => {
+            const plan = trackingPlans[i];
+            const link = skipAutoLink
+              ? ''
+              : composePublicShortUrl(plan.short_code);
+            const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre, {
+              link: link,
+              maxChars: SMS_MAX_MESSAGE_CHARS,
+            });
+            return {
+              phone: String(c.phone).trim(),
+              text: skipAutoLink ? bodyWithName : `${bodyWithName} ${link}`,
+              contact_id: c.id,
+              source_system:
+                c.source_system == null ? null : String(c.source_system),
+              source_record_id: mapContactRecordId(c),
+              marketing_impact_id: plan.impact_id,
+            };
+          });
         } else {
-          shortUrl = null;
-          logger.warn('SMS shortener fallback; using final_url', {
-            kind: shortened.kind || 'shortener_error',
-            campaign_id: campaignId,
+          messages = normalizedPhones.map((phone, i) => {
+            const plan = trackingPlans[i];
+            const link = skipAutoLink
+              ? ''
+              : composePublicShortUrl(plan.short_code);
+            return {
+              phone: phone,
+              text: skipAutoLink
+                ? String(messageBody)
+                : `${messageBody} ${link}`,
+              marketing_impact_id: plan.impact_id,
+            };
           });
         }
-        linkForMessage = shortUrl || finalUrl;
-      }
-
-      if (selectedContacts) {
-        messages = selectedContacts.map((c) => {
-          const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre, {
-            link: skipAutoLink ? '' : linkForMessage,
-            maxChars: SMS_MAX_MESSAGE_CHARS,
-          });
-          const recordId =
-            c.source_record_id == null || c.source_record_id === ''
-              ? null
-              : String(c.source_record_id);
-          return {
-            phone: String(c.phone).trim(),
-            text: skipAutoLink
-              ? bodyWithName
-              : `${bodyWithName} ${linkForMessage}`,
-            contact_id: c.id,
-            source_system:
-              c.source_system == null ? null : String(c.source_system),
-            source_record_id: recordId,
-          };
-        });
       } else {
-        const composedText = skipAutoLink
-          ? String(messageBody)
-          : `${messageBody} ${linkForMessage}`;
-        messages = normalizedPhones.map((phone) => ({
-          phone,
-          text: composedText,
-        }));
-      }
+        let linkForMessage = '';
+        if (!skipAutoLink) {
+          finalUrl = composeFinalUrl(storedDestinationUrl, campaignId);
 
-      const { data, error } = await supabase
-        .from('sms_campaigns')
-        .insert({
-          id: campaignId,
-          name: name.trim(),
-          total_messages: messages.length,
-          status: 'sending',
-          destination_url: storedDestinationUrl,
-          utm_campaign_value: utmCampaignValue,
-          short_url: shortUrl,
-        })
-        .select(
-          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
-        )
-        .limit(1);
+          // Real send: always shorten this campaign's final URL. Do not reuse preview shorts.
+          const shortened = await shortenWithTinyUrl(finalUrl);
+          if (shortened.shortUrl) {
+            shortUrl = shortened.shortUrl;
+          } else {
+            shortUrl = null;
+            logger.warn('SMS shortener fallback; using final_url', {
+              kind: shortened.kind || 'shortener_error',
+              campaign_id: campaignId,
+            });
+          }
+          linkForMessage = shortUrl || finalUrl;
+        }
 
-      if (error || !data || !data[0]) {
-        throw new NotifymeError(
-          `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
-          { kind: 'database', status: 500 },
-        );
-      }
-      campaign = data[0];
-      if (shortUrl && finalUrl) {
-        await attachShortLinkCampaignId(finalUrl, campaignId);
+        if (selectedContacts) {
+          messages = selectedContacts.map((c) => {
+            const bodyWithName = applyNombrePlaceholder(messageBody, c.nombre, {
+              link: skipAutoLink ? '' : linkForMessage,
+              maxChars: SMS_MAX_MESSAGE_CHARS,
+            });
+            return {
+              phone: String(c.phone).trim(),
+              text: skipAutoLink
+                ? bodyWithName
+                : `${bodyWithName} ${linkForMessage}`,
+              contact_id: c.id,
+              source_system:
+                c.source_system == null ? null : String(c.source_system),
+              source_record_id: mapContactRecordId(c),
+            };
+          });
+        } else {
+          const composedText = skipAutoLink
+            ? String(messageBody)
+            : `${messageBody} ${linkForMessage}`;
+          messages = normalizedPhones.map((phone) => ({
+            phone,
+            text: composedText,
+          }));
+        }
+
+        const { data, error } = await supabase
+          .from('sms_campaigns')
+          .insert({
+            id: campaignId,
+            name: name.trim(),
+            total_messages: messages.length,
+            status: 'sending',
+            destination_url: storedDestinationUrl,
+            utm_campaign_value: utmCampaignValue,
+            short_url: shortUrl,
+          })
+          .select(
+            'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+          )
+          .limit(1);
+
+        if (error || !data || !data[0]) {
+          throw new NotifymeError(
+            `Failed to create campaign: ${error ? error.message : 'no row returned'}`,
+            { kind: 'database', status: 500 },
+          );
+        }
+        campaign = data[0];
+        if (shortUrl && finalUrl) {
+          await attachShortLinkCampaignId(finalUrl, campaignId);
+        }
       }
     }
   } catch (err) {
@@ -620,6 +752,41 @@ router.post('/campaigns', async (req, res) => {
   }
 
   try {
+    if (individualTracking) {
+      const n = Array.isArray(messages) ? messages.length : 0;
+      const withImpact = (messages || []).filter(
+        (m) => m && m.marketing_impact_id,
+      ).length;
+      if (!n || withImpact !== n) {
+        await markCampaignPrepError(campaign && campaign.id);
+        return res.status(500).json(
+          jsonSafe({
+            error:
+              'Individual tracking did not close N impacts for N recipients',
+            kind: 'database',
+            campaign: campaign
+              ? {
+                  id: campaign.id,
+                  name: campaign.name,
+                  created_at: campaign.created_at,
+                  total_messages: campaign.total_messages,
+                  status: 'error',
+                  destination_url:
+                    campaign.destination_url != null
+                      ? campaign.destination_url
+                      : null,
+                  utm_campaign_value:
+                    campaign.utm_campaign_value != null
+                      ? campaign.utm_campaign_value
+                      : null,
+                  short_url: null,
+                }
+              : null,
+            individual_tracking: true,
+          }),
+        );
+      }
+    }
     messages = applyWaveScheduledAt(messages, waveSize, intervalSeconds);
     const summary = await sendBatch(campaign.id, messages);
     const payload = {
@@ -645,6 +812,7 @@ router.post('/campaigns', async (req, res) => {
       payload.utm_campaign_value = utmCampaignValue;
       payload.short_url = shortUrl;
     }
+    payload.individual_tracking = individualTracking;
     return res.status(201).json(jsonSafe(payload));
   } catch (err) {
     // Campaign + message rows preserved for auditability.
@@ -675,6 +843,7 @@ router.post('/campaigns', async (req, res) => {
         payload.utm_campaign_value = utmCampaignValue;
         payload.short_url = shortUrl;
       }
+      payload.individual_tracking = individualTracking;
       return res.status(err.status === 400 ? 400 : 502).json(jsonSafe(payload));
     }
     return mapServiceError(err, res);

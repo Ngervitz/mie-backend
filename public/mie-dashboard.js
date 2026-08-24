@@ -10389,7 +10389,8 @@ init();
           : campaign && campaign.short_url != null
             ? String(campaign.short_url)
             : '';
-      const sentUrl = shortUrl || finalUrl;
+      const individualTracking = body && body.individual_tracking === true;
+      const sentUrl = individualTracking ? '' : (shortUrl || finalUrl);
       const utmValue =
         body && body.utm_campaign_value != null
           ? String(body.utm_campaign_value)
@@ -10428,6 +10429,10 @@ init();
       if (finalUrl) okBits.push('URL final (con UTM): ' + finalUrl);
       if (shortUrl) {
         okBits.push('URL corta enviada en el SMS: ' + shortUrl);
+      } else if (individualTracking) {
+        okBits.push(
+          'URL corta individual por destinatario (no hay short único de campaña)',
+        );
       } else if (finalUrl) {
         okBits.push(
           'No se pudo acortar el link, se envió la URL completa',

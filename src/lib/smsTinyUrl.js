@@ -84,6 +84,7 @@ async function lookupExistingShort(supabase, longUrl) {
     .from('sms_short_links')
     .select('short_code')
     .eq('destination_url', longUrl)
+    .is('impact_id', null)
     .maybeSingle();
   if (error || !data || !data.short_code) return null;
   return String(data.short_code);
@@ -277,6 +278,7 @@ module.exports = {
   composeFinalUrl,
   composePublicShortUrl,
   generateShortCode,
+  isUniqueViolation,
   shortenWithTinyUrl,
   attachShortLinkCampaignId,
   getOrCreatePreviewShortUrl,
