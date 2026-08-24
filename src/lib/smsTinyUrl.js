@@ -46,6 +46,16 @@ function composeFinalUrl(destinationUrl, campaignUuid) {
   return url.toString();
 }
 
+/**
+ * Add or replace jt on a destination URL. Preserves other query params and hash.
+ * Does not persist. Caller must pass a parseable absolute URL.
+ */
+function appendTrackingToken(destinationUrl, trackingToken) {
+  const url = new URL(String(destinationUrl).trim());
+  url.searchParams.set('jt', String(trackingToken));
+  return url.toString();
+}
+
 function getShortLinkBaseUrl() {
   const raw = process.env.SMS_SHORT_LINK_BASE_URL;
   const trimmed =
@@ -276,6 +286,7 @@ module.exports = {
   SHORT_CODE_LENGTH,
   looksLikeHttpUrl,
   composeFinalUrl,
+  appendTrackingToken,
   composePublicShortUrl,
   generateShortCode,
   isUniqueViolation,
