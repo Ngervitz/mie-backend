@@ -50,6 +50,8 @@ module.exports = {
   dashboardLoginPassword: process.env.DASHBOARD_LOGIN_PASSWORD || null,
   // Optional at boot. When set, X-Cron-Key header can authenticate cron-job.org.
   cronSecret: process.env.CRON_SECRET || null,
+  // Optional at boot. Required for POST /tracking/events HMAC from Credizona.
+  czTrackingHmacSecret: optionalTrimmedEnv('CZ_TRACKING_HMAC_SECRET'),
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
   // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.

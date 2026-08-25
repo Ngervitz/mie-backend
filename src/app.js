@@ -21,9 +21,21 @@ const {
 const adminUsersRouter = require('./routes/admin-users');
 const logger = require('./lib/logger');
 const smsShortLinksRouter = require('./routes/sms-short-links');
+const trackingEventsRouter = require('./routes/tracking-events');
 
 const app = express();
 
+// Public Credizona tracking ingest — HMAC auth, must run before requireAuth.
+// Own JSON parser so rawBody is available for HMAC and other routes stay unchanged.
+app.use(
+  '/tracking',
+  express.json({
+    limit: '4kb',
+    verify: trackingEventsRouter.attachRawBody,
+  }),
+  trackingEventsRouter,
+  trackingEventsRouter.jsonErrorHandler,
+);
 app.use(express.json());
 // Public SMS short-link redirects — must run before requireAuth.
 app.use(smsShortLinksRouter);
