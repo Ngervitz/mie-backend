@@ -32,7 +32,9 @@ const JOB_LOCK_TTL_SECONDS = 15 * 60;
 
 const SOURCE_GRANTED = 'cz_funnel_granted_loans';
 const SOURCE_SOLICITUDES = 'cz_funnel_solicitudes';
+const SOURCE_SOLICITUD_ESTADOS = 'cz_funnel_solicitud_estados';
 const SOURCE_ENCUESTAS = 'cz_funnel_encuestas';
+const HISTORICO_UPSERT_CHUNK = 500;
 
 async function acquireJobLock(lockedBy) {
   const { data, error } = await supabase.rpc('acquire_job_lock', {
@@ -129,6 +131,119 @@ function parseCzDateTime(raw) {
   return d.toISOString();
 }
 
+function nullableInteger(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function nullableText(raw) {
+  if (raw == null) return null;
+  return String(raw);
+}
+
+function normalizeExtraData(raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  return {};
+}
+
+/**
+ * Map CZ /solicitudes historico[] to child rows.
+ * Does not delete. Empty / missing historico → zero rows.
+ * Duplicate historico.id in one payload: last wins.
+ */
+function mapHistoricoRows(items, nowIso) {
+  const byId = new Map();
+  let received = 0;
+  let skippedNoId = 0;
+
+  for (const item of items) {
+    if (!item || item.id == null) continue;
+    const czId = Number(item.id);
+    if (!Number.isFinite(czId)) continue;
+
+    const hist = Array.isArray(item.historico) ? item.historico : [];
+    received += hist.length;
+
+    for (const row of hist) {
+      if (!row || row.id == null || row.id === '') {
+        skippedNoId += 1;
+        logger.warn('CZ funnel historico row skipped', {
+          kind: 'cz_funnel_historico',
+          reason: 'historico_id_missing',
+          cz_solicitud_id: czId,
+        });
+        continue;
+      }
+      const histId = Number(row.id);
+      if (!Number.isFinite(histId)) {
+        skippedNoId += 1;
+        logger.warn('CZ funnel historico row skipped', {
+          kind: 'cz_funnel_historico',
+          reason: 'historico_id_invalid',
+          cz_solicitud_id: czId,
+        });
+        continue;
+      }
+
+      if (byId.has(histId) && byId.get(histId).cz_solicitud_id !== czId) {
+        logger.warn('CZ funnel historico id collision in payload', {
+          kind: 'cz_funnel_historico',
+          reason: 'historico_id_collision',
+          cz_historico_id: histId,
+        });
+      }
+
+      byId.set(histId, {
+        cz_historico_id: histId,
+        cz_solicitud_id: czId,
+        solicitudes_estados_id: nullableInteger(row.solicitudes_estados_id),
+        solicitudes_estados_id_anterior: nullableInteger(
+          row.solicitudes_estados_id_anterior,
+        ),
+        estado: nullableText(row.estado),
+        estado_anterior: nullableText(row.estado_anterior),
+        fechahora_src: parseCzDateTime(row.fechahora),
+        fechahora_raw:
+          row.fechahora != null && row.fechahora !== ''
+            ? String(row.fechahora)
+            : null,
+        extra_data: normalizeExtraData(row.extra_data),
+        synced_at: nowIso,
+      });
+    }
+  }
+
+  return {
+    rows: Array.from(byId.values()),
+    received: received,
+    skippedNoId: skippedNoId,
+  };
+}
+
+async function upsertSolicitudEstados(rows) {
+  if (!rows.length) return 0;
+  let upserted = 0;
+  for (let i = 0; i < rows.length; i += HISTORICO_UPSERT_CHUNK) {
+    const chunk = rows.slice(i, i + HISTORICO_UPSERT_CHUNK);
+    const { error } = await supabase.from(SOURCE_SOLICITUD_ESTADOS).upsert(chunk, {
+      onConflict: 'cz_historico_id',
+    });
+    if (error) {
+      logger.error('CZ funnel historico persist failed', {
+        kind: 'cz_funnel_historico',
+        reason: 'upsert_failed',
+        chunk_size: chunk.length,
+      });
+      throw new Error(
+        `${SOURCE_SOLICITUD_ESTADOS} upsert failed: ${error.message}`,
+      );
+    }
+    upserted += chunk.length;
+  }
+  return upserted;
+}
+
 async function upsertGrantedLoans(items) {
   const now = new Date().toISOString();
   const rows = [];
@@ -192,11 +307,26 @@ async function upsertSolicitudes(items) {
   if (error) {
     throw new Error(`${SOURCE_SOLICITUDES} upsert failed: ${error.message}`);
   }
+
+  const mapped = mapHistoricoRows(items, now);
+  logger.info('CZ funnel historico mapped', {
+    kind: 'cz_funnel_historico',
+    received: mapped.received,
+    valid: mapped.rows.length,
+    skipped_no_id: mapped.skippedNoId,
+  });
+  const histUpserted = await upsertSolicitudEstados(mapped.rows);
+  logger.info('CZ funnel historico upserted', {
+    kind: 'cz_funnel_historico',
+    upserted: histUpserted,
+  });
+
   await excludeOldBaseContactsByCi(
     rows
       .map((r) => r.ci)
       .filter((ci) => ci != null),
   );
+
   return rows.length;
 }
 
@@ -396,7 +526,15 @@ module.exports = {
   JOB_LOCK_TTL_SECONDS,
   SOURCE_GRANTED,
   SOURCE_SOLICITUDES,
+  SOURCE_SOLICITUD_ESTADOS,
   SOURCE_ENCUESTAS,
+  HISTORICO_UPSERT_CHUNK,
   sanitizeTrackingDataSummary,
   isCzApiAuthFailure,
+  parseCzDateTime,
+  normalizeExtraData,
+  mapHistoricoRows,
+  upsertSolicitudes,
+  upsertGrantedLoans,
+  upsertSolicitudEstados,
 };
