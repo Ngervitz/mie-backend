@@ -155,6 +155,8 @@ function createStore(options) {
     deletes: [],
     rpcs: [],
     tables: [],
+    selects: [],
+    ins: [],
   };
 
   function install() {
@@ -169,6 +171,38 @@ function createStore(options) {
       from: function (table) {
         calls.tables.push(table);
         return {
+          select: function (cols) {
+            calls.selects.push({ table: table, cols: cols });
+            return {
+              in: function (column, ids) {
+                calls.ins.push({
+                  table: table,
+                  column: column,
+                  ids: ids,
+                });
+                if (opts.failSelect && table === SOURCE_SOLICITUDES) {
+                  return Promise.resolve({
+                    data: null,
+                    error: { message: 'forced lookup failure' },
+                  });
+                }
+                const data = [];
+                if (table === SOURCE_SOLICITUDES) {
+                  (ids || []).forEach(function (id) {
+                    const row =
+                      solicitudes.get(Number(id)) || solicitudes.get(id);
+                    if (row) {
+                      data.push({
+                        cz_id: row.cz_id,
+                        tracking_data_summary: row.tracking_data_summary,
+                      });
+                    }
+                  });
+                }
+                return Promise.resolve({ data: data, error: null });
+              },
+            };
+          },
           upsert: function (rows, spec) {
             calls.upserts.push({
               table: table,

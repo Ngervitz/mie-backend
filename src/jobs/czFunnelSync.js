@@ -16,6 +16,8 @@ const {
 } = require('../clients/czApiClient');
 const {
   sanitizeTrackingDataSummary,
+  normalizeJt,
+  applyJtFirstValidWins,
 } = require('../lib/sanitizeCzTrackingData');
 
 function isCzApiAuthFailure(message) {
@@ -35,6 +37,7 @@ const SOURCE_SOLICITUDES = 'cz_funnel_solicitudes';
 const SOURCE_SOLICITUD_ESTADOS = 'cz_funnel_solicitud_estados';
 const SOURCE_ENCUESTAS = 'cz_funnel_encuestas';
 const HISTORICO_UPSERT_CHUNK = 500;
+const EXISTING_SUMMARY_SELECT_CHUNK = 500;
 
 async function acquireJobLock(lockedBy) {
   const { data, error } = await supabase.rpc('acquire_job_lock', {
@@ -244,6 +247,35 @@ async function upsertSolicitudEstados(rows) {
   return upserted;
 }
 
+async function loadExistingJtByCzId(czIds) {
+  const map = new Map();
+  if (!czIds.length) return map;
+  for (let i = 0; i < czIds.length; i += EXISTING_SUMMARY_SELECT_CHUNK) {
+    const chunk = czIds.slice(i, i + EXISTING_SUMMARY_SELECT_CHUNK);
+    const { data, error } = await supabase
+      .from(SOURCE_SOLICITUDES)
+      .select('cz_id, tracking_data_summary')
+      .in('cz_id', chunk);
+    if (error) {
+      throw new Error(
+        `${SOURCE_SOLICITUDES} existing jt lookup failed: ${error.message}`,
+      );
+    }
+    for (const row of data || []) {
+      const czId = Number(row.cz_id);
+      if (!Number.isFinite(czId)) continue;
+      const summary = row.tracking_data_summary;
+      const jt = normalizeJt(
+        summary && typeof summary === 'object' && !Array.isArray(summary)
+          ? summary.jt
+          : null,
+      );
+      if (jt) map.set(czId, jt);
+    }
+  }
+  return map;
+}
+
 async function upsertGrantedLoans(items) {
   const now = new Date().toISOString();
   const rows = [];
@@ -301,6 +333,22 @@ async function upsertSolicitudes(items) {
     });
   }
   if (!rows.length) return 0;
+  const existingJt = await loadExistingJtByCzId(
+    rows.map(function (r) {
+      return r.cz_id;
+    }),
+  );
+  for (const row of rows) {
+    const applied = applyJtFirstValidWins(
+      row.cz_id,
+      row.tracking_data_summary,
+      existingJt.get(row.cz_id) || null,
+    );
+    row.tracking_data_summary = applied.tracking_data_summary;
+    if (applied.conflict) {
+      logger.warn('CZ funnel jt conflict', applied.conflict);
+    }
+  }
   const { error } = await supabase.from(SOURCE_SOLICITUDES).upsert(rows, {
     onConflict: 'cz_id',
   });
@@ -529,7 +577,9 @@ module.exports = {
   SOURCE_SOLICITUD_ESTADOS,
   SOURCE_ENCUESTAS,
   HISTORICO_UPSERT_CHUNK,
+  EXISTING_SUMMARY_SELECT_CHUNK,
   sanitizeTrackingDataSummary,
+  loadExistingJtByCzId,
   isCzApiAuthFailure,
   parseCzDateTime,
   normalizeExtraData,
