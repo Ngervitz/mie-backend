@@ -3867,10 +3867,25 @@
   font-size: 0.9rem;
 }
 
-#mie-dashboard-app .sms-dest-list-wrap:not([hidden]) {
+#mie-dashboard-app .sms-series-wrap:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+#mie-dashboard-app .sms-series-wrap[hidden] {
+  display: none !important;
+}
+
+#mie-dashboard-app .sms-series-create-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#mie-dashboard-app .sms-series-create-row .sms-field {
+  flex: 1 1 220px;
 }
 
 #mie-dashboard-app .sms-field[hidden],

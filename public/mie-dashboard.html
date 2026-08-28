@@ -862,6 +862,31 @@
                 Lista de contactos (sms_contacts)
               </label>
             </fieldset>
+            <div id="sms-series-wrap" class="sms-series-wrap" hidden>
+              <label class="mcl-field sms-field">
+                <span class="mcl-field-label">Serie de campaña</span>
+                <select id="sms-series-select" class="mcl-input">
+                  <option value="">Elegí una serie</option>
+                </select>
+                <span class="mcl-field-hint">Obligatoria con tracking individual. Las tandas de la misma reactivación reutilizan esta serie.</span>
+              </label>
+              <div class="sms-series-create-row">
+                <label class="mcl-field sms-field">
+                  <span class="mcl-field-label">Nueva serie</span>
+                  <input
+                    type="text"
+                    id="sms-series-name"
+                    class="mcl-input"
+                    autocomplete="off"
+                    placeholder="Reactivación Agosto 2026"
+                  />
+                </label>
+                <button type="button" id="sms-series-create-btn" class="btn">
+                  Crear serie
+                </button>
+              </div>
+              <p id="sms-series-status" class="sms-eligible-status" aria-live="polite"></p>
+            </div>
             <label class="mcl-field sms-field" id="sms-dest-paste-wrap">
               <span class="mcl-field-label">Teléfonos (uno por línea)</span>
               <textarea id="sms-phones" class="mcl-input sms-textarea" rows="6"></textarea>
@@ -888,6 +913,7 @@
               </label>
               <p id="sms-eligible-status" class="sms-eligible-status" aria-live="polite"></p>
             </div>
+            <p id="sms-paste-protect-status" class="sms-eligible-status" aria-live="polite"></p>
             <label class="mcl-field sms-field">
               <span class="mcl-field-label">✉️ Mensaje</span>
               <textarea id="sms-message" class="mcl-input sms-textarea" rows="4" required></textarea>

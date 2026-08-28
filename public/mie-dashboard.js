@@ -9240,6 +9240,12 @@ init();
   const waveSizeInput = document.getElementById('sms-wave-size');
   const waveIntervalInput = document.getElementById('sms-wave-interval-seconds');
   const eligibleStatus = document.getElementById('sms-eligible-status');
+  const seriesWrap = document.getElementById('sms-series-wrap');
+  const seriesSelect = document.getElementById('sms-series-select');
+  const seriesNameInput = document.getElementById('sms-series-name');
+  const seriesCreateBtn = document.getElementById('sms-series-create-btn');
+  const seriesStatus = document.getElementById('sms-series-status');
+  const pasteProtectStatus = document.getElementById('sms-paste-protect-status');
   const messageInput = document.getElementById('sms-message');
   const destinationUrlInput = document.getElementById('sms-destination-url');
   const composePreviewText = document.getElementById('sms-compose-preview-text');
@@ -9293,6 +9299,8 @@ init();
   let monthlyBusy = false;
   let openedOnce = false;
   let activeCampaignId = null;
+  let smsIndividualTracking = false;
+  const smsSeriesById = {};
 
   // GSM 03.38 basic character set (includes ñ/Ñ — does NOT force UCS-2 alone).
   const GSM7_BASIC =
@@ -9386,6 +9394,7 @@ init();
     destPasteWrap.hidden = list;
     destListWrap.hidden = !list;
     if (list) refreshEligibleCount();
+    refreshPasteProtection();
     schedulePreviewShort();
   }
 
@@ -9395,14 +9404,26 @@ init();
       eligibleStatus.textContent = '';
       return;
     }
+    if (smsIndividualTracking && seriesSelect && !String(seriesSelect.value || '').trim()) {
+      eligibleStatus.textContent =
+        'Elegí una serie para ver contactos elegibles (sin click en esa serie).';
+      return;
+    }
     eligibleStatus.textContent = 'Consultando elegibles…';
     try {
-      const res = await fetch(
+      let url =
         API_BASE +
-          '/sms/contacts/eligible?source_system=' +
-          encodeURIComponent(sourceSystem),
-        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
-      );
+        '/sms/contacts/eligible?source_system=' +
+        encodeURIComponent(sourceSystem);
+      const seriesId =
+        seriesSelect && String(seriesSelect.value || '').trim();
+      if (smsIndividualTracking && seriesId) {
+        url += '&campaign_series_id=' + encodeURIComponent(seriesId);
+      }
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
       const body = await readJsonSafe(res);
       if (!res.ok) {
         eligibleStatus.textContent =
@@ -9410,13 +9431,197 @@ init();
         return;
       }
       const count = body && body.count != null ? Number(body.count) : 0;
-      eligibleStatus.textContent =
-        count +
-        ' contacto(s) elegibles (sin SMS previo) en «' +
-        sourceSystem +
-        '».';
+      const protectedN =
+        body && body.protected_clicked_count != null
+          ? Number(body.protected_clicked_count)
+          : null;
+      if (body && body.eligibility === 'series') {
+        let text =
+          count +
+          ' contacto(s) elegibles para esta serie en «' +
+          sourceSystem +
+          '».';
+        if (Number.isFinite(protectedN)) {
+          text +=
+            ' ' +
+            protectedN +
+            ' protegido(s) por click en la serie.';
+        }
+        eligibleStatus.textContent = text;
+      } else {
+        eligibleStatus.textContent =
+          count +
+          ' contacto(s) elegibles (sin SMS previo) en «' +
+          sourceSystem +
+          '».';
+      }
     } catch (_err) {
       eligibleStatus.textContent = 'No se pudo contar elegibles.';
+    }
+  }
+
+  function selectedSeriesId() {
+    return seriesSelect ? String(seriesSelect.value || '').trim() : '';
+  }
+
+  function renderSeriesOptions(rows, keepId) {
+    if (!seriesSelect) return;
+    const current = keepId || selectedSeriesId();
+    const list = Array.isArray(rows) ? rows : [];
+    Object.keys(smsSeriesById).forEach(function (k) {
+      delete smsSeriesById[k];
+    });
+    seriesSelect.innerHTML = '<option value="">Elegí una serie</option>';
+    for (let i = 0; i < list.length; i += 1) {
+      const row = list[i];
+      if (!row || !row.id) continue;
+      const id = String(row.id);
+      smsSeriesById[id] = row;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = String(row.name || id);
+      seriesSelect.appendChild(opt);
+    }
+    if (current && smsSeriesById[current]) {
+      seriesSelect.value = current;
+    }
+  }
+
+  function syncSeriesUi() {
+    if (seriesWrap) {
+      seriesWrap.hidden = !smsIndividualTracking;
+    }
+    if (destMode() === 'list') refreshEligibleCount();
+    refreshPasteProtection();
+  }
+
+  async function loadSeriesBootstrap() {
+    try {
+      const res = await fetch(API_BASE + '/sms/campaign-series', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const body = await readJsonSafe(res);
+      smsIndividualTracking = Boolean(body && body.individual_tracking);
+      if (res.ok) {
+        renderSeriesOptions(body && body.series);
+      }
+    } catch (_err) {
+      smsIndividualTracking = false;
+    }
+    syncSeriesUi();
+  }
+
+  async function createSeriesFromUi() {
+    if (!seriesNameInput || !seriesCreateBtn) return;
+    const name = String(seriesNameInput.value || '').trim();
+    if (!name) {
+      if (seriesStatus) seriesStatus.textContent = 'Escribí un nombre para la serie.';
+      return;
+    }
+    seriesCreateBtn.disabled = true;
+    if (seriesStatus) seriesStatus.textContent = 'Creando serie…';
+    try {
+      const res = await fetch(API_BASE + '/sms/campaign-series', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name: name }),
+      });
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        if (seriesStatus) {
+          seriesStatus.textContent =
+            (body && body.error) || 'No se pudo crear la serie.';
+        }
+        return;
+      }
+      const id = body && body.id ? String(body.id) : '';
+      const existing = [];
+      seriesSelect &&
+        seriesSelect.querySelectorAll('option').forEach(function (opt) {
+          if (opt.value) {
+            existing.push({
+              id: opt.value,
+              name: opt.textContent,
+            });
+          }
+        });
+      existing.unshift({ id: id, name: body.name || name, created_at: body.created_at });
+      renderSeriesOptions(existing, id);
+      seriesNameInput.value = '';
+      if (seriesStatus) seriesStatus.textContent = 'Serie creada.';
+      if (destMode() === 'list') refreshEligibleCount();
+      refreshPasteProtection();
+    } catch (_err) {
+      if (seriesStatus) seriesStatus.textContent = 'No se pudo crear la serie.';
+    } finally {
+      seriesCreateBtn.disabled = false;
+    }
+  }
+
+  async function refreshPasteProtection() {
+    if (!pasteProtectStatus) return;
+    if (!smsIndividualTracking || destMode() !== 'paste') {
+      pasteProtectStatus.textContent = '';
+      return;
+    }
+    const seriesId = selectedSeriesId();
+    const phones = parsePhones(phonesInput.value);
+    if (!seriesId || !phones.length) {
+      pasteProtectStatus.textContent = seriesId
+        ? ''
+        : 'Elegí una serie para validar teléfonos protegidos.';
+      return;
+    }
+    pasteProtectStatus.textContent = 'Validando teléfonos contra la serie…';
+    try {
+      const res = await fetch(API_BASE + '/sms/contacts/classify-for-series', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          campaign_series_id: seriesId,
+          phones: phones,
+        }),
+      });
+      const body = await readJsonSafe(res);
+      if (!res.ok) {
+        pasteProtectStatus.textContent =
+          (body && body.error) || 'No se pudo validar la lista.';
+        return;
+      }
+      const clicked = (body && body.protected_clicked) || [];
+      const excluded = (body && body.excluded_from_campaigns) || [];
+      const ok = (body && body.ok) || [];
+      if (!clicked.length && !excluded.length) {
+        pasteProtectStatus.textContent =
+          ok.length + ' teléfono(s) listos (sin protección de esta serie).';
+        return;
+      }
+      const bits = [];
+      if (clicked.length) {
+        bits.push(
+          clicked.length + ' protegido(s) por click: ' + clicked.join(', '),
+        );
+      }
+      if (excluded.length) {
+        bits.push(
+          excluded.length +
+            ' exclusión definitiva: ' +
+            excluded.join(', '),
+        );
+      }
+      pasteProtectStatus.textContent =
+        bits.join(' ') + ' El envío se rechazará hasta sacarlos de la lista.';
+    } catch (_err) {
+      pasteProtectStatus.textContent = 'No se pudo validar la lista.';
     }
   }
 
@@ -9818,6 +10023,25 @@ init();
     }
   }
 
+  function formatProtectedPayload(body) {
+    if (!body || typeof body !== 'object') return '';
+    const clicked = Array.isArray(body.protected_clicked)
+      ? body.protected_clicked
+      : [];
+    const excluded = Array.isArray(body.excluded_from_campaigns)
+      ? body.excluded_from_campaigns
+      : [];
+    if (!clicked.length && !excluded.length) return '';
+    const lines = [body.error || 'Hay teléfonos protegidos.'];
+    if (clicked.length) {
+      lines.push('Protegidos por click: ' + clicked.join(', '));
+    }
+    if (excluded.length) {
+      lines.push('Exclusión definitiva: ' + excluded.join(', '));
+    }
+    return lines.join('\n');
+  }
+
   function showListView() {
     detailSection.classList.add('hidden');
     detailSection.setAttribute('hidden', '');
@@ -9859,6 +10083,17 @@ init();
         cost.messages_delivered != null ? cost.messages_delivered : null,
       status_counts: agg.status_counts || null,
     };
+  }
+
+  function campaignSeriesLabel(campaign) {
+    const id =
+      campaign && campaign.campaign_series_id != null
+        ? String(campaign.campaign_series_id)
+        : '';
+    if (!id) return '';
+    const row = smsSeriesById[id];
+    if (row && row.name) return String(row.name);
+    return id;
   }
 
   function renderCampaignList(campaigns) {
@@ -10089,6 +10324,7 @@ init();
 
     const metaCards = [
       ['Nombre', dash(campaign.name)],
+      ['Serie', dash(campaignSeriesLabel(campaign))],
       ['Creada', dash(campaign.created_at)],
       ['Estado', dash(campaign.status)],
       ['Total mensajes', formatCount(campaign.total_messages)],
@@ -10262,6 +10498,7 @@ init();
     const phones = listMode ? [] : parsePhones(phonesInput.value);
     const sourceSystem = String(sourceSystemInput.value || '').trim();
     const fromLimit = parseInt(String(fromLimitInput.value || ''), 10);
+    const seriesId = selectedSeriesId();
 
     if (!name) {
       setStatus(createStatus, 'El nombre de la campaña es obligatorio.', true);
@@ -10293,6 +10530,14 @@ init();
       setStatus(
         createStatus,
         'La URL de destino debe ser una URL http(s) válida.',
+        true,
+      );
+      return;
+    }
+    if (smsIndividualTracking && !seriesId) {
+      setStatus(
+        createStatus,
+        'Elegí o creá una serie de campaña (obligatoria con tracking individual).',
         true,
       );
       return;
@@ -10355,6 +10600,7 @@ init();
                 message_body: messageBody,
                 wave_size: waveSize,
                 interval_seconds: intervalSeconds,
+                campaign_series_id: smsIndividualTracking ? seriesId : undefined,
                 from_contacts: {
                   source_system: sourceSystem,
                   limit: fromLimit,
@@ -10366,6 +10612,7 @@ init();
                 message_body: messageBody,
                 wave_size: waveSize,
                 interval_seconds: intervalSeconds,
+                campaign_series_id: smsIndividualTracking ? seriesId : undefined,
                 phones: phones,
               },
         ),
@@ -10405,7 +10652,7 @@ init();
         if (totalText) bits.push('Total: ' + totalText);
         if (finalUrl) bits.push('URL final: ' + finalUrl);
         if (shortUrl) bits.push('URL corta enviada: ' + shortUrl);
-        bits.push(formatBackendPayload(body));
+        bits.push(formatProtectedPayload(body) || formatBackendPayload(body));
         setStatus(createStatus, bits.join('\n'), true);
         if (idText) {
           await loadCampaignList();
@@ -10526,7 +10773,6 @@ init();
   });
 
   messageInput.addEventListener('input', () => updateEncodingHint());
-  phonesInput.addEventListener('input', () => updateEncodingHint());
   destinationUrlInput.addEventListener('input', () => schedulePreviewShort());
   form.querySelectorAll('input[name="sms-dest-mode"]').forEach(function (el) {
     el.addEventListener('change', syncDestModeUi);
@@ -10535,12 +10781,28 @@ init();
     if (destMode() === 'list') refreshEligibleCount();
   });
   fromLimitInput.addEventListener('input', () => updateEncodingHint());
+  if (seriesSelect) {
+    seriesSelect.addEventListener('change', () => {
+      if (destMode() === 'list') refreshEligibleCount();
+      refreshPasteProtection();
+    });
+  }
+  if (seriesCreateBtn) {
+    seriesCreateBtn.addEventListener('click', () => {
+      createSeriesFromUi();
+    });
+  }
+  phonesInput.addEventListener('input', () => {
+    updateEncodingHint();
+    refreshPasteProtection();
+  });
   syncDestModeUi();
 
   window.__openSms = () => {
     showListView();
     loadMonthlySummary();
     loadCampaignList();
+    loadSeriesBootstrap();
     openedOnce = true;
   };
 })();

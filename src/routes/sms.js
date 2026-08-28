@@ -18,17 +18,25 @@ const {
   assertUniqueIdString,
 } = require('../services/notifyme-client');
 const {
-  MAX_FROM_CONTACTS_LIMIT,
   SMS_MAX_MESSAGE_CHARS,
   applyNombrePlaceholder,
   messageBodyHasHttpUrl,
   parseSourceSystem,
-  parseLimit,
+  resolveEligibleCount,
+  resolveNewShapeDestinations,
+  classifyPhonesForSeries,
   normalizeDirectedPhones,
-  loadContactsByPhones,
-  countEligibleContacts,
-  listEligibleContacts,
 } = require('../lib/smsCampaignContacts');
+const {
+  parseCampaignSeriesId,
+  parseSeriesName,
+  seriesRequiredBody,
+  seriesNotFoundBody,
+  partitionPhoneClassifications,
+  loadCampaignSeriesById,
+  listCampaignSeries,
+  createCampaignSeries,
+} = require('../lib/smsCampaignSeries');
 const {
   PREVIEW_UTM_CAMPAIGN_UUID,
   looksLikeHttpUrl,
@@ -46,6 +54,9 @@ const {
 } = require('../lib/smsMarketingImpacts');
 
 const router = express.Router();
+
+const SMS_CAMPAIGN_SELECT =
+  'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url, campaign_series_id';
 
 /**
  * Empirically confirmed Notifyme raw delivered statuses (case-sensitive).
@@ -238,6 +249,8 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
     utm_campaign_value:
       campaign.utm_campaign_value != null ? campaign.utm_campaign_value : null,
     short_url: campaign.short_url != null ? campaign.short_url : null,
+    campaign_series_id:
+      campaign.campaign_series_id != null ? campaign.campaign_series_id : null,
     aggregates,
     cost,
   };
@@ -270,8 +283,9 @@ function getGa4PropertyId() {
 }
 
 /**
- * GET /sms/contacts/eligible?source_system=
+ * GET /sms/contacts/eligible?source_system=&campaign_series_id=
  * Count of contacts matching the same eligibility used by POST from_contacts.
+ * Tracking ON requires campaign_series_id (series RPC). Tracking OFF ignores series.
  */
 router.get('/contacts/eligible', async (req, res) => {
   const sourceSystem = parseSourceSystem(req.query && req.query.source_system);
@@ -279,19 +293,125 @@ router.get('/contacts/eligible', async (req, res) => {
     return res.status(400).json({ error: 'source_system is required' });
   }
   try {
-    const count = await countEligibleContacts(sourceSystem);
-    return res.json(
-      jsonSafe({
-        source_system: sourceSystem,
-        count,
-        max_limit: MAX_FROM_CONTACTS_LIMIT,
-      }),
-    );
+    const individualTracking = isIndividualTrackingEnabled();
+    let seriesId = null;
+    if (individualTracking) {
+      const parsed = parseCampaignSeriesId(
+        req.query && req.query.campaign_series_id,
+      );
+      if (parsed.error) {
+        return res.status(400).json({ error: parsed.error, kind: 'validation' });
+      }
+      if (!parsed.id) {
+        return res.status(400).json(jsonSafe(seriesRequiredBody()));
+      }
+      const series = await loadCampaignSeriesById(parsed.id);
+      if (!series) {
+        return res.status(400).json(jsonSafe(seriesNotFoundBody()));
+      }
+      seriesId = parsed.id;
+    }
+    const result = await resolveEligibleCount({
+      sourceSystem: sourceSystem,
+      seriesId: seriesId,
+      individualTracking: individualTracking,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json(jsonSafe(result.body));
+    }
+    return res.json(jsonSafe(result.body));
   } catch (err) {
     logger.error('GET /sms/contacts/eligible failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Failed to count eligible contacts' });
+  }
+});
+
+/**
+ * POST /sms/contacts/classify-for-series
+ * Fail-closed preview for directed/paste phones against a series.
+ */
+router.post('/contacts/classify-for-series', async (req, res) => {
+  const parsed = parseCampaignSeriesId(
+    req.body && req.body.campaign_series_id,
+  );
+  if (parsed.error) {
+    return res.status(400).json({ error: parsed.error, kind: 'validation' });
+  }
+  if (!parsed.id) {
+    return res.status(400).json({
+      error: 'campaign_series_id is required',
+      kind: 'validation',
+    });
+  }
+  const phonesRaw = req.body && req.body.phones;
+  if (!Array.isArray(phonesRaw)) {
+    return res.status(400).json({ error: 'phones must be an array' });
+  }
+  try {
+    const series = await loadCampaignSeriesById(parsed.id);
+    if (!series) {
+      return res.status(400).json(jsonSafe(seriesNotFoundBody()));
+    }
+    const phones = normalizeDirectedPhones(phonesRaw);
+    const classified = await classifyPhonesForSeries(parsed.id, phones);
+    const partition = partitionPhoneClassifications(classified);
+    return res.json(
+      jsonSafe({
+        campaign_series_id: parsed.id,
+        protected_clicked: partition.protected_clicked,
+        excluded_from_campaigns: partition.excluded_from_campaigns,
+        ok: partition.ok,
+      }),
+    );
+  } catch (err) {
+    logger.error('POST /sms/contacts/classify-for-series failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to classify phones' });
+  }
+});
+
+/**
+ * GET /sms/campaign-series
+ */
+router.get('/campaign-series', async (req, res) => {
+  try {
+    const series = await listCampaignSeries();
+    return res.json(
+      jsonSafe({
+        series: series,
+        individual_tracking: isIndividualTrackingEnabled(),
+      }),
+    );
+  } catch (err) {
+    logger.error('GET /sms/campaign-series failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to list campaign series' });
+  }
+});
+
+/**
+ * POST /sms/campaign-series
+ */
+router.post('/campaign-series', async (req, res) => {
+  const name = parseSeriesName(req.body && req.body.name);
+  if (!name) {
+    return res.status(400).json({
+      error: 'name must be a non-empty string',
+      kind: 'validation',
+    });
+  }
+  try {
+    const row = await createCampaignSeries(name);
+    return res.status(201).json(jsonSafe(row));
+  } catch (err) {
+    logger.error('POST /sms/campaign-series failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to create campaign series' });
   }
 });
 
@@ -408,7 +528,7 @@ router.post('/campaigns', async (req, res) => {
           status: 'sending',
         })
         .select(
-          'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+          SMS_CAMPAIGN_SELECT,
         )
         .limit(1);
 
@@ -440,103 +560,62 @@ router.post('/campaigns', async (req, res) => {
         });
       }
 
+      individualTracking = isIndividualTrackingEnabled();
+      let seriesId = null;
+      if (individualTracking) {
+        const parsedSeries = parseCampaignSeriesId(
+          req.body && req.body.campaign_series_id,
+        );
+        if (parsedSeries.error) {
+          return res.status(400).json({
+            error: parsedSeries.error,
+            kind: 'validation',
+          });
+        }
+        if (!parsedSeries.id) {
+          return res.status(400).json(jsonSafe(seriesRequiredBody()));
+        }
+        let seriesRow;
+        try {
+          seriesRow = await loadCampaignSeriesById(parsedSeries.id);
+        } catch (seriesErr) {
+          throw new NotifymeError(
+            seriesErr && seriesErr.message
+              ? seriesErr.message
+              : 'campaign series lookup failed',
+            { kind: 'database', status: 500 },
+          );
+        }
+        if (!seriesRow) {
+          return res.status(400).json(jsonSafe(seriesNotFoundBody()));
+        }
+        seriesId = parsedSeries.id;
+      }
+
       let normalizedPhones = null;
       let selectedContacts = null;
-      if (useFromContacts) {
-        if (Array.isArray(fromContactsRaw.phones)) {
-          const hasAutoFields =
-            parseSourceSystem(fromContactsRaw.source_system) != null ||
-            (fromContactsRaw.limit != null &&
-              String(fromContactsRaw.limit).trim() !== '');
-          if (hasAutoFields) {
-            return res.status(400).json({
-              error:
-                'from_contacts.phones cannot be combined with source_system or limit',
-            });
-          }
-          const directedPhones = normalizeDirectedPhones(fromContactsRaw.phones);
-          if (!directedPhones.length) {
-            return res.status(400).json({
-              error: 'from_contacts.phones must contain at least one non-empty value',
-            });
-          }
-          if (directedPhones.length > MAX_FROM_CONTACTS_LIMIT) {
-            return res.status(400).json({
-              error:
-                'from_contacts.phones cannot exceed ' +
-                String(MAX_FROM_CONTACTS_LIMIT) +
-                ' numbers',
-            });
-          }
-          let loaded;
-          try {
-            loaded = await loadContactsByPhones(directedPhones);
-          } catch (lookupErr) {
-            throw new NotifymeError(
-              lookupErr && lookupErr.message
-                ? lookupErr.message
-                : 'sms_contacts phone lookup failed',
-              { kind: 'database', status: 500 },
-            );
-          }
-          if (loaded.missing_phones.length) {
-            return res.status(400).json({
-              error: 'Unknown sms_contacts phones',
-              missing_phones: loaded.missing_phones,
-            });
-          }
-          selectedContacts = loaded.contacts;
-        } else {
-          const sourceSystem = parseSourceSystem(fromContactsRaw.source_system);
-          const limit = parseLimit(
-            fromContactsRaw.limit,
-            MAX_FROM_CONTACTS_LIMIT,
-          );
-          if (!sourceSystem) {
-            return res.status(400).json({
-              error: 'from_contacts.source_system is required',
-            });
-          }
-          if (limit == null) {
-            return res.status(400).json({
-              error:
-                'from_contacts.limit must be an integer from 1 to ' +
-                String(MAX_FROM_CONTACTS_LIMIT),
-            });
-          }
-          try {
-            selectedContacts = await listEligibleContacts(sourceSystem, limit);
-          } catch (listErr) {
-            throw new NotifymeError(
-              listErr && listErr.message
-                ? listErr.message
-                : 'eligible contacts query failed',
-              { kind: 'database', status: 500 },
-            );
-          }
-          if (!selectedContacts.length) {
-            return res.status(400).json({
-              error: 'No eligible contacts for that source_system',
-              source_system: sourceSystem,
-              count: 0,
-            });
-          }
-        }
-      } else {
-        if (!Array.isArray(phones) || phones.length === 0) {
-          return res.status(400).json({
-            error: 'phones must be a non-empty array',
-          });
-        }
-        normalizedPhones = phones
-          .map((p) => (p == null ? '' : String(p).trim()))
-          .filter((p) => p.length > 0);
-        if (!normalizedPhones.length) {
-          return res.status(400).json({
-            error: 'phones must contain at least one non-empty value',
-          });
-        }
+      let resolved;
+      try {
+        resolved = await resolveNewShapeDestinations({
+          useFromContacts: useFromContacts,
+          fromContactsRaw: fromContactsRaw,
+          phones: phones,
+          individualTracking: individualTracking,
+          seriesId: seriesId,
+        });
+      } catch (resolveErr) {
+        throw new NotifymeError(
+          resolveErr && resolveErr.message
+            ? resolveErr.message
+            : 'eligible contacts query failed',
+          { kind: 'database', status: 500 },
+        );
       }
+      if (!resolved.ok) {
+        return res.status(resolved.status).json(jsonSafe(resolved.body));
+      }
+      selectedContacts = resolved.selectedContacts;
+      normalizedPhones = resolved.normalizedPhones;
 
       // Generate UUID first so UTM and DB row share the same id in one insert.
       const campaignId = randomUUID();
@@ -544,7 +623,6 @@ router.post('/campaigns', async (req, res) => {
       utmCampaignValue = campaignId;
 
       const skipAutoLink = messageBodyHasHttpUrl(messageBody);
-      individualTracking = isIndividualTrackingEnabled();
 
       function mapContactRecordId(c) {
         return c.source_record_id == null || c.source_record_id === ''
@@ -570,9 +648,10 @@ router.post('/campaigns', async (req, res) => {
             destination_url: storedDestinationUrl,
             utm_campaign_value: utmCampaignValue,
             short_url: null,
+            campaign_series_id: seriesId,
           })
           .select(
-            'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+            SMS_CAMPAIGN_SELECT,
           )
           .limit(1);
 
@@ -629,6 +708,10 @@ router.post('/campaigns', async (req, res) => {
                 destination_url: storedDestinationUrl,
                 utm_campaign_value: utmCampaignValue,
                 short_url: null,
+                campaign_series_id:
+                  campaign.campaign_series_id != null
+                    ? campaign.campaign_series_id
+                    : null,
               },
               individual_tracking: true,
             }),
@@ -728,7 +811,7 @@ router.post('/campaigns', async (req, res) => {
             short_url: shortUrl,
           })
           .select(
-            'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+            SMS_CAMPAIGN_SELECT,
           )
           .limit(1);
 
@@ -780,6 +863,10 @@ router.post('/campaigns', async (req, res) => {
                       ? campaign.utm_campaign_value
                       : null,
                   short_url: null,
+                  campaign_series_id:
+                    campaign.campaign_series_id != null
+                      ? campaign.campaign_series_id
+                      : null,
                 }
               : null,
             individual_tracking: true,
@@ -803,6 +890,10 @@ router.post('/campaigns', async (req, res) => {
             ? campaign.utm_campaign_value
             : null,
         short_url: campaign.short_url != null ? campaign.short_url : null,
+        campaign_series_id:
+          campaign.campaign_series_id != null
+            ? campaign.campaign_series_id
+            : null,
       },
       summary,
     };
@@ -831,6 +922,10 @@ router.post('/campaigns', async (req, res) => {
               ? campaign.utm_campaign_value
               : null,
           short_url: campaign.short_url != null ? campaign.short_url : null,
+          campaign_series_id:
+            campaign.campaign_series_id != null
+              ? campaign.campaign_series_id
+              : null,
         },
         error: err.message,
         kind: err.kind,
@@ -858,7 +953,7 @@ router.get('/campaigns', async (req, res) => {
     const { data: campaigns, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+        SMS_CAMPAIGN_SELECT,
       )
       .order('created_at', { ascending: false });
 
@@ -1101,7 +1196,7 @@ router.get('/campaigns/:id', async (req, res) => {
     const { data, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+        SMS_CAMPAIGN_SELECT,
       )
       .eq('id', campaignId)
       .limit(1);
@@ -1142,7 +1237,7 @@ router.post('/campaigns/:id/poll', async (req, res) => {
     const { data, error } = await supabase
       .from('sms_campaigns')
       .select(
-        'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url',
+        SMS_CAMPAIGN_SELECT,
       )
       .eq('id', campaignId)
       .limit(1);
