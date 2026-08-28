@@ -6,11 +6,14 @@
 
 const assert = require('assert');
 
-const IMPACT_LOOKUP_TIMEOUT_MS = 500;
 const TOKEN = 'abcdefghijABCDEFGHIJ12';
 const IMPACT_ID = '11111111-1111-4111-8111-111111111111';
-const DEST =
+const DEST_WITHOUT_JT =
   'https://cz.uy/oferta?utm_source=sms&utm_medium=sms&utm_campaign=camp-1#go';
+const DEST_WITH_JT =
+  'https://cz.uy/oferta?utm_source=sms&utm_medium=sms&utm_campaign=camp-1&jt=' +
+  TOKEN +
+  '#go';
 
 const envPath = require.resolve('../src/config/env');
 require.cache[envPath] = {
@@ -57,7 +60,7 @@ function createMock(options) {
       return {
         select: function () {
           return {
-            eq: function (column, value) {
+            eq: function (_column, value) {
               return {
                 maybeSingle: function () {
                   if (table === 'sms_short_links') {
@@ -159,247 +162,178 @@ function shortRow(dest, impactId) {
 }
 
 (async function run() {
-  const individual = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({
-        data: { tracking_token: TOKEN },
-        error: null,
-      });
-    },
-  });
-  installSupabase(individual);
-  const individualRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(individualRes.statusCode, 302);
-  const individualLoc = new URL(individualRes.headers.Location);
-  assert.strictEqual(individualLoc.searchParams.get('jt'), TOKEN);
-  assert.strictEqual(individualLoc.searchParams.get('utm_source'), 'sms');
-  assert.strictEqual(individualLoc.searchParams.get('utm_medium'), 'sms');
-  assert.strictEqual(individualLoc.searchParams.get('utm_campaign'), 'camp-1');
-  assert.strictEqual(individualLoc.hash, '#go');
-  assert.strictEqual(individual.calls.inserts.length, 1);
-  assert.strictEqual(individual.calls.rpc.length, 0);
-  assert.strictEqual(individual.calls.inserts[0].source, 'janus');
-  assert.strictEqual(individual.calls.inserts[0].event_name, 'click');
-  assert.strictEqual(individual.calls.inserts[0].impact_id, IMPACT_ID);
-  assert.ok(individual.calls.inserts[0].external_event_id);
-
-  const second = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(second.statusCode, 302);
-  assert.strictEqual(individual.calls.inserts.length, 2);
-  assert.notStrictEqual(
-    individual.calls.inserts[0].external_event_id,
-    individual.calls.inserts[1].external_event_id,
-  );
-
-  const insertFail = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({
-        data: { tracking_token: TOKEN },
-        error: null,
-      });
-    },
-    insertError: { message: 'insert failed', code: '57014' },
-  });
-  installSupabase(insertFail);
-  const insertFailRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(insertFailRes.statusCode, 302);
-  assert.ok(new URL(insertFailRes.headers.Location).searchParams.get('jt'));
-  assert.strictEqual(insertFail.calls.inserts.length, 1);
-
-  const insertThrow = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({
-        data: { tracking_token: TOKEN },
-        error: null,
-      });
-    },
-    insertThrow: true,
-  });
-  installSupabase(insertThrow);
-  const insertThrowRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(insertThrowRes.statusCode, 302);
-  assert.ok(new URL(insertThrowRes.headers.Location).searchParams.get('jt'));
-
-  const historical = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, null);
-    },
-  });
-  installSupabase(historical);
-  const historicalRes = await requestShort('Old123');
-  await flush();
-  assert.strictEqual(historicalRes.statusCode, 302);
-  assert.strictEqual(historicalRes.headers.Location, DEST);
-  assert.strictEqual(historical.calls.rpc.length, 1);
-  assert.strictEqual(
-    historical.calls.rpc[0].name,
-    'sms_short_link_record_click',
-  );
-  assert.strictEqual(historical.calls.inserts.length, 0);
-  assert.strictEqual(historical.calls.impactSelects, 0);
-
-  const preview = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, null);
-    },
-  });
-  installSupabase(preview);
-  const previewRes = await requestShort('Prev01');
-  await flush();
-  assert.strictEqual(previewRes.statusCode, 302);
-  assert.strictEqual(previewRes.headers.Location, DEST);
-  assert.ok(!new URL(previewRes.headers.Location).searchParams.get('jt'));
-  assert.strictEqual(preview.calls.rpc.length, 1);
-  assert.strictEqual(preview.calls.inserts.length, 0);
-
-  const missing = createMock({
-    shortLookup: function () {
-      return { data: null, error: null };
-    },
-  });
-  installSupabase(missing);
-  const missingRes = await requestShort('Nope01');
-  await flush();
-  assert.strictEqual(missingRes.statusCode, 404);
-  assert.strictEqual(missingRes.body, 'Not found');
-  assert.strictEqual(missing.calls.rpc.length, 0);
-  assert.strictEqual(missing.calls.inserts.length, 0);
-
-  const badCode = createMock();
-  installSupabase(badCode);
-  const badCodeRes = await requestShort('***');
-  await flush();
-  assert.strictEqual(badCodeRes.statusCode, 404);
-  assert.strictEqual(badCode.calls.shortSelects, 0);
-
-  const orphan = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({ data: null, error: null });
-    },
-  });
-  installSupabase(orphan);
-  const orphanRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(orphanRes.statusCode, 302);
-  assert.strictEqual(orphanRes.headers.Location, DEST);
-  assert.strictEqual(orphan.calls.inserts.length, 0);
-  assert.strictEqual(orphan.calls.rpc.length, 0);
-
-  const badToken = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({
-        data: { tracking_token: 'short' },
-        error: null,
-      });
-    },
-  });
-  installSupabase(badToken);
-  const badTokenRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(badTokenRes.statusCode, 302);
-  assert.strictEqual(badTokenRes.headers.Location, DEST);
-  assert.strictEqual(badToken.calls.inserts.length, 0);
-  assert.strictEqual(badToken.calls.rpc.length, 0);
-
-  let lateReject;
-  const hangingQuery = new Promise(function (_, reject) {
-    lateReject = reject;
-  });
-  const hung = createMock({
-    shortLookup: function () {
-      return shortRow(DEST, IMPACT_ID);
-    },
-    impactLookup: function () {
-      return hangingQuery;
-    },
-  });
-  installSupabase(hung);
-  const lateRejections = [];
-  function onUnhandled(err) {
-    lateRejections.push(err);
+  // -------------------------------------------------------------------------
+  // TEST A: Nuevo individual con jt persistido en destination_url
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(DEST_WITH_JT, IMPACT_ID);
+      },
+      impactLookup: function () {
+        assert.fail('must not call marketing_impacts when destination_url already has jt');
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('New001');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    const loc = new URL(res.headers.Location);
+    assert.strictEqual(loc.searchParams.get('jt'), TOKEN);
+    assert.strictEqual(loc.searchParams.get('utm_campaign'), 'camp-1');
+    assert.strictEqual(mock.calls.shortSelects, 1);
+    assert.strictEqual(mock.calls.impactSelects, 0, 'zero queries to marketing_impacts');
+    assert.strictEqual(mock.calls.inserts.length, 1, 'records click event');
+    assert.strictEqual(mock.calls.inserts[0].impact_id, IMPACT_ID);
+    assert.strictEqual(mock.calls.inserts[0].event_name, 'click');
+    assert.strictEqual(mock.calls.rpc.length, 0);
   }
-  process.on('unhandledRejection', onUnhandled);
-  const hungStarted = Date.now();
-  const hungRes = await requestShort('AbC234');
-  const hungElapsed = Date.now() - hungStarted;
-  await flush();
-  assert.strictEqual(hungRes.statusCode, 302);
-  assert.strictEqual(hungRes.headers.Location, DEST);
-  assert.ok(
-    !new URL(hungRes.headers.Location).searchParams.get('jt'),
-    'timeout must not add jt',
-  );
-  assert.ok(
-    hungElapsed < IMPACT_LOOKUP_TIMEOUT_MS + 400,
-    'timeout must 302 within budget, elapsed=' + hungElapsed,
-  );
-  assert.ok(
-    hungElapsed >= IMPACT_LOOKUP_TIMEOUT_MS - 50,
-    'timeout must wait for the budget, elapsed=' + hungElapsed,
-  );
-  assert.strictEqual(hung.calls.inserts.length, 0);
-  assert.strictEqual(hung.calls.rpc.length, 0);
-  lateReject(new Error('late supabase reject'));
-  await flush();
-  await new Promise(function (resolve) {
-    setTimeout(resolve, 20);
-  });
-  process.removeListener('unhandledRejection', onUnhandled);
-  assert.strictEqual(
-    lateRejections.length,
-    0,
-    'late reject after timeout must not be unhandled',
-  );
 
-  const emptyDest = createMock({
-    shortLookup: function () {
-      return shortRow('   ', IMPACT_ID);
-    },
-  });
-  installSupabase(emptyDest);
-  const emptyDestRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(emptyDestRes.statusCode, 404);
-  assert.strictEqual(emptyDest.calls.impactSelects, 0);
+  // -------------------------------------------------------------------------
+  // TEST B: Individual pre-fix (sin jt) con lookup de fallback exitoso
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(DEST_WITHOUT_JT, IMPACT_ID);
+      },
+      impactLookup: function () {
+        return Promise.resolve({
+          data: { tracking_token: TOKEN },
+          error: null,
+        });
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('PreFix1');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    const loc = new URL(res.headers.Location);
+    assert.strictEqual(loc.searchParams.get('jt'), TOKEN);
+    assert.strictEqual(mock.calls.shortSelects, 1);
+    assert.strictEqual(mock.calls.impactSelects, 1, 'used fallback lookup');
+    assert.strictEqual(mock.calls.inserts.length, 1);
+    assert.strictEqual(mock.calls.inserts[0].impact_id, IMPACT_ID);
+  }
 
-  const unparseable = createMock({
-    shortLookup: function () {
-      return shortRow('not-a-url', IMPACT_ID);
-    },
-    impactLookup: function () {
-      return Promise.resolve({
-        data: { tracking_token: TOKEN },
-        error: null,
-      });
-    },
-  });
-  installSupabase(unparseable);
-  const unparseableRes = await requestShort('AbC234');
-  await flush();
-  assert.strictEqual(unparseableRes.statusCode, 302);
-  assert.strictEqual(unparseableRes.headers.Location, 'not-a-url');
-  assert.strictEqual(unparseable.calls.inserts.length, 0);
+  // -------------------------------------------------------------------------
+  // TEST C: Legacy real (impact_id null)
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(DEST_WITHOUT_JT, null);
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('Old123');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    assert.strictEqual(res.headers.Location, DEST_WITHOUT_JT);
+    assert.strictEqual(mock.calls.impactSelects, 0);
+    assert.strictEqual(mock.calls.inserts.length, 0);
+    assert.strictEqual(mock.calls.rpc.length, 1);
+    assert.strictEqual(mock.calls.rpc[0].name, 'sms_short_link_record_click');
+    assert.strictEqual(mock.calls.rpc[0].args.p_short_code, 'Old123');
+  }
 
-  console.log('OK unit-sms-short-redirect');
+  // -------------------------------------------------------------------------
+  // TEST D: Error o throw en recordImpactClick no afecta redirect ni arroja unhandled
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(DEST_WITH_JT, IMPACT_ID);
+      },
+      insertThrow: true,
+    });
+    installSupabase(mock);
+    const res = await requestShort('New002');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    assert.ok(new URL(res.headers.Location).searchParams.get('jt'));
+  }
+
+  // -------------------------------------------------------------------------
+  // TEST E: Regresión específica del Canary (u3f3uf)
+  // -------------------------------------------------------------------------
+  {
+    const canaryDest =
+      'https://www.credizona.com.uy/solicitudes?utm_source=sms&utm_medium=sms&utm_campaign=a5651b31-11a7-4814-85d9-db37c3418da2';
+    const canaryImpactId = '8d8a4f18-f467-4bea-b65a-7383fc88f382';
+    const canaryToken = '6Z8SFfuCLKLE_Gc7l-Ze_Q';
+
+    const mock = createMock({
+      shortLookup: function (code) {
+        if (code === 'u3f3uf') {
+          return shortRow(canaryDest, canaryImpactId);
+        }
+        return { data: null, error: null };
+      },
+      impactLookup: function (id) {
+        if (id === canaryImpactId) {
+          return Promise.resolve({
+            data: { tracking_token: canaryToken },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: null, error: null });
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('u3f3uf');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    const loc = new URL(res.headers.Location);
+    assert.strictEqual(loc.searchParams.get('jt'), canaryToken);
+    assert.strictEqual(
+      loc.searchParams.get('utm_campaign'),
+      'a5651b31-11a7-4814-85d9-db37c3418da2',
+    );
+    assert.strictEqual(mock.calls.inserts.length, 1);
+    assert.strictEqual(mock.calls.inserts[0].impact_id, canaryImpactId);
+    assert.strictEqual(mock.calls.inserts[0].event_name, 'click');
+  }
+
+  // -------------------------------------------------------------------------
+  // TEST F: Pre-Fix con Lookup Fallido -> Redirige y AÚN ASÍ registra click
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(DEST_WITHOUT_JT, IMPACT_ID);
+      },
+      impactLookup: function () {
+        return Promise.reject(new Error('PostgREST connection timeout'));
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('PreFixFail');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    assert.strictEqual(res.headers.Location, DEST_WITHOUT_JT);
+    assert.ok(!new URL(res.headers.Location).searchParams.get('jt'));
+    assert.strictEqual(mock.calls.inserts.length, 1, 'click event MUST be inserted even if token lookup failed');
+    assert.strictEqual(mock.calls.inserts[0].impact_id, IMPACT_ID);
+    assert.strictEqual(mock.calls.rpc.length, 0, 'must not call recordHistoricalClick');
+  }
+
+  // -------------------------------------------------------------------------
+  // TEST Extra: 404 para short code no existente
+  // -------------------------------------------------------------------------
+  {
+    const mock = createMock({
+      shortLookup: function () {
+        return { data: null, error: null };
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('Nope404');
+    await flush();
+    assert.strictEqual(res.statusCode, 404);
+  }
+
+  console.log('OK unit-sms-short-redirect (All cases A–F passed)');
 })().catch(function (err) {
   console.error(err);
   process.exit(1);

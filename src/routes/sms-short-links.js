@@ -13,7 +13,16 @@ const { appendTrackingToken } = require('../lib/smsTinyUrl');
 const router = express.Router();
 const SHORT_CODE_RE = /^[A-Za-z0-9]{4,12}$/;
 const TRACKING_TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
-const IMPACT_LOOKUP_TIMEOUT_MS = 500;
+const FALLBACK_LOOKUP_TIMEOUT_MS = 5000;
+
+function hasTrackingToken(destinationUrl) {
+  try {
+    const url = new URL(String(destinationUrl).trim());
+    return Boolean(url.searchParams.get('jt'));
+  } catch (_e) {
+    return false;
+  }
+}
 
 function withBudget(promise, timeoutMs) {
   let timer = null;
@@ -31,48 +40,62 @@ function withBudget(promise, timeoutMs) {
 }
 
 function recordHistoricalClick(supabase, code) {
-  supabase
-    .rpc('sms_short_link_record_click', { p_short_code: code })
-    .then(function (rpcRes) {
-      if (rpcRes && rpcRes.error) {
+  try {
+    supabase
+      .rpc('sms_short_link_record_click', { p_short_code: code })
+      .then(function (rpcRes) {
+        if (rpcRes && rpcRes.error) {
+          logger.warn('SMS short link click increment failed', {
+            kind: 'shortener_error',
+            provider: 'mie',
+          });
+        }
+      })
+      .catch(function () {
         logger.warn('SMS short link click increment failed', {
           kind: 'shortener_error',
           provider: 'mie',
         });
-      }
-    })
-    .catch(function () {
-      logger.warn('SMS short link click increment failed', {
-        kind: 'shortener_error',
-        provider: 'mie',
       });
+  } catch (_err) {
+    logger.warn('SMS short link click increment dispatch failed', {
+      kind: 'shortener_error',
+      provider: 'mie',
     });
+  }
 }
 
 function recordImpactClick(supabase, impactId) {
-  supabase
-    .from('marketing_impact_events')
-    .insert({
-      impact_id: impactId,
-      source: 'janus',
-      event_name: 'click',
-      occurred_at: new Date().toISOString(),
-      external_event_id: crypto.randomUUID(),
-    })
-    .then(function (insertRes) {
-      if (insertRes && insertRes.error) {
+  try {
+    supabase
+      .from('marketing_impact_events')
+      .insert({
+        impact_id: impactId,
+        source: 'janus',
+        event_name: 'click',
+        occurred_at: new Date().toISOString(),
+        external_event_id: crypto.randomUUID(),
+      })
+      .then(function (insertRes) {
+        if (insertRes && insertRes.error) {
+          logger.warn('SMS impact click event insert failed', {
+            kind: 'short_redirect_error',
+            reason: 'click_event_insert_failed',
+          });
+        }
+      })
+      .catch(function () {
         logger.warn('SMS impact click event insert failed', {
           kind: 'short_redirect_error',
           reason: 'click_event_insert_failed',
         });
-      }
-    })
-    .catch(function () {
-      logger.warn('SMS impact click event insert failed', {
-        kind: 'short_redirect_error',
-        reason: 'click_event_insert_failed',
       });
+  } catch (_err) {
+    logger.warn('SMS impact click event dispatch failed', {
+      kind: 'short_redirect_error',
+      reason: 'click_event_insert_failed',
     });
+  }
 }
 
 router.get('/s/:short_code', async (req, res) => {
@@ -101,66 +124,75 @@ router.get('/s/:short_code', async (req, res) => {
         : '';
 
     let location = dest;
-    let individual = false;
 
     if (impactId) {
-      try {
-        const impactRes = await withBudget(
-          supabase
-            .from('marketing_impacts')
-            .select('tracking_token')
-            .eq('id', impactId)
-            .maybeSingle(),
-          IMPACT_LOOKUP_TIMEOUT_MS,
-        );
-        const token =
-          impactRes &&
-          impactRes.data &&
-          impactRes.data.tracking_token != null
-            ? String(impactRes.data.tracking_token).trim()
-            : '';
-        if (impactRes.error) {
+      if (hasTrackingToken(dest)) {
+        // CASO 1: Link individual nuevo (destination_url ya tiene jt).
+        // Cero queries adicionales a marketing_impacts.
+        location = dest;
+      } else {
+        // CASO 2: Link individual pre-fix (destination_url sin jt).
+        // Fallback compatible para recuperar token.
+        try {
+          const impactRes = await withBudget(
+            supabase
+              .from('marketing_impacts')
+              .select('tracking_token')
+              .eq('id', impactId)
+              .maybeSingle(),
+            FALLBACK_LOOKUP_TIMEOUT_MS,
+          );
+          const token =
+            impactRes &&
+            impactRes.data &&
+            impactRes.data.tracking_token != null
+              ? String(impactRes.data.tracking_token).trim()
+              : '';
+          if (impactRes.error) {
+            logger.error('SMS short link impact lookup failed', {
+              kind: 'short_redirect_error',
+              reason: 'impact_lookup_failed',
+            });
+          } else if (!impactRes.data) {
+            logger.error('SMS short link impact missing', {
+              kind: 'short_redirect_error',
+              reason: 'impact_not_found',
+            });
+          } else if (!TRACKING_TOKEN_RE.test(token)) {
+            logger.error('SMS short link tracking_token invalid', {
+              kind: 'short_redirect_error',
+              reason: 'invalid_tracking_token',
+            });
+          } else {
+            try {
+              location = appendTrackingToken(dest, token);
+            } catch (_err) {
+              logger.error('SMS short link jt append failed', {
+                kind: 'short_redirect_error',
+                reason: 'invalid_destination_url',
+              });
+            }
+          }
+        } catch (err) {
           logger.error('SMS short link impact lookup failed', {
             kind: 'short_redirect_error',
-            reason: 'impact_lookup_failed',
+            reason:
+              err && err.code === 'IMPACT_LOOKUP_TIMEOUT'
+                ? 'impact_lookup_timeout'
+                : 'impact_lookup_failed',
           });
-        } else if (!impactRes.data) {
-          logger.error('SMS short link impact missing', {
-            kind: 'short_redirect_error',
-            reason: 'impact_not_found',
-          });
-        } else if (!TRACKING_TOKEN_RE.test(token)) {
-          logger.error('SMS short link tracking_token invalid', {
-            kind: 'short_redirect_error',
-            reason: 'invalid_tracking_token',
-          });
-        } else {
-          try {
-            location = appendTrackingToken(dest, token);
-            individual = true;
-          } catch (_err) {
-            logger.error('SMS short link jt append failed', {
-              kind: 'short_redirect_error',
-              reason: 'invalid_destination_url',
-            });
-          }
         }
-      } catch (err) {
-        logger.error('SMS short link impact lookup failed', {
-          kind: 'short_redirect_error',
-          reason:
-            err && err.code === 'IMPACT_LOOKUP_TIMEOUT'
-              ? 'impact_lookup_timeout'
-              : 'impact_lookup_failed',
-        });
       }
     }
 
     res.set('Cache-Control', 'private, no-store');
     res.redirect(302, location);
-    if (individual) {
+
+    // Registro de click post-response:
+    // No depende de que el token se haya resuelto correctamente.
+    if (impactId) {
       recordImpactClick(supabase, impactId);
-    } else if (!impactId) {
+    } else {
       recordHistoricalClick(supabase, code);
     }
     return undefined;

@@ -73,6 +73,7 @@ function createFakeDb(options) {
   const impacts = new Map();
   const shortsByImpact = new Map();
   const shortsByCode = new Map();
+  const insertedShortRows = [];
   let impactSeq = 0;
   const calls = {
     impactInserts: [],
@@ -128,6 +129,7 @@ function createFakeDb(options) {
   function insertShorts(rows) {
     shortInsertN += 1;
     calls.shortInserts.push(rows.map(function (r) { return r.short_code; }));
+    insertedShortRows.push.apply(insertedShortRows, rows);
     const mode = typeof opts.shortInsert === 'function'
       ? opts.shortInsert(shortInsertN, rows)
       : opts.shortInsert || 'ok';
@@ -161,6 +163,7 @@ function createFakeDb(options) {
     impacts: impacts,
     shortsByImpact: shortsByImpact,
     shortsByCode: shortsByCode,
+    insertedShortRows: insertedShortRows,
     from: function (table) {
       return {
         insert: function (rows) {
@@ -247,6 +250,14 @@ function createFakeDb(options) {
   assert.strictEqual(happy.impacts.size, 3);
   assert.strictEqual(happy.shortsByImpact.size, 3);
   assert.ok(happyPlans.every(function (p) { return p.impact_id && p.short_code; }));
+  assert.strictEqual(happy.insertedShortRows.length, 3);
+  assert.ok(
+    happy.insertedShortRows.every(function (r) {
+      const u = new URL(r.destination_url);
+      return u.searchParams.get('utm_campaign') === 'x' && Boolean(u.searchParams.get('jt'));
+    }),
+    'new individual shorts must persist destination_url with jt',
+  );
 
   const skipDb = createFakeDb();
   const skipPlans = await prepareIndividualSmsTracking({

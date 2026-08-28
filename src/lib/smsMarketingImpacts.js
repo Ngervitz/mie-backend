@@ -6,6 +6,7 @@ const {
   generateShortCode,
   composePublicShortUrl,
   isUniqueViolation,
+  appendTrackingToken,
 } = require('./smsTinyUrl');
 
 const IMPACT_INSERT_CHUNK = 500;
@@ -281,7 +282,9 @@ async function persistShortChunk(supabase, campaignId, destinationUrl, chunk, al
           missing.map(function (p) {
             return {
               short_code: p.short_code,
-              destination_url: destinationUrl,
+              destination_url: destinationUrl
+                ? appendTrackingToken(destinationUrl, p.tracking_token)
+                : null,
               campaign_id: campaignId,
               impact_id: p.impact_id,
             };
