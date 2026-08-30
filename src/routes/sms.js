@@ -52,6 +52,7 @@ const {
   markCampaignPrepError,
   TrackingPrepError,
 } = require('../lib/smsMarketingImpacts');
+const { normalizeJt } = require('../lib/sanitizeCzTrackingData');
 
 const router = express.Router();
 
@@ -412,6 +413,119 @@ router.post('/campaign-series', async (req, res) => {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Failed to create campaign series' });
+  }
+});
+
+/**
+ * Transforma N filas devueltas por marketing_impacts_tracking_view (por duplicación de cz_solicitud_id)
+ * a una única entidad de respuesta estructurada sin duplicados.
+ */
+function mapTrackingViewRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const first = rows[0];
+
+  const seenSolIds = new Set();
+  const solicitudes = [];
+
+  for (const r of rows) {
+    if (r.cz_solicitud_id != null) {
+      const solId = Number(r.cz_solicitud_id);
+      if (!seenSolIds.has(solId)) {
+        seenSolIds.add(solId);
+        solicitudes.push({
+          cz_solicitud_id: solId,
+          ci: r.cz_ci != null ? Number(r.cz_ci) : null,
+          fecha_reg: r.solicitud_fecha_reg || null,
+          estado_actual_id:
+            r.solicitud_estado_actual_id != null
+              ? Number(r.solicitud_estado_actual_id)
+              : null,
+          estados_historico: Array.isArray(r.solicitud_estados_historico)
+            ? r.solicitud_estados_historico
+            : [],
+          estados_detalle: Array.isArray(r.solicitud_estados_detalle)
+            ? r.solicitud_estados_detalle
+            : [],
+        });
+      }
+    }
+  }
+
+  return {
+    marketing_impact_id: first.marketing_impact_id,
+    tracking_token: first.tracking_token,
+    channel: first.channel,
+    contact_id: first.contact_id || null,
+    phone: first.phone || null,
+    impact_created_at: first.impact_created_at,
+    campaign: {
+      id: first.campaign_id || null,
+      name: first.campaign_name || null,
+      campaign_series_id: first.campaign_series_id || null,
+      campaign_series_name: first.campaign_series_name || null,
+    },
+    events: {
+      clicked: Boolean(first.clicked),
+      clicked_at: first.clicked_at || null,
+      form_step_1_at: first.form_step_1_at || null,
+      form_step_2_at: first.form_step_2_at || null,
+      form_step_3_at: first.form_step_3_at || null,
+      last_event_at: first.last_event_at || null,
+      total_events: Number(first.total_events) || 0,
+    },
+    series_protection: {
+      protected_clicked: Boolean(first.protected_clicked),
+    },
+    solicitudes: solicitudes,
+  };
+}
+
+/**
+ * GET /sms/tracking/impact?tracking_token=<TOKEN>
+ * Consulta puntual a public.marketing_impacts_tracking_view.
+ */
+router.get('/tracking/impact', async (req, res) => {
+  const rawToken = req.query && req.query.tracking_token;
+  if (rawToken == null || String(rawToken).trim() === '') {
+    return res.status(400).json({ error: 'tracking_token is required' });
+  }
+
+  const token = normalizeJt(rawToken);
+  if (!token) {
+    return res.status(400).json({ error: 'Invalid tracking_token format' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('marketing_impacts_tracking_view')
+      .select('*')
+      .eq('tracking_token', token);
+
+    if (error) {
+      logger.error('Failed to query marketing_impacts_tracking_view', {
+        error: error.message,
+        tracking_token_suffix: token.slice(-4),
+      });
+      return res.status(500).json({ error: 'Failed to load tracking details' });
+    }
+
+    if (!data || !data.length) {
+      return res.status(404).json({
+        found: false,
+        error: 'Marketing impact not found',
+      });
+    }
+
+    const impact = mapTrackingViewRows(data);
+    return res.status(200).json({
+      found: true,
+      impact: impact,
+    });
+  } catch (err) {
+    logger.error('GET /sms/tracking/impact unexpected error', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to load tracking details' });
   }
 });
 
