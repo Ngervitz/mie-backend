@@ -56,7 +56,7 @@ assert.strictEqual(plans.length, 2);
 assert.notStrictEqual(plans[0].tracking_token, plans[1].tracking_token);
 assert.notStrictEqual(plans[0].short_code, plans[1].short_code);
 assert.strictEqual(plans[0].impact_id, null);
-assert.strictEqual(Math.ceil(16500 / IMPACT_INSERT_CHUNK), 33);
+assert.strictEqual(Math.ceil(16500 / IMPACT_INSERT_CHUNK), 165);
 const many = buildRecipientPlans(
   Array.from({ length: 16500 }, function (_, i) {
     return { phone: String(i) };
@@ -81,6 +81,8 @@ function createFakeDb(options) {
     impactSelects: 0,
     shortSelects: 0,
     shortCodeSelects: 0,
+    impactInClauseSizes: [],
+    shortInClauseSizes: [],
   };
   let impactInsertN = 0;
   let shortInsertN = 0;
@@ -180,6 +182,7 @@ function createFakeDb(options) {
             in: function (column, values) {
               if (table === 'marketing_impacts') {
                 calls.impactSelects += 1;
+                calls.impactInClauseSizes.push(values.length);
                 const data = values
                   .map(function (token) { return impacts.get(token); })
                   .filter(Boolean);
@@ -206,6 +209,7 @@ function createFakeDb(options) {
               }
               if (table === 'sms_short_links') {
                 calls.shortSelects += 1;
+                calls.shortInClauseSizes.push(values.length);
                 if (opts.seedAdoptedShorts && shortsByImpact.size === 0) {
                   values.forEach(function (id, i) {
                     const key = String(id);
@@ -229,6 +233,86 @@ function createFakeDb(options) {
       };
     },
   };
+}
+
+function makeRecipients(count) {
+  return Array.from({ length: count }, function (_, i) {
+    return { phone: String(90000000 + i), contact_id: null };
+  });
+}
+
+function expectedPersistChunks(count) {
+  return Math.ceil(count / IMPACT_INSERT_CHUNK);
+}
+
+function assertInsertChunkSizes(insertCalls, expectedChunks, totalCount) {
+  assert.strictEqual(insertCalls.length, expectedChunks);
+  let sum = 0;
+  for (const batch of insertCalls) {
+    assert.ok(
+      batch.length <= IMPACT_INSERT_CHUNK,
+      'insert batch must not exceed IMPACT_INSERT_CHUNK',
+    );
+    sum += batch.length;
+  }
+  assert.strictEqual(sum, totalCount);
+}
+
+function assertOneToOneTracking(db, plans, count) {
+  assert.strictEqual(plans.length, count);
+  assert.strictEqual(db.impacts.size, count);
+  assert.strictEqual(db.shortsByImpact.size, count);
+  assert.strictEqual(db.insertedShortRows.length, count);
+  assert.ok(
+    plans.every(function (p) { return p.impact_id && p.short_code; }),
+    'each plan must have impact_id and short_code',
+  );
+  assert.strictEqual(
+    new Set(plans.map(function (p) { return String(p.impact_id); })).size,
+    count,
+  );
+  assert.strictEqual(
+    new Set(plans.map(function (p) { return String(p.short_code); })).size,
+    count,
+  );
+}
+
+function assertJtOnShortRows(rows) {
+  assert.ok(
+    rows.every(function (r) {
+      const u = new URL(r.destination_url);
+      return Boolean(u.searchParams.get('jt'));
+    }),
+    'each short row must persist destination_url with jt',
+  );
+}
+
+async function runChunkedHappyPath(count) {
+  const db = createFakeDb();
+  const destinationUrl = 'https://cz.uy/?utm_campaign=chunk-test';
+  const plans = await prepareIndividualSmsTracking({
+    campaignId: '22222222-2222-4222-8222-222222222222',
+    recipients: makeRecipients(count),
+    destinationUrl: destinationUrl,
+    skipShorts: false,
+    supabase: db,
+  });
+  const chunks = expectedPersistChunks(count);
+  assertInsertChunkSizes(db.calls.impactInserts, chunks, count);
+  assertInsertChunkSizes(db.calls.shortInserts, chunks, count);
+  assert.ok(
+    db.calls.impactInClauseSizes.every(function (n) {
+      return n <= IMPACT_INSERT_CHUNK;
+    }),
+  );
+  assert.ok(
+    db.calls.shortInClauseSizes.every(function (n) {
+      return n <= IMPACT_INSERT_CHUNK;
+    }),
+  );
+  assertOneToOneTracking(db, plans, count);
+  assertJtOnShortRows(db.insertedShortRows);
+  return { db: db, plans: plans, chunks: chunks };
 }
 
 (async function run() {
@@ -425,6 +509,101 @@ function createFakeDb(options) {
     genericUnique.calls.shortInserts[0].slice().sort(),
   );
   assert.ok(genericUnique.calls.shortCodeSelects >= 1);
+
+  const atChunk = await runChunkedHappyPath(IMPACT_INSERT_CHUNK);
+  assert.strictEqual(atChunk.chunks, 1);
+
+  const overChunk = await runChunkedHappyPath(IMPACT_INSERT_CHUNK + 1);
+  assert.strictEqual(overChunk.chunks, 2);
+  assert.strictEqual(overChunk.db.calls.impactInserts[0].length, IMPACT_INSERT_CHUNK);
+  assert.strictEqual(overChunk.db.calls.impactInserts[1].length, 1);
+  assert.strictEqual(overChunk.db.calls.shortInserts[0].length, IMPACT_INSERT_CHUNK);
+  assert.strictEqual(overChunk.db.calls.shortInserts[1].length, 1);
+
+  const atFiveHundred = await runChunkedHappyPath(500);
+  assert.strictEqual(atFiveHundred.chunks, 5);
+  assert.strictEqual(atFiveHundred.db.impacts.size, 500);
+  assert.strictEqual(atFiveHundred.db.shortsByImpact.size, 500);
+
+  const partialImpactPersist = createFakeDb({
+    impactInsert: function (n) {
+      return n === 2 ? 'timeout' : 'ok';
+    },
+    persistOnUncertain: true,
+  });
+  const partialImpactPlans = await prepareIndividualSmsTracking({
+    campaignId: '33333333-3333-4333-8333-333333333333',
+    recipients: makeRecipients(IMPACT_INSERT_CHUNK + 1),
+    destinationUrl: 'https://cz.uy/x',
+    skipShorts: true,
+    supabase: partialImpactPersist,
+  });
+  assert.strictEqual(partialImpactPlans.length, IMPACT_INSERT_CHUNK + 1);
+  assert.strictEqual(partialImpactPersist.impacts.size, IMPACT_INSERT_CHUNK + 1);
+  assertInsertChunkSizes(
+    partialImpactPersist.calls.impactInserts,
+    2,
+    IMPACT_INSERT_CHUNK + 1,
+  );
+
+  const failAfterOneShortChunk = createFakeDb({
+    shortInsert: function (n, rows) {
+      if (rows.length < IMPACT_INSERT_CHUNK) return 'timeout';
+      return 'ok';
+    },
+    persistOnUncertain: false,
+  });
+  let failAfterOneShortChunkErr = false;
+  try {
+    await prepareIndividualSmsTracking({
+      campaignId: '44444444-4444-4444-8444-444444444444',
+      recipients: makeRecipients(IMPACT_INSERT_CHUNK + 1),
+      destinationUrl: 'https://cz.uy/x',
+      skipShorts: false,
+      supabase: failAfterOneShortChunk,
+    });
+  } catch (err) {
+    failAfterOneShortChunkErr = true;
+    assert.ok(err instanceof TrackingPrepError);
+  }
+  assert.ok(failAfterOneShortChunkErr, 'prep must fail after a later short chunk fails');
+  assert.strictEqual(
+    failAfterOneShortChunk.shortsByImpact.size,
+    IMPACT_INSERT_CHUNK,
+  );
+  assert.ok(failAfterOneShortChunk.calls.shortInserts.length >= 1);
+  assert.strictEqual(
+    failAfterOneShortChunk.calls.shortInserts[0].length,
+    IMPACT_INSERT_CHUNK,
+  );
+
+  const failAfterTwoOfFiveShortChunks = createFakeDb({
+    shortInsert: function (n, rows) {
+      if (n >= 3) return 'timeout';
+      return 'ok';
+    },
+    persistOnUncertain: false,
+  });
+  let failAfterTwoChunksErr = false;
+  try {
+    await prepareIndividualSmsTracking({
+      campaignId: '55555555-5555-4555-8555-555555555555',
+      recipients: makeRecipients(500),
+      destinationUrl: 'https://cz.uy/x',
+      skipShorts: false,
+      supabase: failAfterTwoOfFiveShortChunks,
+    });
+  } catch (err) {
+    failAfterTwoChunksErr = true;
+    assert.ok(err instanceof TrackingPrepError);
+  }
+  assert.ok(failAfterTwoChunksErr, 'prep must fail when a later 500-recipient short chunk fails');
+  assert.strictEqual(
+    failAfterTwoOfFiveShortChunks.shortsByImpact.size,
+    IMPACT_INSERT_CHUNK * 2,
+  );
+  assert.ok(failAfterTwoOfFiveShortChunks.calls.shortInserts.length >= 2);
+  assert.strictEqual(failAfterTwoOfFiveShortChunks.impacts.size, 500);
 
   const broken = createFakeDb({
     impactInsert: function () {

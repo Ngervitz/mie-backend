@@ -9,7 +9,7 @@ const {
   appendTrackingToken,
 } = require('./smsTinyUrl');
 
-const IMPACT_INSERT_CHUNK = 500;
+const IMPACT_INSERT_CHUNK = 100;
 const CHUNK_ATTEMPTS = 5;
 const TRACKING_TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
 
