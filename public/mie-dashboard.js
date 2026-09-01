@@ -10096,7 +10096,14 @@ init();
     return id;
   }
 
-  function renderCampaignList(campaigns) {
+  function formatPct(val) {
+    if (val === null || val === undefined || typeof val !== 'number' || Number.isNaN(val)) {
+      return '—';
+    }
+    return val.toFixed(1) + '%';
+  }
+
+  function renderCampaignList(campaigns, analyticsByCampaignId = {}) {
     const rows = Array.isArray(campaigns) ? campaigns.slice() : [];
     rows.sort((a, b) => {
       const ca = String((a && a.created_at) || '');
@@ -10121,7 +10128,12 @@ init();
             ? '—<div class="sms-cost-note">Costo pendiente de configurar</div>'
             : escapeHtml(formatCost(agg.estimated_cost, agg.currency));
 
-        return (
+        const trk = analyticsByCampaignId[id] || null;
+        const seriesName = trk && trk.campaign_series_name
+          ? trk.campaign_series_name
+          : campaignSeriesLabel(c) || '—';
+
+        const mainRow =
           '<tr class="sms-row" tabindex="0" role="button" data-campaign-id="' +
           escapeHtml(id) +
           '" aria-label="Abrir detalle de campaña">' +
@@ -10154,23 +10166,100 @@ init();
           '<td>' +
           costCell +
           '</td>' +
-          '<td><button type="button" class="btn sms-open-btn" data-campaign-id="' +
+          '<td>' +
+          '<div style="display:flex;gap:4px;">' +
+          '<button type="button" class="btn btn-sm sms-tracking-toggle-btn" data-campaign-id="' +
           escapeHtml(id) +
-          '">Ver</button></td>' +
-          '</tr>'
-        );
+          '">Tracking</button>' +
+          '<button type="button" class="btn sms-open-btn" data-campaign-id="' +
+          escapeHtml(id) +
+          '">Ver</button>' +
+          '</div>' +
+          '</td>' +
+          '</tr>';
+
+        const trkDelivered = trk ? formatCount(trk.messages_delivered) + ' / ' + formatCount(trk.messages_sent) : '—';
+        const trkDeliveredSub = trk ? formatPct(trk.delivery_pct) + ' entrega' : '';
+
+        const trkClicks = trk ? formatCount(trk.total_clicks) : '—';
+        const trkClicksSub = trk ? formatPct(trk.ctr_delivered_pct) + ' s/entr. · ' + formatPct(trk.ctr_sent_pct) + ' s/env.' : '';
+
+        const trkStep1 = trk ? formatCount(trk.total_form_step_1) : '—';
+        const trkStep1Sub = trk ? formatPct(trk.step_1_pct) + ' s/entr. · ' + formatPct(trk.step_1_from_click_pct) + ' s/click' : '';
+
+        const trkStep2 = trk ? formatCount(trk.total_form_step_2) : '—';
+        const trkStep2Sub = trk ? formatPct(trk.step_2_pct) + ' s/entr. · ' + formatPct(trk.step_2_from_step_1_pct) + ' s/paso 1' : '';
+
+        const trkStep3 = trk ? formatCount(trk.total_form_step_3) : '—';
+        const trkStep3Sub = trk ? formatPct(trk.step_3_pct) + ' s/entr. · ' + formatPct(trk.step_3_from_step_2_pct) + ' s/paso 2' : '';
+
+        const trkSol = trk ? formatCount(trk.total_solicitudes) : '—';
+        const trkSolSub = trk ? formatCount(trk.impacts_with_solicitud) + ' SMS (' + formatPct(trk.solicitud_conversion_pct) + ' conv.)' : '';
+
+        const trackingRow =
+          '<tr class="sms-tracking-row" id="sms-tracking-row-' +
+          escapeHtml(id) +
+          '" style="display:none;">' +
+          '<td colspan="10">' +
+          '<div class="sms-tracking-box">' +
+          '<div class="sms-tracking-box-header">' +
+          '<span>🎯 Embudo de seguimiento individual</span>' +
+          '<span>Serie: <strong>' + escapeHtml(seriesName) + '</strong></span>' +
+          '</div>' +
+          '<div class="sms-tracking-box-metrics">' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkDelivered) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Entregados</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkDeliveredSub) + '</div>' +
+          '</div>' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkClicks) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Clicks</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkClicksSub) + '</div>' +
+          '</div>' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkStep1) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Paso 1</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkStep1Sub) + '</div>' +
+          '</div>' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkStep2) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Paso 2</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkStep2Sub) + '</div>' +
+          '</div>' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkStep3) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Paso 3</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkStep3Sub) + '</div>' +
+          '</div>' +
+          '<div class="sms-tracking-metric-card">' +
+          '<div class="sms-tracking-metric-val">' + escapeHtml(trkSol) + '</div>' +
+          '<div class="sms-tracking-metric-lbl">Solicitudes</div>' +
+          '<div class="sms-tracking-metric-sub">' + escapeHtml(trkSolSub) + '</div>' +
+          '</div>' +
+          '</div>' +
+          '</div>' +
+          '</td>' +
+          '</tr>';
+
+        return mainRow + trackingRow;
       })
       .join('');
 
     listEl.innerHTML =
-      '<div class="sms-table-wrap"><table class="sms-table">' +
+      '<details class="cz-funnel-block sms-campaigns-block">' +
+      '<summary class="sms-section-title">' +
+      '<span class="cz-funnel-chevron">▶</span> ' +
+      '<span>Campañas (' + rows.length + ')</span>' +
+      '</summary>' +
+      '<div class="sms-table-wrap" style="margin-top:10px;"><table class="sms-table">' +
       '<thead><tr>' +
       '<th>Nombre</th><th>Creada</th><th>Estado</th><th>Total</th>' +
       '<th>Entregados</th><th>Fallidos</th><th>Respondidos</th><th>Pendientes</th>' +
       '<th>Costo est.</th><th>Acciones</th>' +
       '</tr></thead><tbody>' +
       body +
-      '</tbody></table></div>';
+      '</tbody></table></div></details>';
   }
 
   async function loadMonthlySummary() {
@@ -10180,16 +10269,20 @@ init();
       setStatus(monthlySummaryStatus, 'Cargando resumen del mes…', false);
     }
     try {
-      const [costRes, sessionsRes] = await Promise.all([
+      const [costRes, sessionsRes, analyticsRes] = await Promise.all([
         fetch(API_BASE + '/sms/campaigns/summary/monthly', {
           headers: { Accept: 'application/json' },
         }),
         fetch(API_BASE + '/sms/campaigns/summary/monthly/sessions', {
           headers: { Accept: 'application/json' },
         }),
+        fetch(API_BASE + '/sms/analytics/performance', {
+          headers: { Accept: 'application/json' },
+        }).catch(() => null),
       ]);
       const body = await readJsonSafe(costRes);
       const sessionsBody = await readJsonSafe(sessionsRes);
+      const analyticsBody = analyticsRes ? await readJsonSafe(analyticsRes) : null;
 
       if (!costRes.ok) {
         if (monthlySummaryStatus) {
@@ -10232,7 +10325,54 @@ init();
         }
       }
 
-      monthlySummaryBody.innerHTML =
+      let currentMonthAnalytics = null;
+      if (analyticsBody && analyticsBody.ok && analyticsBody.data) {
+        const monthlySummaryList = analyticsBody.data.monthly_summary || [];
+        currentMonthAnalytics = monthlySummaryList.find((m) => m.is_current_month) || null;
+      }
+
+      const clicksVal = currentMonthAnalytics ? formatCount(currentMonthAnalytics.total_clicks) : '—';
+      const clicksNote = currentMonthAnalytics
+        ? (currentMonthAnalytics.ctr_delivered_pct !== null
+            ? escapeHtml(formatPct(currentMonthAnalytics.ctr_delivered_pct)) + ' s/entregados'
+            : (currentMonthAnalytics.total_clicks > 0 ? 'Entrega pendiente' : 'Sin clicks'))
+        : '<div class="sms-monthly-cost-note">Tracking no disponible</div>';
+
+      const step1Val = currentMonthAnalytics ? formatCount(currentMonthAnalytics.total_form_step_1) : '—';
+      const step1Note = currentMonthAnalytics
+        ? (currentMonthAnalytics.step_1_pct !== null
+            ? escapeHtml(formatPct(currentMonthAnalytics.step_1_pct)) + ' s/entregados'
+            : (currentMonthAnalytics.step_1_from_click_pct !== null
+                ? escapeHtml(formatPct(currentMonthAnalytics.step_1_from_click_pct)) + ' s/clicks'
+                : '—'))
+        : '';
+
+      const step2Val = currentMonthAnalytics ? formatCount(currentMonthAnalytics.total_form_step_2) : '—';
+      const step2Note = currentMonthAnalytics
+        ? (currentMonthAnalytics.step_2_pct !== null
+            ? escapeHtml(formatPct(currentMonthAnalytics.step_2_pct)) + ' s/entregados'
+            : (currentMonthAnalytics.step_2_from_step_1_pct !== null
+                ? escapeHtml(formatPct(currentMonthAnalytics.step_2_from_step_1_pct)) + ' s/paso 1'
+                : '—'))
+        : '';
+
+      const step3Val = currentMonthAnalytics ? formatCount(currentMonthAnalytics.total_form_step_3) : '—';
+      const step3Note = currentMonthAnalytics
+        ? (currentMonthAnalytics.step_3_pct !== null
+            ? escapeHtml(formatPct(currentMonthAnalytics.step_3_pct)) + ' s/entregados'
+            : (currentMonthAnalytics.step_3_from_step_2_pct !== null
+                ? escapeHtml(formatPct(currentMonthAnalytics.step_3_from_step_2_pct)) + ' s/paso 2'
+                : '—'))
+        : '';
+
+      const solVal = currentMonthAnalytics ? formatCount(currentMonthAnalytics.total_solicitudes) : '—';
+      const solNote = currentMonthAnalytics
+        ? (currentMonthAnalytics.solicitud_conversion_pct !== null
+            ? escapeHtml(formatPct(currentMonthAnalytics.solicitud_conversion_pct)) + ' conv. (' + formatCount(currentMonthAnalytics.impacts_with_solicitud) + ' SMS)'
+            : (currentMonthAnalytics.impacts_with_solicitud > 0 ? formatCount(currentMonthAnalytics.impacts_with_solicitud) + ' SMS con sol.' : 'Sin solicitudes'))
+        : '';
+
+      let cardsHtml =
         '<div class="kpi-card is-neutral">' +
         '<div class="kpi-value">' +
         escapeHtml(monthLabel) +
@@ -10258,8 +10398,76 @@ init();
         '</div>' +
         '<div class="kpi-label">Sesiones desde SMS</div>' +
         sessionsNote +
+        '</div>' +
+        '<div class="kpi-card is-accent">' +
+        '<div class="kpi-value">' +
+        escapeHtml(clicksVal) +
+        '</div>' +
+        '<div class="kpi-label">Clicks</div>' +
+        '<div class="sms-monthly-cost-note">' + clicksNote + '</div>' +
+        '</div>' +
+        '<div class="kpi-card is-neutral">' +
+        '<div class="kpi-value">' +
+        escapeHtml(step1Val) +
+        '</div>' +
+        '<div class="kpi-label">Paso 1</div>' +
+        '<div class="sms-monthly-cost-note">' + escapeHtml(step1Note) + '</div>' +
+        '</div>' +
+        '<div class="kpi-card is-neutral">' +
+        '<div class="kpi-value">' +
+        escapeHtml(step2Val) +
+        '</div>' +
+        '<div class="kpi-label">Paso 2</div>' +
+        '<div class="sms-monthly-cost-note">' + escapeHtml(step2Note) + '</div>' +
+        '</div>' +
+        '<div class="kpi-card is-neutral">' +
+        '<div class="kpi-value">' +
+        escapeHtml(step3Val) +
+        '</div>' +
+        '<div class="kpi-label">Paso 3</div>' +
+        '<div class="sms-monthly-cost-note">' + escapeHtml(step3Note) + '</div>' +
+        '</div>' +
+        '<div class="kpi-card is-success">' +
+        '<div class="kpi-value">' +
+        escapeHtml(solVal) +
+        '</div>' +
+        '<div class="kpi-label">Solicitudes</div>' +
+        '<div class="sms-monthly-cost-note">' + escapeHtml(solNote) + '</div>' +
         '</div>';
 
+      let closedMonthsHtml = '';
+      if (analyticsBody && analyticsBody.ok && analyticsBody.data && Array.isArray(analyticsBody.data.monthly_summary)) {
+        const closedMonths = analyticsBody.data.monthly_summary.filter((m) => !m.is_current_month);
+        if (closedMonths.length > 0) {
+          const closedBody = closedMonths.map((m) => (
+            '<tr>' +
+            '<td>' + escapeHtml(formatMonthLabel(m.cohort_month)) + '</td>' +
+            '<td>' + escapeHtml(formatCount(m.messages_delivered)) + ' / ' + escapeHtml(formatCount(m.messages_sent)) + ' (' + escapeHtml(formatPct(m.delivery_pct)) + ')</td>' +
+            '<td>' + escapeHtml(formatCount(m.total_clicks)) + ' (' + escapeHtml(formatPct(m.ctr_delivered_pct)) + ')</td>' +
+            '<td>' + escapeHtml(formatCount(m.total_form_step_1)) + ' (' + escapeHtml(formatPct(m.step_1_pct)) + ')</td>' +
+            '<td>' + escapeHtml(formatCount(m.total_form_step_2)) + ' (' + escapeHtml(formatPct(m.step_2_pct)) + ')</td>' +
+            '<td>' + escapeHtml(formatCount(m.total_form_step_3)) + ' (' + escapeHtml(formatPct(m.step_3_pct)) + ')</td>' +
+            '<td>' + escapeHtml(formatCount(m.total_solicitudes)) + ' (' + escapeHtml(formatPct(m.solicitud_conversion_pct)) + ')</td>' +
+            '</tr>'
+          )).join('');
+
+          closedMonthsHtml =
+            '<details class="cz-funnel-block sms-closed-months-block" style="margin-top:16px;">' +
+            '<summary class="sms-section-title">' +
+            '<span class="cz-funnel-chevron">▶</span> ' +
+            '<span>Meses anteriores (' + closedMonths.length + ')</span>' +
+            '</summary>' +
+            '<div class="sms-table-wrap" style="margin-top:10px;"><table class="sms-table">' +
+            '<thead><tr>' +
+            '<th>Mes de cohorte</th><th>Entregados / Enviados</th><th>Clicks</th>' +
+            '<th>Paso 1</th><th>Paso 2</th><th>Paso 3</th><th>Solicitudes</th>' +
+            '</tr></thead><tbody>' +
+            closedBody +
+            '</tbody></table></div></details>';
+        }
+      }
+
+      monthlySummaryBody.innerHTML = cardsHtml + closedMonthsHtml;
       if (monthlySummaryStatus) setStatus(monthlySummaryStatus, '', false);
     } catch (err) {
       if (monthlySummaryStatus) {
@@ -10276,10 +10484,17 @@ init();
     listBusy = true;
     setStatus(listStatus, 'Cargando campañas…', false);
     try {
-      const res = await fetch(API_BASE + '/sms/campaigns', {
-        headers: { Accept: 'application/json' },
-      });
+      const [res, analyticsRes] = await Promise.all([
+        fetch(API_BASE + '/sms/campaigns', {
+          headers: { Accept: 'application/json' },
+        }),
+        fetch(API_BASE + '/sms/analytics/performance', {
+          headers: { Accept: 'application/json' },
+        }).catch(() => null),
+      ]);
       const body = await readJsonSafe(res);
+      const analyticsBody = analyticsRes ? await readJsonSafe(analyticsRes) : null;
+
       if (!res.ok) {
         setStatus(
           listStatus,
@@ -10295,7 +10510,17 @@ init();
         : Array.isArray(body)
           ? body
           : [];
-      renderCampaignList(campaigns);
+
+      const analyticsByCampaignId = {};
+      if (analyticsBody && analyticsBody.ok && analyticsBody.data && Array.isArray(analyticsBody.data.campaign_breakdown)) {
+        for (const item of analyticsBody.data.campaign_breakdown) {
+          if (item && item.campaign_id) {
+            analyticsByCampaignId[String(item.campaign_id)] = item;
+          }
+        }
+      }
+
+      renderCampaignList(campaigns, analyticsByCampaignId);
       setStatus(listStatus, campaigns.length + ' campaña(s)', false);
     } catch (err) {
       setStatus(listStatus, 'No se pudo conectar con el servidor.', true);
@@ -10742,11 +10967,28 @@ init();
   });
 
   listEl.addEventListener('click', (ev) => {
+    const trackingBtn = ev.target.closest('.sms-tracking-toggle-btn');
+    if (trackingBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const cid = trackingBtn.getAttribute('data-campaign-id');
+      const trkRow = document.getElementById('sms-tracking-row-' + cid);
+      if (trkRow) {
+        const isHidden = trkRow.style.display === 'none';
+        trkRow.style.display = isHidden ? 'table-row' : 'none';
+        trackingBtn.classList.toggle('btn-primary', isHidden);
+      }
+      return;
+    }
     const btn = ev.target.closest('.sms-open-btn');
     if (btn) {
       ev.preventDefault();
       ev.stopPropagation();
       openCampaignDetail(btn.getAttribute('data-campaign-id'));
+      return;
+    }
+    const trkRow = ev.target.closest('tr.sms-tracking-row');
+    if (trkRow) {
       return;
     }
     const row = ev.target.closest('tr.sms-row');

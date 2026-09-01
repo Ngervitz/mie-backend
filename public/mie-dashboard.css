@@ -3789,8 +3789,9 @@
 }
 
 #mie-dashboard-app .sms-monthly-kpi-grid {
-  grid-template-columns: repeat(4, 1fr);
-  max-width: 1100px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  max-width: 1200px;
+  gap: 12px;
 }
 
 #mie-dashboard-app .sms-monthly-kpi-grid .kpi-value {
@@ -3801,6 +3802,60 @@
   margin-top: 6px;
   font-size: 0.75rem;
   color: var(--text-faint);
+}
+
+#mie-dashboard-app .sms-tracking-row td {
+  background: var(--surface-2);
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border);
+}
+
+#mie-dashboard-app .sms-tracking-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#mie-dashboard-app .sms-tracking-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .sms-tracking-box-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+#mie-dashboard-app .sms-tracking-metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+#mie-dashboard-app .sms-tracking-metric-val {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+#mie-dashboard-app .sms-tracking-metric-lbl {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 2px;
+}
+
+#mie-dashboard-app .sms-tracking-metric-sub {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin-top: 4px;
 }
 
 #mie-dashboard-app .sms-compose-preview {

@@ -53,6 +53,7 @@ const {
   TrackingPrepError,
 } = require('../lib/smsMarketingImpacts');
 const { normalizeJt } = require('../lib/sanitizeCzTrackingData');
+const { formatYmdMontevideo } = require('../lib/montevideo-week');
 
 const router = express.Router();
 
@@ -526,6 +527,143 @@ router.get('/tracking/impact', async (req, res) => {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Failed to load tracking details' });
+  }
+});
+
+function calcRatioPct(num, denom) {
+  if (typeof denom !== 'number' || denom <= 0) return null;
+  const n = typeof num === 'number' ? num : 0;
+  return Number(((n / denom) * 100).toFixed(2));
+}
+
+function buildPerformanceRatios(m) {
+  const sent = Number(m.messages_sent) || 0;
+  const delivered = Number(m.messages_delivered) || 0;
+  const clicks = Number(m.total_clicks) || 0;
+  const step1 = Number(m.total_form_step_1) || 0;
+  const step2 = Number(m.total_form_step_2) || 0;
+  const step3 = Number(m.total_form_step_3) || 0;
+  const impactsWithSol = Number(m.impacts_with_solicitud) || 0;
+
+  return {
+    delivery_pct: calcRatioPct(delivered, sent),
+    ctr_delivered_pct: calcRatioPct(clicks, delivered),
+    step_1_pct: calcRatioPct(step1, delivered),
+    step_2_pct: calcRatioPct(step2, delivered),
+    step_3_pct: calcRatioPct(step3, delivered),
+    solicitud_conversion_pct: calcRatioPct(impactsWithSol, delivered),
+    step_1_from_click_pct: calcRatioPct(step1, clicks),
+    step_2_from_step_1_pct: calcRatioPct(step2, step1),
+    step_3_from_step_2_pct: calcRatioPct(step3, step2),
+    solicitud_from_step_3_pct: calcRatioPct(impactsWithSol, step3),
+  };
+}
+
+/**
+ * GET /sms/analytics/performance
+ * Métricas agregadas de embudo por campaña y cohorte mensual (America/Montevideo).
+ */
+router.get('/analytics/performance', async (req, res) => {
+  try {
+    const rawSeries = req.query && req.query.series_id;
+    const parsedSeries = parseCampaignSeriesId(rawSeries);
+    if (parsedSeries.error) {
+      return res.status(400).json({ error: parsedSeries.error, kind: 'validation' });
+    }
+    const seriesId = parsedSeries.id;
+    const campaignId = req.query && req.query.campaign_id ? String(req.query.campaign_id).trim() : null;
+
+    const { data: rows, error } = await supabase.rpc('get_sms_performance_analytics', {
+      p_series_id: seriesId,
+      p_campaign_id: campaignId,
+    });
+
+    if (error) {
+      logger.error('Failed to execute get_sms_performance_analytics RPC', {
+        error: error.message,
+        series_id: seriesId,
+        campaign_id: campaignId,
+      });
+      return res.status(500).json({ error: 'Failed to load SMS performance analytics' });
+    }
+
+    const currentMonthKey = formatYmdMontevideo(new Date()).slice(0, 7);
+
+    let overallItem = {
+      messages_sent: 0,
+      messages_delivered: 0,
+      total_impacts: 0,
+      total_clicks: 0,
+      total_form_step_1: 0,
+      total_form_step_2: 0,
+      total_form_step_3: 0,
+      impacts_with_solicitud: 0,
+      total_solicitudes: 0,
+    };
+
+    const monthlySummary = [];
+    const campaignBreakdown = [];
+
+    for (const row of rows || []) {
+      const level = row.aggregation_level || 'campaign';
+      const item = {
+        messages_sent: Number(row.messages_sent) || 0,
+        messages_delivered: Number(row.messages_delivered) || 0,
+        total_impacts: Number(row.total_impacts) || 0,
+        total_clicks: Number(row.total_clicks) || 0,
+        total_form_step_1: Number(row.total_form_step_1) || 0,
+        total_form_step_2: Number(row.total_form_step_2) || 0,
+        total_form_step_3: Number(row.total_form_step_3) || 0,
+        impacts_with_solicitud: Number(row.impacts_with_solicitud) || 0,
+        total_solicitudes: Number(row.total_solicitudes) || 0,
+        first_sms_at: row.first_sms_at,
+        last_sms_at: row.last_sms_at,
+      };
+      const ratios = buildPerformanceRatios(item);
+
+      if (level === 'overall') {
+        overallItem = {
+          ...item,
+          ...ratios,
+        };
+      } else if (level === 'month') {
+        monthlySummary.push({
+          cohort_month: row.cohort_month,
+          is_current_month: row.cohort_month === currentMonthKey,
+          ...item,
+          ...ratios,
+        });
+      } else if (level === 'campaign') {
+        campaignBreakdown.push({
+          campaign_id: row.campaign_id,
+          campaign_name: row.campaign_name,
+          campaign_series_id: row.campaign_series_id,
+          campaign_series_name: row.campaign_series_name,
+          cohort_month: row.cohort_month,
+          ...item,
+          ...ratios,
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      data: {
+        filter: {
+          series_id: seriesId,
+          campaign_id: campaignId,
+        },
+        current_cohort_month: currentMonthKey,
+        totals: overallItem,
+        monthly_summary: monthlySummary,
+        campaign_breakdown: campaignBreakdown,
+      },
+    });
+  } catch (err) {
+    logger.error('GET /sms/analytics/performance unexpected error', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Failed to load SMS performance analytics' });
   }
 });
 
