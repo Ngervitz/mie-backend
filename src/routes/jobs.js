@@ -38,6 +38,7 @@ const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
 const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
+const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
 const { getCzApiBearerTokenDiagnostic } = require('../clients/czApiClient');
 const env = require('../config/env');
 const logger = require('../lib/logger');
@@ -1324,6 +1325,39 @@ router.post('/run-bcu-usd-rate-sync', async (req, res) => {
     return res.status(200).json(result);
   } catch (err) {
     logger.error('bcu_usd_rate_sync failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+/**
+ * NotifyMe SMS status + response poll (automatic).
+ * Auth: session cookie (dashboard sms) or X-Cron-Key.
+ * Cadence: cron-job.org every 5 min → POST /jobs/run-sms-notifyme-poll
+ * Excludes campaign.status='error'. Skips DELIVERED for getMessagesStatus.
+ */
+router.post('/run-sms-notifyme-poll', async (req, res) => {
+  logger.info('POST /jobs/run-sms-notifyme-poll — started');
+  try {
+    const result = await runSmsNotifymePoll();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('sms_notifyme_poll finished', {
+      ok: result.ok,
+      campaignsConsidered: result.campaignsConsidered,
+      campaignsPolled: result.campaignsPolled,
+      campaignsFailed: result.campaignsFailed,
+      statusRequested: result.statusRequested,
+      responseRequested: result.responseRequested,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('sms_notifyme_poll failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({

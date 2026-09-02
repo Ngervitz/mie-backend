@@ -10,8 +10,6 @@ const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 const {
   sendBatch,
-  pollStatus,
-  pollResponses,
   loadActiveCostConfig,
   jsonSafe,
   NotifymeError,
@@ -1482,57 +1480,34 @@ router.get('/campaigns/:id', async (req, res) => {
 
 /**
  * POST /sms/campaigns/:id/poll
- * Polls status + responses for all message IDs in the campaign.
+ * Polls status + responses via shared helper (same as auto job core).
+ * Manual keeps prior status behavior: does not skip DELIVERED for getMessagesStatus.
  */
 router.post('/campaigns/:id/poll', async (req, res) => {
   const campaignId = req.params.id;
   try {
-    const { data, error } = await supabase
-      .from('sms_campaigns')
-      .select(
-        SMS_CAMPAIGN_SELECT,
-      )
-      .eq('id', campaignId)
-      .limit(1);
+    const {
+      pollCampaignNotifyme,
+    } = require('../lib/smsNotifymePoll');
+    const result = await pollCampaignNotifyme(campaignId, {
+      skipDeliveredForStatus: false,
+    });
 
-    if (error) {
-      throw new NotifymeError(`Failed to load campaign: ${error.message}`, {
-        kind: 'database',
-        status: 500,
-      });
-    }
-    if (!data || !data[0]) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    const campaign = data[0];
-    const rows = await loadCampaignMessages(campaign.id);
-    // Keep unique_id as decimal strings — never Number/parseInt.
-    const uniqueIds = rows.map((r) =>
-      assertUniqueIdString(String(r.unique_id), 'poll load'),
-    );
-
-    let statusSummary = { requested: 0, returned: 0, updated: 0 };
-    let responseSummary = { requested: 0, returned: 0, updated: 0 };
-
-    if (uniqueIds.length > 0) {
-      statusSummary = await pollStatus(uniqueIds);
-      // Poll responses for all IDs (replies may arrive after delivery).
-      responseSummary = await pollResponses(uniqueIds);
-    }
-
-    const refreshedRows = await loadCampaignMessages(campaign.id);
     const costConfig = await loadActiveCostConfig();
-    const enriched = await enrichCampaign(campaign, refreshedRows, costConfig);
+    const enriched = await enrichCampaign(
+      result.campaign,
+      result.messages,
+      costConfig,
+    );
 
     return res.json(
       jsonSafe({
         campaign: enriched,
         // Include fresh message rows so the UI can re-render the per-message
         // table without relying on a possibly-cached GET.
-        messages: refreshedRows.map(mapMessageRow),
-        status_poll: statusSummary,
-        response_poll: responseSummary,
+        messages: result.messages.map(mapMessageRow),
+        status_poll: result.status_poll,
+        response_poll: result.response_poll,
       }),
     );
   } catch (err) {

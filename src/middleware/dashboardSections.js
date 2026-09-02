@@ -90,7 +90,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/jobs/own-ad-changes-status',
     '/jobs/run-liquidity-cycle-sync',
   ]),
-  sms: Object.freeze(['/sms']),
+  sms: Object.freeze(['/sms', '/jobs/run-sms-notifyme-poll']),
   email: Object.freeze(['/email', '/jobs/run-cz-sync']),
   inbox: Object.freeze([
     '/api/social-comments',
