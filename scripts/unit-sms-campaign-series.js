@@ -42,6 +42,8 @@ const PHONE_C = '099333333';
 const PHONE_EX = '099444444';
 const PHONE_OLD = '099555555';
 
+const CONSUMING_CAMPAIGN_STATUSES = ['sending', 'sent', 'partial_error'];
+
 function restoreFlag() {
   if (prevFlag == null) delete process.env.SMS_INDIVIDUAL_TRACKING;
   else process.env.SMS_INDIVIDUAL_TRACKING = prevFlag;
@@ -107,6 +109,31 @@ function requireCampaignSeriesId(seriesId) {
   }
 }
 
+function campaignById(world, campaignId) {
+  return (world.campaigns || []).find(function (c) {
+    return c.id === campaignId;
+  });
+}
+
+function alreadySentIdentitiesOnce(world, seriesId) {
+  requireCampaignSeriesId(seriesId);
+  const seen = Object.create(null);
+  const rows = [];
+  (world.messages || []).forEach(function (m) {
+    const camp = campaignById(world, m.campaign_id);
+    if (!camp || camp.campaign_series_id !== seriesId) return;
+    if (CONSUMING_CAMPAIGN_STATUSES.indexOf(camp.status) === -1) return;
+    const key = String(m.contact_id || '') + '\0' + String(m.phone || '');
+    if (seen[key]) return;
+    seen[key] = true;
+    rows.push({
+      contact_id: m.contact_id || null,
+      phone: m.phone || null,
+    });
+  });
+  return rows;
+}
+
 function clickedIdentitiesOnce(world, seriesId) {
   requireCampaignSeriesId(seriesId);
   const seen = Object.create(null);
@@ -140,18 +167,19 @@ function identityHitsContact(cl, contact) {
 }
 
 function eligibleContactsForSeries(contacts, sourceSystem, seriesId, world) {
-  const clicked = clickedIdentitiesOnce(world, seriesId);
+  const alreadySent = alreadySentIdentitiesOnce(world, seriesId);
   return contacts.filter(function (c) {
     if (c.source_system !== sourceSystem) return false;
     if (!String(c.phone || '').trim()) return false;
     if (c.excluded_from_campaigns) return false;
-    return !clicked.some(function (cl) {
-      return identityHitsContact(cl, c);
+    return !alreadySent.some(function (s) {
+      return identityHitsContact(s, c);
     });
   });
 }
 
 function classifyPhonesForSeries(phones, seriesId, world) {
+  const alreadySent = alreadySentIdentitiesOnce(world, seriesId);
   const clicked = clickedIdentitiesOnce(world, seriesId);
   const unique = [];
   const seen = Object.create(null);
@@ -169,7 +197,11 @@ function classifyPhonesForSeries(phones, seriesId, world) {
     const contactByPhone = world.contacts.find(function (c) {
       return c.phone === phone;
     });
-    const hit = clicked.some(function (cl) {
+    const sentHit = alreadySent.some(function (s) {
+      return identityHitsContact(s, contactByPhone || { id: null, phone: phone });
+    });
+    if (sentHit) return { phone: phone, protection: 'already_sent' };
+    const clickHit = clicked.some(function (cl) {
       const byId =
         cl.contact_id != null &&
         contactByPhone &&
@@ -178,7 +210,7 @@ function classifyPhonesForSeries(phones, seriesId, world) {
       const byPhone = cl.phone != null && cl.phone === phone;
       return byId || byPhone;
     });
-    return { phone: phone, protection: hit ? 'clicked' : null };
+    return { phone: phone, protection: clickHit ? 'clicked' : null };
   });
 }
 
@@ -221,23 +253,24 @@ function baseWorld() {
         source_record_id: '4',
       },
     ],
-    campaigns: [
-      {
-        id: CAMP_A1,
-        campaign_series_id: SERIES_A,
-      },
-    ],
-    messages: [
-      {
-        campaign_id: CAMP_A1,
-        contact_id: CONTACT_A,
-        phone: PHONE_A,
-        marketing_impact_id: IMPACT_A1,
-        status: 'sent',
-      },
-    ],
+    campaigns: [],
+    messages: [],
     events: [],
   };
+}
+
+function markSentInSeries(world, campaignId, seriesId, contactId, phone, impactId) {
+  world.campaigns.push({
+    id: campaignId,
+    campaign_series_id: seriesId,
+    status: 'sent',
+  });
+  world.messages.push({
+    campaign_id: campaignId,
+    contact_id: contactId,
+    phone: phone,
+    marketing_impact_id: impactId,
+  });
 }
 
 // --- SQL file must not touch legacy RPCs ---
@@ -245,63 +278,30 @@ const migPath = path.join(
   __dirname,
   '..',
   'migrations',
-  '20260828_marketing_campaign_series.sql',
+  '20260902_sms_series_already_sent_eligibility.sql',
 );
 const migSql = fs.readFileSync(migPath, 'utf8');
-assert.ok(migSql.indexOf('CREATE TABLE IF NOT EXISTS public.marketing_campaign_series') !== -1);
-assert.ok(migSql.indexOf('campaign_series_id uuid NULL') !== -1);
-assert.ok(migSql.indexOf('ON DELETE RESTRICT') !== -1);
-assert.ok(migSql.indexOf('sms_eligible_contacts_for_series') !== -1);
-assert.ok(migSql.indexOf("e.event_name = 'click'") !== -1);
-assert.ok(migSql.indexOf('sms_classify_phones_for_series') !== -1);
-assert.ok(migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_eligible_contacts_base') === -1);
-assert.ok(migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_contact_has_prior_message') === -1);
-assert.ok(migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_eligible_contacts(') === -1);
-assert.ok(migSql.indexOf('clicked') !== -1);
-
-function sliceFn(name) {
-  const needle = 'CREATE OR REPLACE FUNCTION public.' + name + '(';
-  const start = migSql.indexOf(needle);
-  assert.ok(start !== -1, 'missing function ' + name);
-  const next = migSql.indexOf(
-    'CREATE OR REPLACE FUNCTION public.',
-    start + needle.length,
-  );
-  return migSql.slice(start, next === -1 ? undefined : next);
-}
-
-const massFnNames = [
-  'sms_eligible_contacts_for_series_base',
-  'sms_eligible_contacts_for_series_count',
-  'sms_eligible_contacts_for_series',
-  'sms_series_protected_clicked_count',
-  'sms_classify_phones_for_series',
-];
-massFnNames.forEach(function (name) {
-  const body = sliceFn(name);
-  assert.ok(
-    body.indexOf("RAISE EXCEPTION 'campaign_series_id is required'") !== -1,
-    name + ' must fail-closed on NULL series',
-  );
-  assert.ok(
-    body.indexOf('sms_contact_clicked_in_series(') === -1,
-    name + ' must not call per-contact helper',
-  );
-});
+assert.ok(migSql.indexOf('already_sent AS MATERIALIZED') !== -1);
 assert.ok(
-  sliceFn('sms_contact_clicked_in_series').indexOf(
-    "RAISE EXCEPTION 'campaign_series_id is required'",
-  ) !== -1,
+  migSql.indexOf("camp.status IN ('sending', 'sent', 'partial_error')") !== -1,
 );
-const baseFnSql = sliceFn('sms_eligible_contacts_for_series_base');
-assert.ok(baseFnSql.indexOf('WITH clicked AS MATERIALIZED') !== -1);
-assert.ok(baseFnSql.indexOf('NOT EXISTS') !== -1);
-const protFnSql = sliceFn('sms_series_protected_clicked_count');
-assert.ok(protFnSql.indexOf('clicked AS MATERIALIZED') !== -1);
-const classifyFnSql = sliceFn('sms_classify_phones_for_series');
-assert.ok(classifyFnSql.indexOf('clicked AS MATERIALIZED') !== -1);
-assert.ok(classifyFnSql.indexOf("'excluded'") < classifyFnSql.indexOf("'clicked'"));
-assert.ok(!/CREATE INDEX[\s\S]{0,80}sms_messages\s*\(\s*phone\s*\)/.test(migSql));
+assert.ok(migSql.indexOf("'already_sent'") !== -1);
+assert.ok(migSql.indexOf("'excluded'") < migSql.indexOf("'already_sent'"));
+assert.ok(migSql.indexOf("'already_sent'") < migSql.indexOf("'clicked'"));
+assert.ok(migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_eligible_contacts_base') === -1);
+assert.ok(
+  migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_contact_clicked_in_series') === -1,
+);
+assert.ok(migSql.indexOf('CREATE OR REPLACE FUNCTION public.sms_series_protected_clicked_count') === -1);
+
+const legacyMigPath = path.join(
+  __dirname,
+  '..',
+  'migrations',
+  '20260828_marketing_campaign_series.sql',
+);
+const legacyMigSql = fs.readFileSync(legacyMigPath, 'utf8');
+assert.ok(legacyMigSql.indexOf('sms_series_protected_clicked_count') !== -1);
 
 // --- helpers ---
 assert.deepStrictEqual(parseCampaignSeriesId(null), { id: null, error: null });
@@ -315,19 +315,19 @@ assert.ok(seriesRequiredBody().error);
 assert.ok(seriesNotFoundBody().error);
 
 const part = partitionPhoneClassifications([
-  { phone: PHONE_A, protection: 'clicked' },
+  { phone: PHONE_A, protection: 'already_sent' },
   { phone: PHONE_EX, protection: 'excluded' },
   { phone: PHONE_B, protection: null },
-  { phone: PHONE_A, protection: 'clicked' },
+  { phone: PHONE_A, protection: 'already_sent' },
 ]);
-assert.deepStrictEqual(part.protected_clicked, [PHONE_A]);
+assert.deepStrictEqual(part.already_sent_in_series, [PHONE_A]);
 assert.deepStrictEqual(part.excluded_from_campaigns, [PHONE_EX]);
 assert.deepStrictEqual(part.ok, [PHONE_B]);
 assert.ok(hasFailClosedProtections(part));
 const failBody = buildFailClosedPayload(SERIES_A, part);
 assert.strictEqual(failBody.kind, 'validation');
 assert.strictEqual(failBody.campaign_series_id, SERIES_A);
-assert.deepStrictEqual(failBody.protected_clicked, [PHONE_A]);
+assert.deepStrictEqual(failBody.already_sent_in_series, [PHONE_A]);
 
 assert.deepStrictEqual(
   normalizeDirectedPhones([PHONE_A, ' ' + PHONE_A, PHONE_B, '']),
@@ -380,24 +380,18 @@ assert.deepStrictEqual(
 
   const world = baseWorld();
 
-  // 5. First tanda series A — contact eligible (no click yet)
+  // 5. First tanda series A — contact eligible (no prior send)
   assert.strictEqual(
     isEligibleForSeries(world.contacts[0], 'credizona2_datos', SERIES_A, world),
     true,
   );
 
-  // 6. Second tanda A without clicks — still eligible
-  world.campaigns.push({ id: CAMP_A2, campaign_series_id: SERIES_A });
-  assert.strictEqual(
-    isEligibleForSeries(world.contacts[0], 'credizona2_datos', SERIES_A, world),
-    true,
-  );
-
-  // 7–8. Click on tanda 1 of A → not eligible for tanda 2 of A
-  world.events.push({
-    impact_id: IMPACT_A1,
-    event_name: 'click',
-    source: 'janus',
+  // 6. Second tanda A after successful send — NOT eligible (already_sent)
+  markSentInSeries(world, CAMP_A1, SERIES_A, CONTACT_A, PHONE_A, IMPACT_A1);
+  world.campaigns.push({
+    id: CAMP_A2,
+    campaign_series_id: SERIES_A,
+    status: 'sending',
   });
   assert.strictEqual(
     isEligibleForSeries(world.contacts[0], 'credizona2_datos', SERIES_A, world),
@@ -407,6 +401,18 @@ assert.deepStrictEqual(
     isEligibleForSeries(world.contacts[1], 'credizona2_datos', SERIES_A, world),
     true,
   );
+
+  // 7–8. Click on tanda 1 of A → still not eligible; classify = already_sent
+  world.events.push({
+    impact_id: IMPACT_A1,
+    event_name: 'click',
+    source: 'janus',
+  });
+  assert.strictEqual(
+    isEligibleForSeries(world.contacts[0], 'credizona2_datos', SERIES_A, world),
+    false,
+  );
+  assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, world), 'already_sent');
 
   // 9. Same contact, series B — eligible
   assert.strictEqual(
@@ -421,12 +427,12 @@ assert.deepStrictEqual(
   );
   assert.strictEqual(classifyPhone(PHONE_EX, SERIES_A, world), 'excluded');
 
-  // 11. Directed phone that clicked A
-  assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, world), 'clicked');
+  // 11. Directed phone already sent in A
+  assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, world), 'already_sent');
   {
     const sb = makeSupabase({
       contacts: world.contacts,
-      classify: [{ phone: PHONE_A, protection: 'clicked' }],
+      classify: [{ phone: PHONE_A, protection: 'already_sent' }],
     });
     const resolved = await resolveNewShapeDestinations({
       useFromContacts: true,
@@ -437,14 +443,57 @@ assert.deepStrictEqual(
     });
     assert.strictEqual(resolved.ok, false);
     assert.strictEqual(resolved.status, 400);
-    assert.deepStrictEqual(resolved.body.protected_clicked, [PHONE_A]);
+    assert.deepStrictEqual(resolved.body.already_sent_in_series, [PHONE_A]);
     assert.strictEqual(sb.calls.rpc.some(function (c) {
       return c.name === 'sms_eligible_contacts';
     }), false);
   }
 
-  // 12. Paste phone that clicked A
+  // 12. Paste phone already sent in A
   {
+    const sb = makeSupabase({
+      classify: [{ phone: PHONE_A, protection: 'already_sent' }],
+    });
+    const resolved = await resolveNewShapeDestinations({
+      useFromContacts: false,
+      phones: [PHONE_A],
+      individualTracking: true,
+      seriesId: SERIES_A,
+      supabase: sb,
+    });
+    assert.strictEqual(resolved.ok, false);
+    assert.deepStrictEqual(resolved.body.already_sent_in_series, [PHONE_A]);
+    assert.strictEqual(resolved.body.campaign_series_id, SERIES_A);
+  }
+
+  // 12B. Paste phone clicked but campaign error — fail-closed as clicked, list still eligible
+  {
+    const clickOnlyWorld = baseWorld();
+    clickOnlyWorld.campaigns = [
+      { id: 'camp-err-click', campaign_series_id: SERIES_A, status: 'error' },
+    ];
+    clickOnlyWorld.messages = [
+      {
+        campaign_id: 'camp-err-click',
+        contact_id: CONTACT_A,
+        phone: PHONE_A,
+        marketing_impact_id: IMPACT_A1,
+      },
+    ];
+    clickOnlyWorld.events = [{ impact_id: IMPACT_A1, event_name: 'click' }];
+    assert.strictEqual(
+      isEligibleForSeries(
+        clickOnlyWorld.contacts[0],
+        'credizona2_datos',
+        SERIES_A,
+        clickOnlyWorld,
+      ),
+      true,
+    );
+    assert.strictEqual(
+      classifyPhone(PHONE_A, SERIES_A, clickOnlyWorld),
+      'clicked',
+    );
     const sb = makeSupabase({
       classify: [{ phone: PHONE_A, protection: 'clicked' }],
     });
@@ -457,14 +506,13 @@ assert.deepStrictEqual(
     });
     assert.strictEqual(resolved.ok, false);
     assert.deepStrictEqual(resolved.body.protected_clicked, [PHONE_A]);
-    assert.strictEqual(resolved.body.campaign_series_id, SERIES_A);
   }
 
-  // 13. Mix eligible + protected → fail closed, does not send the rest
+  // 13. Mix eligible + already_sent → fail closed, does not send the rest
   {
     const sb = makeSupabase({
       classify: [
-        { phone: PHONE_A, protection: 'clicked' },
+        { phone: PHONE_A, protection: 'already_sent' },
         { phone: PHONE_B, protection: null },
         { phone: PHONE_C, protection: null },
       ],
@@ -477,16 +525,24 @@ assert.deepStrictEqual(
       supabase: sb,
     });
     assert.strictEqual(resolved.ok, false);
-    assert.deepStrictEqual(resolved.body.protected_clicked, [PHONE_A]);
+    assert.deepStrictEqual(resolved.body.already_sent_in_series, [PHONE_A]);
     assert.ok(!resolved.normalizedPhones);
   }
 
-  // 14. Failed SMS without click — still eligible
+  // 14. Failed campaign (status=error) with prep messages — still eligible
   {
     const failedWorld = baseWorld();
-    failedWorld.messages[0].status = 'error';
-    failedWorld.messages[0].marketing_impact_id = IMPACT_A1;
-    failedWorld.events = [];
+    failedWorld.campaigns = [
+      { id: 'camp-fail', campaign_series_id: SERIES_A, status: 'error' },
+    ];
+    failedWorld.messages = [
+      {
+        campaign_id: 'camp-fail',
+        contact_id: CONTACT_A,
+        phone: PHONE_A,
+        marketing_impact_id: IMPACT_A1,
+      },
+    ];
     assert.strictEqual(
       isEligibleForSeries(
         failedWorld.contacts[0],
@@ -496,11 +552,16 @@ assert.deepStrictEqual(
       ),
       true,
     );
+    assert.strictEqual(
+      classifyPhone(PHONE_A, SERIES_A, failedWorld),
+      null,
+    );
   }
 
-  // 15. form_step_1 without click — still eligible
+  // 15. form_step_1 without click but WITH sent — not eligible
   {
     const stepWorld = baseWorld();
+    markSentInSeries(stepWorld, CAMP_A1, SERIES_A, CONTACT_A, PHONE_A, IMPACT_A1);
     stepWorld.events = [
       { impact_id: IMPACT_A1, event_name: 'form_step_1', source: 'credizona' },
     ];
@@ -511,16 +572,25 @@ assert.deepStrictEqual(
         SERIES_A,
         stepWorld,
       ),
-      true,
+      false,
     );
-    assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, stepWorld), null);
+    assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, stepWorld), 'already_sent');
   }
 
-  // 16. Same phone, historical message contact_id null, click in A
+  // 16. Same phone, historical message contact_id null, sent + click in A
   {
     const hist = baseWorld();
-    hist.messages[0].contact_id = null;
-    hist.messages[0].phone = PHONE_OLD;
+    hist.campaigns = [
+      { id: CAMP_A1, campaign_series_id: SERIES_A, status: 'sent' },
+    ];
+    hist.messages = [
+      {
+        campaign_id: CAMP_A1,
+        contact_id: null,
+        phone: PHONE_OLD,
+        marketing_impact_id: IMPACT_A1,
+      },
+    ];
     hist.events = [{ impact_id: IMPACT_A1, event_name: 'click' }];
     hist.contacts.push({
       id: '55555555-5555-4555-8555-555555555555',
@@ -530,7 +600,7 @@ assert.deepStrictEqual(
     });
     assert.strictEqual(
       classifyPhone(PHONE_OLD, SERIES_A, hist),
-      'clicked',
+      'already_sent',
     );
     assert.strictEqual(
       isEligibleForSeries(
@@ -754,7 +824,9 @@ assert.deepStrictEqual(
 
   {
     const contacts = [];
-    const campaigns = [{ id: 'camp-scale-a', campaign_series_id: SERIES_A }];
+    const campaigns = [
+      { id: 'camp-scale-a', campaign_series_id: SERIES_A, status: 'sent' },
+    ];
     const messages = [];
     const events = [];
     for (let i = 0; i < 100; i++) {
@@ -816,7 +888,7 @@ assert.deepStrictEqual(
           excluded_from_campaigns: false,
         },
       ],
-      campaigns: [{ id: 'camp-id-only', campaign_series_id: SERIES_A }],
+      campaigns: [{ id: 'camp-id-only', campaign_series_id: SERIES_A, status: 'sent' }],
       messages: [
         {
           campaign_id: 'camp-id-only',
@@ -834,7 +906,7 @@ assert.deepStrictEqual(
     );
     assert.strictEqual(
       classifyPhonesForSeries([currentPhone], SERIES_A, w)[0].protection,
-      'clicked',
+      'already_sent',
     );
   }
 
@@ -849,7 +921,7 @@ assert.deepStrictEqual(
           excluded_from_campaigns: false,
         },
       ],
-      campaigns: [{ id: 'camp-phone-only', campaign_series_id: SERIES_A }],
+      campaigns: [{ id: 'camp-phone-only', campaign_series_id: SERIES_A, status: 'sent' }],
       messages: [
         {
           campaign_id: 'camp-phone-only',
@@ -867,7 +939,7 @@ assert.deepStrictEqual(
     );
     assert.strictEqual(
       classifyPhonesForSeries([phoneOnly], SERIES_A, w)[0].protection,
-      'clicked',
+      'already_sent',
     );
   }
 
@@ -881,7 +953,7 @@ assert.deepStrictEqual(
           excluded_from_campaigns: true,
         },
       ],
-      campaigns: [{ id: CAMP_A1, campaign_series_id: SERIES_A }],
+      campaigns: [{ id: CAMP_A1, campaign_series_id: SERIES_A, status: 'sent' }],
       messages: [
         {
           campaign_id: CAMP_A1,
@@ -907,7 +979,7 @@ assert.deepStrictEqual(
     const unknown = '099777777';
     const w = {
       contacts: [],
-      campaigns: [{ id: CAMP_A1, campaign_series_id: SERIES_A }],
+      campaigns: [{ id: CAMP_A1, campaign_series_id: SERIES_A, status: 'sent' }],
       messages: [
         {
           campaign_id: CAMP_A1,
@@ -920,8 +992,76 @@ assert.deepStrictEqual(
     };
     assert.strictEqual(
       classifyPhonesForSeries([unknown], SERIES_A, w)[0].protection,
-      'clicked',
+      'already_sent',
     );
+  }
+
+  // partial_error consumes all messages (conservative)
+  {
+    const w = baseWorld();
+    w.campaigns = [
+      { id: 'camp-pe', campaign_series_id: SERIES_A, status: 'partial_error' },
+    ];
+    w.messages = [
+      {
+        campaign_id: 'camp-pe',
+        contact_id: CONTACT_A,
+        phone: PHONE_A,
+        marketing_impact_id: IMPACT_A1,
+      },
+    ];
+    assert.strictEqual(
+      isEligibleForSeries(w.contacts[0], 'credizona2_datos', SERIES_A, w),
+      false,
+    );
+    assert.strictEqual(classifyPhone(PHONE_A, SERIES_A, w), 'already_sent');
+  }
+
+  // Gate regression: 200 sent + 500 error same series — error-only contacts stay eligible
+  {
+    const SERIES_GATE = 'a88eec38-e622-4e0c-9981-b09cf5a23990';
+    const CAMP_OK = '929d59a0-b136-4810-86d9-ecf4fad37b8c';
+    const CAMP_FAIL = '411cc02d-407b-4bba-89c8-11656fe65414';
+    const gateContacts = [];
+    for (let i = 0; i < 500; i++) {
+      gateContacts.push({
+        id: 'gate-c-' + i,
+        phone: '099' + String(600000 + i),
+        source_system: 'prestafacil',
+        excluded_from_campaigns: false,
+      });
+    }
+    const gateWorld = {
+      contacts: gateContacts,
+      campaigns: [
+        { id: CAMP_OK, campaign_series_id: SERIES_GATE, status: 'sent' },
+        { id: CAMP_FAIL, campaign_series_id: SERIES_GATE, status: 'error' },
+      ],
+      messages: [],
+      events: [],
+    };
+    for (let i = 0; i < 500; i++) {
+      const msg = {
+        campaign_id: i < 200 ? CAMP_OK : CAMP_FAIL,
+        contact_id: gateContacts[i].id,
+        phone: gateContacts[i].phone,
+        marketing_impact_id: 'gate-imp-' + i,
+      };
+      gateWorld.messages.push(msg);
+    }
+    const eligible = eligibleContactsForSeries(
+      gateContacts,
+      'prestafacil',
+      SERIES_GATE,
+      gateWorld,
+    );
+    assert.strictEqual(eligible.length, 300, '300 error-only contacts remain eligible');
+    const sentOnlyEligible = eligible.filter(function (c) {
+      return gateWorld.messages.some(function (m) {
+        return m.campaign_id === CAMP_OK && m.contact_id === c.id;
+      });
+    });
+    assert.strictEqual(sentOnlyEligible.length, 0, '200 sent contacts must be 0 eligible');
   }
 
   restoreFlag();

@@ -9597,15 +9597,23 @@ init();
           (body && body.error) || 'No se pudo validar la lista.';
         return;
       }
+      const alreadySent = (body && body.already_sent_in_series) || [];
       const clicked = (body && body.protected_clicked) || [];
       const excluded = (body && body.excluded_from_campaigns) || [];
       const ok = (body && body.ok) || [];
-      if (!clicked.length && !excluded.length) {
+      if (!alreadySent.length && !clicked.length && !excluded.length) {
         pasteProtectStatus.textContent =
           ok.length + ' teléfono(s) listos (sin protección de esta serie).';
         return;
       }
       const bits = [];
+      if (alreadySent.length) {
+        bits.push(
+          alreadySent.length +
+            ' ya enviado(s) en esta serie: ' +
+            alreadySent.join(', '),
+        );
+      }
       if (clicked.length) {
         bits.push(
           clicked.length + ' protegido(s) por click: ' + clicked.join(', '),
@@ -10025,14 +10033,20 @@ init();
 
   function formatProtectedPayload(body) {
     if (!body || typeof body !== 'object') return '';
+    const alreadySent = Array.isArray(body.already_sent_in_series)
+      ? body.already_sent_in_series
+      : [];
     const clicked = Array.isArray(body.protected_clicked)
       ? body.protected_clicked
       : [];
     const excluded = Array.isArray(body.excluded_from_campaigns)
       ? body.excluded_from_campaigns
       : [];
-    if (!clicked.length && !excluded.length) return '';
+    if (!alreadySent.length && !clicked.length && !excluded.length) return '';
     const lines = [body.error || 'Hay teléfonos protegidos.'];
+    if (alreadySent.length) {
+      lines.push('Ya enviados en esta serie: ' + alreadySent.join(', '));
+    }
     if (clicked.length) {
       lines.push('Protegidos por click: ' + clicked.join(', '));
     }

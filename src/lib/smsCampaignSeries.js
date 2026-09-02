@@ -45,6 +45,7 @@ function seriesNotFoundBody() {
 }
 
 function partitionPhoneClassifications(rows) {
+  const already_sent_in_series = [];
   const protected_clicked = [];
   const excluded_from_campaigns = [];
   const ok = [];
@@ -61,17 +62,26 @@ function partitionPhoneClassifications(rows) {
         : String(row.protection);
     if (protection === 'excluded') {
       excluded_from_campaigns.push(phone);
+    } else if (protection === 'already_sent') {
+      already_sent_in_series.push(phone);
     } else if (protection === 'clicked') {
       protected_clicked.push(phone);
     } else {
       ok.push(phone);
     }
   }
-  return { protected_clicked, excluded_from_campaigns, ok };
+  return {
+    already_sent_in_series,
+    protected_clicked,
+    excluded_from_campaigns,
+    ok,
+  };
 }
 
 function hasFailClosedProtections(partition) {
   return (
+    (partition.already_sent_in_series &&
+      partition.already_sent_in_series.length > 0) ||
     (partition.protected_clicked && partition.protected_clicked.length > 0) ||
     (partition.excluded_from_campaigns &&
       partition.excluded_from_campaigns.length > 0)
@@ -83,6 +93,7 @@ function buildFailClosedPayload(seriesId, partition) {
     error: 'One or more phones are protected from this campaign series',
     kind: 'validation',
     campaign_series_id: seriesId,
+    already_sent_in_series: partition.already_sent_in_series.slice(),
     protected_clicked: partition.protected_clicked.slice(),
     excluded_from_campaigns: partition.excluded_from_campaigns.slice(),
   };

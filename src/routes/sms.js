@@ -362,6 +362,7 @@ router.post('/contacts/classify-for-series', async (req, res) => {
     return res.json(
       jsonSafe({
         campaign_series_id: parsed.id,
+        already_sent_in_series: partition.already_sent_in_series,
         protected_clicked: partition.protected_clicked,
         excluded_from_campaigns: partition.excluded_from_campaigns,
         ok: partition.ok,
