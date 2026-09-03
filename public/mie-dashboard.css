@@ -4943,3 +4943,181 @@
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.4);
   }
 }
+
+/* ---------- Rechazados V0 ---------- */
+#mie-dashboard-app .cz-funnel-calidad-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+#mie-dashboard-app .cz-funnel-calidad-header .sms-section-title {
+  margin-bottom: 0;
+}
+#mie-dashboard-app .rechazados-link-btn {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+#mie-dashboard-app .rechazados-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+#mie-dashboard-app .rechazados-filter-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#mie-dashboard-app .rechazados-filter-btn.is-active {
+  background: var(--accent-info-soft);
+  color: var(--accent-info);
+  border-color: var(--accent-info);
+}
+#mie-dashboard-app .rechazados-ops-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-medium);
+  border-radius: 999px;
+  padding: 4px 10px;
+  line-height: 1.3;
+  border: 1px solid var(--border);
+}
+#mie-dashboard-app .rechazados-ops-badge.is-bcu_pending {
+  background: var(--accent-warn-soft);
+  color: var(--accent-warn);
+}
+#mie-dashboard-app .rechazados-ops-badge.is-retry_eligible {
+  background: var(--accent-success-soft);
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-ops-badge.is-reconsultable {
+  background: var(--accent-info-soft);
+  color: var(--accent-info);
+}
+#mie-dashboard-app .rechazados-ops-badge.is-no_auto_reconsult {
+  background: var(--accent-danger-soft);
+  color: var(--accent-danger);
+}
+#mie-dashboard-app .rechazados-ops-badge.is-undefined_case {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+#mie-dashboard-app .rechazados-next-review.is-overdue {
+  color: var(--accent-danger);
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .rechazados-detail-modal {
+  width: min(960px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+#mie-dashboard-app .rechazados-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+#mie-dashboard-app .rechazados-snapshot-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--surface-2);
+}
+#mie-dashboard-app .rechazados-snapshot-meta {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+#mie-dashboard-app .rechazados-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin: 12px 0 16px;
+  background: var(--surface);
+}
+#mie-dashboard-app .rechazados-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+#mie-dashboard-app .rechazados-inst-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+#mie-dashboard-app .rechazados-inst-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .rechazados-inst-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+#mie-dashboard-app .rechazados-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+#mie-dashboard-app .rechazados-dropzone {
+  margin-top: 6px;
+}
+#mie-dashboard-app .rechazados-file-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+#mie-dashboard-app .rechazados-file-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+#mie-dashboard-app .rechazados-file-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--accent-danger-soft);
+  color: var(--accent-danger);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .rechazados-file-selected-meta {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+#mie-dashboard-app .rechazados-success {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-success-soft);
+  color: var(--accent-success);
+  font-size: 0.9rem;
+}
+@media (max-width: 700px) {
+  #mie-dashboard-app .rechazados-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

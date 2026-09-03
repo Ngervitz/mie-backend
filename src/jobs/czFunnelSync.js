@@ -145,6 +145,17 @@ function nullableText(raw) {
   return String(raw);
 }
 
+/**
+ * Display name from CZ /solicitudes. Blank / missing → null (no empty strings).
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function nullablePersonName(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return s === '' ? null : s;
+}
+
 function normalizeExtraData(raw) {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
   return {};
@@ -325,6 +336,8 @@ async function upsertSolicitudes(items) {
       usuarios_id:
         item.usuarios_id != null ? Number(item.usuarios_id) : null,
       ci: item.ci != null && item.ci !== '' ? Number(item.ci) : null,
+      nombre: nullablePersonName(item.nombre),
+      apellido: nullablePersonName(item.apellido),
       fecha_reg: parseCzDateTime(fechaRaw),
       updated_at_src: parseCzDateTime(updatedRaw),
       updated_raw: updatedRaw,
@@ -582,6 +595,7 @@ module.exports = {
   loadExistingJtByCzId,
   isCzApiAuthFailure,
   parseCzDateTime,
+  nullablePersonName,
   normalizeExtraData,
   mapHistoricoRows,
   upsertSolicitudes,

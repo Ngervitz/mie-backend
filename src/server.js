@@ -5,6 +5,7 @@ const smsRouter = require('./routes/sms');
 const smsContactsRouter = require('./routes/sms-contacts');
 const emailRouter = require('./routes/email');
 const aiVisibilityRouter = require('./routes/ai-visibility');
+const rechazadosRouter = require('./routes/rechazados');
 const {
   requireDashboardPermission,
 } = require('./middleware/requireDashboardPermission');
@@ -20,6 +21,11 @@ app.use(
   '/ai-visibility',
   requireDashboardPermission('ai-visibility'),
   aiVisibilityRouter,
+);
+app.use(
+  '/rechazados',
+  requireDashboardPermission('rechazados'),
+  rechazadosRouter,
 );
 
 app.listen(env.port, () => {

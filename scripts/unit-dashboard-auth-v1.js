@@ -54,7 +54,13 @@ async function main() {
     resolveSectionForPath('/ai-visibility/prompts'),
     'ai-visibility',
   );
-  assert.strictEqual(SECTION_KEYS.length, 10);
+  assert.strictEqual(resolveSectionForPath('/rechazados'), 'rechazados');
+  assert.strictEqual(
+    resolveSectionForPath('/rechazados/45006120'),
+    'rechazados',
+  );
+  assert.ok(SECTION_KEYS.includes('rechazados'));
+  assert.strictEqual(SECTION_KEYS.length, 11);
 
   const hash = await hashPassword('UnitTest!password1');
   assert.ok(await verifyPassword('UnitTest!password1', hash));

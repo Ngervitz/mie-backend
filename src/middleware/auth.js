@@ -22,6 +22,7 @@ const API_PATH_PREFIXES = [
   '/assist',
   '/jobs',
   '/reports',
+  '/rechazados',
 ];
 
 function authConfigured() {

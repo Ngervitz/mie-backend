@@ -14200,10 +14200,18 @@ init();
     const scoreNum = Number(scoreRaw);
     const score =
       scoreRaw == null || !Number.isFinite(scoreNum) ? '—' : String(scoreRaw);
-    return renderKpiSection(
-      'Calidad',
+    return (
+      '<section class="cz-funnel-kpi-section">' +
+      '<div class="cz-funnel-calidad-header">' +
+      '<h3 class="sms-section-title">Calidad</h3>' +
+      '<button type="button" class="btn rechazados-link-btn" data-action="open-rechazados">' +
+      'Ver rechazados' +
+      '</button>' +
+      '</div>' +
+      '<div class="kpi-grid sms-monthly-kpi-grid">' +
       renderKpiCard(String(count), '📋 Encuestas del mes', 'neutral') +
-        renderKpiCard(score, '⭐ Score promedio', 'accent'),
+      renderKpiCard(score, '⭐ Score promedio', 'accent') +
+      '</div></section>'
     );
   }
 
@@ -14418,7 +14426,936 @@ init();
   if (syncBtn) syncBtn.addEventListener('click', runSync);
   if (reloadBtn) reloadBtn.addEventListener('click', loadSummary);
 
+  if (monthKpisEl) {
+    monthKpisEl.addEventListener('click', function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest('[data-action="open-rechazados"]')
+        : null;
+      if (!btn) return;
+      if (typeof window.__activateDashboardTab === 'function') {
+        window.__activateDashboardTab('rechazados');
+      }
+    });
+  }
+
   window.__openCzFunnel = function () {
     loadSummary();
+  };
+})();
+
+/* ----------------------------------------------------------------------------
+ * Rechazados V0 — list + detail modal + manual BCU upload
+ * ------------------------------------------------------------------------- */
+(function initRechazados() {
+  const H = window.RechazadosHelpers;
+  const panel = document.getElementById('rechazados-panel');
+  const statusEl = document.getElementById('rechazados-status');
+  const resultsEl = document.getElementById('rechazados-results');
+  const filtersEl = document.getElementById('rechazados-filters');
+  const reloadBtn = document.getElementById('rechazados-reload-btn');
+  const modalRoot = document.getElementById('rechazados-modal-root');
+  if (!panel || !statusEl || !resultsEl || !filtersEl || !modalRoot || !H) return;
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+
+  const state = {
+    statusFilter: null,
+    loading: false,
+    rows: [],
+    listError: null,
+    detail: null,
+    detailLoading: false,
+    detailError: null,
+    detailCi: null,
+    showForm: false,
+    form: null,
+    formError: null,
+    formSuccess: null,
+    submitting: false,
+    previewUrl: null,
+  };
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function revokePreview() {
+    if (state.previewUrl) {
+      try {
+        URL.revokeObjectURL(state.previewUrl);
+      } catch (_e) {
+        /* ignore */
+      }
+      state.previewUrl = null;
+    }
+  }
+
+  function resetForm(ci) {
+    revokePreview();
+    state.form = {
+      ci: ci,
+      period_label: '',
+      consulted_on: '',
+      institutions: [H.emptyInstitution()],
+      file: null,
+    };
+    state.formError = null;
+    state.submitting = false;
+  }
+
+  function opsBadge(status) {
+    const label = H.opsStatusLabel(status);
+    const key = status || 'unknown';
+    return (
+      '<span class="rechazados-ops-badge is-' +
+      escapeHtml(String(key)) +
+      '">' +
+      escapeHtml(label) +
+      '</span>'
+    );
+  }
+
+  function nextReviewHtml(ymd) {
+    const info = H.formatNextReviewOn(ymd);
+    if (info.text === '—') return '—';
+    return (
+      '<span class="rechazados-next-review' +
+      (info.overdue ? ' is-overdue' : '') +
+      '">' +
+      escapeHtml(info.text) +
+      '</span>'
+    );
+  }
+
+  function renderFilters() {
+    filtersEl.innerHTML = H.FILTERS.map(function (f) {
+      const active =
+        (f.key == null && state.statusFilter == null) ||
+        f.key === state.statusFilter;
+      return (
+        '<button type="button" class="rechazados-filter-btn' +
+        (active ? ' is-active' : '') +
+        '" data-status-filter="' +
+        escapeHtml(f.key == null ? '' : f.key) +
+        '">' +
+        escapeHtml(f.label) +
+        '</button>'
+      );
+    }).join('');
+  }
+
+  function renderList() {
+    renderFilters();
+    if (state.loading) {
+      resultsEl.innerHTML = '<div class="mcl-empty">Cargando…</div>';
+      return;
+    }
+    if (state.listError) {
+      resultsEl.innerHTML =
+        '<div class="mcl-empty mcl-error">' +
+        escapeHtml(state.listError) +
+        '</div>';
+      return;
+    }
+    if (!state.rows.length) {
+      resultsEl.innerHTML =
+        '<div class="mcl-empty">Sin resultados</div>';
+      return;
+    }
+    const body = state.rows
+      .map(function (row) {
+        const name = H.formatPersonName(row.nombre, row.apellido);
+        return (
+          '<tr>' +
+          '<td>' +
+          escapeHtml(String(row.ci)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(name) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(H.formatTsUy(row.rejected_at)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(H.formatScore(row.score_v2)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(H.formatWorstBcu(row.worst_bcu)) +
+          '</td>' +
+          '<td>' +
+          opsBadge(row.ops_status) +
+          '</td>' +
+          '<td>' +
+          nextReviewHtml(row.next_review_on) +
+          '</td>' +
+          '<td><button type="button" class="btn" data-action="view-ci" data-ci="' +
+          escapeHtml(String(row.ci)) +
+          '">Ver</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    resultsEl.innerHTML =
+      '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
+      '<thead><tr>' +
+      '<th>CI</th><th>Nombre</th><th>Fecha rechazo</th><th>Score</th>' +
+      '<th>Peor BCU</th><th>Estado operativo</th><th>Próxima revisión</th><th>Acción</th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>';
+  }
+
+  function moneyCell(v) {
+    if (v == null || v === '') return '0';
+    return escapeHtml(String(v));
+  }
+
+  function renderInstitutionsTable(institutions) {
+    const list = Array.isArray(institutions) ? institutions : [];
+    if (!list.length) {
+      return '<p class="text-muted">Sin instituciones</p>';
+    }
+    const rows = list
+      .map(function (inst) {
+        return (
+          '<tr>' +
+          '<td>' +
+          escapeHtml(inst.institution_name || '—') +
+          '</td>' +
+          '<td>' +
+          escapeHtml(inst.category || '—') +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.vigente_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.vigente_me) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.moroso_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.moroso_me) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.castigado_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.castigado_me) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.contingencias_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.contingencias_me) +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="table-wrap"><table class="ga4-table rechazados-inst-table">' +
+      '<thead><tr>' +
+      '<th>Institución</th><th>Cat.</th>' +
+      '<th>Vig. MN</th><th>Vig. ME</th>' +
+      '<th>Mor. MN</th><th>Mor. ME</th>' +
+      '<th>Cast. MN</th><th>Cast. ME</th>' +
+      '<th>Cont. MN</th><th>Cont. ME</th>' +
+      '</tr></thead><tbody>' +
+      rows +
+      '</tbody></table></div>'
+    );
+  }
+
+  function fileMetaHtml(snap) {
+    const name = snap && snap.original_filename;
+    if (!name) return '<span class="text-muted">Sin archivo</span>';
+    return (
+      '<span class="rechazados-file-meta">Archivo: ' +
+      escapeHtml(String(name)) +
+      '</span>'
+    );
+  }
+
+  function renderSnapshots(snapshots) {
+    const list = Array.isArray(snapshots) ? snapshots : [];
+    if (!list.length) {
+      return '<p class="text-muted">Sin registros</p>';
+    }
+    return list
+      .map(function (snap) {
+        return (
+          '<div class="rechazados-snapshot-card">' +
+          '<div class="rechazados-snapshot-meta">' +
+          '<div><strong>' +
+          escapeHtml(snap.period_label || '—') +
+          '</strong></div>' +
+          '<div>Consulta: ' +
+          escapeHtml(H.formatCalendarDateUy(snap.consulted_on)) +
+          '</div>' +
+          '<div>Peor BCU: ' +
+          escapeHtml(H.formatWorstBcu(snap.worst_bcu)) +
+          '</div>' +
+          '<div>Estado: ' +
+          opsBadge(snap.ops_status) +
+          '</div>' +
+          '<div>Próx. revisión: ' +
+          nextReviewHtml(snap.next_review_on) +
+          '</div>' +
+          '<div>' +
+          fileMetaHtml(snap) +
+          '</div>' +
+          '</div>' +
+          renderInstitutionsTable(snap.institutions) +
+          '</div>'
+        );
+      })
+      .join('');
+  }
+
+  function renderSimpleTable(headers, rows) {
+    if (!rows.length) {
+      return '<p class="text-muted">Sin registros</p>';
+    }
+    const head = headers
+      .map(function (h) {
+        return '<th>' + escapeHtml(h) + '</th>';
+      })
+      .join('');
+    const body = rows
+      .map(function (r) {
+        return (
+          '<tr>' +
+          r
+            .map(function (c) {
+              return '<td>' + c + '</td>';
+            })
+            .join('') +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="table-wrap"><table class="ga4-table"><thead><tr>' +
+      head +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>'
+    );
+  }
+
+  function categoryOptions(selected) {
+    return H.BCU_CATEGORIES.map(function (c) {
+      return (
+        '<option value="' +
+        escapeHtml(c) +
+        '"' +
+        (c === selected ? ' selected' : '') +
+        '>' +
+        escapeHtml(c) +
+        '</option>'
+      );
+    }).join('');
+  }
+
+  function renderInstitutionForms() {
+    const form = state.form;
+    if (!form) return '';
+    return form.institutions
+      .map(function (inst, idx) {
+        const canRemove = H.canRemoveInstitution(form.institutions.length);
+        return (
+          '<div class="rechazados-inst-form" data-inst-idx="' +
+          idx +
+          '">' +
+          '<div class="rechazados-inst-form-header">' +
+          '<strong>Institución ' +
+          (idx + 1) +
+          '</strong>' +
+          (canRemove
+            ? '<button type="button" class="btn" data-action="remove-inst" data-idx="' +
+              idx +
+              '">Eliminar</button>'
+            : '') +
+          '</div>' +
+          '<div class="rechazados-inst-grid">' +
+          '<label class="mcl-field"><span class="mcl-field-label">Institución</span>' +
+          '<input class="mcl-input" data-field="institution_name" data-idx="' +
+          idx +
+          '" value="' +
+          escapeHtml(inst.institution_name || '') +
+          '" /></label>' +
+          '<label class="mcl-field"><span class="mcl-field-label">Categoría</span>' +
+          '<select class="mcl-select" data-field="category" data-idx="' +
+          idx +
+          '">' +
+          categoryOptions(inst.category || '1C') +
+          '</select></label>' +
+          [
+            ['vigente_mn', 'Vigente MN'],
+            ['vigente_me', 'Vigente ME'],
+            ['moroso_mn', 'Moroso MN'],
+            ['moroso_me', 'Moroso ME'],
+            ['castigado_mn', 'Castigado MN'],
+            ['castigado_me', 'Castigado ME'],
+            ['contingencias_mn', 'Contingencias MN'],
+            ['contingencias_me', 'Contingencias ME'],
+          ]
+            .map(function (pair) {
+              return (
+                '<label class="mcl-field"><span class="mcl-field-label">' +
+                escapeHtml(pair[1]) +
+                '</span>' +
+                '<input type="number" min="0" step="any" class="mcl-input" data-field="' +
+                escapeHtml(pair[0]) +
+                '" data-idx="' +
+                idx +
+                '" value="' +
+                escapeHtml(
+                  inst[pair[0]] == null || inst[pair[0]] === ''
+                    ? ''
+                    : String(inst[pair[0]]),
+                ) +
+                '" /></label>'
+              );
+            })
+            .join('') +
+          '</div></div>'
+        );
+      })
+      .join('');
+  }
+
+  function renderFilePreview() {
+    const form = state.form;
+    if (!form || !form.file) {
+      return (
+        '<div id="rechazados-dropzone" class="serp-dropzone rechazados-dropzone" tabindex="0" role="button" aria-label="Adjuntar archivo BCU">' +
+        '<input type="file" id="rechazados-file-input" class="serp-file-input-hidden" accept="image/jpeg,image/png,image/webp,application/pdf" />' +
+        '<p class="serp-dropzone-title">Arrastrá imagen o PDF aquí</p>' +
+        '<p class="serp-dropzone-hint">JPEG, PNG, WEBP o PDF · máx. 10 MB · opcional</p>' +
+        '</div>'
+      );
+    }
+    const file = form.file;
+    const isImg = String(file.type || '').indexOf('image/') === 0;
+    const thumb = isImg && state.previewUrl
+      ? '<img class="rechazados-file-thumb" src="' +
+        escapeHtml(state.previewUrl) +
+        '" alt="" />'
+      : '<div class="rechazados-file-icon" aria-hidden="true">PDF</div>';
+    return (
+      '<div class="rechazados-file-selected">' +
+      thumb +
+      '<div class="rechazados-file-selected-meta">' +
+      '<div>' +
+      escapeHtml(file.name || 'archivo') +
+      '</div>' +
+      '<div class="text-muted">' +
+      escapeHtml(H.formatFileSize(file.size)) +
+      '</div>' +
+      '</div>' +
+      '<button type="button" class="btn" data-action="clear-file">Quitar</button>' +
+      '</div>'
+    );
+  }
+
+  function renderForm() {
+    const form = state.form;
+    if (!form) return '';
+    return (
+      '<div class="rechazados-form">' +
+      '<h4 class="sms-section-title">Cargar BCU</h4>' +
+      (state.formError
+        ? '<div class="ad-modal-error">' +
+          escapeHtml(state.formError) +
+          '</div>'
+        : '') +
+      '<div class="rechazados-form-grid">' +
+      '<label class="mcl-field"><span class="mcl-field-label">Período</span>' +
+      '<input class="mcl-input" id="rechazados-period" value="' +
+      escapeHtml(form.period_label || '') +
+      '" maxlength="100" /></label>' +
+      '<label class="mcl-field"><span class="mcl-field-label">Fecha consulta</span>' +
+      '<input type="date" class="mcl-input" id="rechazados-consulted" value="' +
+      escapeHtml(form.consulted_on || '') +
+      '" /></label>' +
+      '</div>' +
+      '<div class="mcl-field"><span class="mcl-field-label">Archivo (opcional)</span>' +
+      renderFilePreview() +
+      '</div>' +
+      '<div class="rechazados-inst-list">' +
+      renderInstitutionForms() +
+      '</div>' +
+      '<div class="ad-modal-actions rechazados-form-actions">' +
+      '<button type="button" class="btn" data-action="add-inst">Agregar institución</button>' +
+      '<button type="button" class="btn" data-action="cancel-form">Cancelar</button>' +
+      '<button type="button" class="btn btn-primary" data-action="submit-bcu"' +
+      (state.submitting ? ' disabled' : '') +
+      '>' +
+      (state.submitting ? 'Guardando…' : 'Confirmar') +
+      '</button>' +
+      '</div></div>'
+    );
+  }
+
+  function renderDetailModal() {
+    if (!state.detailCi && !state.detailLoading && !state.detailError) {
+      modalRoot.innerHTML = '';
+      return;
+    }
+    let content = '';
+    if (state.detailLoading) {
+      content = '<div class="ad-modal-loading">Cargando detalle…</div>';
+    } else if (state.detailError) {
+      content =
+        '<div class="ad-modal-error">' +
+        escapeHtml(state.detailError) +
+        '</div>';
+    } else if (state.detail) {
+      const d = state.detail;
+      const name = H.formatPersonName(d.nombre, d.apellido);
+      const rejRows = (d.rejections || []).map(function (r) {
+        return [
+          escapeHtml(H.formatTsUy(r.fechahora_src)),
+          escapeHtml(String(r.cz_solicitud_id != null ? r.cz_solicitud_id : '—')),
+          escapeHtml(r.estado || '—'),
+        ];
+      });
+      const encRows = (d.encuestas || []).map(function (e) {
+        return [
+          escapeHtml(H.formatTsUy(e.completed_at)),
+          escapeHtml(H.formatScore(e.score_v2)),
+          escapeHtml(e.email || '—'),
+        ];
+      });
+      content =
+        '<div class="rechazados-detail-summary">' +
+        '<div><div class="ad-modal-label">Nombre</div><div>' +
+        escapeHtml(name) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">CI</div><div>' +
+        escapeHtml(String(d.ci)) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Último rechazo</div><div>' +
+        escapeHtml(H.formatTsUy(d.rejected_at)) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Score</div><div>' +
+        escapeHtml(H.formatScore(d.score_v2)) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Peor BCU</div><div>' +
+        escapeHtml(H.formatWorstBcu(d.worst_bcu)) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Estado</div><div>' +
+        opsBadge(d.ops_status) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Próxima revisión</div><div>' +
+        nextReviewHtml(d.next_review_on) +
+        '</div></div>' +
+        '</div>' +
+        (state.formSuccess
+          ? '<div class="rechazados-success">' +
+            escapeHtml(state.formSuccess) +
+            '</div>'
+          : '') +
+        '<div class="ad-modal-actions">' +
+        (!state.showForm
+          ? '<button type="button" class="btn btn-primary" data-action="open-form">Cargar BCU</button>'
+          : '') +
+        '</div>' +
+        (state.showForm ? renderForm() : '') +
+        '<div class="ad-modal-block"><div class="ad-modal-label">Rechazos</div>' +
+        renderSimpleTable(['Fecha', 'Solicitud', 'Estado'], rejRows) +
+        '</div>' +
+        '<div class="ad-modal-block"><div class="ad-modal-label">Encuestas</div>' +
+        renderSimpleTable(['Fecha', 'Score', 'Email'], encRows) +
+        '</div>' +
+        '<div class="ad-modal-block"><div class="ad-modal-label">Historial BCU</div>' +
+        renderSnapshots(d.snapshots) +
+        '</div>';
+    }
+
+    modalRoot.innerHTML =
+      '<div class="ad-modal-backdrop" role="presentation">' +
+      '<div class="ad-modal rechazados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle rechazado">' +
+      '<div class="ad-modal-header">' +
+      '<h3 class="ad-modal-title">Detalle</h3>' +
+      '<button type="button" class="ad-modal-close" data-action="close-detail" aria-label="Cerrar">×</button>' +
+      '</div>' +
+      content +
+      '</div></div>';
+
+    wireDropzone();
+  }
+
+  function wireDropzone() {
+    const dropzone = document.getElementById('rechazados-dropzone');
+    const fileInput = document.getElementById('rechazados-file-input');
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('click', function (e) {
+      if (e.target === fileInput) return;
+      fileInput.click();
+    });
+    dropzone.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      dropzone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'dragend'].forEach(function (evt) {
+      dropzone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('is-dragover');
+      });
+    });
+    dropzone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('is-dragover');
+      const files =
+        e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : [];
+      if (files[0]) setFile(files[0]);
+    });
+    fileInput.addEventListener('change', function () {
+      if (fileInput.files && fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+  }
+
+  function setFile(file) {
+    const check = H.validateSelectedFile(file);
+    if (!check.ok) {
+      state.formError = check.error;
+      renderDetailModal();
+      return;
+    }
+    revokePreview();
+    state.form.file = check.file;
+    if (check.file && String(check.file.type || '').indexOf('image/') === 0) {
+      state.previewUrl = URL.createObjectURL(check.file);
+    }
+    state.formError = null;
+    renderDetailModal();
+  }
+
+  async function loadList() {
+    state.loading = true;
+    state.listError = null;
+    setStatus('Cargando…', false);
+    renderList();
+    try {
+      const url = H.buildListUrl(API, state.statusFilter);
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        state.rows = [];
+        state.listError =
+          (data && data.error) || 'No se pudo cargar el listado';
+        setStatus(state.listError, true);
+        renderList();
+        return;
+      }
+      const rows =
+        data && data.data && Array.isArray(data.data.rows)
+          ? data.data.rows
+          : [];
+      state.rows = rows;
+      setStatus(
+        rows.length ? String(rows.length) + ' resultado(s)' : '',
+        false,
+      );
+      renderList();
+    } catch (_err) {
+      state.rows = [];
+      state.listError = 'No se pudo conectar.';
+      setStatus(state.listError, true);
+      renderList();
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function openDetail(ci) {
+    state.detailCi = ci;
+    state.detail = null;
+    state.detailError = null;
+    state.detailLoading = true;
+    state.showForm = false;
+    state.formSuccess = null;
+    state.form = null;
+    revokePreview();
+    renderDetailModal();
+    try {
+      const res = await fetch(API + '/rechazados/' + encodeURIComponent(ci), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        state.detailError =
+          (data && data.error) || 'No se pudo cargar el detalle';
+        state.detailLoading = false;
+        renderDetailModal();
+        return;
+      }
+      state.detail = data && data.data ? data.data : null;
+      state.detailLoading = false;
+      renderDetailModal();
+    } catch (_err) {
+      state.detailError = 'No se pudo conectar.';
+      state.detailLoading = false;
+      renderDetailModal();
+    }
+  }
+
+  function closeDetail() {
+    state.detailCi = null;
+    state.detail = null;
+    state.detailError = null;
+    state.detailLoading = false;
+    state.showForm = false;
+    state.form = null;
+    state.formError = null;
+    state.formSuccess = null;
+    state.submitting = false;
+    revokePreview();
+    modalRoot.innerHTML = '';
+  }
+
+  function readFormFieldsIntoState() {
+    if (!state.form) return;
+    const period = document.getElementById('rechazados-period');
+    const consulted = document.getElementById('rechazados-consulted');
+    if (period) state.form.period_label = period.value;
+    if (consulted) state.form.consulted_on = consulted.value;
+    const inputs = modalRoot.querySelectorAll('[data-field][data-idx]');
+    inputs.forEach(function (el) {
+      const idx = Number(el.getAttribute('data-idx'));
+      const field = el.getAttribute('data-field');
+      if (!Number.isFinite(idx) || !state.form.institutions[idx] || !field) {
+        return;
+      }
+      state.form.institutions[idx][field] = el.value;
+    });
+  }
+
+  async function submitBcu() {
+    if (state.submitting || !state.form) return;
+    readFormFieldsIntoState();
+    const period = String(state.form.period_label || '').trim();
+    const consulted = String(state.form.consulted_on || '').trim();
+    if (!period) {
+      state.formError = 'Indicá el período';
+      renderDetailModal();
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(consulted)) {
+      state.formError = 'Fecha de consulta inválida';
+      renderDetailModal();
+      return;
+    }
+    const serialized = H.serializeInstitutions(state.form.institutions);
+    if (!serialized.ok) {
+      state.formError = serialized.error;
+      renderDetailModal();
+      return;
+    }
+    const fileCheck = H.validateSelectedFile(state.form.file);
+    if (!fileCheck.ok) {
+      state.formError = fileCheck.error;
+      renderDetailModal();
+      return;
+    }
+
+    state.submitting = true;
+    state.formError = null;
+    renderDetailModal();
+
+    const fd = new FormData();
+    fd.append('period_label', period);
+    fd.append('consulted_on', consulted);
+    fd.append('institutions', JSON.stringify(serialized.institutions));
+    if (fileCheck.file) fd.append('file', fileCheck.file);
+
+    try {
+      const res = await fetch(
+        API +
+          '/rechazados/' +
+          encodeURIComponent(state.form.ci) +
+          '/bcu-snapshots',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        state.formError =
+          (data && data.error) || 'No se pudo guardar el BCU';
+        state.submitting = false;
+        renderDetailModal();
+        return;
+      }
+      state.submitting = false;
+      state.showForm = false;
+      state.form = null;
+      revokePreview();
+      const savedCi = state.detailCi;
+      state.formSuccess = 'BCU guardado';
+      await loadList();
+      if (savedCi) {
+        state.detailCi = savedCi;
+        state.detailLoading = true;
+        state.detailError = null;
+        state.showForm = false;
+        renderDetailModal();
+        try {
+          const res2 = await fetch(
+            API + '/rechazados/' + encodeURIComponent(savedCi),
+            {
+              headers: { Accept: 'application/json' },
+              credentials: 'same-origin',
+            },
+          );
+          const data2 = await res2.json().catch(function () {
+            return {};
+          });
+          if (!res2.ok) {
+            state.detailError =
+              (data2 && data2.error) || 'No se pudo cargar el detalle';
+            state.detailLoading = false;
+            renderDetailModal();
+            return;
+          }
+          state.detail = data2 && data2.data ? data2.data : null;
+          state.detailLoading = false;
+          state.formSuccess = 'BCU guardado';
+          renderDetailModal();
+          setTimeout(function () {
+            state.formSuccess = null;
+            if (state.detailCi) renderDetailModal();
+          }, 2500);
+        } catch (_e2) {
+          state.detailError = 'No se pudo conectar.';
+          state.detailLoading = false;
+          renderDetailModal();
+        }
+      }
+    } catch (_err) {
+      state.formError = 'No se pudo conectar.';
+      state.submitting = false;
+      renderDetailModal();
+    }
+  }
+
+  filtersEl.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest
+      ? ev.target.closest('[data-status-filter]')
+      : null;
+    if (!btn) return;
+    const raw = btn.getAttribute('data-status-filter');
+    state.statusFilter = raw ? raw : null;
+    loadList();
+  });
+
+  resultsEl.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest
+      ? ev.target.closest('[data-action="view-ci"]')
+      : null;
+    if (!btn) return;
+    const ci = btn.getAttribute('data-ci');
+    if (ci) openDetail(ci);
+  });
+
+  modalRoot.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t || !t.closest) return;
+
+    if (t.classList.contains('ad-modal-backdrop')) {
+      closeDetail();
+      return;
+    }
+
+    const modalPanel = t.closest('.ad-modal');
+    if (modalPanel) {
+      /* clicks inside modal should not close via backdrop logic */
+    }
+
+    const actionEl = t.closest('[data-action]');
+    if (!actionEl) return;
+    const action = actionEl.getAttribute('data-action');
+    if (action === 'close-detail') {
+      closeDetail();
+      return;
+    }
+    if (action === 'open-form') {
+      resetForm(state.detailCi);
+      state.showForm = true;
+      state.formSuccess = null;
+      renderDetailModal();
+      return;
+    }
+    if (action === 'cancel-form') {
+      state.showForm = false;
+      state.form = null;
+      state.formError = null;
+      revokePreview();
+      renderDetailModal();
+      return;
+    }
+    if (action === 'add-inst') {
+      readFormFieldsIntoState();
+      if (state.form) state.form.institutions.push(H.emptyInstitution());
+      renderDetailModal();
+      return;
+    }
+    if (action === 'remove-inst') {
+      readFormFieldsIntoState();
+      const idx = Number(actionEl.getAttribute('data-idx'));
+      if (
+        state.form &&
+        H.canRemoveInstitution(state.form.institutions.length) &&
+        Number.isFinite(idx)
+      ) {
+        state.form.institutions.splice(idx, 1);
+      }
+      renderDetailModal();
+      return;
+    }
+    if (action === 'clear-file') {
+      if (state.form) state.form.file = null;
+      revokePreview();
+      renderDetailModal();
+      return;
+    }
+    if (action === 'submit-bcu') {
+      submitBcu();
+    }
+  });
+
+  if (reloadBtn) reloadBtn.addEventListener('click', loadList);
+
+  renderFilters();
+  window.__openRechazados = function () {
+    loadList();
   };
 })();
