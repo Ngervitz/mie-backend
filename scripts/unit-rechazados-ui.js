@@ -152,4 +152,73 @@ assert.ok(js.indexOf("fd.append('file'") !== -1);
 assert.ok(js.indexOf('Archivo:') !== -1);
 assert.ok(js.indexOf('storage_path') === -1 || !/initRechazados[\s\S]*storage_path/.test(js));
 
+// BUG1 regression: success path must clear loading BEFORE the success renderList.
+const loadListMatch = js.match(
+  /async function loadList\(\) \{[\s\S]*?async function openDetail/,
+);
+assert.ok(loadListMatch, 'loadList block missing');
+const loadListSrc = loadListMatch[0];
+assert.ok(
+  /state\.rows = rows;\s*state\.loading = false;\s*setStatus\([\s\S]*?renderList\(\);/.test(
+    loadListSrc,
+  ),
+  'success path must set loading=false before renderList',
+);
+assert.ok(
+  /listError[\s\S]*state\.loading = false;\s*setStatus\(state\.listError/.test(
+    loadListSrc,
+  ),
+  'error path must clear loading before renderList',
+);
+
+const css = fs.readFileSync(
+  path.join(__dirname, '../public/mie-dashboard.css'),
+  'utf8',
+);
+assert.ok(
+  /#cz-funnel-panel,\s*#mie-dashboard-app #rechazados-panel,/.test(css) ||
+    css.indexOf('#mie-dashboard-app #rechazados-panel') !== -1,
+  'rechazados-panel must share panel padding rule',
+);
+
+// Fixture shaped like prod GET /rechazados (31 rows) — null-heavy, no throws.
+const fixtureRows = [];
+for (let i = 0; i < 31; i += 1) {
+  fixtureRows.push({
+    ci: 50000000 + i,
+    nombre: i % 3 === 0 ? null : 'Nombre' + i,
+    apellido: i % 5 === 0 ? null : 'Apellido' + i,
+    rejected_at:
+      i % 7 === 0 ? null : '2026-0' + ((i % 8) + 1) + '-10T12:00:00.000Z',
+    score_v2: i % 4 === 0 ? null : i,
+    worst_bcu: i % 6 === 0 ? null : '3',
+    ops_status: 'bcu_pending',
+    next_review_on: i % 2 === 0 ? null : '2026-10-05',
+  });
+}
+assert.strictEqual(fixtureRows.length, 31);
+function listViewKind(state) {
+  if (state.loading) return 'loading';
+  if (state.listError) return 'error';
+  if (!state.rows.length) return 'empty';
+  return 'table';
+}
+assert.strictEqual(
+  listViewKind({ loading: true, rows: fixtureRows, listError: null }),
+  'loading',
+);
+assert.strictEqual(
+  listViewKind({ loading: false, rows: fixtureRows, listError: null }),
+  'table',
+);
+for (let i = 0; i < fixtureRows.length; i += 1) {
+  const row = fixtureRows[i];
+  assert.ok(typeof H.formatPersonName(row.nombre, row.apellido) === 'string');
+  assert.ok(typeof H.formatTsUy(row.rejected_at) === 'string');
+  assert.ok(typeof H.formatScore(row.score_v2) === 'string');
+  assert.ok(typeof H.formatWorstBcu(row.worst_bcu) === 'string');
+  assert.ok(typeof H.opsStatusLabel(row.ops_status) === 'string');
+  assert.ok(typeof H.formatNextReviewOn(row.next_review_on).text === 'string');
+}
+
 console.log('OK unit-rechazados-ui');

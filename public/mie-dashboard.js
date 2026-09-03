@@ -15065,6 +15065,7 @@ init();
         state.rows = [];
         state.listError =
           (data && data.error) || 'No se pudo cargar el listado';
+        state.loading = false;
         setStatus(state.listError, true);
         renderList();
         return;
@@ -15074,14 +15075,26 @@ init();
           ? data.data.rows
           : [];
       state.rows = rows;
+      state.loading = false;
       setStatus(
         rows.length ? String(rows.length) + ' resultado(s)' : '',
         false,
       );
-      renderList();
+      try {
+        renderList();
+      } catch (renderErr) {
+        state.listError = 'No se pudo mostrar el listado';
+        setStatus(state.listError, true);
+        resultsEl.innerHTML =
+          '<div class="mcl-empty mcl-error">' +
+          escapeHtml(state.listError) +
+          '</div>';
+        console.error('rechazados renderList failed', renderErr);
+      }
     } catch (_err) {
       state.rows = [];
       state.listError = 'No se pudo conectar.';
+      state.loading = false;
       setStatus(state.listError, true);
       renderList();
     } finally {
