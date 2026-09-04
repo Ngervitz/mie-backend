@@ -17,6 +17,10 @@ const {
   OPS_STATUS,
   deriveRejectedOps,
 } = require('./rejectedOps');
+const {
+  OUTREACH_SELECT,
+  formatOutreach,
+} = require('./rejectedOutreach');
 
 const REJECTED_ESTADO_ID = 3;
 const PAGE_SIZE = 1000;
@@ -266,18 +270,32 @@ function currentOpsFromLatestSnapshot(snapshotsDesc, instMap) {
   return snapshotDerived(latest, institutions);
 }
 
-function formatListRow(ci, lastRejection, name, encuesta, ops) {
-  return {
-    ci: ci,
-    nombre: name.nombre,
-    apellido: name.apellido,
-    rejected_at: lastRejection.fechahora_src || null,
-    score_v2: encuesta ? toNum(encuesta.score_v2) : null,
-    encuesta_completed_at: encuesta ? encuesta.completed_at || null : null,
-    worst_bcu: ops.worst_bcu,
-    ops_status: ops.ops_status,
-    next_review_on: ops.next_review_on,
-  };
+function outreachByCi(outreachRows) {
+  const map = new Map();
+  for (let i = 0; i < (outreachRows || []).length; i += 1) {
+    const row = outreachRows[i];
+    const ci = toNum(row && row.ci);
+    if (ci == null || !Number.isSafeInteger(ci)) continue;
+    map.set(ci, row);
+  }
+  return map;
+}
+
+function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
+  return Object.assign(
+    {
+      ci: ci,
+      nombre: name.nombre,
+      apellido: name.apellido,
+      rejected_at: lastRejection.fechahora_src || null,
+      score_v2: encuesta ? toNum(encuesta.score_v2) : null,
+      encuesta_completed_at: encuesta ? encuesta.completed_at || null : null,
+      worst_bcu: ops.worst_bcu,
+      ops_status: ops.ops_status,
+      next_review_on: ops.next_review_on,
+    },
+    outreach,
+  );
 }
 
 /**
@@ -287,7 +305,9 @@ function formatListRow(ci, lastRejection, name, encuesta, ops) {
  *   encuestaRows: object[],
  *   snapshotRows: object[],
  *   institutionRows: object[],
+ *   outreachRows?: object[],
  *   status?: string|null,
+ *   nowMs?: number,
  * }} input
  */
 function assembleRejectedList(input) {
@@ -297,7 +317,9 @@ function assembleRejectedList(input) {
   const snapshotsByCi = mapByCi(input.snapshotRows || []);
   const instMap = institutionsBySnapshotId(input.institutionRows || []);
   const solsByCi = mapByCi(input.solicitudRows || []);
+  const outreachMap = outreachByCi(input.outreachRows || []);
   const statusFilter = input.status || null;
+  const nowMs = input.nowMs;
 
   const rows = [];
   for (const [ci, rejections] of byCi.entries()) {
@@ -309,7 +331,8 @@ function assembleRejectedList(input) {
     const snaps = sortSnapshotsDesc(snapshotsByCi.get(ci) || []);
     const ops = currentOpsFromLatestSnapshot(snaps, instMap);
     if (statusFilter && ops.ops_status !== statusFilter) continue;
-    rows.push(formatListRow(ci, lastRejection, name, encuesta, ops));
+    const outreach = formatOutreach(outreachMap.get(ci) || null, nowMs);
+    rows.push(formatListRow(ci, lastRejection, name, encuesta, ops, outreach));
   }
 
   rows.sort(function (a, b) {
@@ -347,6 +370,10 @@ function assembleRejectedDetail(input) {
   const instMap = institutionsBySnapshotId(input.institutionRows || []);
   const ops = currentOpsFromLatestSnapshot(snaps, instMap);
   const latestEncuesta = encuestas[0] || null;
+  const outreachRow =
+    (input.outreachRows || []).find(function (r) {
+      return toNum(r && r.ci) === ci;
+    }) || null;
 
   return {
     ci: ci,
@@ -360,6 +387,7 @@ function assembleRejectedDetail(input) {
     worst_bcu: ops.worst_bcu,
     ops_status: ops.ops_status,
     next_review_on: ops.next_review_on,
+    outreach: formatOutreach(outreachRow, input.nowMs),
     rejections: sortedRej.map(function (e) {
       return {
         cz_historico_id: e.cz_historico_id,
@@ -516,12 +544,22 @@ async function fetchRejectedListBundle(supabase) {
         snapshotIds,
       )
     : [];
+  const outreachRows = cis.length
+    ? await fetchInChunks(
+        supabase,
+        'rejected_ci_outreach',
+        OUTREACH_SELECT,
+        'ci',
+        cis,
+      )
+    : [];
   return {
     estadoRows: estadoRows,
     solicitudRows: solicitudRows,
     encuestaRows: encuestaRows,
     snapshotRows: snapshotRows,
     institutionRows: institutionRows,
+    outreachRows: outreachRows,
   };
 }
 
@@ -565,6 +603,13 @@ async function fetchRejectedDetailBundle(supabase, ci) {
         snapshotIds,
       )
     : [];
+  const outreachPage = await fetchAllPages(function (from, to) {
+    return supabase
+      .from('rejected_ci_outreach')
+      .select(OUTREACH_SELECT)
+      .eq('ci', ci)
+      .range(from, to);
+  });
   return {
     ci: ci,
     estadoRows: estadoRows,
@@ -572,6 +617,7 @@ async function fetchRejectedDetailBundle(supabase, ci) {
     encuestaRows: encuestaRows,
     snapshotRows: snapshotRows,
     institutionRows: institutionRows,
+    outreachRows: outreachPage,
   };
 }
 

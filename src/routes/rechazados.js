@@ -66,6 +66,7 @@ router.get('/', async function getRechazadosList(req, res) {
       encuestaRows: bundle.encuestaRows,
       snapshotRows: bundle.snapshotRows,
       institutionRows: bundle.institutionRows,
+      outreachRows: bundle.outreachRows,
       status: parsed.status,
     });
     return res.json({ ok: true, data: { rows: rows } });

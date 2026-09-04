@@ -249,6 +249,13 @@ assert.strictEqual(row111.encuesta_completed_at, '2026-08-01T00:00:00.000Z');
 assert.strictEqual(row111.worst_bcu, '5');
 assert.strictEqual(row111.ops_status, OPS_STATUS.RECONSULTABLE);
 assert.strictEqual(row111.next_review_on, '2026-09-05');
+assert.strictEqual(row111.mi_plan_status, 'not_invited');
+assert.strictEqual(row111.mi_plan_updated_at, null);
+assert.strictEqual(row111.mi_deuda_status, 'not_invited');
+assert.strictEqual(row111.mi_deuda_updated_at, null);
+assert.strictEqual(row111.mi_deuda_invited_at, null);
+assert.strictEqual(row111.mi_deuda_responded_at, null);
+assert.strictEqual(row111.mi_deuda_invite_expired, false);
 
 const row222 = list.find(function (r) {
   return r.ci === 222;
@@ -257,6 +264,8 @@ assert.strictEqual(row222.ops_status, OPS_STATUS.BCU_PENDING);
 assert.strictEqual(row222.worst_bcu, null);
 assert.strictEqual(row222.next_review_on, null);
 assert.strictEqual(row222.score_v2, null);
+assert.strictEqual(row222.mi_plan_status, 'not_invited');
+assert.strictEqual(row222.mi_deuda_invite_expired, false);
 
 const row333 = list.find(function (r) {
   return r.ci === 333;
@@ -331,6 +340,10 @@ assert.deepStrictEqual(
 assert.strictEqual(detail.snapshots[1].ops_status, OPS_STATUS.RETRY_ELIGIBLE);
 assert.strictEqual(detail.ops_status, detail.snapshots[0].ops_status);
 assert.notStrictEqual(detail.ops_status, detail.snapshots[1].ops_status);
+assert.ok(detail.outreach);
+assert.strictEqual(detail.outreach.mi_plan_status, 'not_invited');
+assert.strictEqual(detail.outreach.mi_deuda_status, 'not_invited');
+assert.strictEqual(detail.outreach.mi_deuda_invite_expired, false);
 assert.deepStrictEqual(
   detail.rejections.map(function (r) {
     return r.cz_historico_id;
@@ -343,6 +356,66 @@ assert.deepStrictEqual(
   }),
   [102, 101, 100],
 );
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const invitedAt = '2026-09-01T12:00:00.000Z';
+const invitedMs = Date.parse(invitedAt);
+const listWithOutreach = assembleRejectedList({
+  estadoRows: estadoRows,
+  solicitudRows: solicitudRows,
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [
+    {
+      ci: 111,
+      mi_plan_status: 'active',
+      mi_plan_updated_at: '2026-08-15T00:00:00.000Z',
+      mi_deuda_status: 'invite_sent',
+      mi_deuda_updated_at: invitedAt,
+      mi_deuda_invited_at: invitedAt,
+      mi_deuda_responded_at: null,
+    },
+  ],
+  nowMs: invitedMs + 7 * DAY_MS,
+});
+const o111 = listWithOutreach.find(function (r) {
+  return r.ci === 111;
+});
+assert.strictEqual(o111.mi_plan_status, 'active');
+assert.strictEqual(o111.mi_plan_updated_at, '2026-08-15T00:00:00.000Z');
+assert.strictEqual(o111.mi_deuda_status, 'invite_sent');
+assert.strictEqual(o111.mi_deuda_invited_at, invitedAt);
+assert.strictEqual(o111.mi_deuda_invite_expired, true);
+const o222 = listWithOutreach.find(function (r) {
+  return r.ci === 222;
+});
+assert.strictEqual(o222.mi_plan_status, 'not_invited');
+assert.strictEqual(o222.mi_deuda_invite_expired, false);
+
+const detailOutreach = assembleRejectedDetail({
+  ci: 111,
+  estadoRows: estadoRows,
+  solicitudRows: solicitudRows,
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [
+    {
+      ci: 111,
+      mi_plan_status: 'invited',
+      mi_plan_updated_at: '2026-08-01T00:00:00.000Z',
+      mi_deuda_status: 'invite_sent',
+      mi_deuda_updated_at: invitedAt,
+      mi_deuda_invited_at: invitedAt,
+      mi_deuda_responded_at: null,
+    },
+  ],
+  nowMs: invitedMs + 6 * DAY_MS,
+});
+assert.strictEqual(detailOutreach.outreach.mi_plan_status, 'invited');
+assert.strictEqual(detailOutreach.outreach.mi_deuda_status, 'invite_sent');
+assert.strictEqual(detailOutreach.outreach.mi_deuda_invite_expired, false);
 
 const sortedEnc = sortEncuestas([
   { cz_id: 1, completed_at: null },
