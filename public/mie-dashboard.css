@@ -5013,6 +5013,21 @@
   color: var(--accent-danger);
   font-weight: var(--font-weight-medium);
 }
+#mie-dashboard-app .rechazados-cell-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+#mie-dashboard-app #rechazados-results .table-wrap {
+  overflow-x: auto;
+}
+#mie-dashboard-app .rechazados-table th,
+#mie-dashboard-app .rechazados-table td {
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-table {
+  min-width: 960px;
+}
 #mie-dashboard-app .rechazados-detail-modal {
   width: min(960px, 96vw);
   max-height: 90vh;

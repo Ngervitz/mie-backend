@@ -14528,6 +14528,38 @@ init();
     );
   }
 
+  function renderCellDescriptor(cell, ci) {
+    if (!cell || cell.kind === 'text') {
+      const label = cell && cell.label != null ? cell.label : '—';
+      if (cell && cell.overdue) {
+        return (
+          '<span class="rechazados-next-review is-overdue">' +
+          escapeHtml(label) +
+          '</span>'
+        );
+      }
+      return escapeHtml(label);
+    }
+    const enabled = cell.enabled === true;
+    const action = cell.action ? String(cell.action) : '';
+    if (enabled && action) {
+      return (
+        '<button type="button" class="btn rechazados-cell-btn" data-action="' +
+        escapeHtml(action) +
+        '" data-ci="' +
+        escapeHtml(String(ci)) +
+        '">' +
+        escapeHtml(cell.label) +
+        '</button>'
+      );
+    }
+    return (
+      '<button type="button" class="btn rechazados-cell-btn" disabled title="Próximamente">' +
+      escapeHtml(cell.label) +
+      '</button>'
+    );
+  }
+
   function renderFilters() {
     filtersEl.innerHTML = H.FILTERS.map(function (f) {
       const active =
@@ -14566,6 +14598,14 @@ init();
     const body = state.rows
       .map(function (row) {
         const name = H.formatPersonName(row.nombre, row.apellido);
+        const score = H.scoreCell(row.score_v2);
+        const plan = H.miPlanCell(row.mi_plan_status);
+        const deuda = H.miDeudaCell(
+          row.mi_deuda_status,
+          row.mi_deuda_invite_expired,
+        );
+        const bcu = H.worstBcuCell(row.worst_bcu);
+        const retry = H.retryReviewCell(row.ops_status, row.next_review_on);
         return (
           '<tr>' +
           '<td>' +
@@ -14578,16 +14618,19 @@ init();
           escapeHtml(H.formatTsUy(row.rejected_at)) +
           '</td>' +
           '<td>' +
-          escapeHtml(H.formatScore(row.score_v2)) +
+          renderCellDescriptor(score, row.ci) +
           '</td>' +
           '<td>' +
-          escapeHtml(H.formatWorstBcu(row.worst_bcu)) +
+          renderCellDescriptor(plan, row.ci) +
           '</td>' +
           '<td>' +
-          opsBadge(row.ops_status) +
+          renderCellDescriptor(deuda, row.ci) +
           '</td>' +
           '<td>' +
-          nextReviewHtml(row.next_review_on) +
+          renderCellDescriptor(bcu, row.ci) +
+          '</td>' +
+          '<td>' +
+          renderCellDescriptor(retry, row.ci) +
           '</td>' +
           '<td><button type="button" class="btn" data-action="view-ci" data-ci="' +
           escapeHtml(String(row.ci)) +
@@ -14600,7 +14643,8 @@ init();
       '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
       '<thead><tr>' +
       '<th>CI</th><th>Nombre</th><th>Fecha rechazo</th><th>Score</th>' +
-      '<th>Peor BCU</th><th>Estado operativo</th><th>Próxima revisión</th><th>Acción</th>' +
+      '<th>Mi Plan</th><th>Mi Deuda</th><th>Peor BCU</th>' +
+      '<th>Retry / Próx. revisión</th><th>Ver</th>' +
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>';
@@ -14944,6 +14988,25 @@ init();
         '<div><div class="ad-modal-label">Score</div><div>' +
         escapeHtml(H.formatScore(d.score_v2)) +
         '</div></div>' +
+        '<div><div class="ad-modal-label">Mi Plan</div><div>' +
+        escapeHtml(
+          H.miPlanLabel(
+            d.outreach && d.outreach.mi_plan_status
+              ? d.outreach.mi_plan_status
+              : 'not_invited',
+          ),
+        ) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Mi Deuda</div><div>' +
+        escapeHtml(
+          H.miDeudaLabel(
+            d.outreach && d.outreach.mi_deuda_status
+              ? d.outreach.mi_deuda_status
+              : 'not_invited',
+            d.outreach ? d.outreach.mi_deuda_invite_expired : false,
+          ),
+        ) +
+        '</div></div>' +
         '<div><div class="ad-modal-label">Peor BCU</div><div>' +
         escapeHtml(H.formatWorstBcu(d.worst_bcu)) +
         '</div></div>' +
@@ -15102,7 +15165,9 @@ init();
     }
   }
 
-  async function openDetail(ci) {
+  async function openDetail(ci, options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const openBcuForm = opts.openBcuForm === true;
     state.detailCi = ci;
     state.detail = null;
     state.detailError = null;
@@ -15129,6 +15194,11 @@ init();
       }
       state.detail = data && data.data ? data.data : null;
       state.detailLoading = false;
+      if (openBcuForm && state.detail) {
+        resetForm(ci);
+        state.showForm = true;
+        state.formSuccess = null;
+      }
       renderDetailModal();
     } catch (_err) {
       state.detailError = 'No se pudo conectar.';
@@ -15292,11 +15362,19 @@ init();
 
   resultsEl.addEventListener('click', function (ev) {
     const btn = ev.target && ev.target.closest
-      ? ev.target.closest('[data-action="view-ci"]')
+      ? ev.target.closest('[data-action]')
       : null;
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
+    const action = btn.getAttribute('data-action');
     const ci = btn.getAttribute('data-ci');
-    if (ci) openDetail(ci);
+    if (!ci) return;
+    if (action === 'view-ci') {
+      openDetail(ci);
+      return;
+    }
+    if (action === 'consultar-bcu') {
+      openDetail(ci, { openBcuForm: true });
+    }
   });
 
   modalRoot.addEventListener('click', function (ev) {

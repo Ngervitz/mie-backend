@@ -63,6 +63,120 @@
     return String(cat);
   }
 
+  /**
+   * List/detail presentation descriptors (no DOM).
+   * @returns {{ kind: 'text'|'cta', label: string, enabled?: boolean, action?: string|null }}
+   */
+  function scoreCell(score) {
+    if (score == null || score === '') {
+      return {
+        kind: 'cta',
+        label: 'Encuestar',
+        enabled: false,
+        action: null,
+      };
+    }
+    var n = Number(score);
+    if (!Number.isFinite(n)) {
+      return {
+        kind: 'cta',
+        label: 'Encuestar',
+        enabled: false,
+        action: null,
+      };
+    }
+    return { kind: 'text', label: String(score) };
+  }
+
+  function miPlanCell(status) {
+    var s = status != null ? String(status) : 'not_invited';
+    if (s === 'invited') return { kind: 'text', label: 'Invitado' };
+    if (s === 'active') return { kind: 'text', label: 'Activo' };
+    return {
+      kind: 'cta',
+      label: 'Invitar',
+      enabled: false,
+      action: null,
+    };
+  }
+
+  function miDeudaCell(status, inviteExpired) {
+    var s = status != null ? String(status) : 'not_invited';
+    if (s === 'opt_in_accepted') return { kind: 'text', label: 'Aceptó' };
+    if (s === 'opt_in_rejected') return { kind: 'text', label: 'Rechazó' };
+    if (s === 'invite_sent') {
+      if (inviteExpired === true) {
+        return {
+          kind: 'cta',
+          label: 'Reinvitar',
+          enabled: false,
+          action: null,
+        };
+      }
+      return { kind: 'text', label: 'Enviado' };
+    }
+    return {
+      kind: 'cta',
+      label: 'Invitar',
+      enabled: false,
+      action: null,
+    };
+  }
+
+  function worstBcuCell(cat) {
+    if (cat == null || cat === '') {
+      return {
+        kind: 'cta',
+        label: 'Consultar',
+        enabled: true,
+        action: 'consultar-bcu',
+      };
+    }
+    return { kind: 'text', label: String(cat) };
+  }
+
+  /**
+   * Combined Retry / next_review presentation from ops_status + next_review_on.
+   * Does not recalculate next_review_on.
+   */
+  function retryReviewCell(opsStatus, nextReviewOn, nowMs) {
+    var status = opsStatus != null ? String(opsStatus) : '';
+    if (status === 'retry_eligible') {
+      return {
+        kind: 'cta',
+        label: 'Reintentar',
+        enabled: false,
+        action: null,
+      };
+    }
+    if (status === 'reconsultable') {
+      var info = formatNextReviewOn(nextReviewOn, nowMs);
+      return {
+        kind: 'text',
+        label: info.text,
+        overdue: info.overdue,
+      };
+    }
+    if (status === 'no_auto_reconsult') {
+      return { kind: 'text', label: 'Sin revisión auto' };
+    }
+    if (status === 'bcu_pending') {
+      return { kind: 'text', label: '—' };
+    }
+    if (status === 'undefined_case') {
+      return { kind: 'text', label: 'Caso indefinido' };
+    }
+    return { kind: 'text', label: '—' };
+  }
+
+  function miPlanLabel(status) {
+    return miPlanCell(status).label;
+  }
+
+  function miDeudaLabel(status, inviteExpired) {
+    return miDeudaCell(status, inviteExpired).label;
+  }
+
   function todayYmdMontevideo(nowMs) {
     var d = nowMs != null ? new Date(nowMs) : new Date();
     return d.toLocaleDateString('en-CA', { timeZone: 'America/Montevideo' });
@@ -227,6 +341,13 @@
     formatPersonName: formatPersonName,
     formatScore: formatScore,
     formatWorstBcu: formatWorstBcu,
+    scoreCell: scoreCell,
+    miPlanCell: miPlanCell,
+    miDeudaCell: miDeudaCell,
+    worstBcuCell: worstBcuCell,
+    retryReviewCell: retryReviewCell,
+    miPlanLabel: miPlanLabel,
+    miDeudaLabel: miDeudaLabel,
     todayYmdMontevideo: todayYmdMontevideo,
     formatCalendarDateUy: formatCalendarDateUy,
     formatNextReviewOn: formatNextReviewOn,

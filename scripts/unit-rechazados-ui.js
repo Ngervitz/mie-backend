@@ -48,6 +48,96 @@ assert.strictEqual(H.formatPersonName(null, null), '—');
 assert.strictEqual(H.formatScore(null), '—');
 assert.strictEqual(H.formatWorstBcu(null), '—');
 
+assert.deepStrictEqual(H.scoreCell(24), { kind: 'text', label: '24' });
+assert.deepStrictEqual(H.scoreCell(null), {
+  kind: 'cta',
+  label: 'Encuestar',
+  enabled: false,
+  action: null,
+});
+assert.deepStrictEqual(H.miPlanCell('not_invited'), {
+  kind: 'cta',
+  label: 'Invitar',
+  enabled: false,
+  action: null,
+});
+assert.deepStrictEqual(H.miPlanCell('invited'), {
+  kind: 'text',
+  label: 'Invitado',
+});
+assert.deepStrictEqual(H.miPlanCell('active'), {
+  kind: 'text',
+  label: 'Activo',
+});
+assert.strictEqual(H.miPlanLabel('active'), 'Activo');
+assert.deepStrictEqual(H.miDeudaCell('not_invited'), {
+  kind: 'cta',
+  label: 'Invitar',
+  enabled: false,
+  action: null,
+});
+assert.deepStrictEqual(H.miDeudaCell('invite_sent', false), {
+  kind: 'text',
+  label: 'Enviado',
+});
+assert.deepStrictEqual(H.miDeudaCell('invite_sent', true), {
+  kind: 'cta',
+  label: 'Reinvitar',
+  enabled: false,
+  action: null,
+});
+assert.deepStrictEqual(H.miDeudaCell('opt_in_accepted'), {
+  kind: 'text',
+  label: 'Aceptó',
+});
+assert.deepStrictEqual(H.miDeudaCell('opt_in_rejected'), {
+  kind: 'text',
+  label: 'Rechazó',
+});
+assert.strictEqual(H.miDeudaLabel('opt_in_accepted', false), 'Aceptó');
+assert.deepStrictEqual(H.worstBcuCell(null), {
+  kind: 'cta',
+  label: 'Consultar',
+  enabled: true,
+  action: 'consultar-bcu',
+});
+assert.deepStrictEqual(H.worstBcuCell('1C'), { kind: 'text', label: '1C' });
+assert.deepStrictEqual(H.retryReviewCell('retry_eligible', null), {
+  kind: 'cta',
+  label: 'Reintentar',
+  enabled: false,
+  action: null,
+});
+assert.deepStrictEqual(H.retryReviewCell('bcu_pending', null), {
+  kind: 'text',
+  label: '—',
+});
+assert.deepStrictEqual(H.retryReviewCell('no_auto_reconsult', null), {
+  kind: 'text',
+  label: 'Sin revisión auto',
+});
+assert.deepStrictEqual(H.retryReviewCell('undefined_case', null), {
+  kind: 'text',
+  label: 'Caso indefinido',
+});
+const retryDate = H.retryReviewCell(
+  'reconsultable',
+  '2020-01-05',
+  Date.parse('2026-09-03T15:00:00Z'),
+);
+assert.strictEqual(retryDate.kind, 'text');
+assert.strictEqual(retryDate.overdue, true);
+assert.ok(retryDate.label.indexOf('vencida') !== -1);
+
+assert.ok(js.indexOf('Mi Plan') !== -1);
+assert.ok(js.indexOf('Mi Deuda') !== -1);
+assert.ok(js.indexOf('Retry / Próx. revisión') !== -1);
+assert.ok(js.indexOf('Estado operativo') === -1);
+assert.ok(js.indexOf("title=\"Próximamente\"") !== -1 || js.indexOf("title='Próximamente'") !== -1 || js.indexOf('title="Próximamente"') !== -1);
+assert.ok(js.indexOf("data-action=\"consultar-bcu\"") !== -1 || js.indexOf("action: 'consultar-bcu'") !== -1 || js.indexOf('consultar-bcu') !== -1);
+assert.ok(js.indexOf('openBcuForm') !== -1);
+assert.ok(js.indexOf('d.outreach') !== -1 || js.indexOf('detail.outreach') !== -1 || js.indexOf('outreach.mi_plan') !== -1);
+
 assert.strictEqual(H.buildListUrl('', null), '/rechazados');
 assert.strictEqual(
   H.buildListUrl('', 'bcu_pending'),
@@ -194,6 +284,13 @@ for (let i = 0; i < 31; i += 1) {
     worst_bcu: i % 6 === 0 ? null : '3',
     ops_status: 'bcu_pending',
     next_review_on: i % 2 === 0 ? null : '2026-10-05',
+    mi_plan_status: 'not_invited',
+    mi_plan_updated_at: null,
+    mi_deuda_status: 'not_invited',
+    mi_deuda_updated_at: null,
+    mi_deuda_invited_at: null,
+    mi_deuda_responded_at: null,
+    mi_deuda_invite_expired: false,
   });
 }
 assert.strictEqual(fixtureRows.length, 31);
