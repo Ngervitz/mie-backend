@@ -5019,14 +5019,87 @@
   white-space: nowrap;
 }
 #mie-dashboard-app #rechazados-results .table-wrap {
-  overflow-x: auto;
+  overflow: visible;
+}
+#mie-dashboard-app .rechazados-table {
+  width: 100%;
+  table-layout: fixed;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-table th,
 #mie-dashboard-app .rechazados-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+#mie-dashboard-app .rechazados-col-ci {
+  width: 7%;
+  text-align: left;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .rechazados-col-name {
+  width: 20%;
+  text-align: left;
+  overflow: hidden;
+}
+#mie-dashboard-app .rechazados-name-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-#mie-dashboard-app .rechazados-table {
-  min-width: 960px;
+#mie-dashboard-app .rechazados-col-date {
+  width: 9%;
+  text-align: left;
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-col-score {
+  width: 8%;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .rechazados-col-plan,
+#mie-dashboard-app .rechazados-col-deuda {
+  width: 9%;
+  text-align: center;
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-col-bcu {
+  width: 9%;
+  text-align: center;
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-col-retry {
+  width: 18%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .rechazados-col-ver {
+  width: 5%;
+  text-align: center;
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-status.is-positive {
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-status.is-info {
+  color: var(--accent-info);
+}
+#mie-dashboard-app .rechazados-status.is-negative {
+  color: var(--accent-danger);
+}
+@media (max-width: 640px) {
+  #mie-dashboard-app #rechazados-results .table-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #mie-dashboard-app .rechazados-table {
+    min-width: 720px;
+    table-layout: fixed;
+  }
 }
 #mie-dashboard-app .rechazados-detail-modal {
   width: min(960px, 96vw);

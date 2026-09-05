@@ -14538,13 +14538,27 @@ init();
           '</span>'
         );
       }
+      const tone = H.outreachStatusTone(label);
+      if (tone) {
+        return (
+          '<span class="rechazados-status is-' +
+          escapeHtml(tone) +
+          '">' +
+          escapeHtml(label) +
+          '</span>'
+        );
+      }
       return escapeHtml(label);
     }
     const enabled = cell.enabled === true;
     const action = cell.action ? String(cell.action) : '';
     if (enabled && action) {
+      const primary =
+        action === 'consultar-bcu' ? ' btn-primary' : '';
       return (
-        '<button type="button" class="btn rechazados-cell-btn" data-action="' +
+        '<button type="button" class="btn' +
+        primary +
+        ' rechazados-cell-btn" data-action="' +
         escapeHtml(action) +
         '" data-ci="' +
         escapeHtml(String(ci)) +
@@ -14598,6 +14612,7 @@ init();
     const body = state.rows
       .map(function (row) {
         const name = H.formatPersonName(row.nombre, row.apellido);
+        const dateCell = H.formatRejectedAtDateCell(row.rejected_at);
         const score = H.scoreCell(row.score_v2);
         const plan = H.miPlanCell(row.mi_plan_status);
         const deuda = H.miDeudaCell(
@@ -14608,31 +14623,37 @@ init();
         const retry = H.retryReviewCell(row.ops_status, row.next_review_on);
         return (
           '<tr>' +
-          '<td>' +
+          '<td class="rechazados-col-ci">' +
           escapeHtml(String(row.ci)) +
           '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-name" title="' +
           escapeHtml(name) +
+          '"><span class="rechazados-name-text">' +
+          escapeHtml(name) +
+          '</span></td>' +
+          '<td class="rechazados-col-date"' +
+          (dateCell.title
+            ? ' title="' + escapeHtml(dateCell.title) + '"'
+            : '') +
+          '>' +
+          escapeHtml(dateCell.text) +
           '</td>' +
-          '<td>' +
-          escapeHtml(H.formatTsUy(row.rejected_at)) +
-          '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-score">' +
           renderCellDescriptor(score, row.ci) +
           '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-plan">' +
           renderCellDescriptor(plan, row.ci) +
           '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-deuda">' +
           renderCellDescriptor(deuda, row.ci) +
           '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-bcu">' +
           renderCellDescriptor(bcu, row.ci) +
           '</td>' +
-          '<td>' +
+          '<td class="rechazados-col-retry">' +
           renderCellDescriptor(retry, row.ci) +
           '</td>' +
-          '<td><button type="button" class="btn" data-action="view-ci" data-ci="' +
+          '<td class="rechazados-col-ver"><button type="button" class="btn rechazados-cell-btn" data-action="view-ci" data-ci="' +
           escapeHtml(String(row.ci)) +
           '">Ver</button></td>' +
           '</tr>'
@@ -14642,9 +14663,15 @@ init();
     resultsEl.innerHTML =
       '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
       '<thead><tr>' +
-      '<th>CI</th><th>Nombre</th><th>Fecha rechazo</th><th>Score</th>' +
-      '<th>Mi Plan</th><th>Mi Deuda</th><th>Peor BCU</th>' +
-      '<th>Retry / Próx. revisión</th><th>Ver</th>' +
+      '<th class="rechazados-col-ci">CI</th>' +
+      '<th class="rechazados-col-name">Nombre</th>' +
+      '<th class="rechazados-col-date">Fecha rechazo</th>' +
+      '<th class="rechazados-col-score">Score</th>' +
+      '<th class="rechazados-col-plan">Mi Plan</th>' +
+      '<th class="rechazados-col-deuda">Mi Deuda</th>' +
+      '<th class="rechazados-col-bcu">Peor BCU</th>' +
+      '<th class="rechazados-col-retry">Retry / Próx. revisión</th>' +
+      '<th class="rechazados-col-ver">Ver</th>' +
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>';

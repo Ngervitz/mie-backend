@@ -48,6 +48,21 @@ assert.strictEqual(H.formatPersonName(null, null), '—');
 assert.strictEqual(H.formatScore(null), '—');
 assert.strictEqual(H.formatWorstBcu(null), '—');
 
+const dateCell = H.formatRejectedAtDateCell('2026-08-20T15:00:00.000Z');
+assert.strictEqual(dateCell.text, '20/08/2026');
+assert.ok(dateCell.title.indexOf('20/08/2026') !== -1);
+assert.ok(dateCell.title.indexOf(':') !== -1);
+assert.deepStrictEqual(H.formatRejectedAtDateCell(null), {
+  text: '—',
+  title: '',
+});
+assert.strictEqual(H.outreachStatusTone('Activo'), 'positive');
+assert.strictEqual(H.outreachStatusTone('Aceptó'), 'positive');
+assert.strictEqual(H.outreachStatusTone('Invitado'), 'info');
+assert.strictEqual(H.outreachStatusTone('Enviado'), 'info');
+assert.strictEqual(H.outreachStatusTone('Rechazó'), 'negative');
+assert.strictEqual(H.outreachStatusTone('Invitar'), null);
+
 assert.deepStrictEqual(H.scoreCell(24), { kind: 'text', label: '24' });
 assert.deepStrictEqual(H.scoreCell(null), {
   kind: 'cta',
@@ -133,10 +148,23 @@ assert.ok(js.indexOf('Mi Plan') !== -1);
 assert.ok(js.indexOf('Mi Deuda') !== -1);
 assert.ok(js.indexOf('Retry / Próx. revisión') !== -1);
 assert.ok(js.indexOf('Estado operativo') === -1);
-assert.ok(js.indexOf("title=\"Próximamente\"") !== -1 || js.indexOf("title='Próximamente'") !== -1 || js.indexOf('title="Próximamente"') !== -1);
-assert.ok(js.indexOf("data-action=\"consultar-bcu\"") !== -1 || js.indexOf("action: 'consultar-bcu'") !== -1 || js.indexOf('consultar-bcu') !== -1);
+assert.ok(js.indexOf('title="Próximamente"') !== -1);
+assert.ok(js.indexOf('consultar-bcu') !== -1);
 assert.ok(js.indexOf('openBcuForm') !== -1);
-assert.ok(js.indexOf('d.outreach') !== -1 || js.indexOf('detail.outreach') !== -1 || js.indexOf('outreach.mi_plan') !== -1);
+assert.ok(js.indexOf('formatRejectedAtDateCell') !== -1);
+assert.ok(js.indexOf('rechazados-col-score') !== -1);
+assert.ok(js.indexOf('btn-primary') !== -1);
+assert.ok(js.indexOf('outreach.mi_plan') !== -1 || js.indexOf('outreach.mi_plan_status') !== -1);
+
+const css = fs.readFileSync(
+  path.join(__dirname, '../public/mie-dashboard.css'),
+  'utf8',
+);
+assert.ok(css.indexOf('table-layout: fixed') !== -1);
+assert.ok(css.indexOf('min-width: 960px') === -1);
+assert.ok(css.indexOf('min-width: 720px') !== -1);
+assert.ok(css.indexOf('rechazados-col-score') !== -1);
+assert.ok(css.indexOf('rechazados-status.is-positive') !== -1);
 
 assert.strictEqual(H.buildListUrl('', null), '/rechazados');
 assert.strictEqual(
@@ -261,10 +289,6 @@ assert.ok(
   'error path must clear loading before renderList',
 );
 
-const css = fs.readFileSync(
-  path.join(__dirname, '../public/mie-dashboard.css'),
-  'utf8',
-);
 assert.ok(
   /#cz-funnel-panel,\s*#mie-dashboard-app #rechazados-panel,/.test(css) ||
     css.indexOf('#mie-dashboard-app #rechazados-panel') !== -1,

@@ -190,6 +190,40 @@
   }
 
   /**
+   * Table date cell: DD/MM/YYYY in America/Montevideo + full timestamp for title.
+   * @returns {{ text: string, title: string }}
+   */
+  function formatRejectedAtDateCell(raw) {
+    if (raw == null || raw === '') {
+      return { text: '—', title: '' };
+    }
+    var full = formatTsUy(raw);
+    var t = Date.parse(String(raw));
+    if (!Number.isFinite(t)) {
+      return { text: String(raw), title: String(raw) };
+    }
+    var ymd = new Date(t).toLocaleDateString('en-CA', {
+      timeZone: 'America/Montevideo',
+    });
+    return {
+      text: formatCalendarDateUy(ymd),
+      title: full === '—' ? String(raw) : full,
+    };
+  }
+
+  /**
+   * Subtle status tone for Mi Plan / Mi Deuda labels (text only).
+   * @returns {'positive'|'info'|'negative'|null}
+   */
+  function outreachStatusTone(label) {
+    var s = label != null ? String(label) : '';
+    if (s === 'Activo' || s === 'Aceptó') return 'positive';
+    if (s === 'Invitado' || s === 'Enviado') return 'info';
+    if (s === 'Rechazó') return 'negative';
+    return null;
+  }
+
+  /**
    * Display next_review_on. Does not recalculate the date.
    * @returns {{ text: string, overdue: boolean }}
    */
@@ -350,6 +384,8 @@
     miDeudaLabel: miDeudaLabel,
     todayYmdMontevideo: todayYmdMontevideo,
     formatCalendarDateUy: formatCalendarDateUy,
+    formatRejectedAtDateCell: formatRejectedAtDateCell,
+    outreachStatusTone: outreachStatusTone,
     formatNextReviewOn: formatNextReviewOn,
     formatTsUy: formatTsUy,
     buildListUrl: buildListUrl,
