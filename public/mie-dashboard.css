@@ -5038,7 +5038,7 @@
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-name {
-  width: 17%;
+  width: 25%;
   text-align: left;
   overflow: hidden;
 }
@@ -5100,11 +5100,17 @@
   white-space: nowrap;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-retry {
-  width: 18%;
+  width: 10%;
   text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.25;
+  overflow: visible;
+  hyphens: manual;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+#mie-dashboard-app .ga4-table.rechazados-table th.rechazados-col-retry {
+  line-height: 1.2;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-ver {
   width: 5%;
@@ -5112,7 +5118,7 @@
   white-space: nowrap;
 }
 #mie-dashboard-app .ga4-table.rechazados-table tbody tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.05);
 }
 #mie-dashboard-app .ga4-table.rechazados-table tbody tr:hover {
   background: var(--surface-2);
