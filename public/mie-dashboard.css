@@ -5021,24 +5021,24 @@
 #mie-dashboard-app #rechazados-results .table-wrap {
   overflow: visible;
 }
-#mie-dashboard-app .rechazados-table {
+#mie-dashboard-app .ga4-table.rechazados-table {
   width: 100%;
   table-layout: fixed;
   min-width: 0;
 }
-#mie-dashboard-app .rechazados-table th,
-#mie-dashboard-app .rechazados-table td {
+#mie-dashboard-app .ga4-table.rechazados-table th,
+#mie-dashboard-app .ga4-table.rechazados-table td {
   padding: 6px 8px;
   vertical-align: middle;
 }
-#mie-dashboard-app .rechazados-col-ci {
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-ci {
   width: 7%;
   text-align: left;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-#mie-dashboard-app .rechazados-col-name {
-  width: 20%;
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-name {
+  width: 17%;
   text-align: left;
   overflow: hidden;
 }
@@ -5048,36 +5048,59 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#mie-dashboard-app .rechazados-col-date {
-  width: 9%;
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-date {
+  width: 11%;
   text-align: left;
   white-space: nowrap;
+  padding-right: 16px;
 }
-#mie-dashboard-app .rechazados-col-score {
-  width: 8%;
+#mie-dashboard-app .ga4-table.rechazados-table th.rechazados-col-date {
+  white-space: normal;
+  line-height: 1.2;
+  word-break: keep-all;
+}
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-score {
+  width: 7%;
   text-align: center;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  padding-left: 14px;
+  padding-right: 10px;
 }
-#mie-dashboard-app .rechazados-col-plan,
-#mie-dashboard-app .rechazados-col-deuda {
+#mie-dashboard-app .rechazados-score {
+  display: inline-block;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+#mie-dashboard-app .rechazados-score.is-success {
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-score.is-warn {
+  color: var(--accent-warn);
+}
+#mie-dashboard-app .rechazados-score.is-danger {
+  color: var(--accent-danger);
+}
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-plan,
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-deuda {
   width: 9%;
   text-align: center;
   white-space: nowrap;
 }
-#mie-dashboard-app .rechazados-col-bcu {
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-bcu {
   width: 9%;
   text-align: center;
   white-space: nowrap;
 }
-#mie-dashboard-app .rechazados-col-retry {
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-retry {
   width: 18%;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#mie-dashboard-app .rechazados-col-ver {
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-ver {
   width: 5%;
   text-align: center;
   white-space: nowrap;
@@ -5091,12 +5114,22 @@
 #mie-dashboard-app .rechazados-status.is-negative {
   color: var(--accent-danger);
 }
+#mie-dashboard-app .rechazados-cell-btn.is-warn:disabled {
+  color: var(--accent-warn);
+  border-color: rgba(176, 137, 74, 0.35);
+  opacity: 0.55;
+}
+#mie-dashboard-app .rechazados-cell-btn.is-action:disabled {
+  color: var(--accent-info);
+  border-color: rgba(91, 127, 173, 0.4);
+  opacity: 0.55;
+}
 @media (max-width: 640px) {
   #mie-dashboard-app #rechazados-results .table-wrap {
     overflow-x: auto;
     overflow-y: hidden;
   }
-  #mie-dashboard-app .rechazados-table {
+  #mie-dashboard-app .ga4-table.rechazados-table {
     min-width: 720px;
     table-layout: fixed;
   }

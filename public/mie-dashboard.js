@@ -14538,6 +14538,15 @@ init();
           '</span>'
         );
       }
+      if (cell && cell.tone) {
+        return (
+          '<span class="rechazados-score is-' +
+          escapeHtml(String(cell.tone)) +
+          '">' +
+          escapeHtml(label) +
+          '</span>'
+        );
+      }
       const tone = H.outreachStatusTone(label);
       if (tone) {
         return (
@@ -14552,6 +14561,8 @@ init();
     }
     const enabled = cell.enabled === true;
     const action = cell.action ? String(cell.action) : '';
+    const btnTone = cell.btnTone ? String(cell.btnTone) : '';
+    const toneClass = btnTone ? ' is-' + btnTone : '';
     if (enabled && action) {
       const primary =
         action === 'consultar-bcu' ? ' btn-primary' : '';
@@ -14568,7 +14579,9 @@ init();
       );
     }
     return (
-      '<button type="button" class="btn rechazados-cell-btn" disabled title="Próximamente">' +
+      '<button type="button" class="btn rechazados-cell-btn' +
+      toneClass +
+      '" disabled title="Próximamente">' +
       escapeHtml(cell.label) +
       '</button>'
     );

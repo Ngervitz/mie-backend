@@ -63,7 +63,29 @@ assert.strictEqual(H.outreachStatusTone('Enviado'), 'info');
 assert.strictEqual(H.outreachStatusTone('Rechazó'), 'negative');
 assert.strictEqual(H.outreachStatusTone('Invitar'), null);
 
-assert.deepStrictEqual(H.scoreCell(24), { kind: 'text', label: '24' });
+assert.deepStrictEqual(H.scoreCell(24), {
+  kind: 'text',
+  label: '24',
+  tone: 'success',
+});
+assert.deepStrictEqual(H.scoreCell(16), {
+  kind: 'text',
+  label: '16',
+  tone: 'warn',
+});
+assert.deepStrictEqual(H.scoreCell(5), {
+  kind: 'text',
+  label: '5',
+  tone: 'danger',
+});
+assert.strictEqual(H.scoreTone(30), 'success');
+assert.strictEqual(H.scoreTone(20), 'success');
+assert.strictEqual(H.scoreTone(19), 'warn');
+assert.strictEqual(H.scoreTone(10), 'warn');
+assert.strictEqual(H.scoreTone(9), 'danger');
+assert.strictEqual(H.scoreTone(0), 'danger');
+assert.strictEqual(H.scoreTone(31), null);
+assert.strictEqual(H.scoreTone(null), null);
 assert.deepStrictEqual(H.scoreCell(null), {
   kind: 'cta',
   label: 'Encuestar',
@@ -100,6 +122,7 @@ assert.deepStrictEqual(H.miDeudaCell('invite_sent', true), {
   label: 'Reinvitar',
   enabled: false,
   action: null,
+  btnTone: 'warn',
 });
 assert.deepStrictEqual(H.miDeudaCell('opt_in_accepted'), {
   kind: 'text',
@@ -122,6 +145,7 @@ assert.deepStrictEqual(H.retryReviewCell('retry_eligible', null), {
   label: 'Reintentar',
   enabled: false,
   action: null,
+  btnTone: 'action',
 });
 assert.deepStrictEqual(H.retryReviewCell('bcu_pending', null), {
   kind: 'text',
@@ -153,6 +177,7 @@ assert.ok(js.indexOf('consultar-bcu') !== -1);
 assert.ok(js.indexOf('openBcuForm') !== -1);
 assert.ok(js.indexOf('formatRejectedAtDateCell') !== -1);
 assert.ok(js.indexOf('rechazados-col-score') !== -1);
+assert.ok(js.indexOf('rechazados-score') !== -1);
 assert.ok(js.indexOf('btn-primary') !== -1);
 assert.ok(js.indexOf('outreach.mi_plan') !== -1 || js.indexOf('outreach.mi_plan_status') !== -1);
 
@@ -165,6 +190,12 @@ assert.ok(css.indexOf('min-width: 960px') === -1);
 assert.ok(css.indexOf('min-width: 720px') !== -1);
 assert.ok(css.indexOf('rechazados-col-score') !== -1);
 assert.ok(css.indexOf('rechazados-status.is-positive') !== -1);
+assert.ok(css.indexOf('rechazados-score.is-success') !== -1);
+assert.ok(css.indexOf('rechazados-score.is-warn') !== -1);
+assert.ok(css.indexOf('rechazados-score.is-danger') !== -1);
+assert.ok(css.indexOf('th.rechazados-col-date') !== -1);
+assert.ok(css.indexOf('.ga4-table.rechazados-table .rechazados-col-score') !== -1);
+assert.ok(js.indexOf('rechazados-score is-') !== -1 || js.indexOf('rechazados-score') !== -1);
 
 assert.strictEqual(H.buildListUrl('', null), '/rechazados');
 assert.strictEqual(

@@ -64,8 +64,22 @@
   }
 
   /**
+   * Visual tone for raw score_v2 only (not segment A/B/C).
+   * @returns {'success'|'warn'|'danger'|null}
+   */
+  function scoreTone(score) {
+    if (score == null || score === '') return null;
+    var n = Number(score);
+    if (!Number.isFinite(n)) return null;
+    if (n >= 20 && n <= 30) return 'success';
+    if (n >= 10 && n <= 19) return 'warn';
+    if (n >= 0 && n <= 9) return 'danger';
+    return null;
+  }
+
+  /**
    * List/detail presentation descriptors (no DOM).
-   * @returns {{ kind: 'text'|'cta', label: string, enabled?: boolean, action?: string|null }}
+   * @returns {{ kind: 'text'|'cta', label: string, enabled?: boolean, action?: string|null, tone?: string|null, btnTone?: string|null }}
    */
   function scoreCell(score) {
     if (score == null || score === '') {
@@ -85,7 +99,11 @@
         action: null,
       };
     }
-    return { kind: 'text', label: String(score) };
+    return {
+      kind: 'text',
+      label: String(score),
+      tone: scoreTone(n),
+    };
   }
 
   function miPlanCell(status) {
@@ -111,6 +129,7 @@
           label: 'Reinvitar',
           enabled: false,
           action: null,
+          btnTone: 'warn',
         };
       }
       return { kind: 'text', label: 'Enviado' };
@@ -147,6 +166,7 @@
         label: 'Reintentar',
         enabled: false,
         action: null,
+        btnTone: 'action',
       };
     }
     if (status === 'reconsultable') {
@@ -376,6 +396,7 @@
     formatScore: formatScore,
     formatWorstBcu: formatWorstBcu,
     scoreCell: scoreCell,
+    scoreTone: scoreTone,
     miPlanCell: miPlanCell,
     miDeudaCell: miDeudaCell,
     worstBcuCell: worstBcuCell,
