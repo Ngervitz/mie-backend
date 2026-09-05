@@ -134,10 +134,14 @@ assert.deepStrictEqual(H.miDeudaCell('opt_in_rejected'), {
 });
 assert.strictEqual(H.miDeudaLabel('opt_in_accepted', false), 'Aceptó');
 assert.deepStrictEqual(H.worstBcuCell(null), {
-  kind: 'cta',
-  label: 'Consultar',
-  enabled: true,
-  action: 'consultar-bcu',
+  kind: 'text',
+  label: 'Pendiente',
+  muted: true,
+});
+assert.deepStrictEqual(H.worstBcuCell(''), {
+  kind: 'text',
+  label: 'Pendiente',
+  muted: true,
 });
 assert.deepStrictEqual(H.worstBcuCell('1C'), { kind: 'text', label: '1C' });
 assert.deepStrictEqual(H.retryReviewCell('retry_eligible', null), {
@@ -173,12 +177,14 @@ assert.ok(js.indexOf('Mi Deuda') !== -1);
 assert.ok(js.indexOf('Retry / Próx. revisión') !== -1);
 assert.ok(js.indexOf('Estado operativo') === -1);
 assert.ok(js.indexOf('title="Próximamente"') !== -1);
-assert.ok(js.indexOf('consultar-bcu') !== -1);
-assert.ok(js.indexOf('openBcuForm') !== -1);
+assert.ok(js.indexOf('consultar-bcu') === -1);
+assert.ok(js.indexOf('openBcuForm') === -1);
+assert.ok(js.indexOf('data-action="open-form"') !== -1);
+assert.ok(js.indexOf('Cargar BCU') !== -1);
 assert.ok(js.indexOf('formatRejectedAtDateCell') !== -1);
 assert.ok(js.indexOf('rechazados-col-score') !== -1);
 assert.ok(js.indexOf('rechazados-score') !== -1);
-assert.ok(js.indexOf('btn-primary') !== -1);
+assert.ok(js.indexOf('rechazados-muted') !== -1);
 assert.ok(js.indexOf('outreach.mi_plan') !== -1 || js.indexOf('outreach.mi_plan_status') !== -1);
 
 const css = fs.readFileSync(
@@ -195,6 +201,11 @@ assert.ok(css.indexOf('rechazados-score.is-warn') !== -1);
 assert.ok(css.indexOf('rechazados-score.is-danger') !== -1);
 assert.ok(css.indexOf('th.rechazados-col-date') !== -1);
 assert.ok(css.indexOf('.ga4-table.rechazados-table .rechazados-col-score') !== -1);
+assert.ok(css.indexOf('rechazados-score-slot') !== -1);
+assert.ok(css.indexOf('justify-content: center') !== -1);
+assert.ok(css.indexOf('tbody tr:nth-child(even)') !== -1);
+assert.ok(css.indexOf('rechazados-muted') !== -1);
+assert.ok(js.indexOf('rechazados-score-slot') !== -1);
 assert.ok(js.indexOf('rechazados-score is-') !== -1 || js.indexOf('rechazados-score') !== -1);
 
 assert.strictEqual(H.buildListUrl('', null), '/rechazados');

@@ -5064,8 +5064,14 @@
   text-align: center;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  padding-left: 14px;
-  padding-right: 10px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+#mie-dashboard-app .rechazados-score-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
 }
 #mie-dashboard-app .rechazados-score {
   display: inline-block;
@@ -5104,6 +5110,15 @@
   width: 5%;
   text-align: center;
   white-space: nowrap;
+}
+#mie-dashboard-app .ga4-table.rechazados-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.025);
+}
+#mie-dashboard-app .ga4-table.rechazados-table tbody tr:hover {
+  background: var(--surface-2);
+}
+#mie-dashboard-app .rechazados-muted {
+  color: var(--text-muted);
 }
 #mie-dashboard-app .rechazados-status.is-positive {
   color: var(--accent-success);

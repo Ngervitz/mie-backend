@@ -144,12 +144,7 @@
 
   function worstBcuCell(cat) {
     if (cat == null || cat === '') {
-      return {
-        kind: 'cta',
-        label: 'Consultar',
-        enabled: true,
-        action: 'consultar-bcu',
-      };
+      return { kind: 'text', label: 'Pendiente', muted: true };
     }
     return { kind: 'text', label: String(cat) };
   }

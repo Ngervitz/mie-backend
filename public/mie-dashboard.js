@@ -14557,6 +14557,11 @@ init();
           '</span>'
         );
       }
+      if (cell && cell.muted) {
+        return (
+          '<span class="rechazados-muted">' + escapeHtml(label) + '</span>'
+        );
+      }
       return escapeHtml(label);
     }
     const enabled = cell.enabled === true;
@@ -14564,12 +14569,8 @@ init();
     const btnTone = cell.btnTone ? String(cell.btnTone) : '';
     const toneClass = btnTone ? ' is-' + btnTone : '';
     if (enabled && action) {
-      const primary =
-        action === 'consultar-bcu' ? ' btn-primary' : '';
       return (
-        '<button type="button" class="btn' +
-        primary +
-        ' rechazados-cell-btn" data-action="' +
+        '<button type="button" class="btn rechazados-cell-btn" data-action="' +
         escapeHtml(action) +
         '" data-ci="' +
         escapeHtml(String(ci)) +
@@ -14651,9 +14652,9 @@ init();
           '>' +
           escapeHtml(dateCell.text) +
           '</td>' +
-          '<td class="rechazados-col-score">' +
+          '<td class="rechazados-col-score"><span class="rechazados-score-slot">' +
           renderCellDescriptor(score, row.ci) +
-          '</td>' +
+          '</span></td>' +
           '<td class="rechazados-col-plan">' +
           renderCellDescriptor(plan, row.ci) +
           '</td>' +
@@ -15205,9 +15206,7 @@ init();
     }
   }
 
-  async function openDetail(ci, options) {
-    const opts = options && typeof options === 'object' ? options : {};
-    const openBcuForm = opts.openBcuForm === true;
+  async function openDetail(ci) {
     state.detailCi = ci;
     state.detail = null;
     state.detailError = null;
@@ -15234,11 +15233,6 @@ init();
       }
       state.detail = data && data.data ? data.data : null;
       state.detailLoading = false;
-      if (openBcuForm && state.detail) {
-        resetForm(ci);
-        state.showForm = true;
-        state.formSuccess = null;
-      }
       renderDetailModal();
     } catch (_err) {
       state.detailError = 'No se pudo conectar.';
@@ -15411,9 +15405,6 @@ init();
     if (action === 'view-ci') {
       openDetail(ci);
       return;
-    }
-    if (action === 'consultar-bcu') {
-      openDetail(ci, { openBcuForm: true });
     }
   });
 
