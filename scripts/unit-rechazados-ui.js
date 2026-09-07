@@ -134,16 +134,20 @@ assert.deepStrictEqual(H.miDeudaCell('opt_in_rejected'), {
 });
 assert.strictEqual(H.miDeudaLabel('opt_in_accepted', false), 'Aceptó');
 assert.deepStrictEqual(H.worstBcuCell(null), {
-  kind: 'text',
+  kind: 'badge',
   label: 'Pendiente',
-  muted: true,
+  badgeClass: 'is-bcu-pending',
 });
 assert.deepStrictEqual(H.worstBcuCell(''), {
-  kind: 'text',
+  kind: 'badge',
   label: 'Pendiente',
-  muted: true,
+  badgeClass: 'is-bcu-pending',
 });
-assert.deepStrictEqual(H.worstBcuCell('1C'), { kind: 'text', label: '1C' });
+assert.deepStrictEqual(H.worstBcuCell('1C'), {
+  kind: 'badge',
+  label: '1C',
+  badgeClass: 'is-bcu-1c',
+});
 assert.deepStrictEqual(H.retryReviewCell('retry_eligible', null), {
   kind: 'cta',
   label: 'Reintentar',
@@ -383,5 +387,128 @@ for (let i = 0; i < fixtureRows.length; i += 1) {
   assert.ok(typeof H.opsStatusLabel(row.ops_status) === 'string');
   assert.ok(typeof H.formatNextReviewOn(row.next_review_on).text === 'string');
 }
+
+// Stage 5 — money null≠0, extract helpers, UI wiring
+assert.strictEqual(H.moneyCell(null), '—');
+assert.strictEqual(H.moneyCell(undefined), '—');
+assert.strictEqual(H.moneyCell(''), '—');
+assert.strictEqual(H.moneyCell(0), '0');
+assert.strictEqual(H.moneyCell(12.5), '12.5');
+
+const emptyInst = H.emptyExtractInstitution();
+assert.strictEqual(emptyInst.institution_name_raw, '');
+assert.strictEqual(emptyInst.category, null);
+assert.strictEqual(emptyInst.vigente.mn, null);
+assert.strictEqual(emptyInst.castigado_por_atraso.me, null);
+assert.strictEqual(emptyInst.creditos_reestructurados.mn, null);
+
+assert.strictEqual(H.moneyModeFromValue(null), 'null');
+assert.strictEqual(H.moneyModeFromValue(0), 'zero');
+assert.strictEqual(H.moneyModeFromValue(10), 'value');
+assert.strictEqual(H.moneyValueFromMode('null', '9'), null);
+assert.strictEqual(H.moneyValueFromMode('zero', '9'), 0);
+assert.strictEqual(H.moneyValueFromMode('value', '9'), 9);
+
+const reviewedOk = H.extractionToReviewed({
+  extraction_contract_version: 'bcu_v1',
+  currency_view_selected: 'MN_PESOS_ME_PESOS',
+  period: '2026-08',
+  document_ci_raw: '45006120',
+  institutions: [
+    {
+      institution_name_raw: 'OCA S.A.',
+      category: '1C',
+      vigente: { mn: 100, me: null },
+      vigente_no_autoliquidable: { mn: null, me: null },
+      moroso: { mn: 0, me: null },
+      castigado_por_atraso: { mn: null, me: null },
+      contingencias: { mn: null, me: null },
+      creditos_reestructurados: { mn: null, me: null },
+    },
+  ],
+  summary: H.emptyExtractSummary(),
+});
+assert.strictEqual(H.validateReviewedUx(reviewedOk).ok, true);
+assert.strictEqual(reviewedOk.institutions[0].vigente.me, null);
+assert.strictEqual(reviewedOk.institutions[0].moroso.mn, 0);
+
+assert.strictEqual(
+  H.validateReviewedUx({
+    institutions: [],
+    summary: H.emptyExtractSummary(),
+  }).ok,
+  false,
+);
+assert.strictEqual(
+  H.validateReviewedUx({
+    institutions: [H.emptyExtractInstitution()],
+    summary: H.emptyExtractSummary(),
+  }).ok,
+  false,
+);
+
+const dup = H.extractionToReviewed(reviewedOk);
+dup.institutions.push(
+  Object.assign(H.emptyExtractInstitution(), {
+    institution_name_raw: 'oca s.a.',
+    category: '2A',
+  }),
+);
+assert.strictEqual(H.validateReviewedUx(dup).ok, false);
+
+const payload = H.buildConfirmPayload('2026-09-06', reviewedOk);
+assert.deepStrictEqual(Object.keys(payload).sort(), [
+  'consulted_on',
+  'reviewed',
+]);
+assert.strictEqual(payload.consulted_on, '2026-09-06');
+
+assert.strictEqual(H.shouldContinueExtractPoll(0, 'extracting'), true);
+assert.strictEqual(
+  H.shouldContinueExtractPoll(H.BCU_EXTRACT_POLL_MAX_MS, 'extracting'),
+  false,
+);
+assert.strictEqual(H.shouldContinueExtractPoll(1000, 'pending_review'), false);
+assert.strictEqual(H.extractPollIntervalMs(), 3000);
+assert.strictEqual(H.extractPollMaxMs(), 90000);
+
+assert.strictEqual(H.institutionHistoryAmountKeys().length, 12);
+
+assert.ok(js.indexOf('renderExtractAssist') !== -1);
+assert.ok(js.indexOf('bcu-extraction-drafts') !== -1);
+assert.ok(js.indexOf('extract-confirm') !== -1);
+assert.ok(js.indexOf('stopExtractPoll') !== -1);
+assert.ok(js.indexOf('refreshExtractLatest') !== -1);
+assert.ok(js.indexOf('creditos_reestructurados_mn') !== -1);
+assert.ok(js.indexOf('VigNA MN') !== -1);
+assert.ok(!/initRechazados[\s\S]*storage_path/.test(js));
+assert.ok(js.indexOf('file_url') !== -1);
+
+// BCU category badge mapping (presentation only)
+assert.strictEqual(H.bcuCategoryBadgeClass('1C'), 'is-bcu-1c');
+assert.strictEqual(H.bcuCategoryBadgeClass('2A'), 'is-bcu-2a');
+assert.strictEqual(H.bcuCategoryBadgeClass('2B'), 'is-bcu-2b');
+assert.strictEqual(H.bcuCategoryBadgeClass('3'), 'is-bcu-3');
+assert.strictEqual(H.bcuCategoryBadgeClass('4'), 'is-bcu-4');
+assert.strictEqual(H.bcuCategoryBadgeClass('5'), 'is-bcu-5');
+assert.strictEqual(H.bcuCategoryBadgeClass(null), 'is-bcu-pending');
+assert.strictEqual(H.bcuCategoryBadgeClass(''), 'is-bcu-pending');
+assert.strictEqual(H.bcuCategoryBadgeClass('9Z'), 'is-bcu-pending');
+assert.strictEqual(H.bcuCategoryBadgeClass(' pending '), 'is-bcu-pending');
+assert.deepStrictEqual(H.worstBcuCell(null), {
+  kind: 'badge',
+  label: 'Pendiente',
+  badgeClass: 'is-bcu-pending',
+});
+assert.deepStrictEqual(H.worstBcuCell('2B'), {
+  kind: 'badge',
+  label: '2B',
+  badgeClass: 'is-bcu-2b',
+});
+assert.strictEqual(H.formatWorstBcu('1C'), '1C');
+assert.ok(js.indexOf('rechazados-bcu-badge') !== -1);
+assert.ok(css.indexOf('rechazados-bcu-badge') !== -1);
+assert.ok(css.indexOf('is-bcu-1c') !== -1);
+assert.ok(css.indexOf('is-bcu-5') !== -1);
 
 console.log('OK unit-rechazados-ui');

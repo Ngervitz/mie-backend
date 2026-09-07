@@ -35,7 +35,22 @@
     'image/webp': true,
     'application/pdf': true,
   });
+  var EXTRACT_ALLOWED_MIME = Object.freeze({
+    'image/jpeg': true,
+    'image/png': true,
+    'image/webp': true,
+  });
   var MAX_FILE_BYTES = 10 * 1024 * 1024;
+  var EXTRACT_RUBRO_KEYS = Object.freeze([
+    'vigente',
+    'vigente_no_autoliquidable',
+    'moroso',
+    'castigado_por_atraso',
+    'contingencias',
+    'creditos_reestructurados',
+  ]);
+  var BCU_EXTRACT_POLL_MS = 3000;
+  var BCU_EXTRACT_POLL_MAX_MS = 90000;
 
   function opsStatusLabel(status) {
     if (status == null || status === '') return '—';
@@ -64,6 +79,23 @@
   }
 
   /**
+   * Visual CSS modifier for BCU category badges (presentation only).
+   * Known: is-bcu-1c|2a|2b|3|4|5. Null/unknown → is-bcu-pending (neutral).
+   * @returns {string}
+   */
+  function bcuCategoryBadgeClass(cat) {
+    if (cat == null || cat === '') return 'is-bcu-pending';
+    var key = String(cat).trim().toUpperCase();
+    if (key === '1C') return 'is-bcu-1c';
+    if (key === '2A') return 'is-bcu-2a';
+    if (key === '2B') return 'is-bcu-2b';
+    if (key === '3') return 'is-bcu-3';
+    if (key === '4') return 'is-bcu-4';
+    if (key === '5') return 'is-bcu-5';
+    return 'is-bcu-pending';
+  }
+
+  /**
    * Visual tone for raw score_v2 only (not segment A/B/C).
    * @returns {'success'|'warn'|'danger'|null}
    */
@@ -79,7 +111,6 @@
 
   /**
    * List/detail presentation descriptors (no DOM).
-   * @returns {{ kind: 'text'|'cta', label: string, enabled?: boolean, action?: string|null, tone?: string|null, btnTone?: string|null }}
    */
   function scoreCell(score) {
     if (score == null || score === '') {
@@ -144,15 +175,19 @@
 
   function worstBcuCell(cat) {
     if (cat == null || cat === '') {
-      return { kind: 'text', label: 'Pendiente', muted: true };
+      return {
+        kind: 'badge',
+        label: 'Pendiente',
+        badgeClass: bcuCategoryBadgeClass(null),
+      };
     }
-    return { kind: 'text', label: String(cat) };
+    return {
+      kind: 'badge',
+      label: String(cat),
+      badgeClass: bcuCategoryBadgeClass(cat),
+    };
   }
 
-  /**
-   * Combined Retry / next_review presentation from ops_status + next_review_on.
-   * Does not recalculate next_review_on.
-   */
   function retryReviewCell(opsStatus, nextReviewOn, nowMs) {
     var status = opsStatus != null ? String(opsStatus) : '';
     if (status === 'retry_eligible') {
@@ -204,10 +239,6 @@
     return m[3] + '/' + m[2] + '/' + m[1];
   }
 
-  /**
-   * Table date cell: DD/MM/YYYY in America/Montevideo + full timestamp for title.
-   * @returns {{ text: string, title: string }}
-   */
   function formatRejectedAtDateCell(raw) {
     if (raw == null || raw === '') {
       return { text: '—', title: '' };
@@ -226,10 +257,6 @@
     };
   }
 
-  /**
-   * Subtle status tone for Mi Plan / Mi Deuda labels (text only).
-   * @returns {'positive'|'info'|'negative'|null}
-   */
   function outreachStatusTone(label) {
     var s = label != null ? String(label) : '';
     if (s === 'Activo' || s === 'Aceptó') return 'positive';
@@ -238,10 +265,6 @@
     return null;
   }
 
-  /**
-   * Display next_review_on. Does not recalculate the date.
-   * @returns {{ text: string, overdue: boolean }}
-   */
   function formatNextReviewOn(ymd, nowMs) {
     if (ymd == null || ymd === '') {
       return { text: '—', overdue: false };
@@ -298,9 +321,6 @@
     return n;
   }
 
-  /**
-   * @returns {{ ok: true, institutions: object[] } | { ok: false, error: string }}
-   */
   function serializeInstitutions(rows) {
     if (!Array.isArray(rows) || !rows.length) {
       return { ok: false, error: 'Agregá al menos una institución' };
@@ -316,8 +336,7 @@
           error: 'Completá el nombre de la institución #' + (i + 1),
         };
       }
-      var cat =
-        row.category != null ? String(row.category).trim() : '';
+      var cat = row.category != null ? String(row.category).trim() : '';
       if (BCU_CATEGORIES.indexOf(cat) === -1) {
         return {
           ok: false,
@@ -380,16 +399,267 @@
     return Number(count) > 1;
   }
 
+  function moneyCell(v) {
+    if (v == null || v === '') return '—';
+    return String(v);
+  }
+
+  function moneyPairNull() {
+    return { mn: null, me: null };
+  }
+
+  function emptyExtractInstitution() {
+    return {
+      institution_name_raw: '',
+      category: null,
+      vigente: moneyPairNull(),
+      vigente_no_autoliquidable: moneyPairNull(),
+      moroso: moneyPairNull(),
+      castigado_por_atraso: moneyPairNull(),
+      contingencias: moneyPairNull(),
+      creditos_reestructurados: moneyPairNull(),
+    };
+  }
+
+  function emptyExtractSummary() {
+    var out = {};
+    for (var i = 0; i < EXTRACT_RUBRO_KEYS.length; i += 1) {
+      out[EXTRACT_RUBRO_KEYS[i]] = moneyPairNull();
+    }
+    return out;
+  }
+
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizeMoneyPair(pair) {
+    var src = pair && typeof pair === 'object' ? pair : {};
+    function side(raw) {
+      if (raw === null || raw === undefined || raw === '') return null;
+      if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+      var n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    }
+    return { mn: side(src.mn), me: side(src.me) };
+  }
+
+  function extractionToReviewed(extraction) {
+    var src =
+      extraction && typeof extraction === 'object' ? cloneJson(extraction) : {};
+    var institutions = Array.isArray(src.institutions) ? src.institutions : [];
+    var mapped = [];
+    for (var i = 0; i < institutions.length; i += 1) {
+      var inst = institutions[i] || {};
+      var row = {
+        institution_name_raw:
+          inst.institution_name_raw != null
+            ? String(inst.institution_name_raw)
+            : '',
+        category: inst.category != null ? inst.category : null,
+      };
+      for (var r = 0; r < EXTRACT_RUBRO_KEYS.length; r += 1) {
+        var key = EXTRACT_RUBRO_KEYS[r];
+        row[key] = normalizeMoneyPair(inst[key]);
+      }
+      mapped.push(row);
+    }
+    var summarySrc =
+      src.summary && typeof src.summary === 'object' ? src.summary : {};
+    var summary = {};
+    for (var s = 0; s < EXTRACT_RUBRO_KEYS.length; s += 1) {
+      var sk = EXTRACT_RUBRO_KEYS[s];
+      summary[sk] = normalizeMoneyPair(summarySrc[sk]);
+    }
+    var reviewSrc =
+      src.review && typeof src.review === 'object' ? src.review : {};
+    return {
+      extraction_contract_version:
+        src.extraction_contract_version != null
+          ? src.extraction_contract_version
+          : 'bcu_v1',
+      currency_view_selected:
+        src.currency_view_selected != null
+          ? src.currency_view_selected
+          : 'MN_PESOS_ME_PESOS',
+      period: src.period != null ? src.period : null,
+      document_ci_raw:
+        src.document_ci_raw != null ? src.document_ci_raw : null,
+      institutions: mapped,
+      summary: summary,
+      review: {
+        warnings: Array.isArray(reviewSrc.warnings)
+          ? reviewSrc.warnings.slice()
+          : [],
+        illegible_fields: Array.isArray(reviewSrc.illegible_fields)
+          ? reviewSrc.illegible_fields.slice()
+          : [],
+      },
+    };
+  }
+
+  function moneyModeFromValue(v) {
+    if (v === null || v === undefined || v === '') return 'null';
+    if (typeof v === 'number' && Number.isFinite(v) && v === 0) return 'zero';
+    return 'value';
+  }
+
+  function moneyValueFromMode(mode, rawInput) {
+    if (mode === 'null') return null;
+    if (mode === 'zero') return 0;
+    if (rawInput === '' || rawInput == null) return NaN;
+    var n = Number(rawInput);
+    return n;
+  }
+
+  function validateReviewedUx(reviewed) {
+    if (!reviewed || typeof reviewed !== 'object') {
+      return { ok: false, error: 'Extracción inválida' };
+    }
+    var list = reviewed.institutions;
+    if (!Array.isArray(list) || !list.length) {
+      return { ok: false, error: 'Agregá al menos una institución' };
+    }
+    var seen = Object.create(null);
+    for (var i = 0; i < list.length; i += 1) {
+      var inst = list[i] || {};
+      var name =
+        inst.institution_name_raw != null
+          ? String(inst.institution_name_raw).trim()
+          : '';
+      if (!name) {
+        return {
+          ok: false,
+          error: 'Completá el nombre de la institución #' + (i + 1),
+        };
+      }
+      var dupKey = name.toLowerCase();
+      if (seen[dupKey]) {
+        return {
+          ok: false,
+          error: 'Institución duplicada: ' + name,
+        };
+      }
+      seen[dupKey] = true;
+
+      if (inst.category == null || inst.category === '') {
+        return {
+          ok: false,
+          error: 'Indicá la categoría de la institución #' + (i + 1),
+        };
+      }
+      if (BCU_CATEGORIES.indexOf(String(inst.category)) === -1) {
+        return {
+          ok: false,
+          error: 'Categoría inválida en institución #' + (i + 1),
+        };
+      }
+
+      for (var r = 0; r < EXTRACT_RUBRO_KEYS.length; r += 1) {
+        var pair = inst[EXTRACT_RUBRO_KEYS[r]];
+        var sides = ['mn', 'me'];
+        for (var si = 0; si < sides.length; si += 1) {
+          var v = pair && typeof pair === 'object' ? pair[sides[si]] : undefined;
+          if (v === null || v === undefined) continue;
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+            return {
+              ok: false,
+              error: 'Monto inválido en institución #' + (i + 1),
+            };
+          }
+        }
+      }
+    }
+
+    var summary =
+      reviewed.summary && typeof reviewed.summary === 'object'
+        ? reviewed.summary
+        : {};
+    for (var sr = 0; sr < EXTRACT_RUBRO_KEYS.length; sr += 1) {
+      var sp = summary[EXTRACT_RUBRO_KEYS[sr]];
+      var ssides = ['mn', 'me'];
+      for (var ss = 0; ss < ssides.length; ss += 1) {
+        var sv = sp && typeof sp === 'object' ? sp[ssides[ss]] : undefined;
+        if (sv === null || sv === undefined) continue;
+        if (typeof sv !== 'number' || !Number.isFinite(sv) || sv < 0) {
+          return { ok: false, error: 'Monto inválido en resumen' };
+        }
+      }
+    }
+    return { ok: true };
+  }
+
+  function buildConfirmPayload(consultedOn, reviewed) {
+    return {
+      consulted_on: consultedOn,
+      reviewed: reviewed,
+    };
+  }
+
+  function validateExtractSelectedFile(file) {
+    if (!file) return { ok: false, error: 'Seleccioná una imagen' };
+    var mime = String(file.type || '')
+      .toLowerCase()
+      .split(';')[0]
+      .trim();
+    if (!EXTRACT_ALLOWED_MIME[mime]) {
+      return { ok: false, error: 'Archivo no permitido (JPEG, PNG o WEBP)' };
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      return { ok: false, error: 'El archivo supera 10 MB' };
+    }
+    return { ok: true, file: file };
+  }
+
+  function shouldContinueExtractPoll(elapsedMs, status) {
+    if (status !== 'extracting') return false;
+    if (!Number.isFinite(elapsedMs) || elapsedMs >= BCU_EXTRACT_POLL_MAX_MS) {
+      return false;
+    }
+    return true;
+  }
+
+  function extractPollIntervalMs() {
+    return BCU_EXTRACT_POLL_MS;
+  }
+
+  function extractPollMaxMs() {
+    return BCU_EXTRACT_POLL_MAX_MS;
+  }
+
+  function institutionHistoryAmountKeys() {
+    return [
+      'vigente_mn',
+      'vigente_me',
+      'vigente_no_autoliquidable_mn',
+      'vigente_no_autoliquidable_me',
+      'moroso_mn',
+      'moroso_me',
+      'castigado_mn',
+      'castigado_me',
+      'contingencias_mn',
+      'contingencias_me',
+      'creditos_reestructurados_mn',
+      'creditos_reestructurados_me',
+    ];
+  }
+
   return {
     OPS_STATUS_LABELS: OPS_STATUS_LABELS,
     FILTERS: FILTERS,
     BCU_CATEGORIES: BCU_CATEGORIES,
     ALLOWED_MIME: ALLOWED_MIME,
+    EXTRACT_ALLOWED_MIME: EXTRACT_ALLOWED_MIME,
     MAX_FILE_BYTES: MAX_FILE_BYTES,
+    EXTRACT_RUBRO_KEYS: EXTRACT_RUBRO_KEYS,
+    BCU_EXTRACT_POLL_MS: BCU_EXTRACT_POLL_MS,
+    BCU_EXTRACT_POLL_MAX_MS: BCU_EXTRACT_POLL_MAX_MS,
     opsStatusLabel: opsStatusLabel,
     formatPersonName: formatPersonName,
     formatScore: formatScore,
     formatWorstBcu: formatWorstBcu,
+    bcuCategoryBadgeClass: bcuCategoryBadgeClass,
     scoreCell: scoreCell,
     scoreTone: scoreTone,
     miPlanCell: miPlanCell,
@@ -410,5 +680,18 @@
     validateSelectedFile: validateSelectedFile,
     formatFileSize: formatFileSize,
     canRemoveInstitution: canRemoveInstitution,
+    moneyCell: moneyCell,
+    emptyExtractInstitution: emptyExtractInstitution,
+    emptyExtractSummary: emptyExtractSummary,
+    extractionToReviewed: extractionToReviewed,
+    moneyModeFromValue: moneyModeFromValue,
+    moneyValueFromMode: moneyValueFromMode,
+    validateReviewedUx: validateReviewedUx,
+    buildConfirmPayload: buildConfirmPayload,
+    validateExtractSelectedFile: validateExtractSelectedFile,
+    shouldContinueExtractPoll: shouldContinueExtractPoll,
+    extractPollIntervalMs: extractPollIntervalMs,
+    extractPollMaxMs: extractPollMaxMs,
+    institutionHistoryAmountKeys: institutionHistoryAmountKeys,
   };
 });

@@ -70,13 +70,23 @@ function reuseFlags(draft, nowMs) {
   return { can_retry: false, in_progress: false };
 }
 
+function buildDraftFileUrl(ci, draftId) {
+  return (
+    '/rechazados/' +
+    encodeURIComponent(String(ci)) +
+    '/bcu-extraction-drafts/' +
+    encodeURIComponent(String(draftId)) +
+    '/file'
+  );
+}
+
+/** Public draft meta — never includes storage_path (browser uses file_url proxy). */
 function publicDraft(row) {
   if (!row) return null;
   return {
     id: row.id,
     ci: row.ci,
     status: row.status,
-    storage_path: row.storage_path,
     original_filename: row.original_filename,
     content_type: row.content_type,
     file_size_bytes: row.file_size_bytes,
@@ -93,6 +103,8 @@ function publicDraft(row) {
     confirmed_at: row.confirmed_at,
     purge_after: row.purge_after,
     lease_expires_at: row.lease_expires_at,
+    file_available: !!row.storage_path,
+    file_url: buildDraftFileUrl(row.ci, row.id),
   };
 }
 

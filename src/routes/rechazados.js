@@ -33,6 +33,15 @@ const {
   retryBcuExtractionDraft,
 } = require('../lib/rejectedBcuExtractDraft');
 const { confirmBcuExtractionDraft } = require('../lib/rejectedBcuExtractConfirm');
+const {
+  assertDraftId,
+  summarizeDraft,
+  detailDraft,
+  fetchLatestActiveDraft,
+  fetchDraftByIdAndCi,
+  assertDraftReadableStatus,
+  loadDraftFileBytes,
+} = require('../lib/rejectedBcuExtractRead');
 
 const router = express.Router();
 
@@ -330,6 +339,126 @@ router.post(
         },
       );
       return sendWriteError(res, err);
+    }
+  },
+);
+
+router.get(
+  '/:ci/bcu-extraction-drafts',
+  async function getLatestBcuExtractionDraft(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+
+    try {
+      const inUniverse = await fetchCiHasRejectedHistorico(supabase, ci);
+      if (!inUniverse) {
+        return res.status(404).json({ error: 'No encontrado' });
+      }
+
+      const row = await fetchLatestActiveDraft(supabase, ci);
+      const draft = summarizeDraft(row);
+      return res.json({
+        ok: true,
+        data: {
+          draft: draft,
+          has_active_draft: !!draft,
+        },
+      });
+    } catch (err) {
+      logger.error('GET /rechazados/:ci/bcu-extraction-drafts failed', {
+        error: err && err.message ? err.message : 'unknown',
+      });
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  },
+);
+
+router.get(
+  '/:ci/bcu-extraction-drafts/:draftId/file',
+  async function getBcuExtractionDraftFile(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+    let draftId;
+    try {
+      draftId = assertDraftId(req.params && req.params.draftId);
+    } catch (err) {
+      return res.status(400).json({ error: 'draft inválido' });
+    }
+
+    try {
+      const inUniverse = await fetchCiHasRejectedHistorico(supabase, ci);
+      if (!inUniverse) {
+        return res.status(404).json({ error: 'No encontrado' });
+      }
+
+      const row = assertDraftReadableStatus(
+        await fetchDraftByIdAndCi(supabase, draftId, ci),
+      );
+      const file = await loadDraftFileBytes(supabase, row);
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader(
+        'Content-Disposition',
+        'inline; filename="' + file.filename + '"',
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).send(file.buffer);
+    } catch (err) {
+      const status = err && err.statusCode;
+      if (status === 400 || status === 404) {
+        return sendWriteError(res, err);
+      }
+      logger.error(
+        'GET /rechazados/:ci/bcu-extraction-drafts/:draftId/file failed',
+        {
+          error: err && err.message ? err.message : 'unknown',
+          code: err && err.code ? err.code : null,
+        },
+      );
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  },
+);
+
+router.get(
+  '/:ci/bcu-extraction-drafts/:draftId',
+  async function getBcuExtractionDraftDetail(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+    let draftId;
+    try {
+      draftId = assertDraftId(req.params && req.params.draftId);
+    } catch (err) {
+      return res.status(400).json({ error: 'draft inválido' });
+    }
+
+    try {
+      const inUniverse = await fetchCiHasRejectedHistorico(supabase, ci);
+      if (!inUniverse) {
+        return res.status(404).json({ error: 'No encontrado' });
+      }
+
+      const row = assertDraftReadableStatus(
+        await fetchDraftByIdAndCi(supabase, draftId, ci),
+      );
+      return res.json({ ok: true, data: detailDraft(row) });
+    } catch (err) {
+      const status = err && err.statusCode;
+      if (status === 400 || status === 404) {
+        return sendWriteError(res, err);
+      }
+      logger.error(
+        'GET /rechazados/:ci/bcu-extraction-drafts/:draftId failed',
+        {
+          error: err && err.message ? err.message : 'unknown',
+        },
+      );
+      return res.status(500).json({ error: 'Error interno' });
     }
   },
 );

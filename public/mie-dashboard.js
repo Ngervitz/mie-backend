@@ -14473,6 +14473,24 @@ init();
     formSuccess: null,
     submitting: false,
     previewUrl: null,
+    // Stage 5 — BCU asistido
+    extractDraft: null,
+    extractDetail: null,
+    extractLoading: false,
+    extractError: null,
+    extractFile: null,
+    extractUploading: false,
+    extractPollTimer: null,
+    extractPollStartedAt: null,
+    extractPollTimedOut: false,
+    extractReview: null,
+    extractConsultedOn: '',
+    extractConfirming: false,
+    extractConfirmError: null,
+    extractConfirmBlockers: null,
+    extractConfirmWarnings: null,
+    extractLocalPreviewUrl: null,
+    extractReviewDraftId: null,
   };
 
   function setStatus(msg, isError) {
@@ -14489,6 +14507,44 @@ init();
       }
       state.previewUrl = null;
     }
+  }
+
+  function revokeExtractLocalPreview() {
+    if (state.extractLocalPreviewUrl) {
+      try {
+        URL.revokeObjectURL(state.extractLocalPreviewUrl);
+      } catch (_e2) {
+        /* ignore */
+      }
+      state.extractLocalPreviewUrl = null;
+    }
+  }
+
+  function stopExtractPoll() {
+    if (state.extractPollTimer) {
+      clearTimeout(state.extractPollTimer);
+      state.extractPollTimer = null;
+    }
+  }
+
+  function resetExtractUiState() {
+    stopExtractPoll();
+    revokeExtractLocalPreview();
+    state.extractDraft = null;
+    state.extractDetail = null;
+    state.extractLoading = false;
+    state.extractError = null;
+    state.extractFile = null;
+    state.extractUploading = false;
+    state.extractPollStartedAt = null;
+    state.extractPollTimedOut = false;
+    state.extractReview = null;
+    state.extractReviewDraftId = null;
+    state.extractConsultedOn = '';
+    state.extractConfirming = false;
+    state.extractConfirmError = null;
+    state.extractConfirmBlockers = null;
+    state.extractConfirmWarnings = null;
   }
 
   function resetForm(ci) {
@@ -14529,16 +14585,30 @@ init();
   }
 
   function renderCellDescriptor(cell, ci) {
-    if (!cell || cell.kind === 'text') {
-      const label = cell && cell.label != null ? cell.label : '—';
-      if (cell && cell.overdue) {
+    if (!cell) return '—';
+    if (cell.kind === 'badge') {
+      const badgeClass =
+        cell.badgeClass != null
+          ? String(cell.badgeClass)
+          : 'is-bcu-pending';
+      return (
+        '<span class="rechazados-bcu-badge ' +
+        escapeHtml(badgeClass) +
+        '">' +
+        escapeHtml(cell.label != null ? cell.label : '—') +
+        '</span>'
+      );
+    }
+    if (cell.kind === 'text' || cell.kind == null) {
+      const label = cell.label != null ? cell.label : '—';
+      if (cell.overdue) {
         return (
           '<span class="rechazados-next-review is-overdue">' +
           escapeHtml(label) +
           '</span>'
         );
       }
-      if (cell && cell.tone) {
+      if (cell.tone) {
         return (
           '<span class="rechazados-score is-' +
           escapeHtml(String(cell.tone)) +
@@ -14557,7 +14627,7 @@ init();
           '</span>'
         );
       }
-      if (cell && cell.muted) {
+      if (cell.muted) {
         return (
           '<span class="rechazados-muted">' + escapeHtml(label) + '</span>'
         );
@@ -14692,8 +14762,7 @@ init();
   }
 
   function moneyCell(v) {
-    if (v == null || v === '') return '0';
-    return escapeHtml(String(v));
+    return escapeHtml(H.moneyCell(v));
   }
 
   function renderInstitutionsTable(institutions) {
@@ -14718,6 +14787,12 @@ init();
           moneyCell(inst.vigente_me) +
           '</td>' +
           '<td class="num">' +
+          moneyCell(inst.vigente_no_autoliquidable_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.vigente_no_autoliquidable_me) +
+          '</td>' +
+          '<td class="num">' +
           moneyCell(inst.moroso_mn) +
           '</td>' +
           '<td class="num">' +
@@ -14735,6 +14810,12 @@ init();
           '<td class="num">' +
           moneyCell(inst.contingencias_me) +
           '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.creditos_reestructurados_mn) +
+          '</td>' +
+          '<td class="num">' +
+          moneyCell(inst.creditos_reestructurados_me) +
+          '</td>' +
           '</tr>'
         );
       })
@@ -14744,9 +14825,11 @@ init();
       '<thead><tr>' +
       '<th>Institución</th><th>Cat.</th>' +
       '<th>Vig. MN</th><th>Vig. ME</th>' +
+      '<th>VigNA MN</th><th>VigNA ME</th>' +
       '<th>Mor. MN</th><th>Mor. ME</th>' +
       '<th>Cast. MN</th><th>Cast. ME</th>' +
       '<th>Cont. MN</th><th>Cont. ME</th>' +
+      '<th>Reest. MN</th><th>Reest. ME</th>' +
       '</tr></thead><tbody>' +
       rows +
       '</tbody></table></div>'
@@ -14946,6 +15029,434 @@ init();
     );
   }
 
+  const EXTRACT_RUBRO_LABELS = {
+    vigente: 'Vigente',
+    vigente_no_autoliquidable: 'Vig. no autoliquidable',
+    moroso: 'Moroso',
+    castigado_por_atraso: 'Castigado por atraso',
+    contingencias: 'Contingencias',
+    creditos_reestructurados: 'Créditos reestructurados',
+  };
+
+  function extractCategoryOptions(selected) {
+    const sel =
+      selected == null || selected === '' ? '' : String(selected);
+    let html =
+      '<option value=""' +
+      (sel === '' ? ' selected' : '') +
+      '>Elegir…</option>';
+    H.BCU_CATEGORIES.forEach(function (c) {
+      html +=
+        '<option value="' +
+        escapeHtml(c) +
+        '"' +
+        (sel === c ? ' selected' : '') +
+        '>' +
+        escapeHtml(c) +
+        '</option>';
+    });
+    return html;
+  }
+
+  function renderMoneyTriState(opts) {
+    const mode = H.moneyModeFromValue(opts.value);
+    const valueAttr =
+      mode === 'value' && opts.value != null ? String(opts.value) : '';
+    return (
+      '<div class="rechazados-money-tri">' +
+      '<select class="mcl-select rechazados-money-mode" data-money-mode="' +
+      escapeHtml(opts.path) +
+      '">' +
+      '<option value="null"' +
+      (mode === 'null' ? ' selected' : '') +
+      '>—</option>' +
+      '<option value="zero"' +
+      (mode === 'zero' ? ' selected' : '') +
+      '>0</option>' +
+      '<option value="value"' +
+      (mode === 'value' ? ' selected' : '') +
+      '>Valor</option>' +
+      '</select>' +
+      '<input type="number" min="0" step="any" class="mcl-input rechazados-money-input" data-money-value="' +
+      escapeHtml(opts.path) +
+      '" value="' +
+      escapeHtml(valueAttr) +
+      '"' +
+      (mode === 'value' ? '' : ' disabled') +
+      ' />' +
+      '</div>'
+    );
+  }
+
+  function findingsListHtml(findings, title) {
+    const list = Array.isArray(findings) ? findings : [];
+    if (!list.length) {
+      return (
+        '<div class="rechazados-findings"><div class="ad-modal-label">' +
+        escapeHtml(title) +
+        '</div><p class="text-muted">Sin findings</p></div>'
+      );
+    }
+    const items = list
+      .map(function (f) {
+        const sev = f && f.severity != null ? String(f.severity) : '';
+        const code = f && f.reason_code != null ? String(f.reason_code) : '';
+        const msg = f && f.message != null ? String(f.message) : '';
+        return (
+          '<li class="rechazados-finding is-' +
+          escapeHtml(sev || 'info') +
+          '"><strong>' +
+          escapeHtml(code || sev || 'finding') +
+          '</strong>' +
+          (msg ? ' — ' + escapeHtml(msg) : '') +
+          '</li>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="rechazados-findings"><div class="ad-modal-label">' +
+      escapeHtml(title) +
+      '</div><ul class="rechazados-findings-list">' +
+      items +
+      '</ul></div>'
+    );
+  }
+
+  function renderExtractDocPreview(fileUrl, contentType, filename) {
+    if (!fileUrl) {
+      return '<p class="text-muted">Documento no disponible</p>';
+    }
+    const abs = API + fileUrl;
+    const mime = String(contentType || '').toLowerCase();
+    if (mime.indexOf('image/') === 0) {
+      return (
+        '<div class="rechazados-extract-doc">' +
+        '<img class="rechazados-extract-doc-img" src="' +
+        escapeHtml(abs) +
+        '" alt="' +
+        escapeHtml(filename || 'documento BCU') +
+        '" />' +
+        '</div>'
+      );
+    }
+    return (
+      '<div class="rechazados-extract-doc">' +
+      '<a class="btn" href="' +
+      escapeHtml(abs) +
+      '" target="_blank" rel="noopener">Abrir documento</a>' +
+      (filename
+        ? '<span class="text-muted"> ' + escapeHtml(filename) + '</span>'
+        : '') +
+      '</div>'
+    );
+  }
+
+  function renderExtractInstitutionEditor(inst, idx, total) {
+    const canRemove = total > 1;
+    const rubros = H.EXTRACT_RUBRO_KEYS.map(function (rubro) {
+      const pair = (inst && inst[rubro]) || { mn: null, me: null };
+      const label = EXTRACT_RUBRO_LABELS[rubro] || rubro;
+      return (
+        '<div class="rechazados-rubro-block">' +
+        '<div class="ad-modal-label">' +
+        escapeHtml(label) +
+        '</div>' +
+        '<div class="rechazados-rubro-sides">' +
+        '<label class="mcl-field"><span class="mcl-field-label">MN</span>' +
+        renderMoneyTriState({
+          path: 'inst.' + idx + '.' + rubro + '.mn',
+          value: pair.mn,
+        }) +
+        '</label>' +
+        '<label class="mcl-field"><span class="mcl-field-label">ME</span>' +
+        renderMoneyTriState({
+          path: 'inst.' + idx + '.' + rubro + '.me',
+          value: pair.me,
+        }) +
+        '</label>' +
+        '</div></div>'
+      );
+    }).join('');
+
+    return (
+      '<div class="rechazados-inst-form rechazados-extract-inst" data-extract-inst-idx="' +
+      idx +
+      '">' +
+      '<div class="rechazados-inst-form-header">' +
+      '<strong>Institución ' +
+      (idx + 1) +
+      '</strong>' +
+      (canRemove
+        ? '<button type="button" class="btn" data-action="extract-remove-inst" data-idx="' +
+          idx +
+          '">Eliminar</button>'
+        : '') +
+      '</div>' +
+      '<div class="rechazados-inst-grid">' +
+      '<label class="mcl-field"><span class="mcl-field-label">Institución</span>' +
+      '<input class="mcl-input" data-extract-field="institution_name_raw" data-idx="' +
+      idx +
+      '" value="' +
+      escapeHtml((inst && inst.institution_name_raw) || '') +
+      '" /></label>' +
+      '<label class="mcl-field"><span class="mcl-field-label">Categoría</span>' +
+      '<select class="mcl-select" data-extract-field="category" data-idx="' +
+      idx +
+      '">' +
+      extractCategoryOptions(inst && inst.category) +
+      '</select></label>' +
+      '</div>' +
+      rubros +
+      '</div>'
+    );
+  }
+
+  function renderExtractSummaryEditor(summary) {
+    const src = summary && typeof summary === 'object' ? summary : {};
+    return (
+      '<div class="rechazados-extract-summary">' +
+      '<div class="ad-modal-label">Resumen (editable)</div>' +
+      H.EXTRACT_RUBRO_KEYS.map(function (rubro) {
+        const pair = src[rubro] || { mn: null, me: null };
+        const label = EXTRACT_RUBRO_LABELS[rubro] || rubro;
+        return (
+          '<div class="rechazados-rubro-block">' +
+          '<div class="ad-modal-label">' +
+          escapeHtml(label) +
+          '</div>' +
+          '<div class="rechazados-rubro-sides">' +
+          '<label class="mcl-field"><span class="mcl-field-label">MN</span>' +
+          renderMoneyTriState({
+            path: 'summary.' + rubro + '.mn',
+            value: pair.mn,
+          }) +
+          '</label>' +
+          '<label class="mcl-field"><span class="mcl-field-label">ME</span>' +
+          renderMoneyTriState({
+            path: 'summary.' + rubro + '.me',
+            value: pair.me,
+          }) +
+          '</label>' +
+          '</div></div>'
+        );
+      }).join('') +
+      '</div>'
+    );
+  }
+
+  function renderExtractReviewForm() {
+    const reviewed = state.extractReview;
+    if (!reviewed) return '';
+    const validation =
+      state.extractDetail && state.extractDetail.validation
+        ? state.extractDetail.validation
+        : null;
+    const originalFindings =
+      validation && Array.isArray(validation.findings)
+        ? validation.findings
+        : [];
+    const draftMeta =
+      (state.extractDetail && state.extractDetail.draft) ||
+      state.extractDraft ||
+      {};
+    const fileUrl =
+      (state.extractDetail && state.extractDetail.file_url) ||
+      draftMeta.file_url ||
+      null;
+
+    const metaFields =
+      '<div class="rechazados-form-grid">' +
+      '<label class="mcl-field"><span class="mcl-field-label">Contrato</span>' +
+      '<input class="mcl-input" data-extract-meta="extraction_contract_version" value="' +
+      escapeHtml(reviewed.extraction_contract_version || 'bcu_v1') +
+      '" /></label>' +
+      '<label class="mcl-field"><span class="mcl-field-label">Currency view</span>' +
+      '<input class="mcl-input" data-extract-meta="currency_view_selected" value="' +
+      escapeHtml(reviewed.currency_view_selected || '') +
+      '" /></label>' +
+      '<label class="mcl-field"><span class="mcl-field-label">Período</span>' +
+      '<input class="mcl-input" data-extract-meta="period" value="' +
+      escapeHtml(reviewed.period != null ? String(reviewed.period) : '') +
+      '" /></label>' +
+      '<label class="mcl-field"><span class="mcl-field-label">CI documento</span>' +
+      '<input class="mcl-input" data-extract-meta="document_ci_raw" value="' +
+      escapeHtml(
+        reviewed.document_ci_raw != null
+          ? String(reviewed.document_ci_raw)
+          : '',
+      ) +
+      '" /></label>' +
+      '</div>';
+
+    return (
+      '<div class="rechazados-extract-review">' +
+      '<div class="ad-modal-label">Documento</div>' +
+      renderExtractDocPreview(
+        fileUrl,
+        draftMeta.content_type,
+        draftMeta.original_filename,
+      ) +
+      findingsListHtml(originalFindings, 'Findings originales (extracción)') +
+      (state.extractConfirmBlockers
+        ? findingsListHtml(
+            state.extractConfirmBlockers,
+            'Blockers actuales (confirm)',
+          )
+        : '') +
+      (state.extractConfirmWarnings && state.extractConfirmWarnings.length
+        ? findingsListHtml(
+            state.extractConfirmWarnings,
+            'Warnings actuales (confirm)',
+          )
+        : '') +
+      (state.extractConfirmError
+        ? '<div class="ad-modal-error">' +
+          escapeHtml(state.extractConfirmError) +
+          '</div>'
+        : '') +
+      '<div class="ad-modal-label">Revisión</div>' +
+      metaFields +
+      '<div class="rechazados-inst-list">' +
+      (reviewed.institutions || [])
+        .map(function (inst, idx) {
+          return renderExtractInstitutionEditor(
+            inst,
+            idx,
+            (reviewed.institutions || []).length,
+          );
+        })
+        .join('') +
+      '</div>' +
+      '<div class="ad-modal-actions">' +
+      '<button type="button" class="btn" data-action="extract-add-inst">Agregar institución</button>' +
+      '</div>' +
+      renderExtractSummaryEditor(reviewed.summary) +
+      '<label class="mcl-field"><span class="mcl-field-label">Fecha consulta (obligatoria)</span>' +
+      '<input type="date" class="mcl-input" id="rechazados-extract-consulted" value="' +
+      escapeHtml(state.extractConsultedOn || '') +
+      '" /></label>' +
+      '<div class="ad-modal-actions rechazados-form-actions">' +
+      '<button type="button" class="btn btn-primary" data-action="extract-confirm"' +
+      (state.extractConfirming ? ' disabled' : '') +
+      '>' +
+      (state.extractConfirming ? 'Confirmando…' : 'Confirmar extracción') +
+      '</button>' +
+      '</div></div>'
+    );
+  }
+
+  function renderExtractUploadZone() {
+    if (state.extractFile) {
+      const file = state.extractFile;
+      const thumb =
+        state.extractLocalPreviewUrl
+          ? '<img class="rechazados-file-thumb" src="' +
+            escapeHtml(state.extractLocalPreviewUrl) +
+            '" alt="" />'
+          : '<div class="rechazados-file-icon" aria-hidden="true">IMG</div>';
+      return (
+        '<div class="rechazados-file-selected">' +
+        thumb +
+        '<div class="rechazados-file-selected-meta">' +
+        '<div>' +
+        escapeHtml(file.name || 'archivo') +
+        '</div>' +
+        '<div class="text-muted">' +
+        escapeHtml(H.formatFileSize(file.size)) +
+        '</div></div>' +
+        '<button type="button" class="btn" data-action="extract-clear-file">Quitar</button>' +
+        '</div>'
+      );
+    }
+    return (
+      '<div id="rechazados-extract-dropzone" class="serp-dropzone rechazados-dropzone" tabindex="0" role="button" aria-label="Adjuntar imagen BCU para extracción">' +
+      '<input type="file" id="rechazados-extract-file-input" class="serp-file-input-hidden" accept="image/jpeg,image/png,image/webp" />' +
+      '<p class="serp-dropzone-title">Arrastrá imagen BCU aquí</p>' +
+      '<p class="serp-dropzone-hint">JPEG, PNG o WEBP · máx. 10 MB</p>' +
+      '</div>'
+    );
+  }
+
+  function renderExtractAssist() {
+    const draft = state.extractDraft;
+    const status = draft && draft.status;
+    let body = '';
+
+    if (state.extractLoading && !draft) {
+      body = '<div class="ad-modal-loading">Cargando extracción…</div>';
+    } else if (state.extractError) {
+      body =
+        '<div class="ad-modal-error">' +
+        escapeHtml(state.extractError) +
+        '</div>';
+    } else if (!draft) {
+      body =
+        '<p class="text-muted">Sin extracción activa. Subí una imagen para extraer con IA.</p>' +
+        renderExtractUploadZone() +
+        '<div class="ad-modal-actions rechazados-form-actions">' +
+        '<button type="button" class="btn btn-primary" data-action="extract-upload"' +
+        (state.extractUploading || !state.extractFile ? ' disabled' : '') +
+        '>' +
+        (state.extractUploading ? 'Subiendo…' : 'Extraer con IA') +
+        '</button></div>';
+    } else if (status === 'extracting') {
+      body =
+        '<div class="rechazados-extract-status">' +
+        '<div class="ad-modal-loading">Extrayendo con IA…</div>' +
+        '<p class="text-muted">Archivo: ' +
+        escapeHtml(draft.original_filename || '—') +
+        '</p>' +
+        (state.extractPollTimedOut
+          ? '<button type="button" class="btn" data-action="extract-refresh">Actualizar</button>'
+          : '<p class="text-muted">Consultando estado cada 3s…</p>') +
+        '</div>';
+    } else if (status === 'extraction_failed') {
+      const canRetry = !!(
+        draft.can_retry ||
+        (state.extractDetail && state.extractDetail.can_retry)
+      );
+      const val =
+        state.extractDetail && state.extractDetail.validation
+          ? state.extractDetail.validation
+          : null;
+      body =
+        '<div class="ad-modal-error">Extracción fallida</div>' +
+        findingsListHtml(
+          val && val.findings ? val.findings : [],
+          'Detalle del error',
+        ) +
+        '<div class="ad-modal-actions rechazados-form-actions">' +
+        (canRetry
+          ? '<button type="button" class="btn btn-primary" data-action="extract-retry"' +
+            (state.extractUploading ? ' disabled' : '') +
+            '>Reintentar</button>'
+          : '') +
+        '</div>' +
+        '<div class="ad-modal-label">O extraer otro archivo</div>' +
+        renderExtractUploadZone() +
+        '<div class="ad-modal-actions rechazados-form-actions">' +
+        '<button type="button" class="btn" data-action="extract-upload"' +
+        (state.extractUploading || !state.extractFile ? ' disabled' : '') +
+        '>' +
+        (state.extractUploading ? 'Subiendo…' : 'Extraer con IA') +
+        '</button></div>';
+    } else if (status === 'pending_review') {
+      body = renderExtractReviewForm();
+    } else {
+      body =
+        '<p class="text-muted">Estado: ' +
+        escapeHtml(String(status || '—')) +
+        '</p>';
+    }
+
+    return (
+      '<div class="rechazados-extract-assist">' +
+      '<h4 class="sms-section-title">BCU asistido (IA)</h4>' +
+      body +
+      '</div>'
+    );
+  }
+
   function renderForm() {
     const form = state.form;
     if (!form) return '';
@@ -15049,7 +15560,7 @@ init();
         ) +
         '</div></div>' +
         '<div><div class="ad-modal-label">Peor BCU</div><div>' +
-        escapeHtml(H.formatWorstBcu(d.worst_bcu)) +
+        renderCellDescriptor(H.worstBcuCell(d.worst_bcu), d.ci) +
         '</div></div>' +
         '<div><div class="ad-modal-label">Estado</div><div>' +
         opsBadge(d.ops_status) +
@@ -15068,6 +15579,7 @@ init();
           ? '<button type="button" class="btn btn-primary" data-action="open-form">Cargar BCU</button>'
           : '') +
         '</div>' +
+        renderExtractAssist() +
         (state.showForm ? renderForm() : '') +
         '<div class="ad-modal-block"><div class="ad-modal-label">Rechazos</div>' +
         renderSimpleTable(['Fecha', 'Solicitud', 'Estado'], rejRows) +
@@ -15091,6 +15603,87 @@ init();
       '</div></div>';
 
     wireDropzone();
+    wireExtractDropzone();
+    wireExtractMoneyModeToggles();
+  }
+
+  function wireExtractMoneyModeToggles() {
+    const selects = modalRoot.querySelectorAll('[data-money-mode]');
+    selects.forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        const wrap = sel.closest('.rechazados-money-tri');
+        const input = wrap
+          ? wrap.querySelector('[data-money-value]')
+          : null;
+        if (!input) return;
+        if (sel.value === 'value') {
+          input.disabled = false;
+        } else {
+          input.disabled = true;
+          input.value = '';
+        }
+      });
+    });
+  }
+
+  function wireExtractDropzone() {
+    const dropzone = document.getElementById('rechazados-extract-dropzone');
+    const fileInput = document.getElementById('rechazados-extract-file-input');
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('click', function (e) {
+      if (e.target === fileInput) return;
+      fileInput.click();
+    });
+    dropzone.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      dropzone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'dragend'].forEach(function (evt) {
+      dropzone.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('is-dragover');
+      });
+    });
+    dropzone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('is-dragover');
+      const files =
+        e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : [];
+      if (files[0]) setExtractFile(files[0]);
+    });
+    fileInput.addEventListener('change', function () {
+      if (fileInput.files && fileInput.files[0]) {
+        setExtractFile(fileInput.files[0]);
+      }
+    });
+  }
+
+  function setExtractFile(file) {
+    const check = H.validateExtractSelectedFile(file);
+    if (!check.ok) {
+      state.extractError = check.error;
+      renderDetailModal();
+      return;
+    }
+    revokeExtractLocalPreview();
+    state.extractFile = check.file;
+    if (check.file && String(check.file.type || '').indexOf('image/') === 0) {
+      state.extractLocalPreviewUrl = URL.createObjectURL(check.file);
+    }
+    state.extractError = null;
+    renderDetailModal();
   }
 
   function wireDropzone() {
@@ -15215,6 +15808,7 @@ init();
     state.formSuccess = null;
     state.form = null;
     revokePreview();
+    resetExtractUiState();
     renderDetailModal();
     try {
       const res = await fetch(API + '/rechazados/' + encodeURIComponent(ci), {
@@ -15234,6 +15828,7 @@ init();
       state.detail = data && data.data ? data.data : null;
       state.detailLoading = false;
       renderDetailModal();
+      await refreshExtractLatest({ startPoll: true });
     } catch (_err) {
       state.detailError = 'No se pudo conectar.';
       state.detailLoading = false;
@@ -15252,7 +15847,441 @@ init();
     state.formSuccess = null;
     state.submitting = false;
     revokePreview();
+    resetExtractUiState();
     modalRoot.innerHTML = '';
+  }
+
+  function applyExtractDetailToReview(detail) {
+    if (!detail || !detail.draft) return;
+    const draftId = detail.draft.id;
+    const status = detail.draft.status;
+    state.extractDetail = detail;
+    if (status === 'pending_review') {
+      if (state.extractReviewDraftId !== draftId || !state.extractReview) {
+        state.extractReview = H.extractionToReviewed(detail.extraction);
+        state.extractReviewDraftId = draftId;
+        state.extractConsultedOn = '';
+        state.extractConfirmError = null;
+        state.extractConfirmBlockers = null;
+        state.extractConfirmWarnings = null;
+      }
+    }
+  }
+
+  async function loadExtractDetail(draftId) {
+    if (!state.detailCi || !draftId) return null;
+    const res = await fetch(
+      API +
+        '/rechazados/' +
+        encodeURIComponent(state.detailCi) +
+        '/bcu-extraction-drafts/' +
+        encodeURIComponent(draftId),
+      {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      },
+    );
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok) {
+      throw new Error((data && data.error) || 'No se pudo cargar el draft');
+    }
+    return data && data.data ? data.data : null;
+  }
+
+  function scheduleExtractPoll() {
+    stopExtractPoll();
+    if (!state.extractPollStartedAt) {
+      state.extractPollStartedAt = Date.now();
+    }
+    const elapsed = Date.now() - state.extractPollStartedAt;
+    const status = state.extractDraft && state.extractDraft.status;
+    if (!H.shouldContinueExtractPoll(elapsed, status)) {
+      if (status === 'extracting') {
+        state.extractPollTimedOut = true;
+        if (state.detailCi) renderDetailModal();
+      }
+      return;
+    }
+    state.extractPollTimedOut = false;
+    state.extractPollTimer = setTimeout(function () {
+      refreshExtractLatest({ fromPoll: true, startPoll: true }).catch(
+        function () {
+          /* ignore */
+        },
+      );
+    }, H.extractPollIntervalMs());
+  }
+
+  async function refreshExtractLatest(opts) {
+    const options = opts || {};
+    if (!state.detailCi) return;
+    if (!options.fromPoll) {
+      state.extractLoading = true;
+      state.extractError = null;
+    }
+    try {
+      const res = await fetch(
+        API +
+          '/rechazados/' +
+          encodeURIComponent(state.detailCi) +
+          '/bcu-extraction-drafts',
+        {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        state.extractError =
+          (data && data.error) || 'No se pudo cargar la extracción';
+        state.extractLoading = false;
+        stopExtractPoll();
+        if (state.detailCi) renderDetailModal();
+        return;
+      }
+      const payload = data && data.data ? data.data : {};
+      const draft = payload.draft || null;
+      state.extractDraft = draft;
+      state.extractLoading = false;
+      state.extractError = null;
+
+      if (!draft) {
+        stopExtractPoll();
+        state.extractDetail = null;
+        state.extractReview = null;
+        state.extractReviewDraftId = null;
+        if (state.detailCi) renderDetailModal();
+        return;
+      }
+
+      if (
+        draft.status === 'pending_review' ||
+        draft.status === 'extraction_failed'
+      ) {
+        stopExtractPoll();
+        try {
+          const detail = await loadExtractDetail(draft.id);
+          applyExtractDetailToReview(detail);
+        } catch (detailErr) {
+          state.extractError =
+            detailErr && detailErr.message
+              ? detailErr.message
+              : 'No se pudo cargar el draft';
+        }
+        if (state.detailCi) renderDetailModal();
+        return;
+      }
+
+      if (draft.status === 'extracting') {
+        state.extractDetail = null;
+        state.extractReview = null;
+        state.extractReviewDraftId = null;
+        if (state.detailCi) renderDetailModal();
+        if (options.startPoll || options.fromPoll) {
+          scheduleExtractPoll();
+        }
+        return;
+      }
+
+      stopExtractPoll();
+      if (state.detailCi) renderDetailModal();
+    } catch (_err) {
+      state.extractLoading = false;
+      state.extractError = 'No se pudo conectar.';
+      stopExtractPoll();
+      if (state.detailCi) renderDetailModal();
+    }
+  }
+
+  async function uploadExtractDraft() {
+    if (state.extractUploading || !state.detailCi) return;
+    const check = H.validateExtractSelectedFile(state.extractFile);
+    if (!check.ok) {
+      state.extractError = check.error;
+      renderDetailModal();
+      return;
+    }
+    state.extractUploading = true;
+    state.extractError = null;
+    renderDetailModal();
+    const fd = new FormData();
+    fd.append('file', check.file);
+    try {
+      const res = await fetch(
+        API +
+          '/rechazados/' +
+          encodeURIComponent(state.detailCi) +
+          '/bcu-extraction-drafts',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      state.extractUploading = false;
+      if (!res.ok) {
+        state.extractError =
+          (data && data.error) || 'No se pudo iniciar la extracción';
+        renderDetailModal();
+        return;
+      }
+      revokeExtractLocalPreview();
+      state.extractFile = null;
+      state.extractPollStartedAt = Date.now();
+      state.extractPollTimedOut = false;
+      state.extractReview = null;
+      state.extractReviewDraftId = null;
+      await refreshExtractLatest({ startPoll: true });
+    } catch (_err) {
+      state.extractUploading = false;
+      state.extractError = 'No se pudo conectar.';
+      renderDetailModal();
+    }
+  }
+
+  async function retryExtractDraft() {
+    if (state.extractUploading || !state.detailCi || !state.extractDraft) {
+      return;
+    }
+    state.extractUploading = true;
+    state.extractError = null;
+    renderDetailModal();
+    try {
+      const res = await fetch(
+        API +
+          '/rechazados/' +
+          encodeURIComponent(state.detailCi) +
+          '/bcu-extraction-drafts/' +
+          encodeURIComponent(state.extractDraft.id) +
+          '/retry',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      state.extractUploading = false;
+      if (!res.ok) {
+        state.extractError =
+          (data && data.error) || 'No se pudo reintentar';
+        renderDetailModal();
+        return;
+      }
+      state.extractPollStartedAt = Date.now();
+      state.extractPollTimedOut = false;
+      state.extractReview = null;
+      state.extractReviewDraftId = null;
+      await refreshExtractLatest({ startPoll: true });
+    } catch (_err) {
+      state.extractUploading = false;
+      state.extractError = 'No se pudo conectar.';
+      renderDetailModal();
+    }
+  }
+
+  function readExtractReviewIntoState() {
+    if (!state.extractReview) return;
+    const consulted = document.getElementById('rechazados-extract-consulted');
+    if (consulted) state.extractConsultedOn = consulted.value;
+
+    const metaEls = modalRoot.querySelectorAll('[data-extract-meta]');
+    metaEls.forEach(function (el) {
+      const key = el.getAttribute('data-extract-meta');
+      if (!key) return;
+      const raw = el.value;
+      if (key === 'period' || key === 'document_ci_raw') {
+        state.extractReview[key] = raw === '' ? null : raw;
+      } else {
+        state.extractReview[key] = raw;
+      }
+    });
+
+    const list = state.extractReview.institutions || [];
+    list.forEach(function (inst, idx) {
+      const nameEl = modalRoot.querySelector(
+        '[data-extract-field="institution_name_raw"][data-idx="' + idx + '"]',
+      );
+      const catEl = modalRoot.querySelector(
+        '[data-extract-field="category"][data-idx="' + idx + '"]',
+      );
+      if (nameEl) inst.institution_name_raw = nameEl.value;
+      if (catEl) {
+        inst.category = catEl.value === '' ? null : catEl.value;
+      }
+      H.EXTRACT_RUBRO_KEYS.forEach(function (rubro) {
+        if (!inst[rubro]) inst[rubro] = { mn: null, me: null };
+        ['mn', 'me'].forEach(function (side) {
+          const path = 'inst.' + idx + '.' + rubro + '.' + side;
+          const wrap = modalRoot.querySelector(
+            '[data-money-mode="' + path + '"]',
+          );
+          if (!wrap) return;
+          const modeSel = wrap;
+          const input = wrap
+            .closest('.rechazados-money-tri')
+            .querySelector('[data-money-value]');
+          const mode = modeSel.value;
+          inst[rubro][side] = H.moneyValueFromMode(
+            mode,
+            input ? input.value : '',
+          );
+        });
+      });
+    });
+
+    if (!state.extractReview.summary) {
+      state.extractReview.summary = H.emptyExtractSummary();
+    }
+    H.EXTRACT_RUBRO_KEYS.forEach(function (rubro) {
+      if (!state.extractReview.summary[rubro]) {
+        state.extractReview.summary[rubro] = { mn: null, me: null };
+      }
+      ['mn', 'me'].forEach(function (side) {
+        const path = 'summary.' + rubro + '.' + side;
+        const modeSel = modalRoot.querySelector(
+          '[data-money-mode="' + path + '"]',
+        );
+        if (!modeSel) return;
+        const input = modeSel
+          .closest('.rechazados-money-tri')
+          .querySelector('[data-money-value]');
+        state.extractReview.summary[rubro][side] = H.moneyValueFromMode(
+          modeSel.value,
+          input ? input.value : '',
+        );
+      });
+    });
+  }
+
+  async function confirmExtractDraft() {
+    if (state.extractConfirming || !state.detailCi || !state.extractDraft) {
+      return;
+    }
+    readExtractReviewIntoState();
+    const consulted = String(state.extractConsultedOn || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(consulted)) {
+      state.extractConfirmError = 'Indicá la fecha de consulta';
+      state.extractConfirmBlockers = null;
+      state.extractConfirmWarnings = null;
+      renderDetailModal();
+      return;
+    }
+    const ux = H.validateReviewedUx(state.extractReview);
+    if (!ux.ok) {
+      state.extractConfirmError = ux.error;
+      state.extractConfirmBlockers = null;
+      state.extractConfirmWarnings = null;
+      renderDetailModal();
+      return;
+    }
+
+    state.extractConfirming = true;
+    state.extractConfirmError = null;
+    state.extractConfirmBlockers = null;
+    state.extractConfirmWarnings = null;
+    renderDetailModal();
+
+    const body = H.buildConfirmPayload(consulted, state.extractReview);
+    try {
+      const res = await fetch(
+        API +
+          '/rechazados/' +
+          encodeURIComponent(state.detailCi) +
+          '/bcu-extraction-drafts/' +
+          encodeURIComponent(state.extractDraft.id) +
+          '/confirm',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      state.extractConfirming = false;
+      if (res.status === 422) {
+        const blockData = data && data.data ? data.data : {};
+        state.extractConfirmError =
+          (data && data.error) || 'confirmación bloqueada';
+        state.extractConfirmBlockers = Array.isArray(blockData.blockers)
+          ? blockData.blockers
+          : [];
+        state.extractConfirmWarnings = Array.isArray(blockData.warnings)
+          ? blockData.warnings
+          : [];
+        renderDetailModal();
+        return;
+      }
+      if (!res.ok) {
+        state.extractConfirmError =
+          (data && data.error) || 'No se pudo confirmar';
+        renderDetailModal();
+        return;
+      }
+
+      state.extractReview = null;
+      state.extractReviewDraftId = null;
+      state.extractConsultedOn = '';
+      state.formSuccess = 'Extracción confirmada';
+      const savedCi = state.detailCi;
+      await loadList();
+      if (savedCi) {
+        state.detailCi = savedCi;
+        state.detailLoading = true;
+        state.detailError = null;
+        renderDetailModal();
+        try {
+          const res2 = await fetch(
+            API + '/rechazados/' + encodeURIComponent(savedCi),
+            {
+              headers: { Accept: 'application/json' },
+              credentials: 'same-origin',
+            },
+          );
+          const data2 = await res2.json().catch(function () {
+            return {};
+          });
+          if (!res2.ok) {
+            state.detailError =
+              (data2 && data2.error) || 'No se pudo cargar el detalle';
+            state.detailLoading = false;
+            renderDetailModal();
+            return;
+          }
+          state.detail = data2 && data2.data ? data2.data : null;
+          state.detailLoading = false;
+          state.formSuccess = 'Extracción confirmada';
+          await refreshExtractLatest({ startPoll: false });
+          setTimeout(function () {
+            state.formSuccess = null;
+            if (state.detailCi) renderDetailModal();
+          }, 2500);
+        } catch (_e2) {
+          state.detailError = 'No se pudo conectar.';
+          state.detailLoading = false;
+          renderDetailModal();
+        }
+      }
+    } catch (_err) {
+      state.extractConfirming = false;
+      state.extractConfirmError = 'No se pudo conectar.';
+      renderDetailModal();
+    }
   }
 
   function readFormFieldsIntoState() {
@@ -15471,6 +16500,55 @@ init();
     }
     if (action === 'submit-bcu') {
       submitBcu();
+      return;
+    }
+    if (action === 'extract-upload') {
+      uploadExtractDraft();
+      return;
+    }
+    if (action === 'extract-clear-file') {
+      state.extractFile = null;
+      revokeExtractLocalPreview();
+      renderDetailModal();
+      return;
+    }
+    if (action === 'extract-refresh') {
+      state.extractPollStartedAt = Date.now();
+      state.extractPollTimedOut = false;
+      refreshExtractLatest({ startPoll: true });
+      return;
+    }
+    if (action === 'extract-retry') {
+      retryExtractDraft();
+      return;
+    }
+    if (action === 'extract-add-inst') {
+      readExtractReviewIntoState();
+      if (state.extractReview) {
+        if (!Array.isArray(state.extractReview.institutions)) {
+          state.extractReview.institutions = [];
+        }
+        state.extractReview.institutions.push(H.emptyExtractInstitution());
+      }
+      renderDetailModal();
+      return;
+    }
+    if (action === 'extract-remove-inst') {
+      readExtractReviewIntoState();
+      const idx = Number(actionEl.getAttribute('data-idx'));
+      if (
+        state.extractReview &&
+        Array.isArray(state.extractReview.institutions) &&
+        state.extractReview.institutions.length > 1 &&
+        Number.isFinite(idx)
+      ) {
+        state.extractReview.institutions.splice(idx, 1);
+      }
+      renderDetailModal();
+      return;
+    }
+    if (action === 'extract-confirm') {
+      confirmExtractDraft();
     }
   });
 
