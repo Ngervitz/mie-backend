@@ -1,0 +1,211 @@
+{
+  "_comment": "REGRESSION_N6_NOT_GENERALIZATION — frozen pass1 from Stage 0D spike; gates provisional",
+  "case_id": "50375358",
+  "expected_ci": "50375358",
+  "extraction": {
+    "extraction_contract_version": "bcu_v1",
+    "currency_view_selected": "MN_PESOS_ME_PESOS",
+    "period": "202607",
+    "document_ci_raw": "UY IDE 000000000050375358",
+    "institutions": [
+      {
+        "institution_name_raw": "BANCO DE LA REPÚBLICA ORIENTAL DEL URUGUAY",
+        "category": "5",
+        "vigente": {
+          "mn": null,
+          "me": null
+        },
+        "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "moroso": {
+          "mn": 9329.66,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "SOCUR S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": 5102.4,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 5102.4,
+          "me": 0
+        },
+        "moroso": {
+          "mn": 84004.53,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "OCA S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": null,
+          "me": null
+        },
+        "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "moroso": {
+          "mn": 29859.64,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "PASS CARD S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": null,
+          "me": null
+        },
+        "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "moroso": {
+          "mn": 23042.37,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "FUCA VERDE COOPERATIVA DE AHORRO Y CRÉDITO",
+        "category": "5",
+        "vigente": {
+          "mn": null,
+          "me": null
+        },
+        "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "moroso": {
+          "mn": 88405.3,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "CASH S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": 2285.97,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 2285.97,
+          "me": 0
+        },
+        "moroso": {
+          "mn": 70965.02,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      }
+    ],
+    "summary": {
+      "vigente": {
+        "mn": 7388.37,
+        "me": 0
+      },
+      "vigente_no_autoliquidable": {
+        "mn": 7388.37,
+        "me": 0
+      },
+      "moroso": {
+        "mn": 305606.52,
+        "me": 0
+      },
+      "castigado_por_atraso": {
+        "mn": null,
+        "me": null
+      },
+      "contingencias": {
+        "mn": null,
+        "me": null
+      },
+      "creditos_reestructurados": {
+        "mn": null,
+        "me": null
+      }
+    },
+    "review": {
+      "warnings": [],
+      "illegible_fields": []
+    }
+  }
+}

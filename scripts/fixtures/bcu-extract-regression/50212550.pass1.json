@@ -1,0 +1,155 @@
+{
+  "_comment": "REGRESSION_N6_NOT_GENERALIZATION — frozen pass1 from Stage 0D spike; gates provisional",
+  "case_id": "50212550",
+  "expected_ci": "50212550",
+  "extraction": {
+    "extraction_contract_version": "bcu_v1",
+    "currency_view_selected": "MN_PESOS_ME_PESOS",
+    "period": "202607",
+    "document_ci_raw": "UY IDE 000000000050212550",
+    "institutions": [
+      {
+        "institution_name_raw": "BANCO DE LA REPÚBLICA ORIENTAL DEL URUGUAY",
+        "category": "5",
+        "vigente": {
+          "mn": 1410.4,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 1410.4,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": 15643.2,
+          "me": 0
+        },
+        "creditos_reestructurados": {
+          "mn": 75598.99,
+          "me": 0
+        }
+      },
+      {
+        "institution_name_raw": "SOCUR S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": 483.99,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 483.99,
+          "me": 0
+        },
+        "moroso": {
+          "mn": 39881.24,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "CASH S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": 3805.48,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 3805.48,
+          "me": 0
+        },
+        "moroso": {
+          "mn": 134121.32,
+          "me": 0
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "ADMINISTRADORA DE SOLUCIONES INTEGRALES S.A.",
+        "category": "5",
+        "vigente": {
+          "mn": null,
+          "me": null
+        },
+        "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": 5723.7,
+          "me": 0
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      }
+    ],
+    "summary": {
+      "vigente": {
+        "mn": 5699.87,
+        "me": 0
+      },
+      "vigente_no_autoliquidable": {
+        "mn": 5699.87,
+        "me": 0
+      },
+      "moroso": {
+        "mn": 174002.56,
+        "me": 0
+      },
+      "castigado_por_atraso": {
+        "mn": 5723.7,
+        "me": 0
+      },
+      "contingencias": {
+        "mn": 15643.2,
+        "me": 0
+      },
+      "creditos_reestructurados": {
+        "mn": 75598.99,
+        "me": 0
+      }
+    },
+    "review": {
+      "warnings": [],
+      "illegible_fields": []
+    }
+  }
+}

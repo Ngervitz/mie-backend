@@ -1,0 +1,295 @@
+{
+  "_comment": "REGRESSION_N6_NOT_GENERALIZATION — frozen pass1 from Stage 0D spike; gates provisional",
+  "case_id": "36692223",
+  "expected_ci": "36692223",
+  "extraction": {
+    "extraction_contract_version": "bcu_v1",
+    "currency_view_selected": "MN_PESOS_ME_USD",
+    "period": "202307",
+    "document_ci_raw": "UY IDE 00000000038692293",
+    "institutions": [
+      {
+        "institution_name_raw": "BANCO ITAU URUGUAY SA",
+        "category": "2A",
+        "vigente": {
+          "mn": 119823.88,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 119823.88,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "SCOTIABANK URUGUAY S.A.",
+        "category": "1C",
+        "vigente": {
+          "mn": 88855.06,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 88855.06,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "BANCO SANTANDER S.A.",
+        "category": "2A",
+        "vigente": {
+          "mn": 73892.02,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 73892.02,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "BANCO BILBAO VIZCAYA ARGENTARIA URUGUAY S.A.",
+        "category": "2A",
+        "vigente": {
+          "mn": 33197.37,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 33197.37,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": 5501.35,
+          "me": 0
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "SCOUR S.A.",
+        "category": "1C",
+        "vigente": {
+          "mn": 88480.17,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 88480.17,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "OCA S.A.",
+        "category": "3",
+        "vigente": {
+          "mn": 16377.91,
+          "me": 494.55
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 16377.91,
+          "me": 494.55
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "RETOP S.A.",
+        "category": "2A",
+        "vigente": {
+          "mn": 5213.82,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 5213.82,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": 10000,
+          "me": 0
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "BAUTZEN S.A.",
+        "category": "1C",
+        "vigente": {
+          "mn": 18319.8,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 18319.8,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": 32000,
+          "me": 0
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      },
+      {
+        "institution_name_raw": "ADMINISTRADORA DE SOLUCIONES INTEGRALES S.A.",
+        "category": "2A",
+        "vigente": {
+          "mn": 23848.29,
+          "me": 0
+        },
+        "vigente_no_autoliquidable": {
+          "mn": 23848.29,
+          "me": 0
+        },
+        "moroso": {
+          "mn": null,
+          "me": null
+        },
+        "castigado_por_atraso": {
+          "mn": null,
+          "me": null
+        },
+        "contingencias": {
+          "mn": null,
+          "me": null
+        },
+        "creditos_reestructurados": {
+          "mn": null,
+          "me": null
+        }
+      }
+    ],
+    "summary": {
+      "vigente": {
+        "mn": 447588.12,
+        "me": 494.55
+      },
+      "vigente_no_autoliquidable": {
+        "mn": 447588.12,
+        "me": 494.55
+      },
+      "moroso": {
+        "mn": null,
+        "me": null
+      },
+      "castigado_por_atraso": {
+        "mn": null,
+        "me": null
+      },
+      "contingencias": {
+        "mn": 47501.35,
+        "me": 0
+      },
+      "creditos_reestructurados": {
+        "mn": null,
+        "me": null
+      }
+    },
+    "review": {
+      "warnings": [],
+      "illegible_fields": []
+    }
+  }
+}

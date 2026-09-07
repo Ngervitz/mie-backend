@@ -2,7 +2,7 @@
 
 /**
  * Private BCU file storage. Bucket must already exist (not created at runtime).
- * Paths: {snapshot_id}/{uuid}.{ext} — never include CI.
+ * Paths: {ownerId}/{uuid}.{ext} — ownerId is snapshot_id or draft_id; never CI.
  */
 
 const { randomUUID } = require('crypto');
@@ -19,6 +19,13 @@ const MIME_TO_EXT = Object.freeze({
 });
 
 const ALLOWED_MIME_TYPES = Object.freeze(Object.keys(MIME_TO_EXT));
+
+/** Stage 3 extraction V1 — images only (PDF deferred until explicitly tested). */
+const EXTRACT_IMAGE_MIME_TYPES = Object.freeze([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 function normalizeMime(raw) {
   return String(raw || '')
@@ -69,10 +76,11 @@ function storageHttpError(message, statusCode, code) {
 /**
  * @param {{ mimetype?: string, originalname?: string, size?: number, buffer?: Buffer }} file
  */
-function validateRejectedBcuFile(file) {
+function validateRejectedBcuFile(file, allowedMimes) {
   if (!file) return null;
+  const allow = allowedMimes || ALLOWED_MIME_TYPES;
   const mime = normalizeMime(file.mimetype);
-  if (!ALLOWED_MIME_TYPES.includes(mime)) {
+  if (!allow.includes(mime)) {
     const err = new Error('archivo no permitido');
     err.statusCode = 400;
     throw err;
@@ -106,8 +114,19 @@ function validateRejectedBcuFile(file) {
   };
 }
 
-function buildRejectedBcuObjectPath(snapshotId, objectId, ext) {
-  return String(snapshotId) + '/' + String(objectId) + '.' + String(ext);
+/** Stage 3: JPEG/PNG/WEBP only. */
+function validateRejectedBcuExtractFile(file) {
+  return validateRejectedBcuFile(file, EXTRACT_IMAGE_MIME_TYPES);
+}
+
+/**
+ * Object path owner is snapshot_id or draft_id — never CI.
+ * @param {string} ownerId
+ * @param {string} objectId
+ * @param {string} ext
+ */
+function buildRejectedBcuObjectPath(ownerId, objectId, ext) {
+  return String(ownerId) + '/' + String(objectId) + '.' + String(ext);
 }
 
 function pathContainsCi(path, ci) {
@@ -117,8 +136,9 @@ function pathContainsCi(path, ci) {
 
 async function uploadRejectedBcuFile(supabase, opts) {
   const objectId = opts.objectId || randomUUID();
+  const ownerId = opts.ownerId || opts.snapshotId;
   const storagePath = buildRejectedBcuObjectPath(
-    opts.snapshotId,
+    ownerId,
     objectId,
     opts.ext,
   );
@@ -161,16 +181,37 @@ async function removeRejectedBcuFile(supabase, storagePath) {
   }
 }
 
+async function downloadRejectedBcuFile(supabase, storagePath) {
+  const { data, error } = await supabase.storage
+    .from(REJECTED_BCU_BUCKET)
+    .download(storagePath);
+  if (error || !data) {
+    logger.error('rejected BCU storage download failed', {
+      storagePath: storagePath,
+      error: error && error.message ? error.message : 'empty',
+    });
+    const err = new Error('Error interno');
+    err.statusCode = 500;
+    err.code = 'BCU_DOWNLOAD_FAILED';
+    throw err;
+  }
+  const ab = await data.arrayBuffer();
+  return Buffer.from(ab);
+}
+
 module.exports = {
   REJECTED_BCU_BUCKET,
   MAX_FILE_BYTES,
   ALLOWED_MIME_TYPES,
+  EXTRACT_IMAGE_MIME_TYPES,
   MIME_TO_EXT,
   normalizeMime,
   detectMagicMime,
   validateRejectedBcuFile,
+  validateRejectedBcuExtractFile,
   buildRejectedBcuObjectPath,
   pathContainsCi,
   uploadRejectedBcuFile,
   removeRejectedBcuFile,
+  downloadRejectedBcuFile,
 };
