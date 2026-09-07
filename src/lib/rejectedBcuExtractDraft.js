@@ -229,7 +229,9 @@ function buildFailureValidationJson(meta, llmResult, classified) {
 function resolveDeps(deps) {
   const d = deps || {};
   return {
-    supabase: d.supabase,
+    // Lazy default matches confirm's resolveClient — routes need not inject.
+    // Unit tests pass deps.supabase mock and never load clients/supabase.
+    supabase: d.supabase || require('../clients/supabase'),
     upload: d.upload || uploadRejectedBcuFile,
     remove: d.remove || removeRejectedBcuFile,
     download: d.download || downloadRejectedBcuFile,

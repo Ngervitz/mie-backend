@@ -160,4 +160,115 @@ const baseRow = {
   assert.strictEqual(summarizeDraft(noFile, { nowMs: nowMs }).file_available, false);
 }
 
-console.log('unit-bcu-extract-read: PASS');
+/**
+ * Mock chain for fetchLatestActiveDraft (builder ends at .limit()).
+ */
+function mockLatestQuery(result) {
+  const state = {
+    filters: {},
+    orders: [],
+    limitN: null,
+    table: null,
+  };
+  const builder = {
+    select: function () {
+      return builder;
+    },
+    eq: function (col, val) {
+      state.filters[col] = val;
+      return builder;
+    },
+    in: function (col, vals) {
+      state.filters[col + '_in'] = vals.slice();
+      return builder;
+    },
+    order: function (col, opts) {
+      state.orders.push({ col: col, ascending: !!(opts && opts.ascending) });
+      return builder;
+    },
+    limit: function (n) {
+      state.limitN = n;
+      return Promise.resolve(result);
+    },
+  };
+  return {
+    state: state,
+    supabase: {
+      from: function (table) {
+        state.table = table;
+        return builder;
+      },
+    },
+  };
+}
+
+const {
+  fetchLatestActiveDraft: fetchLatestActiveDraftFn,
+} = require('../src/lib/rejectedBcuExtractRead');
+
+(async function runLatestCases() {
+  // a) CI sin ningún draft → null (route → 200 + draft:null)
+  {
+    const mock = mockLatestQuery({ data: [], error: null });
+    const row = await fetchLatestActiveDraftFn(mock.supabase, 50212550);
+    assert.strictEqual(row, null);
+    assert.strictEqual(mock.state.limitN, 1);
+    assert.strictEqual(mock.state.table, 'rejected_bcu_extraction_drafts');
+    assert.deepStrictEqual(mock.state.filters.status_in, [
+      'extracting',
+      'extraction_failed',
+      'pending_review',
+    ]);
+    assert.deepStrictEqual(mock.state.orders, [
+      { col: 'created_at', ascending: false },
+      { col: 'id', ascending: false },
+    ]);
+  }
+
+  // a2) PGRST116 must not throw → null
+  {
+    const row = await fetchLatestActiveDraftFn(
+      mockLatestQuery({
+        data: null,
+        error: {
+          code: 'PGRST116',
+          message: 'Cannot coerce the result to a single JSON object',
+        },
+      }).supabase,
+      50212550,
+    );
+    assert.strictEqual(row, null);
+  }
+
+  // b) CI con solo confirmed → active filter returns empty → null
+  {
+    const row = await fetchLatestActiveDraftFn(
+      mockLatestQuery({ data: [], error: null }).supabase,
+      45006120,
+    );
+    assert.strictEqual(row, null);
+  }
+
+  // c) CI con active draft → latest row
+  {
+    const active = Object.assign({}, baseRow, {
+      status: 'pending_review',
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    });
+    const row = await fetchLatestActiveDraftFn(
+      mockLatestQuery({ data: [active], error: null }).supabase,
+      45006120,
+    );
+    assert.ok(row);
+    assert.strictEqual(row.id, active.id);
+    assert.strictEqual(row.status, 'pending_review');
+    const summary = summarizeDraft(row, { nowMs: nowMs });
+    assert.strictEqual(summary.status, 'pending_review');
+    assert.ok(!Object.prototype.hasOwnProperty.call(summary, 'storage_path'));
+  }
+
+  console.log('unit-bcu-extract-read: PASS');
+})().catch(function (err) {
+  console.error(err);
+  process.exit(1);
+});

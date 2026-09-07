@@ -175,8 +175,9 @@ function detailDraft(row, opts) {
 
 /**
  * Latest active draft for CI: created_at DESC, id DESC LIMIT 1 among active statuses.
+ * Empty result → null (HTTP 200 at route). Never treat "0 rows" as hard failure.
  * @param {object} supabase
- * @param {string} ci
+ * @param {string|number} ci
  */
 async function fetchLatestActiveDraft(supabase, ci) {
   const { data, error } = await supabase
@@ -186,17 +187,22 @@ async function fetchLatestActiveDraft(supabase, ci) {
     .in('status', ACTIVE_DRAFT_STATUSES.slice())
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
 
   if (error) {
+    // Defensive: some PostgREST/singular Accept paths surface 0-row as PGRST116.
+    if (error.code === 'PGRST116') {
+      return null;
+    }
     const err = new Error('Error interno');
     err.statusCode = 500;
     err.code = 'DRAFT_READ_FAILED';
     err.cause = error;
     throw err;
   }
-  return data || null;
+
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  return rows.length ? rows[0] : null;
 }
 
 /**

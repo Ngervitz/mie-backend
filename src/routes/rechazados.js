@@ -369,6 +369,14 @@ router.get(
     } catch (err) {
       logger.error('GET /rechazados/:ci/bcu-extraction-drafts failed', {
         error: err && err.message ? err.message : 'unknown',
+        code: err && err.code ? err.code : null,
+        cause:
+          err && err.cause && err.cause.message
+            ? err.cause.message
+            : err && err.cause
+              ? String(err.cause)
+              : null,
+        ci: ci,
       });
       return res.status(500).json({ error: 'Error interno' });
     }
