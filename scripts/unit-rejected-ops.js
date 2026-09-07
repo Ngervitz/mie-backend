@@ -7,9 +7,12 @@
 const assert = require('assert');
 const {
   OPS_STATUS,
+  TRI,
   normalizeCi,
   worstBcuCategory,
   institutionFlags,
+  amountFlag,
+  amountPairFlag,
   deriveOpsStatus,
   nextReviewOn,
   deriveRejectedOps,
@@ -55,22 +58,39 @@ assert.strictEqual(worstBcuCategory([inst('3'), inst('4')]), '4');
 assert.strictEqual(worstBcuCategory(['1C', '2B']), '2B');
 assert.strictEqual(worstBcuCategory([]), null);
 
+// --- amountFlag / pair ---
+assert.strictEqual(amountFlag(null), TRI.UNKNOWN);
+assert.strictEqual(amountFlag(0), TRI.FALSE);
+assert.strictEqual(amountFlag(1), TRI.TRUE);
+assert.strictEqual(amountPairFlag(0, 0), TRI.FALSE);
+assert.strictEqual(amountPairFlag(10, null), TRI.TRUE);
+assert.strictEqual(amountPairFlag(0, null), TRI.UNKNOWN);
+assert.strictEqual(amountPairFlag(null, null), TRI.UNKNOWN);
+
 // --- flags: MN/ME never summed; either side > 0 is enough ---
 assert.deepStrictEqual(institutionFlags(inst('4', { moroso_mn: 1, moroso_me: 0 })), {
-  hasMoroso: true,
-  hasCastigado: false,
+  hasMoroso: TRI.TRUE,
+  hasCastigado: TRI.FALSE,
 });
 assert.deepStrictEqual(institutionFlags(inst('4', { moroso_mn: 0, moroso_me: 2 })), {
-  hasMoroso: true,
-  hasCastigado: false,
+  hasMoroso: TRI.TRUE,
+  hasCastigado: TRI.FALSE,
 });
 assert.deepStrictEqual(
   institutionFlags(inst('5', { castigado_mn: 0, castigado_me: 1 })),
-  { hasMoroso: false, hasCastigado: true },
+  { hasMoroso: TRI.FALSE, hasCastigado: TRI.TRUE },
 );
 assert.deepStrictEqual(
   institutionFlags(inst('5', { moroso_mn: 0, moroso_me: 0, castigado_mn: 0, castigado_me: 0 })),
-  { hasMoroso: false, hasCastigado: false },
+  { hasMoroso: TRI.FALSE, hasCastigado: TRI.FALSE },
+);
+assert.deepStrictEqual(
+  institutionFlags(inst('4', { moroso_mn: 0, moroso_me: null })),
+  { hasMoroso: TRI.UNKNOWN, hasCastigado: TRI.FALSE },
+);
+assert.deepStrictEqual(
+  institutionFlags(inst('4', { moroso_mn: null, moroso_me: null, castigado_mn: null, castigado_me: null })),
+  { hasMoroso: TRI.UNKNOWN, hasCastigado: TRI.UNKNOWN },
 );
 
 // --- retry ---
@@ -79,6 +99,18 @@ assert.strictEqual(deriveOpsStatus([inst('2A')]), OPS_STATUS.RETRY_ELIGIBLE);
 assert.strictEqual(
   deriveOpsStatus([inst('1C'), inst('2A')]),
   OPS_STATUS.RETRY_ELIGIBLE,
+);
+assert.strictEqual(
+  deriveOpsStatus([
+    inst('1C', {
+      moroso_mn: null,
+      moroso_me: null,
+      castigado_mn: null,
+      castigado_me: null,
+    }),
+  ]),
+  OPS_STATUS.RETRY_ELIGIBLE,
+  '1C/2A does not use balances',
 );
 
 // --- reconsultable ---
@@ -118,6 +150,40 @@ assert.strictEqual(
   deriveOpsStatus([inst('2B'), inst('5')]),
   OPS_STATUS.UNDEFINED_CASE,
   '5 without moroso/castigado wins over 2B (step 4 before step 5)',
+);
+assert.strictEqual(
+  deriveOpsStatus([
+    inst('4', {
+      moroso_mn: null,
+      moroso_me: null,
+      castigado_mn: null,
+      castigado_me: null,
+    }),
+  ]),
+  OPS_STATUS.UNDEFINED_CASE,
+  '4/5 + UNKNOWN never retry_eligible',
+);
+assert.notStrictEqual(
+  deriveOpsStatus([
+    inst('4', {
+      moroso_mn: null,
+      moroso_me: 0,
+      castigado_mn: 0,
+      castigado_me: 0,
+    }),
+  ]),
+  OPS_STATUS.RETRY_ELIGIBLE,
+);
+assert.strictEqual(
+  deriveOpsStatus([
+    inst('4', {
+      moroso_mn: null,
+      moroso_me: 0,
+      castigado_mn: 0,
+      castigado_me: 0,
+    }),
+  ]),
+  OPS_STATUS.UNDEFINED_CASE,
 );
 
 // --- pending ---

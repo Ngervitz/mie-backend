@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Rechazados — list/detail + manual BCU snapshot write + Stage 3 extraction drafts.
+ * Rechazados — list/detail + manual BCU snapshot write + Stage 3/4 extraction drafts.
  * Mount: app.use('/rechazados', requireDashboardPermission('rechazados'), router)
  */
 
@@ -32,6 +32,7 @@ const {
   createBcuExtractionDraft,
   retryBcuExtractionDraft,
 } = require('../lib/rejectedBcuExtractDraft');
+const { confirmBcuExtractionDraft } = require('../lib/rejectedBcuExtractConfirm');
 
 const router = express.Router();
 
@@ -72,6 +73,14 @@ function sendWriteError(res, err) {
     };
     if (err && err.data !== undefined) body.data = err.data;
     return res.status(409).json(body);
+  }
+  if (status === 422) {
+    const body = {
+      error: (err && err.message) || 'confirmación bloqueada',
+      code: (err && err.code) || 'CONFIRM_BLOCKED',
+    };
+    if (err && err.data !== undefined) body.data = err.data;
+    return res.status(422).json(body);
   }
   const message =
     status === 400 || status === 404
@@ -266,6 +275,60 @@ router.post(
         error: err && err.message ? err.message : 'unknown',
         code: err && err.code ? err.code : null,
       });
+      return sendWriteError(res, err);
+    }
+  },
+);
+
+router.post(
+  '/:ci/bcu-extraction-drafts/:draftId/confirm',
+  async function postBcuExtractionDraftConfirm(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+    const draftId = req.params && req.params.draftId;
+    if (
+      !draftId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        String(draftId),
+      )
+    ) {
+      return res.status(400).json({ error: 'draft inválido' });
+    }
+
+    try {
+      const inUniverse = await fetchCiHasRejectedHistorico(supabase, ci);
+      if (!inUniverse) {
+        return res.status(404).json({ error: 'No encontrado' });
+      }
+
+      const result = await confirmBcuExtractionDraft({
+        ci: ci,
+        draftId: String(draftId),
+        body: req.body || {},
+        createdBy: req.dashboardUserId,
+      });
+
+      return res.status(result.httpStatus).json({ ok: true, data: result.data });
+    } catch (err) {
+      const status = err && err.statusCode;
+      if (
+        status === 400 ||
+        status === 404 ||
+        status === 409 ||
+        status === 422
+      ) {
+        return sendWriteError(res, err);
+      }
+      logger.error(
+        'POST /rechazados/:ci/bcu-extraction-drafts/:draftId/confirm failed',
+        {
+          error: err && err.message ? err.message : 'unknown',
+          code: err && err.code ? err.code : null,
+          draft_id: draftId,
+        },
+      );
       return sendWriteError(res, err);
     }
   },

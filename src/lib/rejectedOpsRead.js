@@ -29,10 +29,10 @@ const IN_CHUNK = 200;
 const ALLOWED_OPS_STATUS = Object.freeze(Object.values(OPS_STATUS));
 
 const SNAPSHOT_SELECT =
-  'id, ci, period_label, consulted_on, source, storage_path, original_filename, content_type, file_size_bytes, created_at';
+  'id, ci, period_label, consulted_on, source, storage_path, original_filename, content_type, file_size_bytes, created_at, currency_view_selected, extraction_contract_version, document_ci_raw, summary, summary_validation_status, summary_validation';
 
 const INSTITUTION_SELECT =
-  'id, snapshot_id, institution_name, category, vigente_mn, vigente_me, moroso_mn, moroso_me, castigado_mn, castigado_me, contingencias_mn, contingencias_me, sort_order, created_at';
+  'id, snapshot_id, institution_name, category, vigente_mn, vigente_me, vigente_no_autoliquidable_mn, vigente_no_autoliquidable_me, moroso_mn, moroso_me, castigado_mn, castigado_me, contingencias_mn, contingencias_me, creditos_reestructurados_mn, creditos_reestructurados_me, sort_order, created_at';
 
 /**
  * @param {unknown} raw
@@ -207,19 +207,35 @@ function institutionsBySnapshotId(institutionRows) {
   return map;
 }
 
+/**
+ * Preserve null vs 0 for balances. null = unknown; 0 = explicit zero.
+ * @param {unknown} raw
+ * @returns {number|null}
+ */
+function formatAmount(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = toNum(raw);
+  if (n == null || !Number.isFinite(n)) return null;
+  return n;
+}
+
 function formatInstitution(row) {
   return {
     id: row.id,
     institution_name: row.institution_name,
     category: row.category,
-    vigente_mn: toNum(row.vigente_mn) || 0,
-    vigente_me: toNum(row.vigente_me) || 0,
-    moroso_mn: toNum(row.moroso_mn) || 0,
-    moroso_me: toNum(row.moroso_me) || 0,
-    castigado_mn: toNum(row.castigado_mn) || 0,
-    castigado_me: toNum(row.castigado_me) || 0,
-    contingencias_mn: toNum(row.contingencias_mn) || 0,
-    contingencias_me: toNum(row.contingencias_me) || 0,
+    vigente_mn: formatAmount(row.vigente_mn),
+    vigente_me: formatAmount(row.vigente_me),
+    vigente_no_autoliquidable_mn: formatAmount(row.vigente_no_autoliquidable_mn),
+    vigente_no_autoliquidable_me: formatAmount(row.vigente_no_autoliquidable_me),
+    moroso_mn: formatAmount(row.moroso_mn),
+    moroso_me: formatAmount(row.moroso_me),
+    castigado_mn: formatAmount(row.castigado_mn),
+    castigado_me: formatAmount(row.castigado_me),
+    contingencias_mn: formatAmount(row.contingencias_mn),
+    contingencias_me: formatAmount(row.contingencias_me),
+    creditos_reestructurados_mn: formatAmount(row.creditos_reestructurados_mn),
+    creditos_reestructurados_me: formatAmount(row.creditos_reestructurados_me),
     sort_order: Number(row.sort_order) || 0,
   };
 }
@@ -246,6 +262,23 @@ function formatSnapshot(snapshot, instMap, withDerived) {
     file_size_bytes:
       snapshot.file_size_bytes != null ? toNum(snapshot.file_size_bytes) : null,
     created_at: snapshot.created_at,
+    currency_view_selected:
+      snapshot.currency_view_selected != null
+        ? snapshot.currency_view_selected
+        : null,
+    extraction_contract_version:
+      snapshot.extraction_contract_version != null
+        ? snapshot.extraction_contract_version
+        : null,
+    document_ci_raw:
+      snapshot.document_ci_raw != null ? snapshot.document_ci_raw : null,
+    summary: snapshot.summary != null ? snapshot.summary : null,
+    summary_validation_status:
+      snapshot.summary_validation_status != null
+        ? snapshot.summary_validation_status
+        : null,
+    summary_validation:
+      snapshot.summary_validation != null ? snapshot.summary_validation : null,
     institutions: institutions,
   };
   if (withDerived) {
@@ -680,6 +713,7 @@ module.exports = {
   hasRejectedHistorico,
   fetchCiHasRejectedHistorico,
   formatInstitution,
+  formatAmount,
   formatSnapshot,
   buildCreatedSnapshotResponse,
 };

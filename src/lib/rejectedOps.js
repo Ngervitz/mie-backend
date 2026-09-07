@@ -1,6 +1,11 @@
+'use strict';
+
 /**
  * Pure Rechazados V0 helpers (CI + BCU operational rules).
  * No I/O. next_review_on depends only on consulted_on (calendar DATE).
+ *
+ * Amount flags are tri-state: TRUE | FALSE | UNKNOWN.
+ * NULL is never treated as 0 for operational decisions.
  */
 
 const OPS_STATUS = Object.freeze({
@@ -9,6 +14,12 @@ const OPS_STATUS = Object.freeze({
   RECONSULTABLE: 'reconsultable',
   NO_AUTO_RECONSULT: 'no_auto_reconsult',
   UNDEFINED_CASE: 'undefined_case',
+});
+
+const TRI = Object.freeze({
+  TRUE: 'TRUE',
+  FALSE: 'FALSE',
+  UNKNOWN: 'UNKNOWN',
 });
 
 /** Best → worst. Do not use lexicographic string order. */
@@ -75,6 +86,42 @@ function worstBcuCategory(institutionsOrCategories) {
   return worst;
 }
 
+/**
+ * Single amount → tri-state.
+ * null/undefined → UNKNOWN; 0 → FALSE; >0 → TRUE.
+ * Non-finite / negative → UNKNOWN (defensive; should not appear post-confirm).
+ * @param {unknown} raw
+ * @returns {'TRUE'|'FALSE'|'UNKNOWN'}
+ */
+function amountFlag(raw) {
+  if (raw === null || raw === undefined || raw === '') return TRI.UNKNOWN;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return TRI.UNKNOWN;
+  if (n > 0) return TRI.TRUE;
+  return TRI.FALSE;
+}
+
+/**
+ * MN/ME pair aggregation:
+ * TRUE if any side >0;
+ * FALSE only if both sides are known zeros;
+ * UNKNOWN if no TRUE and at least one side is null/unknown.
+ * @param {unknown} mn
+ * @param {unknown} me
+ * @returns {'TRUE'|'FALSE'|'UNKNOWN'}
+ */
+function amountPairFlag(mn, me) {
+  const a = amountFlag(mn);
+  const b = amountFlag(me);
+  if (a === TRI.TRUE || b === TRI.TRUE) return TRI.TRUE;
+  if (a === TRI.FALSE && b === TRI.FALSE) return TRI.FALSE;
+  return TRI.UNKNOWN;
+}
+
+/**
+ * @deprecated Prefer amountFlag / amountPairFlag. Kept for non-ops numeric coercion.
+ * null → 0 (legacy). Do NOT use for ops decisions.
+ */
 function toNonNegNumber(raw) {
   const n = Number(raw);
   return Number.isFinite(n) ? n : 0;
@@ -82,17 +129,13 @@ function toNonNegNumber(raw) {
 
 /**
  * @param {object|null|undefined} institution
- * @returns {{ hasMoroso: boolean, hasCastigado: boolean }}
+ * @returns {{ hasMoroso: 'TRUE'|'FALSE'|'UNKNOWN', hasCastigado: 'TRUE'|'FALSE'|'UNKNOWN' }}
  */
 function institutionFlags(institution) {
   const row = institution && typeof institution === 'object' ? institution : {};
-  const morosoMn = toNonNegNumber(row.moroso_mn);
-  const morosoMe = toNonNegNumber(row.moroso_me);
-  const castigadoMn = toNonNegNumber(row.castigado_mn);
-  const castigadoMe = toNonNegNumber(row.castigado_me);
   return {
-    hasMoroso: morosoMn > 0 || morosoMe > 0,
-    hasCastigado: castigadoMn > 0 || castigadoMe > 0,
+    hasMoroso: amountPairFlag(row.moroso_mn, row.moroso_me),
+    hasCastigado: amountPairFlag(row.castigado_mn, row.castigado_me),
   };
 }
 
@@ -100,8 +143,19 @@ function isRetryCategory(category) {
   return category === '1C' || category === '2A';
 }
 
+function isTrue(flag) {
+  return flag === TRI.TRUE;
+}
+function isFalse(flag) {
+  return flag === TRI.FALSE;
+}
+function isUnknown(flag) {
+  return flag === TRI.UNKNOWN;
+}
+
 /**
  * Precedence is intentional and must not be reordered.
+ * NULL amounts never count as evidence of "no moroso/castigado".
  * @param {Array<object>|null|undefined} institutions
  * @returns {string}
  */
@@ -121,7 +175,7 @@ function deriveOpsStatus(institutions) {
   for (let i = 0; i < list.length; i += 1) {
     const cat = list[i] && list[i].category;
     const flags = institutionFlags(list[i]);
-    if ((cat === '4' || cat === '5') && flags.hasCastigado) {
+    if ((cat === '4' || cat === '5') && isTrue(flags.hasCastigado)) {
       return OPS_STATUS.NO_AUTO_RECONSULT;
     }
   }
@@ -129,7 +183,21 @@ function deriveOpsStatus(institutions) {
   for (let i = 0; i < list.length; i += 1) {
     const cat = list[i] && list[i].category;
     const flags = institutionFlags(list[i]);
-    if (cat === '5' && !flags.hasMoroso && !flags.hasCastigado) {
+    if (
+      cat === '5' &&
+      isFalse(flags.hasMoroso) &&
+      isFalse(flags.hasCastigado)
+    ) {
+      return OPS_STATUS.UNDEFINED_CASE;
+    }
+  }
+
+  // 4/5 with UNKNOWN evidence needed for remaining rules → not evaluable.
+  for (let i = 0; i < list.length; i += 1) {
+    const cat = list[i] && list[i].category;
+    if (cat !== '4' && cat !== '5') continue;
+    const flags = institutionFlags(list[i]);
+    if (isUnknown(flags.hasMoroso) || isUnknown(flags.hasCastigado)) {
       return OPS_STATUS.UNDEFINED_CASE;
     }
   }
@@ -138,10 +206,18 @@ function deriveOpsStatus(institutions) {
     const cat = list[i] && list[i].category;
     const flags = institutionFlags(list[i]);
     if (cat === '2B' || cat === '3') return OPS_STATUS.RECONSULTABLE;
-    if (cat === '4' && flags.hasMoroso && !flags.hasCastigado) {
+    if (
+      cat === '4' &&
+      isTrue(flags.hasMoroso) &&
+      isFalse(flags.hasCastigado)
+    ) {
       return OPS_STATUS.RECONSULTABLE;
     }
-    if (cat === '5' && flags.hasMoroso && !flags.hasCastigado) {
+    if (
+      cat === '5' &&
+      isTrue(flags.hasMoroso) &&
+      isFalse(flags.hasCastigado)
+    ) {
       return OPS_STATUS.RECONSULTABLE;
     }
   }
@@ -211,11 +287,15 @@ function deriveRejectedOps(input) {
 
 module.exports = {
   OPS_STATUS,
+  TRI,
   BCU_CATEGORY_RANK,
   BCU_CATEGORIES,
   normalizeCi,
   categoryRank,
   worstBcuCategory,
+  amountFlag,
+  amountPairFlag,
+  toNonNegNumber,
   institutionFlags,
   deriveOpsStatus,
   parseConsultedOn,
