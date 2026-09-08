@@ -5194,9 +5194,12 @@
   }
 }
 #mie-dashboard-app .rechazados-detail-modal {
-  width: min(1100px, 96vw);
+  width: min(1200px, 96vw);
+  max-width: calc(100vw - 32px);
   max-height: 90vh;
   overflow: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 #mie-dashboard-app .rechazados-detail-summary {
   display: grid;
@@ -5303,12 +5306,18 @@
   padding: 14px;
   margin: 12px 0 16px;
   background: var(--surface);
+  min-width: 0;
+  overflow-x: hidden;
+}
+#mie-dashboard-app .rechazados-extract-review {
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-extract-review-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 38%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
   gap: 16px;
   align-items: stretch;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-extract-doc-col {
   min-width: 0;
@@ -5316,21 +5325,44 @@
 #mie-dashboard-app .rechazados-extract-doc-sticky {
   position: sticky;
   top: 8px;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-extract-review-col {
   min-width: 0;
+  overflow-x: hidden;
 }
 #mie-dashboard-app .rechazados-extract-doc {
   margin: 8px 0 14px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-extract-doc-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+#mie-dashboard-app .rechazados-extract-doc.is-zoomed .rechazados-extract-doc-btn {
+  cursor: zoom-out;
 }
 #mie-dashboard-app .rechazados-extract-doc-img {
   max-width: 100%;
-  max-height: min(70vh, 560px);
   width: 100%;
+  height: auto;
+  max-height: min(72vh, 640px);
   object-fit: contain;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  display: block;
+}
+#mie-dashboard-app .rechazados-extract-doc.is-zoomed .rechazados-extract-doc-img {
+  max-height: none;
+}
+#mie-dashboard-app .rechazados-extract-doc-hint {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
 }
 #mie-dashboard-app .rechazados-extract-overview {
   margin: 0 0 14px;
@@ -5338,16 +5370,46 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-extract-overview-title {
   font-weight: var(--font-weight-medium);
   margin-bottom: 8px;
 }
-#mie-dashboard-app .rechazados-extract-overview-grid {
+#mie-dashboard-app .rechazados-extract-check {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px 12px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin: 6px 0;
   font-size: 0.92rem;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-extract-check-mark {
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+#mie-dashboard-app .rechazados-extract-check.is-ok .rechazados-extract-check-mark {
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-extract-check.is-bad .rechazados-extract-check-mark {
+  color: var(--accent-danger);
+}
+#mie-dashboard-app .rechazados-extract-check-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+#mie-dashboard-app .rechazados-extract-obs {
+  margin: 0 0 14px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-extract-obs-summary {
+  margin: 0 0 8px;
+  font-weight: var(--font-weight-medium);
+}
+#mie-dashboard-app .rechazados-extract-obs-note {
+  margin: 8px 0;
+  font-size: 0.82rem;
 }
 #mie-dashboard-app .rechazados-extract-tech {
   margin: 10px 0 14px;
@@ -5355,9 +5417,60 @@
 }
 #mie-dashboard-app .rechazados-extract-tech > summary,
 #mie-dashboard-app .rechazados-empty-rubros > summary,
-#mie-dashboard-app .rechazados-extract-summary-summary {
+#mie-dashboard-app .rechazados-extract-summary-summary,
+#mie-dashboard-app .rechazados-extract-edit-details > summary {
   cursor: pointer;
   color: var(--text-muted);
+}
+#mie-dashboard-app .rechazados-extract-edit-details {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-extract-edit-body {
+  margin-top: 10px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-inst-quick-list {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-inst-quick-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--surface);
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-inst-quick-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .rechazados-inst-quick-rows {
+  display: grid;
+  gap: 4px;
+}
+#mie-dashboard-app .rechazados-inst-quick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  font-size: 0.9rem;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-inst-quick-label {
+  color: var(--text-muted);
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-inst-quick-value {
+  text-align: right;
+  white-space: nowrap;
 }
 #mie-dashboard-app .rechazados-findings {
   margin: 10px 0 14px;
@@ -5378,6 +5491,10 @@
   border-color: var(--accent-danger);
   background: var(--accent-danger-soft);
 }
+#mie-dashboard-app .rechazados-finding.is-warning {
+  border-color: var(--accent-warn, #c9a227);
+  background: rgba(201, 162, 39, 0.08);
+}
 #mie-dashboard-app .rechazados-finding-title {
   font-weight: var(--font-weight-medium);
 }
@@ -5395,12 +5512,14 @@
   padding-left: 16px;
   font-size: 0.82rem;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 #mie-dashboard-app .rechazados-money-compact {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-money-null {
   min-width: 36px;
@@ -5416,10 +5535,11 @@
   margin: 10px 0;
   padding-top: 8px;
   border-top: 1px solid var(--border);
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-rubro-sides {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 #mie-dashboard-app .rechazados-extract-summary {
@@ -5427,6 +5547,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-extract-summary-body {
   margin-top: 8px;
@@ -5439,6 +5560,7 @@
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
+  min-width: 0;
 }
 #mie-dashboard-app .rechazados-inst-name-field {
   grid-column: 1 / -1;
@@ -5468,7 +5590,7 @@
 }
 @media (max-width: 800px) {
   #mie-dashboard-app .rechazados-extract-review-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   #mie-dashboard-app .rechazados-extract-doc-sticky {
     position: static;
@@ -5482,6 +5604,6 @@
     grid-template-columns: 1fr;
   }
   #mie-dashboard-app .rechazados-rubro-sides {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

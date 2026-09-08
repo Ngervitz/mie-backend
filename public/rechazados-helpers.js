@@ -698,6 +698,174 @@
     return EXTRACT_RUBRO_LABELS[key] || key;
   }
 
+  function digitsOnly(value) {
+    return String(value == null ? '' : value).replace(/\D/g, '');
+  }
+
+  function documentCiMatchesExpected(documentCiRaw, expectedCi) {
+    var exp = digitsOnly(expectedCi);
+    var raw = digitsOnly(documentCiRaw);
+    if (!exp) {
+      return { ok: false, label: 'Sin CI de referencia' };
+    }
+    if (!raw) {
+      return { ok: false, label: 'Falta CI en documento' };
+    }
+    var ok = raw === exp || raw.slice(-exp.length) === exp;
+    return { ok: ok, label: ok ? 'coincide' : 'no coincide' };
+  }
+
+  function isPeriodValidYyyymm(period) {
+    if (period == null || period === '') return false;
+    var s = String(period).trim();
+    var m = /^(\d{4})(\d{2})$/.exec(s);
+    if (!m) {
+      m = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(s);
+    }
+    if (!m) return false;
+    var month = Number(m[2]);
+    return month >= 1 && month <= 12;
+  }
+
+  function currencyViewQuickStatus(view) {
+    var v = view != null ? String(view) : '';
+    if (v === 'MN_PESOS_ME_PESOS') {
+      return { ok: true, label: 'Pesos' };
+    }
+    if (!v) {
+      return { ok: false, label: 'Sin moneda' };
+    }
+    return { ok: false, label: v };
+  }
+
+  /** Format amount for quick cards (es-UY). null → — */
+  function formatMoneyUyQuick(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    var n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return (
+      '$' +
+      n.toLocaleString('es-UY', {
+        minimumFractionDigits: n % 1 === 0 ? 0 : 2,
+        maximumFractionDigits: 2,
+      })
+    );
+  }
+
+  function moneyPairsEqual(a, b) {
+    var pa = a && typeof a === 'object' ? a : {};
+    var pb = b && typeof b === 'object' ? b : {};
+    return pa.mn === pb.mn && pa.me === pb.me;
+  }
+
+  function moneyPairHasPositive(pair) {
+    var p = pair && typeof pair === 'object' ? pair : {};
+    var mn = p.mn;
+    var me = p.me;
+    return (typeof mn === 'number' && mn > 0) || (typeof me === 'number' && me > 0);
+  }
+
+  /**
+   * Quick-view money display: omit ME=0; null pair → —; MN=0 alone → $0.
+   */
+  function formatQuickMoneyPair(pair) {
+    var p = pair && typeof pair === 'object' ? pair : {};
+    var mn = p.mn;
+    var me = p.me;
+    if (mn == null && me == null) return '—';
+    if (mn == null && me === 0) return '—';
+    var parts = [];
+    if (mn != null) parts.push(formatMoneyUyQuick(mn));
+    if (me != null && me !== 0) {
+      parts.push(formatMoneyUyQuick(me) + ' ME');
+    }
+    return parts.length ? parts.join(' · ') : '—';
+  }
+
+  /**
+   * Compact institution rows for quick authorize (presentation only).
+   * Does not mutate data. Skips vigente_no_autoliquidable when equal to vigente.
+   */
+  function institutionQuickRows(inst) {
+    var rows = [];
+    var src = inst && typeof inst === 'object' ? inst : {};
+    function pushRow(key, label, pair, opts) {
+      var o = opts || {};
+      var p = pair && typeof pair === 'object' ? pair : { mn: null, me: null };
+      if (o.onlyIfPositive && !moneyPairHasPositive(p)) return;
+      if (!o.always && p.mn == null && p.me == null) return;
+      rows.push({
+        key: key,
+        label: label,
+        display: formatQuickMoneyPair(p),
+      });
+    }
+    pushRow('vigente', 'Vigente', src.vigente, { always: true });
+    if (!moneyPairsEqual(src.vigente, src.vigente_no_autoliquidable)) {
+      pushRow(
+        'vigente_no_autoliquidable',
+        'Vig. no autoliquidable',
+        src.vigente_no_autoliquidable,
+        { always: true },
+      );
+    }
+    pushRow('moroso', 'Moroso', src.moroso, { always: true });
+    pushRow('castigado_por_atraso', 'Castigado', src.castigado_por_atraso, {
+      always: true,
+    });
+    pushRow('contingencias', 'Contingencias', src.contingencias, {
+      onlyIfPositive: true,
+    });
+    pushRow(
+      'creditos_reestructurados',
+      'Reestructurado',
+      src.creditos_reestructurados,
+      { onlyIfPositive: true },
+    );
+    return rows;
+  }
+
+  /**
+   * Extraction findings for quick view.
+   * Persisted ORPHAN/NOT_COMPARABLE are historical extraction notes — not
+   * treated as definitive current confirm blockers (Stage 4 revalidates live).
+   */
+  function extractionObservationsForUi(findings) {
+    var groups = groupFindingsForUi(findings);
+    return groups.map(function (g) {
+      var code = g.reason_code;
+      var isOrphan = code.indexOf('RUBRO_ORPHAN_') === 0;
+      var isNc = code === 'SUMMARY_DETAIL_NOT_COMPARABLE';
+      var title = g.label;
+      var detail = '';
+      var confirmHint = '';
+      if (isNc) {
+        title = 'Totales no completamente comparables';
+        detail =
+          'Hay campos sin dato por institución, aunque los valores informados pueden coincidir con el total.';
+        confirmHint =
+          'No bloquea por sí solo en la vista rápida; la validación final ocurre al confirmar.';
+      } else if (isOrphan) {
+        detail =
+          'Etiqueta histórica de la extracción. La confirmación revalida con las reglas actuales.';
+        confirmHint =
+          'No tratar este registro persistido como blocker definitivo.';
+      }
+      var showAsCurrentBlocker =
+        g.severity === 'blocker' && !isOrphan && !isNc;
+      return {
+        reason_code: code,
+        title: title,
+        detail: detail,
+        confirmHint: confirmHint,
+        count: g.count,
+        paths: g.paths.slice(),
+        tone: showAsCurrentBlocker ? 'blocker' : 'warning',
+        showAsCurrentBlocker: showAsCurrentBlocker,
+      };
+    });
+  }
+
   function validateReviewedUx(reviewed) {
     if (!reviewed || typeof reviewed !== 'object') {
       return { ok: false, error: 'Extracción inválida' };
@@ -886,6 +1054,15 @@
     shouldShowMoneyCell: shouldShowMoneyCell,
     shouldExpandExtractSummary: shouldExpandExtractSummary,
     extractRubroLabel: extractRubroLabel,
+    documentCiMatchesExpected: documentCiMatchesExpected,
+    isPeriodValidYyyymm: isPeriodValidYyyymm,
+    currencyViewQuickStatus: currencyViewQuickStatus,
+    formatMoneyUyQuick: formatMoneyUyQuick,
+    moneyPairsEqual: moneyPairsEqual,
+    moneyPairHasPositive: moneyPairHasPositive,
+    formatQuickMoneyPair: formatQuickMoneyPair,
+    institutionQuickRows: institutionQuickRows,
+    extractionObservationsForUi: extractionObservationsForUi,
     validateReviewedUx: validateReviewedUx,
     buildConfirmPayload: buildConfirmPayload,
     validateExtractSelectedFile: validateExtractSelectedFile,

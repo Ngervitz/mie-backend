@@ -638,4 +638,91 @@ assert.ok(css.indexOf('position: sticky') !== -1);
 assert.ok(js.indexOf('rechazados-money-mode') === -1);
 assert.ok(js.indexOf('>Valor</option>') === -1);
 
+// --- Stage 5.2 quick authorize ---
+assert.ok(js.indexOf('Estado general') !== -1);
+assert.ok(js.indexOf('Observaciones de extracción') !== -1);
+assert.ok(js.indexOf('Editar detalles') !== -1);
+assert.ok(js.indexOf('rechazados-inst-quick-card') !== -1);
+assert.ok(js.indexOf('extractEditDetailsOpen') !== -1);
+assert.ok(js.indexOf('data-extract-edit-details') !== -1);
+assert.ok(js.indexOf('extract-doc-zoom') !== -1);
+assert.ok(js.indexOf('validación final ocurre al confirmar') !== -1);
+assert.ok(css.indexOf('minmax(0, 0.45fr)') !== -1);
+assert.ok(css.indexOf('min-width: 0') !== -1);
+assert.ok(css.indexOf('max-width: 800px') !== -1);
+assert.ok(css.indexOf('rechazados-inst-quick-card') !== -1);
+assert.ok(css.indexOf('width: min(1200px') !== -1);
+
+assert.deepStrictEqual(
+  H.documentCiMatchesExpected('UY IDE 000000000050212550', 50212550),
+  { ok: true, label: 'coincide' },
+);
+assert.strictEqual(H.documentCiMatchesExpected('123', 50212550).ok, false);
+assert.strictEqual(H.isPeriodValidYyyymm('202607'), true);
+assert.strictEqual(H.isPeriodValidYyyymm('202613'), false);
+assert.deepStrictEqual(H.currencyViewQuickStatus('MN_PESOS_ME_PESOS'), {
+  ok: true,
+  label: 'Pesos',
+});
+assert.strictEqual(H.formatMoneyUyQuick(null), '—');
+assert.strictEqual(H.formatQuickMoneyPair({ mn: null, me: null }), '—');
+assert.strictEqual(H.formatQuickMoneyPair({ mn: null, me: 0 }), '—');
+assert.ok(H.formatQuickMoneyPair({ mn: 1410.4, me: 0 }).indexOf('ME') === -1);
+assert.ok(H.formatQuickMoneyPair({ mn: 0, me: null }).indexOf('$') !== -1);
+
+const quickInst = {
+  institution_name_raw: 'BROU',
+  category: '5',
+  vigente: { mn: 1410.4, me: 0 },
+  vigente_no_autoliquidable: { mn: 1410.4, me: 0 },
+  moroso: { mn: null, me: null },
+  castigado_por_atraso: { mn: 0, me: null },
+  contingencias: { mn: null, me: null },
+  creditos_reestructurados: { mn: 75598.99, me: 0 },
+};
+const qRows = H.institutionQuickRows(quickInst);
+const qKeys = qRows.map(function (r) {
+  return r.key;
+});
+assert.ok(qKeys.indexOf('vigente') !== -1);
+assert.ok(qKeys.indexOf('vigente_no_autoliquidable') === -1);
+assert.ok(qKeys.indexOf('moroso') !== -1);
+assert.ok(qKeys.indexOf('castigado_por_atraso') !== -1);
+assert.ok(qKeys.indexOf('creditos_reestructurados') !== -1);
+assert.strictEqual(
+  qRows.find(function (r) {
+    return r.key === 'moroso';
+  }).display,
+  '—',
+);
+
+const obs = H.extractionObservationsForUi([
+  {
+    severity: 'info',
+    reason_code: 'SUMMARY_DETAIL_NOT_COMPARABLE',
+    path: 'vigente.mn',
+  },
+  {
+    severity: 'blocker',
+    reason_code: 'RUBRO_ORPHAN_INCONSISTENT_SUPPORT',
+    path: 'vigente.mn',
+  },
+  {
+    severity: 'blocker',
+    reason_code: 'CI_MISMATCH',
+    path: 'document_ci_raw',
+  },
+]);
+assert.strictEqual(obs.length, 3);
+assert.strictEqual(obs[0].title, 'Totales no completamente comparables');
+assert.strictEqual(obs[0].showAsCurrentBlocker, false);
+assert.strictEqual(obs[1].showAsCurrentBlocker, false);
+assert.strictEqual(obs[2].showAsCurrentBlocker, true);
+assert.ok(JSON.stringify(obs).indexOf('BROU') === -1);
+
+// confirm still available without requiring edit-details open string coupling
+assert.ok(js.indexOf('data-action="extract-confirm"') !== -1);
+assert.ok(js.indexOf('buildConfirmPayload') !== -1);
+assert.ok(js.indexOf("state.extractEditDetailsOpen = true") !== -1);
+
 console.log('OK unit-rechazados-ui');

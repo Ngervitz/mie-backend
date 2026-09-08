@@ -14491,6 +14491,8 @@ init();
     extractConfirmWarnings: null,
     extractLocalPreviewUrl: null,
     extractReviewDraftId: null,
+    extractEditDetailsOpen: false,
+    extractDocZoomed: false,
   };
 
   function setStatus(msg, isError) {
@@ -14545,6 +14547,8 @@ init();
     state.extractConfirmError = null;
     state.extractConfirmBlockers = null;
     state.extractConfirmWarnings = null;
+    state.extractEditDetailsOpen = false;
+    state.extractDocZoomed = false;
   }
 
   function resetForm(ci) {
@@ -15145,12 +15149,17 @@ init();
     const mime = String(contentType || '').toLowerCase();
     if (mime.indexOf('image/') === 0) {
       return (
-        '<div class="rechazados-extract-doc">' +
+        '<div class="rechazados-extract-doc' +
+        (state.extractDocZoomed ? ' is-zoomed' : '') +
+        '">' +
+        '<button type="button" class="rechazados-extract-doc-btn" data-action="extract-doc-zoom" title="Ampliar / reducir">' +
         '<img class="rechazados-extract-doc-img" src="' +
         escapeHtml(abs) +
         '" alt="' +
         escapeHtml(filename || 'documento BCU') +
         '" />' +
+        '</button>' +
+        '<p class="text-muted rechazados-extract-doc-hint">Clic para ampliar</p>' +
         '</div>'
       );
     }
@@ -15322,6 +15331,116 @@ init();
     );
   }
 
+  function renderInstitutionQuickCard(inst) {
+    const name = (inst && inst.institution_name_raw) || 'Institución';
+    const cat = inst && inst.category != null ? String(inst.category) : '—';
+    const badgeClass = H.bcuCategoryBadgeClass(
+      inst && inst.category != null ? inst.category : null,
+    );
+    const rows = H.institutionQuickRows(inst);
+    const rowsHtml = rows
+      .map(function (row) {
+        return (
+          '<div class="rechazados-inst-quick-row">' +
+          '<span class="rechazados-inst-quick-label">' +
+          escapeHtml(row.label) +
+          '</span>' +
+          '<span class="rechazados-inst-quick-value">' +
+          escapeHtml(row.display) +
+          '</span></div>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="rechazados-inst-quick-card">' +
+      '<div class="rechazados-inst-quick-header">' +
+      '<strong class="rechazados-inst-name-full">' +
+      escapeHtml(name) +
+      '</strong>' +
+      '<span class="rechazados-bcu-badge ' +
+      escapeHtml(badgeClass) +
+      '">' +
+      escapeHtml(cat) +
+      '</span></div>' +
+      '<div class="rechazados-inst-quick-rows">' +
+      rowsHtml +
+      '</div></div>'
+    );
+  }
+
+  function renderExtractionObservationsQuick(findings) {
+    const groups = H.extractionObservationsForUi(findings);
+    if (!groups.length) {
+      return (
+        '<div class="rechazados-extract-obs">' +
+        '<div class="ad-modal-label">Observaciones de extracción</div>' +
+        '<p class="text-muted">Sin observaciones</p></div>'
+      );
+    }
+    const nTypes = groups.length;
+    const header =
+      nTypes === 1
+        ? '1 tipo de observación'
+        : nTypes + ' tipos de observación';
+    const items = groups
+      .map(function (g) {
+        return (
+          '<li class="rechazados-finding is-' +
+          escapeHtml(g.tone) +
+          '">' +
+          '<div class="rechazados-finding-title">' +
+          escapeHtml(g.title) +
+          '</div>' +
+          (g.detail
+            ? '<div class="rechazados-finding-meta">' +
+              escapeHtml(g.detail) +
+              '</div>'
+            : '') +
+          (g.confirmHint
+            ? '<div class="rechazados-finding-meta text-muted">' +
+              escapeHtml(g.confirmHint) +
+              '</div>'
+            : '') +
+          '<div class="rechazados-finding-meta text-muted">' +
+          escapeHtml(g.count === 1 ? '1 caso' : g.count + ' casos') +
+          '</div></li>'
+        );
+      })
+      .join('');
+    const techPaths = groups
+      .map(function (g) {
+        const pathBits = (g.paths || [])
+          .map(function (p) {
+            return H.formatFindingPathLabel(p);
+          })
+          .filter(Boolean);
+        return (
+          '<li><code>' +
+          escapeHtml(g.reason_code) +
+          '</code>' +
+          (pathBits.length ? ' — ' + escapeHtml(pathBits.join(', ')) : '') +
+          '</li>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="rechazados-extract-obs">' +
+      '<div class="ad-modal-label">Observaciones de extracción</div>' +
+      '<p class="rechazados-extract-obs-summary">' +
+      escapeHtml(header) +
+      '</p>' +
+      '<ul class="rechazados-findings-list">' +
+      items +
+      '</ul>' +
+      '<p class="text-muted rechazados-extract-obs-note">La validación final ocurre al confirmar (reglas actuales del servidor).</p>' +
+      '<details class="rechazados-extract-tech">' +
+      '<summary>Ver detalle técnico</summary>' +
+      '<ul class="rechazados-finding-paths">' +
+      techPaths +
+      '</ul></details></div>'
+    );
+  }
+
   function renderExtractReviewForm() {
     const reviewed = state.extractReview;
     if (!reviewed) return '';
@@ -15349,33 +15468,97 @@ init();
     const instCount = Array.isArray(reviewed.institutions)
       ? reviewed.institutions.length
       : 0;
-    const findingGroups = H.groupFindingsForUi(originalFindings);
     const expandSummary = H.shouldExpandExtractSummary(originalFindings);
+    const editOpen = !!state.extractEditDetailsOpen;
 
-    const overview =
+    const ciCheck = H.documentCiMatchesExpected(
+      reviewed.document_ci_raw,
+      state.detailCi,
+    );
+    const periodOk = H.isPeriodValidYyyymm(reviewed.period);
+    const currency = H.currencyViewQuickStatus(
+      reviewed.currency_view_selected,
+    );
+    const ux = H.validateReviewedUx(reviewed);
+    const consultedOk = /^\d{4}-\d{2}-\d{2}$/.test(
+      String(state.extractConsultedOn || '').trim(),
+    );
+    const canConfirm = ux.ok && consultedOk && !state.extractConfirming;
+
+    function checkRow(ok, label, value) {
+      return (
+        '<div class="rechazados-extract-check' +
+        (ok ? ' is-ok' : ' is-bad') +
+        '"><span class="rechazados-extract-check-mark" aria-hidden="true">' +
+        (ok ? '✓' : '!') +
+        '</span><div><div class="rechazados-extract-check-label">' +
+        escapeHtml(label) +
+        '</div><div>' +
+        escapeHtml(value) +
+        '</div></div></div>'
+      );
+    }
+
+    const statusBlock =
       '<div class="rechazados-extract-overview">' +
-      '<div class="rechazados-extract-overview-title">BCU asistido IA</div>' +
-      '<div class="rechazados-extract-overview-grid">' +
-      '<div><span class="text-muted">CI</span><div>' +
-      escapeHtml(String(state.detailCi != null ? state.detailCi : '—')) +
-      '</div></div>' +
-      '<div><span class="text-muted">Período</span><div>' +
-      escapeHtml(H.formatPeriodLabelUy(reviewed.period)) +
-      '</div></div>' +
-      '<div><span class="text-muted">Instituciones detectadas</span><div>' +
+      '<div class="rechazados-extract-overview-title">Estado general</div>' +
+      checkRow(ciCheck.ok, 'CI documento', ciCheck.label) +
+      checkRow(
+        periodOk,
+        'Período',
+        H.formatPeriodLabelUy(reviewed.period) +
+          (periodOk ? ' · válido' : ' · problema'),
+      ) +
+      checkRow(
+        currency.ok,
+        'Moneda',
+        currency.label + (currency.ok ? ' · correcta' : ' · problema'),
+      ) +
+      '<div class="rechazados-extract-check is-neutral"><span class="rechazados-extract-check-mark" aria-hidden="true">·</span><div><div class="rechazados-extract-check-label">Instituciones detectadas</div><div>' +
       escapeHtml(String(instCount)) +
-      '</div></div>' +
-      '<div><span class="text-muted">Resultado</span><div>' +
+      '</div></div></div>' +
+      '<div class="rechazados-extract-check is-neutral"><span class="rechazados-extract-check-mark" aria-hidden="true">·</span><div><div class="rechazados-extract-check-label">Resultado</div><div>' +
       escapeHtml(H.classificationLabel(classification)) +
-      '</div></div>' +
-      '<div><span class="text-muted">Observaciones</span><div>' +
-      escapeHtml(String(findingGroups.length)) +
-      '</div></div>' +
-      '</div></div>';
+      '</div></div></div></div>';
 
-    const techDetails =
-      '<details class="rechazados-extract-tech">' +
-      '<summary>Detalles técnicos</summary>' +
+    const confirmBlock =
+      (state.extractConfirmError
+        ? '<div class="ad-modal-error">' +
+          escapeHtml(state.extractConfirmError) +
+          '</div>'
+        : '') +
+      (state.extractConfirmBlockers && state.extractConfirmBlockers.length
+        ? findingsGroupedHtml(
+            state.extractConfirmBlockers,
+            'Blockers del confirm (validación actual)',
+          )
+        : '') +
+      (state.extractConfirmWarnings && state.extractConfirmWarnings.length
+        ? findingsGroupedHtml(
+            state.extractConfirmWarnings,
+            'Warnings del confirm',
+          )
+        : '');
+
+    const quickInst =
+      '<div class="ad-modal-label">Instituciones</div>' +
+      '<div class="rechazados-inst-quick-list">' +
+      (reviewed.institutions || [])
+        .map(function (inst) {
+          return renderInstitutionQuickCard(inst);
+        })
+        .join('') +
+      '</div>';
+
+    const editPanel =
+      '<details class="rechazados-extract-edit-details"' +
+      (editOpen ? ' open' : '') +
+      ' data-extract-edit-details>' +
+      '<summary>Editar detalles</summary>' +
+      '<div class="rechazados-extract-edit-body">' +
+      '<p class="text-muted">Editor completo bcu_v1. Los cambios se conservan al cerrar este panel.</p>' +
+      findingsGroupedHtml(originalFindings, 'Findings técnicos (extracción)') +
+      '<details class="rechazados-extract-tech"><summary>Detalles técnicos</summary>' +
       '<div class="rechazados-form-grid">' +
       '<label class="mcl-field"><span class="mcl-field-label">Contrato</span>' +
       '<input class="mcl-input" data-extract-meta="extraction_contract_version" value="' +
@@ -15396,35 +15579,7 @@ init();
           ? String(reviewed.document_ci_raw)
           : '',
       ) +
-      '" /></label>' +
-      '</div></details>';
-
-    const confirmBlock =
-      (state.extractConfirmError
-        ? '<div class="ad-modal-error">' +
-          escapeHtml(state.extractConfirmError) +
-          '</div>'
-        : '') +
-      (state.extractConfirmBlockers && state.extractConfirmBlockers.length
-        ? findingsGroupedHtml(
-            state.extractConfirmBlockers,
-            'Blockers del confirm',
-          )
-        : '') +
-      (state.extractConfirmWarnings && state.extractConfirmWarnings.length
-        ? findingsGroupedHtml(
-            state.extractConfirmWarnings,
-            'Warnings del confirm',
-          )
-        : '');
-
-    const rightCol =
-      '<div class="rechazados-extract-review-col">' +
-      overview +
-      findingsGroupedHtml(originalFindings, 'Observaciones') +
-      confirmBlock +
-      techDetails +
-      '<div class="ad-modal-label">Instituciones</div>' +
+      '" /></label></div></details>' +
       '<div class="rechazados-inst-list">' +
       (reviewed.institutions || [])
         .map(function (inst, idx) {
@@ -15445,25 +15600,40 @@ init();
         highlightMap,
         expandSummary,
       ) +
-      '<label class="mcl-field"><span class="mcl-field-label">Fecha consulta (obligatoria)</span>' +
+      '</div></details>';
+
+    const actions =
+      '<label class="mcl-field"><span class="mcl-field-label">Fecha de consulta</span>' +
       '<input type="date" class="mcl-input" id="rechazados-extract-consulted" value="' +
       escapeHtml(state.extractConsultedOn || '') +
       '" /></label>' +
+      (!ux.ok
+        ? '<p class="ad-modal-error">' + escapeHtml(ux.error) + '</p>'
+        : '') +
       '<div class="ad-modal-actions rechazados-form-actions rechazados-extract-actions">' +
       '<button type="button" class="btn" data-action="close-detail">Cancelar</button>' +
       '<button type="button" class="btn btn-primary" data-action="extract-confirm"' +
-      (state.extractConfirming ? ' disabled' : '') +
+      (canConfirm ? '' : ' disabled') +
       '>' +
       (state.extractConfirming ? 'Confirmando…' : 'Confirmar BCU') +
-      '</button>' +
-      '</div></div>';
+      '</button></div>';
+
+    const rightCol =
+      '<div class="rechazados-extract-review-col">' +
+      statusBlock +
+      renderExtractionObservationsQuick(originalFindings) +
+      confirmBlock +
+      quickInst +
+      editPanel +
+      actions +
+      '</div>';
 
     return (
       '<div class="rechazados-extract-review">' +
       '<div class="rechazados-extract-review-layout">' +
       '<div class="rechazados-extract-doc-col">' +
       '<div class="rechazados-extract-doc-sticky">' +
-      '<div class="ad-modal-label">Documento</div>' +
+      '<div class="ad-modal-label">Documento BCU</div>' +
       renderExtractDocPreview(
         fileUrl,
         draftMeta.content_type,
@@ -15735,6 +15905,26 @@ init();
     wireDropzone();
     wireExtractDropzone();
     wireExtractMoneyCompact();
+    wireExtractReviewChrome();
+  }
+
+  function wireExtractReviewChrome() {
+    const consulted = document.getElementById('rechazados-extract-consulted');
+    if (consulted) {
+      consulted.addEventListener('change', function () {
+        state.extractConsultedOn = consulted.value;
+        renderDetailModal();
+      });
+    }
+    const editDetails = modalRoot.querySelector(
+      'details[data-extract-edit-details]',
+    );
+    if (editDetails) {
+      editDetails.addEventListener('toggle', function () {
+        readExtractReviewIntoState();
+        state.extractEditDetailsOpen = !!editDetails.open;
+      });
+    }
   }
 
   function wireExtractMoneyCompact() {
@@ -16377,6 +16567,7 @@ init();
         state.extractConfirmWarnings = Array.isArray(blockData.warnings)
           ? blockData.warnings
           : [];
+        state.extractEditDetailsOpen = true;
         renderDetailModal();
         return;
       }
@@ -16697,6 +16888,11 @@ init();
       ) {
         state.extractReview.institutions.splice(idx, 1);
       }
+      renderDetailModal();
+      return;
+    }
+    if (action === 'extract-doc-zoom') {
+      state.extractDocZoomed = !state.extractDocZoomed;
       renderDetailModal();
       return;
     }
