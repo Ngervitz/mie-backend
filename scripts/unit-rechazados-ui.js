@@ -477,6 +477,7 @@ assert.strictEqual(H.institutionHistoryAmountKeys().length, 12);
 assert.ok(js.indexOf('renderExtractAssist') !== -1);
 assert.ok(js.indexOf('bcu-extraction-drafts') !== -1);
 assert.ok(js.indexOf('extract-confirm') !== -1);
+assert.ok(js.indexOf('Confirmar BCU') !== -1);
 assert.ok(js.indexOf('stopExtractPoll') !== -1);
 assert.ok(js.indexOf('refreshExtractLatest') !== -1);
 assert.ok(js.indexOf('creditos_reestructurados_mn') !== -1);
@@ -510,5 +511,131 @@ assert.ok(js.indexOf('rechazados-bcu-badge') !== -1);
 assert.ok(css.indexOf('rechazados-bcu-badge') !== -1);
 assert.ok(css.indexOf('is-bcu-1c') !== -1);
 assert.ok(css.indexOf('is-bcu-5') !== -1);
+
+// --- Stage 5.1 UI review helpers ---
+// 1–4: null / 0 / value / compact — toggle
+assert.strictEqual(H.moneyValueFromCompact(true, '99'), null);
+assert.strictEqual(H.moneyValueFromCompact(false, '0'), 0);
+assert.strictEqual(H.moneyValueFromCompact(false, '12.5'), 12.5);
+assert.ok(Number.isNaN(H.moneyValueFromCompact(false, '')));
+assert.strictEqual(H.moneyModeFromValue(null), 'null');
+assert.strictEqual(H.moneyModeFromValue(0), 'zero');
+assert.strictEqual(H.moneyModeFromValue(7), 'value');
+
+// 5: findings grouping
+const grouped = H.groupFindingsForUi([
+  {
+    severity: 'info',
+    reason_code: 'SUMMARY_DETAIL_NOT_COMPARABLE',
+    path: 'vigente.mn',
+  },
+  {
+    severity: 'info',
+    reason_code: 'SUMMARY_DETAIL_NOT_COMPARABLE',
+    path: 'moroso.mn',
+  },
+  {
+    severity: 'blocker',
+    reason_code: 'RUBRO_ORPHAN_INCONSISTENT_SUPPORT',
+    path: 'vigente.mn',
+  },
+  {
+    severity: 'blocker',
+    reason_code: 'RUBRO_ORPHAN_INCONSISTENT_SUPPORT',
+    path: 'moroso.mn',
+  },
+]);
+assert.strictEqual(grouped.length, 2);
+assert.strictEqual(grouped[0].count, 2);
+assert.strictEqual(grouped[0].reason_code, 'SUMMARY_DETAIL_NOT_COMPARABLE');
+assert.strictEqual(
+  grouped[0].label,
+  'Resumen y detalle no son comparables',
+);
+assert.strictEqual(grouped[1].severity, 'blocker');
+assert.deepStrictEqual(grouped[1].paths.sort(), ['moroso.mn', 'vigente.mn']);
+
+// 6–7: path highlight; never invent institution
+const hl = H.highlightPathMapFromFindings([
+  { reason_code: 'RUBRO_ORPHAN_INCONSISTENT_SUPPORT', path: 'vigente.mn' },
+  { reason_code: 'CI_MISMATCH', path: 'document_ci_raw' },
+]);
+assert.strictEqual(H.isMoneyPathHighlighted(hl, 'vigente', 'mn'), true);
+assert.strictEqual(H.isMoneyPathHighlighted(hl, 'vigente', 'me'), false);
+assert.strictEqual(H.parseMoneyFindingPath('document_ci_raw'), null);
+const groupedBlob = JSON.stringify(grouped);
+assert.ok(groupedBlob.indexOf('BROU') === -1);
+assert.ok(groupedBlob.indexOf('institution') === -1);
+assert.ok(groupedBlob.indexOf('institution_name') === -1);
+
+// 8: period YYYYMM → MM/YYYY
+assert.strictEqual(H.formatPeriodLabelUy('202607'), '07/2026');
+assert.strictEqual(H.formatPeriodLabelUy('2026-07'), '07/2026');
+assert.strictEqual(H.formatPeriodLabelUy(null), '—');
+assert.strictEqual(H.classificationLabel('HUMAN_REVIEW'), 'Requiere revisión');
+
+// 9: Cancelar = close-detail (no abandon/delete write)
+assert.ok(
+  /data-action="close-detail">Cancelar</.test(js) ||
+    js.indexOf('data-action="close-detail">Cancelar') !== -1,
+);
+assert.ok(js.indexOf('/abandon') === -1);
+assert.ok(js.indexOf('extract-cancel') === -1);
+
+// 10: Confirmar still Stage 4 payload shape
+const payload51 = H.buildConfirmPayload('2026-09-07', reviewedOk);
+assert.deepStrictEqual(Object.keys(payload51).sort(), [
+  'consulted_on',
+  'reviewed',
+]);
+assert.strictEqual(payload51.reviewed, reviewedOk);
+assert.strictEqual(payload51.reviewed.institutions[0].vigente.me, null);
+assert.strictEqual(payload51.reviewed.institutions[0].moroso.mn, 0);
+
+// 11–12: null hidden initially; value/0 visible
+assert.strictEqual(H.shouldShowMoneyCell(null, false), false);
+assert.strictEqual(H.shouldShowMoneyCell(0, false), true);
+assert.strictEqual(H.shouldShowMoneyCell(10, false), true);
+assert.strictEqual(H.shouldShowMoneyCell(null, true), true);
+
+// 13: summary opens with relevant finding
+assert.strictEqual(
+  H.shouldExpandExtractSummary([
+    {
+      reason_code: 'SUMMARY_DETAIL_NOT_COMPARABLE',
+      path: 'vigente.mn',
+    },
+  ]),
+  true,
+);
+assert.strictEqual(
+  H.shouldExpandExtractSummary([
+    { reason_code: 'CI_MISMATCH', path: 'document_ci_raw' },
+  ]),
+  false,
+);
+
+// 14: 422 path keeps edited review (blockers set; no wipe before return)
+assert.ok(js.indexOf('extractConfirmBlockers') !== -1);
+assert.ok(js.indexOf("|| 'confirmación bloqueada'") !== -1);
+const marker422 = "|| 'confirmación bloqueada'";
+const idx422 = js.indexOf(marker422);
+assert.ok(idx422 !== -1);
+const slice422 = js.slice(idx422, idx422 + 450);
+assert.ok(slice422.indexOf('extractConfirmBlockers') !== -1);
+assert.ok(slice422.indexOf('extractReview = null') === -1);
+assert.ok(slice422.indexOf('renderDetailModal();') !== -1);
+
+// Stage 5.1 layout / compact money markers
+assert.ok(js.indexOf('rechazados-extract-review-layout') !== -1);
+assert.ok(js.indexOf('rechazados-money-compact') !== -1);
+assert.ok(js.indexOf('data-money-null') !== -1);
+assert.ok(js.indexOf('Mostrar campos vacíos') !== -1);
+assert.ok(js.indexOf('Detalles técnicos') !== -1);
+assert.ok(js.indexOf('rechazados-extract-doc-sticky') !== -1);
+assert.ok(css.indexOf('rechazados-extract-doc-sticky') !== -1);
+assert.ok(css.indexOf('position: sticky') !== -1);
+assert.ok(js.indexOf('rechazados-money-mode') === -1);
+assert.ok(js.indexOf('>Valor</option>') === -1);
 
 console.log('OK unit-rechazados-ui');

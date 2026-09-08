@@ -15029,15 +15029,6 @@ init();
     );
   }
 
-  const EXTRACT_RUBRO_LABELS = {
-    vigente: 'Vigente',
-    vigente_no_autoliquidable: 'Vig. no autoliquidable',
-    moroso: 'Moroso',
-    castigado_por_atraso: 'Castigado por atraso',
-    contingencias: 'Contingencias',
-    creditos_reestructurados: 'Créditos reestructurados',
-  };
-
   function extractCategoryOptions(selected) {
     const sel =
       selected == null || selected === '' ? '' : String(selected);
@@ -15058,57 +15049,81 @@ init();
     return html;
   }
 
-  function renderMoneyTriState(opts) {
+  function renderMoneyCompact(opts) {
     const mode = H.moneyModeFromValue(opts.value);
-    const valueAttr =
-      mode === 'value' && opts.value != null ? String(opts.value) : '';
+    const isNull = mode === 'null';
+    const valueAttr = isNull ? '' : String(opts.value);
+    const highlightClass = opts.highlighted
+      ? ' is-finding-highlight'
+      : '';
     return (
-      '<div class="rechazados-money-tri">' +
-      '<select class="mcl-select rechazados-money-mode" data-money-mode="' +
-      escapeHtml(opts.path) +
+      '<div class="rechazados-money-compact' +
+      highlightClass +
       '">' +
-      '<option value="null"' +
-      (mode === 'null' ? ' selected' : '') +
-      '>—</option>' +
-      '<option value="zero"' +
-      (mode === 'zero' ? ' selected' : '') +
-      '>0</option>' +
-      '<option value="value"' +
-      (mode === 'value' ? ' selected' : '') +
-      '>Valor</option>' +
-      '</select>' +
       '<input type="number" min="0" step="any" class="mcl-input rechazados-money-input" data-money-value="' +
       escapeHtml(opts.path) +
       '" value="' +
       escapeHtml(valueAttr) +
       '"' +
-      (mode === 'value' ? '' : ' disabled') +
-      ' />' +
+      (isNull ? ' disabled' : '') +
+      ' aria-label="' +
+      escapeHtml(opts.ariaLabel || 'Monto') +
+      '" />' +
+      '<button type="button" class="btn rechazados-money-null' +
+      (isNull ? ' is-active' : '') +
+      '" data-money-null="' +
+      escapeHtml(opts.path) +
+      '" aria-pressed="' +
+      (isNull ? 'true' : 'false') +
+      '" title="Marcar como vacío (—)">' +
+      '—' +
+      '</button>' +
       '</div>'
     );
   }
 
-  function findingsListHtml(findings, title) {
-    const list = Array.isArray(findings) ? findings : [];
-    if (!list.length) {
+  function findingsGroupedHtml(findings, title) {
+    const groups = H.groupFindingsForUi(findings);
+    if (!groups.length) {
       return (
         '<div class="rechazados-findings"><div class="ad-modal-label">' +
         escapeHtml(title) +
-        '</div><p class="text-muted">Sin findings</p></div>'
+        '</div><p class="text-muted">Sin observaciones</p></div>'
       );
     }
-    const items = list
-      .map(function (f) {
-        const sev = f && f.severity != null ? String(f.severity) : '';
-        const code = f && f.reason_code != null ? String(f.reason_code) : '';
-        const msg = f && f.message != null ? String(f.message) : '';
+    const items = groups
+      .map(function (g) {
+        const pathBits = (g.paths || [])
+          .map(function (p) {
+            return H.formatFindingPathLabel(p);
+          })
+          .filter(Boolean);
+        const countLabel =
+          g.count === 1
+            ? '1 caso'
+            : g.count +
+              (pathBits.length
+                ? ' · afecta ' + pathBits.length + ' campo' + (pathBits.length === 1 ? '' : 's')
+                : ' casos');
         return (
           '<li class="rechazados-finding is-' +
-          escapeHtml(sev || 'info') +
-          '"><strong>' +
-          escapeHtml(code || sev || 'finding') +
-          '</strong>' +
-          (msg ? ' — ' + escapeHtml(msg) : '') +
+          escapeHtml(g.severity || 'info') +
+          '">' +
+          '<div class="rechazados-finding-title">' +
+          escapeHtml(g.label) +
+          '</div>' +
+          '<div class="rechazados-finding-meta text-muted">' +
+          escapeHtml(countLabel) +
+          ' <span class="rechazados-finding-code" title="' +
+          escapeHtml(g.reason_code) +
+          '">' +
+          escapeHtml(g.reason_code) +
+          '</span></div>' +
+          (pathBits.length
+            ? '<ul class="rechazados-finding-paths"><li>' +
+              pathBits.map(escapeHtml).join('</li><li>') +
+              '</li></ul>'
+            : '') +
           '</li>'
         );
       })
@@ -15151,40 +15166,106 @@ init();
     );
   }
 
-  function renderExtractInstitutionEditor(inst, idx, total) {
-    const canRemove = total > 1;
-    const rubros = H.EXTRACT_RUBRO_KEYS.map(function (rubro) {
-      const pair = (inst && inst[rubro]) || { mn: null, me: null };
-      const label = EXTRACT_RUBRO_LABELS[rubro] || rubro;
-      return (
-        '<div class="rechazados-rubro-block">' +
+  function renderRubroSideField(opts) {
+    const show = H.shouldShowMoneyCell(opts.value, opts.highlighted);
+    if (!show && !opts.forceShow) return '';
+    return (
+      '<label class="mcl-field' +
+      (opts.highlighted ? ' is-finding-highlight' : '') +
+      '"><span class="mcl-field-label">' +
+      escapeHtml(opts.sideLabel) +
+      '</span>' +
+      renderMoneyCompact({
+        path: opts.path,
+        value: opts.value,
+        highlighted: opts.highlighted,
+        ariaLabel: opts.ariaLabel,
+      }) +
+      '</label>'
+    );
+  }
+
+  function renderRubroBlock(opts) {
+    const pair = opts.pair || { mn: null, me: null };
+    const hlMn = H.isMoneyPathHighlighted(opts.highlightMap, opts.rubro, 'mn');
+    const hlMe = H.isMoneyPathHighlighted(opts.highlightMap, opts.rubro, 'me');
+    const showMn = H.shouldShowMoneyCell(pair.mn, hlMn) || opts.forceShow;
+    const showMe = H.shouldShowMoneyCell(pair.me, hlMe) || opts.forceShow;
+    if (!showMn && !showMe) return { html: '', hidden: true };
+
+    const mnHtml = showMn
+      ? renderRubroSideField({
+          sideLabel: 'MN',
+          path: opts.pathPrefix + '.' + opts.rubro + '.mn',
+          value: pair.mn,
+          highlighted: hlMn,
+          forceShow: true,
+          ariaLabel: opts.label + ' MN',
+        })
+      : '';
+    const meHtml = showMe
+      ? renderRubroSideField({
+          sideLabel: 'ME',
+          path: opts.pathPrefix + '.' + opts.rubro + '.me',
+          value: pair.me,
+          highlighted: hlMe,
+          forceShow: true,
+          ariaLabel: opts.label + ' ME',
+        })
+      : '';
+
+    return {
+      html:
+        '<div class="rechazados-rubro-block' +
+        (hlMn || hlMe ? ' is-finding-highlight' : '') +
+        '">' +
         '<div class="ad-modal-label">' +
-        escapeHtml(label) +
+        escapeHtml(opts.label) +
         '</div>' +
         '<div class="rechazados-rubro-sides">' +
-        '<label class="mcl-field"><span class="mcl-field-label">MN</span>' +
-        renderMoneyTriState({
-          path: 'inst.' + idx + '.' + rubro + '.mn',
-          value: pair.mn,
-        }) +
-        '</label>' +
-        '<label class="mcl-field"><span class="mcl-field-label">ME</span>' +
-        renderMoneyTriState({
-          path: 'inst.' + idx + '.' + rubro + '.me',
-          value: pair.me,
-        }) +
-        '</label>' +
-        '</div></div>'
-      );
-    }).join('');
+        mnHtml +
+        meHtml +
+        '</div></div>',
+      hidden: false,
+    };
+  }
+
+  function renderExtractInstitutionEditor(inst, idx, total, highlightMap) {
+    const canRemove = total > 1;
+    const visible = [];
+    const hidden = [];
+    H.EXTRACT_RUBRO_KEYS.forEach(function (rubro) {
+      const pair = (inst && inst[rubro]) || { mn: null, me: null };
+      const hlMn = H.isMoneyPathHighlighted(highlightMap, rubro, 'mn');
+      const hlMe = H.isMoneyPathHighlighted(highlightMap, rubro, 'me');
+      const showRubro =
+        H.shouldShowMoneyCell(pair.mn, hlMn) ||
+        H.shouldShowMoneyCell(pair.me, hlMe);
+      const block = renderRubroBlock({
+        rubro: rubro,
+        label: H.extractRubroLabel(rubro),
+        pair: pair,
+        pathPrefix: 'inst.' + idx,
+        highlightMap: highlightMap,
+        forceShow: true,
+      });
+      if (showRubro) {
+        visible.push(block.html);
+      } else {
+        hidden.push(block.html);
+      }
+    });
 
     return (
       '<div class="rechazados-inst-form rechazados-extract-inst" data-extract-inst-idx="' +
       idx +
       '">' +
       '<div class="rechazados-inst-form-header">' +
-      '<strong>Institución ' +
-      (idx + 1) +
+      '<strong class="rechazados-inst-name-full">' +
+      escapeHtml(
+        (inst && inst.institution_name_raw) ||
+          'Institución ' + (idx + 1),
+      ) +
       '</strong>' +
       (canRemove
         ? '<button type="button" class="btn" data-action="extract-remove-inst" data-idx="' +
@@ -15193,7 +15274,7 @@ init();
         : '') +
       '</div>' +
       '<div class="rechazados-inst-grid">' +
-      '<label class="mcl-field"><span class="mcl-field-label">Institución</span>' +
+      '<label class="mcl-field rechazados-inst-name-field"><span class="mcl-field-label">Institución</span>' +
       '<input class="mcl-input" data-extract-field="institution_name_raw" data-idx="' +
       idx +
       '" value="' +
@@ -15206,41 +15287,38 @@ init();
       extractCategoryOptions(inst && inst.category) +
       '</select></label>' +
       '</div>' +
-      rubros +
+      visible.join('') +
+      (hidden.length
+        ? '<details class="rechazados-empty-rubros"><summary>Mostrar campos vacíos (' +
+          hidden.length +
+          ')</summary>' +
+          hidden.join('') +
+          '</details>'
+        : '') +
       '</div>'
     );
   }
 
-  function renderExtractSummaryEditor(summary) {
+  function renderExtractSummaryEditor(summary, highlightMap, expanded) {
     const src = summary && typeof summary === 'object' ? summary : {};
+    const body = H.EXTRACT_RUBRO_KEYS.map(function (rubro) {
+      return renderRubroBlock({
+        rubro: rubro,
+        label: H.extractRubroLabel(rubro),
+        pair: src[rubro] || { mn: null, me: null },
+        pathPrefix: 'summary',
+        highlightMap: highlightMap,
+        forceShow: true,
+      }).html;
+    }).join('');
     return (
-      '<div class="rechazados-extract-summary">' +
-      '<div class="ad-modal-label">Resumen (editable)</div>' +
-      H.EXTRACT_RUBRO_KEYS.map(function (rubro) {
-        const pair = src[rubro] || { mn: null, me: null };
-        const label = EXTRACT_RUBRO_LABELS[rubro] || rubro;
-        return (
-          '<div class="rechazados-rubro-block">' +
-          '<div class="ad-modal-label">' +
-          escapeHtml(label) +
-          '</div>' +
-          '<div class="rechazados-rubro-sides">' +
-          '<label class="mcl-field"><span class="mcl-field-label">MN</span>' +
-          renderMoneyTriState({
-            path: 'summary.' + rubro + '.mn',
-            value: pair.mn,
-          }) +
-          '</label>' +
-          '<label class="mcl-field"><span class="mcl-field-label">ME</span>' +
-          renderMoneyTriState({
-            path: 'summary.' + rubro + '.me',
-            value: pair.me,
-          }) +
-          '</label>' +
-          '</div></div>'
-        );
-      }).join('') +
-      '</div>'
+      '<details class="rechazados-extract-summary"' +
+      (expanded ? ' open' : '') +
+      '>' +
+      '<summary class="rechazados-extract-summary-summary">Resumen BCU (editable)</summary>' +
+      '<div class="rechazados-extract-summary-body">' +
+      body +
+      '</div></details>'
     );
   }
 
@@ -15255,6 +15333,7 @@ init();
       validation && Array.isArray(validation.findings)
         ? validation.findings
         : [];
+    const highlightMap = H.highlightPathMapFromFindings(originalFindings);
     const draftMeta =
       (state.extractDetail && state.extractDetail.draft) ||
       state.extractDraft ||
@@ -15263,8 +15342,40 @@ init();
       (state.extractDetail && state.extractDetail.file_url) ||
       draftMeta.file_url ||
       null;
+    const classification =
+      (draftMeta && draftMeta.classification) ||
+      (validation && validation.classification) ||
+      null;
+    const instCount = Array.isArray(reviewed.institutions)
+      ? reviewed.institutions.length
+      : 0;
+    const findingGroups = H.groupFindingsForUi(originalFindings);
+    const expandSummary = H.shouldExpandExtractSummary(originalFindings);
 
-    const metaFields =
+    const overview =
+      '<div class="rechazados-extract-overview">' +
+      '<div class="rechazados-extract-overview-title">BCU asistido IA</div>' +
+      '<div class="rechazados-extract-overview-grid">' +
+      '<div><span class="text-muted">CI</span><div>' +
+      escapeHtml(String(state.detailCi != null ? state.detailCi : '—')) +
+      '</div></div>' +
+      '<div><span class="text-muted">Período</span><div>' +
+      escapeHtml(H.formatPeriodLabelUy(reviewed.period)) +
+      '</div></div>' +
+      '<div><span class="text-muted">Instituciones detectadas</span><div>' +
+      escapeHtml(String(instCount)) +
+      '</div></div>' +
+      '<div><span class="text-muted">Resultado</span><div>' +
+      escapeHtml(H.classificationLabel(classification)) +
+      '</div></div>' +
+      '<div><span class="text-muted">Observaciones</span><div>' +
+      escapeHtml(String(findingGroups.length)) +
+      '</div></div>' +
+      '</div></div>';
+
+    const techDetails =
+      '<details class="rechazados-extract-tech">' +
+      '<summary>Detalles técnicos</summary>' +
       '<div class="rechazados-form-grid">' +
       '<label class="mcl-field"><span class="mcl-field-label">Contrato</span>' +
       '<input class="mcl-input" data-extract-meta="extraction_contract_version" value="' +
@@ -15274,11 +15385,11 @@ init();
       '<input class="mcl-input" data-extract-meta="currency_view_selected" value="' +
       escapeHtml(reviewed.currency_view_selected || '') +
       '" /></label>' +
-      '<label class="mcl-field"><span class="mcl-field-label">Período</span>' +
+      '<label class="mcl-field"><span class="mcl-field-label">Período (raw)</span>' +
       '<input class="mcl-input" data-extract-meta="period" value="' +
       escapeHtml(reviewed.period != null ? String(reviewed.period) : '') +
       '" /></label>' +
-      '<label class="mcl-field"><span class="mcl-field-label">CI documento</span>' +
+      '<label class="mcl-field"><span class="mcl-field-label">CI documento (raw)</span>' +
       '<input class="mcl-input" data-extract-meta="document_ci_raw" value="' +
       escapeHtml(
         reviewed.document_ci_raw != null
@@ -15286,43 +15397,42 @@ init();
           : '',
       ) +
       '" /></label>' +
-      '</div>';
+      '</div></details>';
 
-    return (
-      '<div class="rechazados-extract-review">' +
-      '<div class="ad-modal-label">Documento</div>' +
-      renderExtractDocPreview(
-        fileUrl,
-        draftMeta.content_type,
-        draftMeta.original_filename,
-      ) +
-      findingsListHtml(originalFindings, 'Findings originales (extracción)') +
-      (state.extractConfirmBlockers
-        ? findingsListHtml(
-            state.extractConfirmBlockers,
-            'Blockers actuales (confirm)',
-          )
-        : '') +
-      (state.extractConfirmWarnings && state.extractConfirmWarnings.length
-        ? findingsListHtml(
-            state.extractConfirmWarnings,
-            'Warnings actuales (confirm)',
-          )
-        : '') +
+    const confirmBlock =
       (state.extractConfirmError
         ? '<div class="ad-modal-error">' +
           escapeHtml(state.extractConfirmError) +
           '</div>'
         : '') +
-      '<div class="ad-modal-label">Revisión</div>' +
-      metaFields +
+      (state.extractConfirmBlockers && state.extractConfirmBlockers.length
+        ? findingsGroupedHtml(
+            state.extractConfirmBlockers,
+            'Blockers del confirm',
+          )
+        : '') +
+      (state.extractConfirmWarnings && state.extractConfirmWarnings.length
+        ? findingsGroupedHtml(
+            state.extractConfirmWarnings,
+            'Warnings del confirm',
+          )
+        : '');
+
+    const rightCol =
+      '<div class="rechazados-extract-review-col">' +
+      overview +
+      findingsGroupedHtml(originalFindings, 'Observaciones') +
+      confirmBlock +
+      techDetails +
+      '<div class="ad-modal-label">Instituciones</div>' +
       '<div class="rechazados-inst-list">' +
       (reviewed.institutions || [])
         .map(function (inst, idx) {
           return renderExtractInstitutionEditor(
             inst,
             idx,
-            (reviewed.institutions || []).length,
+            instCount,
+            highlightMap,
           );
         })
         .join('') +
@@ -15330,17 +15440,37 @@ init();
       '<div class="ad-modal-actions">' +
       '<button type="button" class="btn" data-action="extract-add-inst">Agregar institución</button>' +
       '</div>' +
-      renderExtractSummaryEditor(reviewed.summary) +
+      renderExtractSummaryEditor(
+        reviewed.summary,
+        highlightMap,
+        expandSummary,
+      ) +
       '<label class="mcl-field"><span class="mcl-field-label">Fecha consulta (obligatoria)</span>' +
       '<input type="date" class="mcl-input" id="rechazados-extract-consulted" value="' +
       escapeHtml(state.extractConsultedOn || '') +
       '" /></label>' +
-      '<div class="ad-modal-actions rechazados-form-actions">' +
+      '<div class="ad-modal-actions rechazados-form-actions rechazados-extract-actions">' +
+      '<button type="button" class="btn" data-action="close-detail">Cancelar</button>' +
       '<button type="button" class="btn btn-primary" data-action="extract-confirm"' +
       (state.extractConfirming ? ' disabled' : '') +
       '>' +
-      (state.extractConfirming ? 'Confirmando…' : 'Confirmar extracción') +
+      (state.extractConfirming ? 'Confirmando…' : 'Confirmar BCU') +
       '</button>' +
+      '</div></div>';
+
+    return (
+      '<div class="rechazados-extract-review">' +
+      '<div class="rechazados-extract-review-layout">' +
+      '<div class="rechazados-extract-doc-col">' +
+      '<div class="rechazados-extract-doc-sticky">' +
+      '<div class="ad-modal-label">Documento</div>' +
+      renderExtractDocPreview(
+        fileUrl,
+        draftMeta.content_type,
+        draftMeta.original_filename,
+      ) +
+      '</div></div>' +
+      rightCol +
       '</div></div>'
     );
   }
@@ -15421,7 +15551,7 @@ init();
           : null;
       body =
         '<div class="ad-modal-error">Extracción fallida</div>' +
-        findingsListHtml(
+        findingsGroupedHtml(
           val && val.findings ? val.findings : [],
           'Detalle del error',
         ) +
@@ -15604,23 +15734,44 @@ init();
 
     wireDropzone();
     wireExtractDropzone();
-    wireExtractMoneyModeToggles();
+    wireExtractMoneyCompact();
   }
 
-  function wireExtractMoneyModeToggles() {
-    const selects = modalRoot.querySelectorAll('[data-money-mode]');
-    selects.forEach(function (sel) {
-      sel.addEventListener('change', function () {
-        const wrap = sel.closest('.rechazados-money-tri');
+  function wireExtractMoneyCompact() {
+    const nullBtns = modalRoot.querySelectorAll('[data-money-null]');
+    nullBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const wrap = btn.closest('.rechazados-money-compact');
         const input = wrap
           ? wrap.querySelector('[data-money-value]')
           : null;
         if (!input) return;
-        if (sel.value === 'value') {
+        const wasNull = btn.getAttribute('aria-pressed') === 'true';
+        if (wasNull) {
+          btn.setAttribute('aria-pressed', 'false');
+          btn.classList.remove('is-active');
           input.disabled = false;
+          input.focus();
         } else {
+          btn.setAttribute('aria-pressed', 'true');
+          btn.classList.add('is-active');
           input.disabled = true;
           input.value = '';
+        }
+      });
+    });
+    const inputs = modalRoot.querySelectorAll(
+      '.rechazados-money-compact [data-money-value]',
+    );
+    inputs.forEach(function (input) {
+      input.addEventListener('input', function () {
+        const wrap = input.closest('.rechazados-money-compact');
+        const btn = wrap ? wrap.querySelector('[data-money-null]') : null;
+        if (!btn) return;
+        if (btn.getAttribute('aria-pressed') === 'true') {
+          btn.setAttribute('aria-pressed', 'false');
+          btn.classList.remove('is-active');
+          input.disabled = false;
         }
       });
     });
@@ -16122,17 +16273,17 @@ init();
         if (!inst[rubro]) inst[rubro] = { mn: null, me: null };
         ['mn', 'me'].forEach(function (side) {
           const path = 'inst.' + idx + '.' + rubro + '.' + side;
-          const wrap = modalRoot.querySelector(
-            '[data-money-mode="' + path + '"]',
+          const nullBtn = modalRoot.querySelector(
+            '[data-money-null="' + path + '"]',
           );
-          if (!wrap) return;
-          const modeSel = wrap;
+          if (!nullBtn) return;
+          const wrap = nullBtn.closest('.rechazados-money-compact');
           const input = wrap
-            .closest('.rechazados-money-tri')
-            .querySelector('[data-money-value]');
-          const mode = modeSel.value;
-          inst[rubro][side] = H.moneyValueFromMode(
-            mode,
+            ? wrap.querySelector('[data-money-value]')
+            : null;
+          const isNull = nullBtn.getAttribute('aria-pressed') === 'true';
+          inst[rubro][side] = H.moneyValueFromCompact(
+            isNull,
             input ? input.value : '',
           );
         });
@@ -16148,15 +16299,17 @@ init();
       }
       ['mn', 'me'].forEach(function (side) {
         const path = 'summary.' + rubro + '.' + side;
-        const modeSel = modalRoot.querySelector(
-          '[data-money-mode="' + path + '"]',
+        const nullBtn = modalRoot.querySelector(
+          '[data-money-null="' + path + '"]',
         );
-        if (!modeSel) return;
-        const input = modeSel
-          .closest('.rechazados-money-tri')
-          .querySelector('[data-money-value]');
-        state.extractReview.summary[rubro][side] = H.moneyValueFromMode(
-          modeSel.value,
+        if (!nullBtn) return;
+        const wrap = nullBtn.closest('.rechazados-money-compact');
+        const input = wrap
+          ? wrap.querySelector('[data-money-value]')
+          : null;
+        const isNull = nullBtn.getAttribute('aria-pressed') === 'true';
+        state.extractReview.summary[rubro][side] = H.moneyValueFromCompact(
+          isNull,
           input ? input.value : '',
         );
       });

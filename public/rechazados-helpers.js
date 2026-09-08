@@ -513,6 +513,191 @@
     return n;
   }
 
+  /**
+   * Compact Stage 5.1 tri-state: [input] [—].
+   * — active → null; input 0 → 0; input >0 → value. Never coerce null→0.
+   */
+  function moneyValueFromCompact(isNullActive, rawInput) {
+    if (isNullActive) return null;
+    if (rawInput === '' || rawInput == null) return NaN;
+    var n = Number(rawInput);
+    return n;
+  }
+
+  var FINDING_REASON_LABELS = Object.freeze({
+    SUMMARY_DETAIL_NOT_COMPARABLE: 'Resumen y detalle no son comparables',
+    SUMMARY_DETAIL_MISMATCH: 'Resumen no coincide con el detalle',
+    RUBRO_ORPHAN_INCONSISTENT_SUPPORT: 'Rubros sin respaldo consistente',
+    RUBRO_ORPHAN_SUMMARY_WITHOUT_INST: 'Resumen sin respaldo en instituciones',
+    CI_MISSING: 'Falta CI en el documento',
+    CI_MISMATCH: 'CI del documento no coincide',
+    CURRENCY_VIEW_MISSING: 'Falta vista de moneda',
+    CURRENCY_VIEW_INVALID: 'Vista de moneda inválida',
+    EXTRACTION_MISSING: 'Extracción ausente',
+    EXTRACTION_NOT_OBJECT: 'Extracción inválida',
+    EXTRACTION_CONTRACT_INVALID: 'Contrato de extracción inválido',
+    STRUCTURE_INSTITUTIONS_NOT_ARRAY: 'Instituciones inválidas',
+    STRUCTURE_INSTITUTION_INVALID: 'Institución inválida',
+    STRUCTURE_EMPTY_INSTITUTIONS: 'Sin instituciones',
+  });
+
+  var CLASSIFICATION_LABELS = Object.freeze({
+    HUMAN_REVIEW: 'Requiere revisión',
+    REVIEW_READY: 'Lista para revisar',
+    EXTRACTION_FAILED: 'Extracción fallida',
+  });
+
+  var EXTRACT_RUBRO_LABELS = Object.freeze({
+    vigente: 'Vigente',
+    vigente_no_autoliquidable: 'Vig. no autoliquidable',
+    moroso: 'Moroso',
+    castigado_por_atraso: 'Castigado por atraso',
+    contingencias: 'Contingencias',
+    creditos_reestructurados: 'Créditos reestructurados',
+  });
+
+  function findingReasonLabel(code) {
+    if (code == null || code === '') return 'Observación';
+    var key = String(code);
+    if (FINDING_REASON_LABELS[key]) return FINDING_REASON_LABELS[key];
+    return key.replace(/_/g, ' ');
+  }
+
+  function classificationLabel(classification) {
+    if (classification == null || classification === '') return '—';
+    var key = String(classification);
+    return CLASSIFICATION_LABELS[key] || key;
+  }
+
+  /** YYYYMM or YYYY-MM → MM/YYYY; otherwise passthrough. */
+  function formatPeriodLabelUy(period) {
+    if (period == null || period === '') return '—';
+    var s = String(period).trim();
+    var compact = /^(\d{4})(\d{2})$/.exec(s);
+    if (compact) return compact[2] + '/' + compact[1];
+    var dashed = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(s);
+    if (dashed) return dashed[2] + '/' + dashed[1];
+    return s;
+  }
+
+  /**
+   * Parse finding path like "vigente.mn". No institution index exists in payload.
+   * @returns {{ rubro: string, side: string, path: string }|null}
+   */
+  function parseMoneyFindingPath(path) {
+    if (path == null || path === '') return null;
+    var m = /^([a-z0-9_]+)\.(mn|me)$/i.exec(String(path).trim());
+    if (!m) return null;
+    var rubro = m[1].toLowerCase();
+    var side = m[2].toLowerCase();
+    if (EXTRACT_RUBRO_KEYS.indexOf(rubro) === -1) return null;
+    return { rubro: rubro, side: side, path: rubro + '.' + side };
+  }
+
+  function formatFindingPathLabel(path) {
+    var parsed = parseMoneyFindingPath(path);
+    if (parsed) {
+      var rubroLabel = EXTRACT_RUBRO_LABELS[parsed.rubro] || parsed.rubro;
+      return rubroLabel + ' · ' + parsed.side.toUpperCase();
+    }
+    if (path == null || path === '') return null;
+    return String(path);
+  }
+
+  /**
+   * Group equivalent findings by reason_code. Does not invent institutions.
+   */
+  function groupFindingsForUi(findings) {
+    var list = Array.isArray(findings) ? findings : [];
+    var order = [];
+    var groups = Object.create(null);
+    for (var i = 0; i < list.length; i += 1) {
+      var f = list[i] || {};
+      var code =
+        f.reason_code != null && String(f.reason_code).trim()
+          ? String(f.reason_code)
+          : 'UNKNOWN';
+      if (!groups[code]) {
+        groups[code] = {
+          reason_code: code,
+          label: findingReasonLabel(code),
+          severity: f.severity != null ? String(f.severity) : 'info',
+          count: 0,
+          paths: [],
+          pathSeen: Object.create(null),
+        };
+        order.push(code);
+      }
+      var g = groups[code];
+      g.count += 1;
+      if (String(f.severity) === 'blocker') g.severity = 'blocker';
+      if (f.path != null && String(f.path).trim() !== '') {
+        var p = String(f.path);
+        if (!g.pathSeen[p]) {
+          g.pathSeen[p] = true;
+          g.paths.push(p);
+        }
+      }
+    }
+    return order.map(function (code) {
+      var g = groups[code];
+      return {
+        reason_code: g.reason_code,
+        label: g.label,
+        severity: g.severity,
+        count: g.count,
+        paths: g.paths.slice(),
+      };
+    });
+  }
+
+  /** Map of "rubro.side" → true for deterministic field highlight. */
+  function highlightPathMapFromFindings(findings) {
+    var map = Object.create(null);
+    var list = Array.isArray(findings) ? findings : [];
+    for (var i = 0; i < list.length; i += 1) {
+      var parsed = parseMoneyFindingPath(list[i] && list[i].path);
+      if (parsed) map[parsed.path] = true;
+    }
+    return map;
+  }
+
+  function isMoneyPathHighlighted(map, rubro, side) {
+    if (!map) return false;
+    return !!map[String(rubro) + '.' + String(side)];
+  }
+
+  /**
+   * Show cell if non-null (incl. explicit 0) or highlighted by finding path.
+   * Null without highlight → hidden initially.
+   */
+  function shouldShowMoneyCell(value, highlighted) {
+    if (highlighted) return true;
+    return value !== null && value !== undefined;
+  }
+
+  function shouldExpandExtractSummary(findings) {
+    var list = Array.isArray(findings) ? findings : [];
+    for (var i = 0; i < list.length; i += 1) {
+      var f = list[i] || {};
+      var code = f.reason_code != null ? String(f.reason_code) : '';
+      if (
+        code.indexOf('SUMMARY_DETAIL_') === 0 ||
+        code.indexOf('RUBRO_ORPHAN_') === 0
+      ) {
+        return true;
+      }
+      if (parseMoneyFindingPath(f.path)) return true;
+    }
+    return false;
+  }
+
+  function extractRubroLabel(rubro) {
+    if (rubro == null) return '';
+    var key = String(rubro);
+    return EXTRACT_RUBRO_LABELS[key] || key;
+  }
+
   function validateReviewedUx(reviewed) {
     if (!reviewed || typeof reviewed !== 'object') {
       return { ok: false, error: 'Extracción inválida' };
@@ -686,6 +871,21 @@
     extractionToReviewed: extractionToReviewed,
     moneyModeFromValue: moneyModeFromValue,
     moneyValueFromMode: moneyValueFromMode,
+    moneyValueFromCompact: moneyValueFromCompact,
+    FINDING_REASON_LABELS: FINDING_REASON_LABELS,
+    CLASSIFICATION_LABELS: CLASSIFICATION_LABELS,
+    EXTRACT_RUBRO_LABELS: EXTRACT_RUBRO_LABELS,
+    findingReasonLabel: findingReasonLabel,
+    classificationLabel: classificationLabel,
+    formatPeriodLabelUy: formatPeriodLabelUy,
+    parseMoneyFindingPath: parseMoneyFindingPath,
+    formatFindingPathLabel: formatFindingPathLabel,
+    groupFindingsForUi: groupFindingsForUi,
+    highlightPathMapFromFindings: highlightPathMapFromFindings,
+    isMoneyPathHighlighted: isMoneyPathHighlighted,
+    shouldShowMoneyCell: shouldShowMoneyCell,
+    shouldExpandExtractSummary: shouldExpandExtractSummary,
+    extractRubroLabel: extractRubroLabel,
     validateReviewedUx: validateReviewedUx,
     buildConfirmPayload: buildConfirmPayload,
     validateExtractSelectedFile: validateExtractSelectedFile,
