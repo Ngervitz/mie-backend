@@ -241,17 +241,17 @@ assertBlocked(
   REASON.RUBRO_ORPHAN_SUMMARY_WITHOUT_INST,
 );
 
-// ---------- 16b RUBRO_ORPHAN_INCONSISTENT_SUPPORT + NOT_COMPARABLE → BLOCK ----------
+// ---------- 16b RUBRO_ORPHAN_INCONSISTENT_SUPPORT when sparse sum ≠ summary → BLOCK ----------
 {
   const reviewed = baseReviewed({
     institutions: [
       baseInstitution({
-        vigente: money(50, 0),
+        vigente: money(40, 0),
         moroso: money(null, 0),
       }),
       baseInstitution({
         institution_name_raw: 'Other SA',
-        vigente: money(50, 0),
+        vigente: money(null, 0),
         moroso: money(10, 0),
       }),
     ],
@@ -275,6 +275,43 @@ assertBlocked(
       return w.reason_code === REASON.SUMMARY_DETAIL_NOT_COMPARABLE;
     }),
     'NOT_COMPARABLE must not warn when RUBRO_ORPHAN_* blocks',
+  );
+}
+
+// ---------- 16c sparse sum === summary → NOT_COMPARABLE warn, no orphan block ----------
+{
+  const reviewed = baseReviewed({
+    institutions: [
+      baseInstitution({
+        vigente: money(40, 0),
+        moroso: money(null, 0),
+      }),
+      baseInstitution({
+        institution_name_raw: 'Other SA',
+        vigente: money(60, 0),
+        moroso: money(10, 0),
+      }),
+    ],
+    summary: Object.assign(baseReviewed().summary, {
+      vigente: money(100, 0),
+      moroso: money(10, 0),
+    }),
+  });
+  const r = assertAllowed(reviewed);
+  // Aggregate status may still be MATCH on fully-numeric sides (e.g. *.me);
+  // Stage 1 still emits NOT_COMPARABLE on sparse paths → confirm warns.
+  assert.ok(
+    r.warnings.some(function (w) {
+      return w.reason_code === REASON.SUMMARY_DETAIL_NOT_COMPARABLE;
+    }),
+  );
+  assert.ok(
+    !r.blockers.some(function (b) {
+      return (
+        typeof b.reason_code === 'string' &&
+        b.reason_code.indexOf('RUBRO_ORPHAN_') === 0
+      );
+    }),
   );
 }
 

@@ -315,7 +315,11 @@ function runBcuExtractGates(extraction, options) {
       }
 
       if (nNull > 0) {
-        // Cannot strict-reconcile; NOT_COMPARABLE info + orphan blocker
+        // Sparse detail: cannot declare MATCH under strict all-cells compare.
+        // Always emit NOT_COMPARABLE (info).
+        // ORPHAN blocker only when the non-null subset does NOT sum to summary.
+        // If sum(non-null) === summary exactly (BigInt cents), do not orphan —
+        // typical BCU matrix where institutions omit unused rubros as null.
         findings.push(
           finding(
             'SUMMARY_DETAIL',
@@ -326,23 +330,26 @@ function runBcuExtractGates(extraction, options) {
               summary_cents: sumSlot.cents.toString(),
               nCents: nCents,
               nNull: nNull,
-            },
-          ),
-        );
-        findings.push(
-          finding(
-            'RUBRO_ORPHAN',
-            'blocker',
-            REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT,
-            path,
-            {
-              summary_cents: sumSlot.cents.toString(),
-              nCents: nCents,
-              nNull: nNull,
               detail_sparse_cents: detailSum.toString(),
             },
           ),
         );
+        if (detailSum !== sumSlot.cents) {
+          findings.push(
+            finding(
+              'RUBRO_ORPHAN',
+              'blocker',
+              REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT,
+              path,
+              {
+                summary_cents: sumSlot.cents.toString(),
+                nCents: nCents,
+                nNull: nNull,
+                detail_sparse_cents: detailSum.toString(),
+              },
+            ),
+          );
+        }
         continue;
       }
 

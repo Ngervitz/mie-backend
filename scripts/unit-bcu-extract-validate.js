@@ -154,8 +154,146 @@ const mmFinding = mismatch.blockers.find(function (f) {
 assert.ok(mmFinding);
 assert.strictEqual(mmFinding.detail.delta_cents, '1');
 
-// orphan / inconsistent support (summary numeric + null mix)
-const orphan = classifyBcuExtraction(
+// --- sparse summary/detail: A–E (orphan only when non-null sum ≠ summary) ---
+function instMoney(name, vigenteMn) {
+  return {
+    institution_name_raw: name,
+    category: '1C',
+    vigente: { mn: vigenteMn, me: null },
+    vigente_no_autoliquidable: { mn: vigenteMn, me: null },
+    moroso: { mn: null, me: null },
+    castigado_por_atraso: { mn: null, me: null },
+    contingencias: { mn: null, me: null },
+    creditos_reestructurados: { mn: null, me: null },
+  };
+}
+
+function hasOrphan(result) {
+  return result.findings.some(function (f) {
+    return f.reason_code === REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT;
+  });
+}
+
+function hasNotComparable(result) {
+  return result.findings.some(function (f) {
+    return f.reason_code === REASON.SUMMARY_DETAIL_NOT_COMPARABLE;
+  });
+}
+
+// A: summary=100, detail=[40,60,null] → NOT_COMPARABLE, no ORPHAN
+{
+  const a = classifyBcuExtraction(
+    baseExtraction({
+      institutions: [
+        instMoney('A', 40),
+        instMoney('B', 60),
+        instMoney('C', null),
+      ],
+      summary: Object.assign({}, baseExtraction().summary, {
+        vigente: { mn: 100, me: null },
+        vigente_no_autoliquidable: { mn: 100, me: null },
+      }),
+    }),
+    { expected_ci: '45006120' },
+  );
+  assert.strictEqual(a.classification, CLASSIFICATION.REVIEW_READY);
+  assert.ok(hasNotComparable(a));
+  assert.ok(!hasOrphan(a));
+  assert.ok(
+    !a.blockers.some(function (f) {
+      return String(f.reason_code).indexOf('RUBRO_ORPHAN_') === 0;
+    }),
+  );
+}
+
+// B: summary=100, detail=[40,50,null] → ORPHAN blocker (sum 90 ≠ 100)
+{
+  const b = classifyBcuExtraction(
+    baseExtraction({
+      institutions: [
+        instMoney('A', 40),
+        instMoney('B', 50),
+        instMoney('C', null),
+      ],
+      summary: Object.assign({}, baseExtraction().summary, {
+        vigente: { mn: 100, me: null },
+        vigente_no_autoliquidable: { mn: 100, me: null },
+      }),
+    }),
+    { expected_ci: '45006120' },
+  );
+  assert.strictEqual(b.classification, CLASSIFICATION.HUMAN_REVIEW);
+  assert.ok(hasNotComparable(b));
+  assert.ok(hasOrphan(b));
+  assert.ok(
+    b.blockers.some(function (f) {
+      return f.reason_code === REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT;
+    }),
+  );
+}
+
+// C: summary=0, detail=[0,0,null] → NOT_COMPARABLE, no ORPHAN
+{
+  const c = classifyBcuExtraction(
+    baseExtraction({
+      institutions: [
+        instMoney('A', 0),
+        instMoney('B', 0),
+        instMoney('C', null),
+      ],
+      summary: Object.assign({}, baseExtraction().summary, {
+        vigente: { mn: 0, me: null },
+        vigente_no_autoliquidable: { mn: 0, me: null },
+      }),
+    }),
+    { expected_ci: '45006120' },
+  );
+  assert.strictEqual(c.classification, CLASSIFICATION.REVIEW_READY);
+  assert.ok(hasNotComparable(c));
+  assert.ok(!hasOrphan(c));
+}
+
+// D: summary>0, detail=[null,null] → SUMMARY_WITHOUT_INST (nCents=0)
+{
+  const d = classifyBcuExtraction(
+    baseExtraction({
+      institutions: [instMoney('A', null), instMoney('B', null)],
+      summary: Object.assign({}, baseExtraction().summary, {
+        vigente: { mn: 10, me: null },
+        vigente_no_autoliquidable: { mn: 10, me: null },
+      }),
+    }),
+    { expected_ci: '45006120' },
+  );
+  assert.strictEqual(d.classification, CLASSIFICATION.HUMAN_REVIEW);
+  assert.ok(
+    d.reason_codes.includes(REASON.RUBRO_ORPHAN_SUMMARY_WITHOUT_INST),
+  );
+}
+
+// E: null summary + mix cents/null → keep orphan on null-summary branch
+{
+  const e = classifyBcuExtraction(
+    baseExtraction({
+      institutions: [
+        instMoney('A', 10),
+        instMoney('B', null),
+      ],
+      summary: Object.assign({}, baseExtraction().summary, {
+        vigente: { mn: null, me: null },
+        vigente_no_autoliquidable: { mn: null, me: null },
+      }),
+    }),
+    { expected_ci: '45006120' },
+  );
+  assert.strictEqual(e.classification, CLASSIFICATION.HUMAN_REVIEW);
+  assert.ok(
+    e.reason_codes.includes(REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT),
+  );
+}
+
+// legacy sparse fixture that previously expected orphan-or-mismatch
+const orphanLegacy = classifyBcuExtraction(
   baseExtraction({
     document_ci_raw: 'UY IDE 000000000051769764',
     institutions: [
@@ -191,11 +329,9 @@ const orphan = classifyBcuExtraction(
   }),
   { expected_ci: '51769764' },
 );
-assert.strictEqual(orphan.classification, CLASSIFICATION.HUMAN_REVIEW);
-assert.ok(
-  orphan.reason_codes.includes(REASON.RUBRO_ORPHAN_INCONSISTENT_SUPPORT) ||
-    orphan.reason_codes.includes(REASON.SUMMARY_DETAIL_MISMATCH),
-);
+assert.strictEqual(orphanLegacy.classification, CLASSIFICATION.REVIEW_READY);
+assert.ok(hasNotComparable(orphanLegacy));
+assert.ok(!hasOrphan(orphanLegacy));
 
 // origin-blind: same payload without "llm" metadata
 const handBuilt = classifyBcuExtraction(baseExtraction(), {
@@ -207,11 +343,12 @@ assert.strictEqual(handBuilt.classification, CLASSIFICATION.REVIEW_READY);
 const fixDir = path.join(__dirname, 'fixtures', 'bcu-extract-regression');
 const expectedClass = {
   '45006120': CLASSIFICATION.REVIEW_READY,
-  '50212550': CLASSIFICATION.HUMAN_REVIEW, // sparse orphan
-  '19569164': CLASSIFICATION.HUMAN_REVIEW,
-  '50375358': CLASSIFICATION.HUMAN_REVIEW,
+  // sparse but sum(non-null)===summary → NOT_COMPARABLE only (no orphan blocker)
+  '50212550': CLASSIFICATION.REVIEW_READY,
+  '19569164': CLASSIFICATION.REVIEW_READY,
+  '50375358': CLASSIFICATION.REVIEW_READY,
   '36692223': CLASSIFICATION.HUMAN_REVIEW, // CI mismatch vs filename
-  '51769764': CLASSIFICATION.HUMAN_REVIEW,
+  '51769764': CLASSIFICATION.HUMAN_REVIEW, // currency + mismatch
 };
 
 const files = fs.readdirSync(fixDir).filter(function (f) {
