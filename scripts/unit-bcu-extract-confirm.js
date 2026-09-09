@@ -488,6 +488,31 @@ assert.strictEqual(TRI.UNKNOWN, 'UNKNOWN');
   assert.strictEqual(RPC_NAME, 'confirm_rejected_bcu_extraction_draft');
 }
 
+// ---------- 37b Stage 6D.4 common writer + Stage 4 wrapper (not applied) ----------
+{
+  const sqlPath = path.join(
+    __dirname,
+    '..',
+    'migrations',
+    '20260909_rechazados_bcu_html_direct_persistence.sql',
+  );
+  const sql = fs.readFileSync(sqlPath, 'utf8');
+  assert.ok(sql.indexOf('persist_rejected_bcu_observation') >= 0);
+  assert.ok(sql.indexOf('html_import') >= 0);
+  assert.ok(sql.indexOf('FOR UPDATE') >= 0);
+  assert.ok(sql.indexOf("status = 'confirmed'") >= 0);
+  // Stage 4 wrapper must still force llm_assisted
+  assert.ok(
+    /CREATE OR REPLACE FUNCTION public\.confirm_rejected_bcu_extraction_draft[\s\S]*?'llm_assisted'/i.test(
+      sql,
+    ),
+  );
+  assert.ok(
+    /RETURN public\.persist_rejected_bcu_observation/i.test(sql),
+    'Stage 4 confirm must delegate to common persist RPC',
+  );
+}
+
 async function runConfirmServiceCases() {
   const draftId = 'df85989a-2292-4210-baba-04b8cfe80956';
   const storagePath = draftId + '/file.png';

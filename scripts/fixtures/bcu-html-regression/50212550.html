@@ -1,0 +1,452 @@
+
+<!-- saved from url=(REDACTED) -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<link rel="stylesheet" type="text/css" href="./ppal.css">
+</head>
+<body onload="init();" marginwidth="10" marginheight="10">
+<script>var RecaptchaOptions = {lang:'es', theme:'blackglass'};</script>
+<table border="0" align="Center" width="95%" cellpadding="0" cellspacing="0">
+	<tbody><tr>
+		<td class="cabezaPagina"></td>
+		<td class="cabezaPagina">&nbsp;</td>
+		<td class="cabezaPagina"></td>
+	</tr>
+	<tr>
+		<td class="vacio"></td>
+		<td class="vacio">
+
+<noscript>
+<p/>
+<div class="alert-warning" id="noscriptError">
+<strong>Parece que JavaScript está deshabilitado en su navegador.</strong><br/>
+Si no puede habilitarlo, solo se desplegarán los documentos de Uruguay y otras funcionalidades no estarán disponibles.
+</div>
+<p/>
+</noscript>
+<script language="JavaScript">
+ 
+ 
+function mostrarTabla(id,ver) {
+  dis= ver ? 'none' : '';
+  var obj = document.getElementById(id);
+  var display = obj.style.display;
+  display = dis;
+  obj.style.display = display;
+}
+ 
+function ocultarColumna(num,ver) {
+  dis= ver ? '' : 'none';
+  fila=document.getElementById('tabla').getElementsByTagName('tr');
+  for(i=0;i<fila.length;i++){
+    fila[i].getElementsByTagName('td')[num].style.display=dis;
+  }
+}
+ 
+function colXGrupos(param){
+     var objL = document.getElementById('rbtMonsL');
+     var objR = document.getElementById('rbtMonsR');
+	  if(param == "MNP_MEP") {
+	    ocultarColumna(1,true);
+	    ocultarColumna(2,true);
+	    ocultarColumna(3,false);
+	    ocultarColumna(4,false);
+       objL.value='A';
+       objR.value='A';
+                               
+	   } 
+        
+	   if(param == "MNP_MED") {
+	    ocultarColumna(1,true);
+	    ocultarColumna(2,false);
+	    ocultarColumna(3,false);
+	    ocultarColumna(4,true);
+       objL.value='B';
+       objR.value='B';
+	                           
+	   }
+       
+	   if(param == "MND_MED") {
+	    ocultarColumna(1,false);
+	    ocultarColumna(2,false);
+	    ocultarColumna(3,true);
+	    ocultarColumna(4,true);
+       objL.value='D';
+       objR.value='D';
+	                           
+	   }
+	   ocultarColumnaXInst(param);
+	}
+	 
+	function ocultarColumnaXInst(param) {
+	  for(j=0;j<=20;j++){
+	     if (document.getElementById('XInst'+j) != null){
+	        fila=document.getElementById('XInst'+j).getElementsByTagName('tr');
+	        if(param == "MNP_MEP") {
+	            for(i=0;i<fila.length;i++){
+	                fila[i].getElementsByTagName('td')[1].style.display='';
+	                fila[i].getElementsByTagName('td')[2].style.display='';
+	                fila[i].getElementsByTagName('td')[3].style.display='none';
+	                fila[i].getElementsByTagName('td')[4].style.display='none';
+	            }
+	        }
+	        if(param == "MNP_MED") {
+	            for(i=0;i<fila.length;i++){
+	                fila[i].getElementsByTagName('td')[1].style.display='';
+	                fila[i].getElementsByTagName('td')[2].style.display='none';
+	                fila[i].getElementsByTagName('td')[3].style.display='none';
+	                fila[i].getElementsByTagName('td')[4].style.display='';
+	            }
+	        }
+	        if(param == "MND_MED") {
+	            for(i=0;i<fila.length;i++){
+	                fila[i].getElementsByTagName('td')[1].style.display='none';
+	                fila[i].getElementsByTagName('td')[2].style.display='none';
+	                fila[i].getElementsByTagName('td')[3].style.display='';
+	                fila[i].getElementsByTagName('td')[4].style.display='';
+	            }
+	        }
+	                                                              
+	     }else{
+	        return true;
+	     }
+	  }
+	}
+	 
+    
+	function Abrir_CerrarTodo(param) {
+	  var obj;
+	  var display;
+	  var signo_mas = new Image();
+	  var signo_menos = new Image();
+	  signo_mas.src = "../images/mas.gif";
+	  signo_menos.src = "../images/menos.gif";
+	  
+	  for(j=0;j<=20;j++){
+	    if (document.getElementById('divXInst'+j) != null){
+	      obj = document.getElementById('divXInst'+j);
+	      if(param == "MOSTRARTODO") {
+	        document.images['imgINST'+j].src = signo_menos.src;
+	        obj.style.display = "";
+	      }
+	      if(param == "OCULTARTODO") {
+		     document.images['imgINST'+j].src = signo_mas.src;
+		     obj.style.display = "none";
+	      }
+	    }else{
+	      return;
+		}
+	  }
+	}
+   
+function mostrar(id,image) {
+  var obj = document.getElementById(id);
+  var display = obj.style.display;
+  var signo_mas = new Image();
+  var signo_menos = new Image();
+  signo_mas.src = "../images/mas.gif";
+  signo_menos.src = "../images/menos.gif";
+  
+  if(display == "none") {
+     display = "";
+     document.images[image].src = signo_menos.src;
+  }else {
+	  display = "none"
+	  document.images[image].src = signo_mas.src;
+  }
+  obj.style.display = display;
+}
+ 
+function init(){
+	populate();
+}
+ 
+function populate(){
+   colXGrupos('MNP_MEP');
+}
+ 
+</script>
+<table border="0" align="Center" width="100%" height="24">
+	<tbody><tr>
+		<td class="headerTitle" width="34%" align="Center">CONSULTA DE DEUDAS</td>
+	</tr>
+</tbody></table>
+<table border="0" width="100%" align="Center">
+  <tbody><tr>
+		<td class="header" width="17%">Nombre</td>
+		<td class="impar" width="48%">RODRIGUEZ PEREZ, AGUSTINA MICAELA</td>
+		<td class="header" width="3%">Periodo</td>
+		<td class="impar" width="2%">
+        <form action="https://consultadeuda.bcu.gub.uy/consultadeuda/servlet/RequestFiltroServlet" method="get">
+             <input type="hidden" name="periodo" value="202606">
+             <input type="hidden" name="cboPaisDoc" value="UY">
+             <input type="hidden" name="cboTipoDoc" value="IDE">
+             <input type="hidden" name="nroDoc" value="000000000050212550">
+             <input type="hidden" id="rbtMonsL" name="rbtMons" value="A">
+             <input type="hidden" id="CALL" name="CALL" value="IN">
+             <input type="hidden" id="ORIGEN" name="ORIGEN" value="XDOC">
+        </form>
+		</td>
+		<td class="impar" width="3%" align="Center">202607</td>
+		<td class="impar" width="2%">
+        <form action="https://consultadeuda.bcu.gub.uy/consultadeuda/servlet/RequestFiltroServlet" method="get">
+             <input type="hidden" name="periodo" value="202608">
+             <input type="hidden" name="cboPaisDoc" value="UY">
+             <input type="hidden" name="cboTipoDoc" value="IDE">
+             <input type="hidden" name="nroDoc" value="000000000050212550">
+             <input type="hidden" id="rbtMonsR" name="rbtMons" value="A">
+         <input type="hidden" id="CALL" name="CALL" value="IN">
+         <input type="hidden" id="ORIGEN" name="ORIGEN" value="XDOC">
+        </form>
+	   </td>
+	</tr>
+	<tr>
+		<td class="header">Documento</td>
+		<td class="impar">UY IDE 000000000050212550</td>
+   <td colspan="4" rowspan="2">
+     <a href="javascript:document.filtroF.submit()"><img src="./volver.gif" border="0" align="right"> </a>
+   </td>
+<form method="get" action="https://consultadeuda.bcu.gub.uy/consultadeuda/servlet/FiltroServlet" name="filtroF" target="ppal"></form>
+<input type="hidden" name="action" value="Logout">
+
+	</tr>
+	<tr>
+		<td class="header">Sector de Actividad</td>
+		<td class="impar">97000 FAMILIAS</td>
+	</tr>
+</tbody></table>
+&nbsp;
+	<table border="0" width="100%" align="center">
+	   <tbody><tr>
+	     <td class="info"><input type="radio" value="A" checked="" name="rbtMons" onclick="colXGrupos(&#39;MNP_MEP&#39;);return true"> MN $ - ME $</td>
+	     <td class="info"><input type="radio" value="B" name="rbtMons" onclick="colXGrupos(&#39;MNP_MED&#39;);return true"> MN $ - ME USD </td>
+	     <td class="info"><input type="radio" value="D" name="rbtMons" onclick="colXGrupos(&#39;MND_MED&#39;);return true"> MN USD - ME USD </td>
+	   </tr>
+	</tbody></table>
+  <table border="0" width="100%" align="Center" id="tabla">
+	  <tbody><tr>
+      <td class="header" width="5%" align="Center">RUBRO</td>
+		<td class="header" width="5%" align="Center">MN-$</td>
+		<td class="header" width="5%" align="Center">ME-$</td>
+		<td class="header" width="5%" align="Center" style="display: none;">MN-US$</td>
+		<td class="header" width="5%" align="Center" style="display: none;">ME-US$</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">VIGENTE</td>
+	   	<td class="impar" align="right" width="10%">5,699.87</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">141.53</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">VIGENTE - NO AUTOLIQUIDABLE</td>
+	   	<td class="impar" align="right" width="10%">5,699.87</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">141.53</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">MOROSOS</td>
+	   	<td class="impar" align="right" width="10%">174,002.56</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">4,320.58</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">CASTIGADO POR ATRASO</td>
+	   	<td class="impar" align="right" width="10%">5,723.70</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">142.12</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">CONTINGENCIAS</td>
+	   	<td class="impar" align="right" width="10%">15,643.20</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">388.43</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+    <tr>
+	   	<td class="headerLeftGris" width="40%">CREDITOS REESTRUCTURADOS</td>
+	   	<td class="impar" align="right" width="10%">75,598.99</td>
+	   	<td class="impar" align="right" width="10%">0.00</td>
+	   	<td class="par" align="right" width="10%" style="display: none;">1,877.16</td>
+      <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+    </tr>
+  </tbody></table>
+
+	<table id="botones" align="center" border="0" width="100%">
+     <tbody><tr>
+		<td width="10%">
+			<input type="submit" value="Cerrar todo" name="B1" onclick="Abrir_CerrarTodo(&#39;OCULTARTODO&#39;);return false;">
+		</td>
+		<td width="100%">
+			<input type="submit" value="Abrir todo" name="B2" onclick="Abrir_CerrarTodo(&#39;MOSTRARTODO&#39;);return false;">
+		</td>
+    </tr>
+  </tbody></table>
+<table id="tablaXInst0" align="center" border="0" width="100%">
+  <tbody><tr>
+    <td class="headerLeft" width="52%"><img name="imgINST0" style="cursor:pointer" border="0" src="./menos.gif" onclick="mostrar(&#39;divXInst0&#39;,&#39;imgINST0&#39;);return false;">Banco de la República Oriental del Uruguay</td>
+    <td class="headerLeft" width="14%">&nbsp;CALIF:&nbsp;5</td>
+    <td width="34%"></td>
+  </tr>
+  <tr>
+    <td colspan="3" width="100%">
+      <div id="divXInst0" style="">
+      <table id="XInst0" name="XInst0" style="display:;" border="0" width="100%">
+        <tbody><tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE</td>
+	   	    <td class="impar" align="right" width="10%">1,410.40</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">35.02</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE - NO AUTOLIQUIDABLE</td>
+	   	    <td class="impar" align="right" width="10%">1,410.40</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">35.02</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">CONTINGENCIAS</td>
+	   	    <td class="impar" align="right" width="10%">15,643.20</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">388.43</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">CREDITOS REESTRUCTURADOS</td>
+	   	    <td class="impar" align="right" width="10%">75,598.99</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">1,877.16</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+      </tbody></table>
+      </div>
+    </td>	  </tr>
+	</tbody></table>
+<table id="tablaXInst1" align="center" border="0" width="100%">
+  <tbody><tr>
+    <td class="headerLeft" width="52%"><img name="imgINST1" style="cursor:pointer" border="0" src="./menos.gif" onclick="mostrar(&#39;divXInst1&#39;,&#39;imgINST1&#39;);return false;">SOCUR S.A.</td>
+    <td class="headerLeft" width="14%">&nbsp;CALIF:&nbsp;5</td>
+    <td width="34%"></td>
+  </tr>
+  <tr>
+    <td colspan="3" width="100%">
+      <div id="divXInst1" style="">
+      <table id="XInst1" name="XInst1" style="display:;" border="0" width="100%">
+        <tbody><tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE</td>
+	   	    <td class="impar" align="right" width="10%">483.99</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">12.02</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE - NO AUTOLIQUIDABLE</td>
+	   	    <td class="impar" align="right" width="10%">483.99</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">12.02</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">MOROSOS</td>
+	   	    <td class="impar" align="right" width="10%">39,881.24</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">990.27</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+      </tbody></table>
+      </div>
+    </td>	  </tr>
+	</tbody></table>
+<table id="tablaXInst2" align="center" border="0" width="100%">
+  <tbody><tr>
+    <td class="headerLeft" width="52%"><img name="imgINST2" style="cursor:pointer" border="0" src="./menos.gif" onclick="mostrar(&#39;divXInst2&#39;,&#39;imgINST2&#39;);return false;">CASH S.A.</td>
+    <td class="headerLeft" width="14%">&nbsp;CALIF:&nbsp;5</td>
+    <td width="34%"></td>
+  </tr>
+  <tr>
+    <td colspan="3" width="100%">
+      <div id="divXInst2" style="">
+      <table id="XInst2" name="XInst2" style="display:;" border="0" width="100%">
+        <tbody><tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE</td>
+	   	    <td class="impar" align="right" width="10%">3,805.48</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">94.49</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">VIGENTE - NO AUTOLIQUIDABLE</td>
+	   	    <td class="impar" align="right" width="10%">3,805.48</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">94.49</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+        <tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">MOROSOS</td>
+	   	    <td class="impar" align="right" width="10%">134,121.32</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">3,330.30</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+      </tbody></table>
+      </div>
+    </td>	  </tr>
+	</tbody></table>
+<table id="tablaXInst3" align="center" border="0" width="100%">
+  <tbody><tr>
+    <td class="headerLeft" width="52%"><img name="imgINST3" style="cursor:pointer" border="0" src="./menos.gif" onclick="mostrar(&#39;divXInst3&#39;,&#39;imgINST3&#39;);return false;"> Administradora de Soluciones Integrales S.A.  </td>
+    <td class="headerLeft" width="14%">&nbsp;CALIF:&nbsp;5</td>
+    <td width="34%"></td>
+  </tr>
+  <tr>
+    <td colspan="3" width="100%">
+      <div id="divXInst3" style="">
+      <table id="XInst3" name="XInst3" style="display:;" border="0" width="100%">
+        <tbody><tr>
+	   	    <td class="headerLeftGris" align="left" width="40%">CASTIGADO POR ATRASO</td>
+	   	    <td class="impar" align="right" width="10%">5,723.70</td>
+	   	    <td class="impar" align="right" width="10%">0.00</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">142.12</td>
+	   	    <td class="par" align="right" width="10%" style="display: none;">0.00</td>
+        </tr>
+      </tbody></table>
+      </div>
+    </td>	  </tr>
+	</tbody></table>
+
+
+<table border="0" width="100%" align="Center">
+<tbody><tr> <td class="info3" colspan="2">Por más información:</td></tr>  <tr>
+		<td class="info3" width="20%" clspan="2"><a href="https://www.bcu.gub.uy/Servicios-Financieros-SSF/Paginas/Central_Riesgos.aspx" target="_blank">Introducción a la Central de Riesgos Crediticios </a></td>
+  </tr>
+  <tr>
+		<td class="info3" width="20%" clspan="2"><a href="https://www.bcu.gub.uy/Servicios-Financieros-SSF/Paginas/Central_Riesgos_Preguntas.aspx" target="_blank">Preguntas frecuentes </a></td>
+  </tr>
+  <tr>
+		<td class="info3" width="20%" clspan="2"><a href="https://www.bcu.gub.uy/Servicios-Financieros-SSF/Paginas/Central_Riesgos_Categorias.aspx" target="_blank">Definición de las categorías de riesgo de crédito </a></td>
+  </tr>
+</tbody></table>
+
+			<br><br>
+		</td>
+		<td class="vacio"></td>
+	</tr>
+	<tr>
+		<td class="impar" width="21"><img border="0" src="./footerLEFT.jpg" width="21" height="24" align="absbottom"></td>
+		<td class="piePagina" align="Center">Sitio optimizado para resolución 1280 x 1024 - Todos los derechos reservados. ©2026, Banco Central del Uruguay - 2.2.03-prod</td>
+		<td class="impar" width="21"><img border="0" src="./footerRIGHT.jpg" width="21" height="24" align="absbottom"></td>
+	</tr>
+	<tr>
+		<td>&nbsp;</td>
+		<td>&nbsp;</td>
+		<td>&nbsp;</td>
+	</tr>
+</tbody></table>
+
+
+
+</body></html>
