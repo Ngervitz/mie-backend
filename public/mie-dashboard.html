@@ -727,14 +727,39 @@
       </div>
     </div>
 
-    <!-- Rechazados V0: listado por CI + carga manual BCU. -->
+    <!-- Rechazados V0: listado por CI + carga manual BCU.
+         Mi Deuda Stage 1E: bolsas read-only (sub-vista; mismo permiso rechazados). -->
     <div
       class="dashboard-panel hidden"
       id="rechazados-panel"
       role="tabpanel"
       aria-labelledby="tab-rechazados"
       hidden>
-      <div id="rechazados-landing" class="mcl-landing">
+      <div
+        id="rechazados-chrome"
+        class="meta-subnav"
+        role="tablist"
+        aria-label="Vistas de Rechazados">
+        <button
+          type="button"
+          id="rechazados-view-list-btn"
+          class="meta-subnav-btn active"
+          role="tab"
+          aria-selected="true"
+          data-rechazados-view="list">
+          Listado
+        </button>
+        <button
+          type="button"
+          id="rechazados-view-mi-deuda-btn"
+          class="meta-subnav-btn"
+          role="tab"
+          aria-selected="false"
+          data-rechazados-view="mi-deuda">
+          Mi Deuda
+        </button>
+      </div>
+      <div id="rechazados-landing" class="mcl-landing" data-rechazados-pane="list">
         <header class="mcl-header">
           <div class="mcl-header-left">
             <h1 class="mcl-title">Rechazados</h1>
@@ -755,6 +780,32 @@
           aria-label="Filtro por estado operativo"></div>
         <div id="rechazados-status" class="mcl-status" aria-live="polite"></div>
         <div id="rechazados-results"></div>
+      </div>
+      <div
+        id="mi-deuda-landing"
+        class="mcl-landing"
+        data-rechazados-pane="mi-deuda"
+        hidden>
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Mi Deuda</h1>
+            <p class="mcl-subtitle">
+              Bolsas por institución · monto problemático conocido (Moroso + Castigado)
+            </p>
+          </div>
+          <div class="mcl-header-actions">
+            <button type="button" id="mi-deuda-reload-btn" class="btn">
+              Recargar
+            </button>
+          </div>
+        </header>
+        <div
+          id="mi-deuda-exclusions"
+          class="mi-deuda-exclusions"
+          role="status"
+          hidden></div>
+        <div id="mi-deuda-status" class="mcl-status" aria-live="polite"></div>
+        <div id="mi-deuda-results"></div>
       </div>
       <div id="rechazados-modal-root"></div>
     </div>
@@ -1505,6 +1556,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
   <script src="rechazados-helpers.js"></script>
+  <script src="mi-deuda-helpers.js"></script>
   <script src="mie-dashboard.js"></script>
   <script src="meta-agent.js"></script>
   <script src="janus-assist.js"></script>

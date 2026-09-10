@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * Rechazados — list/detail + manual BCU snapshot write + Stage 3/4 extraction drafts.
+ * Rechazados — list/detail + manual BCU snapshot write + Stage 3/4 extraction drafts
+ * + Mi Deuda bags read (Stage 1D).
  * Mount: app.use('/rechazados', requireDashboardPermission('rechazados'), router)
  */
 
@@ -46,6 +47,7 @@ const {
   assertSnapshotId,
   loadSnapshotSourceFileBytes,
 } = require('../lib/rejectedBcuSnapshotSourceRead');
+const { loadMiDeudaBags } = require('../lib/miDeudaBagsRead');
 
 const router = express.Router();
 
@@ -127,6 +129,24 @@ router.get('/', async function getRechazadosList(req, res) {
     return res.status(500).json({
       error: err && err.message ? err.message : 'Internal error',
     });
+  }
+});
+
+/**
+ * Mi Deuda Stage 1D — canonical bags (read-only).
+ * Auth: mount requireDashboardPermission('rechazados').
+ * Registered before GET /:ci so "mi-deuda" is not parsed as CI.
+ */
+router.get('/mi-deuda/bags', async function getMiDeudaBags(req, res) {
+  try {
+    const data = await loadMiDeudaBags(supabase);
+    return res.status(200).json({ ok: true, data: data });
+  } catch (err) {
+    logger.error('GET /rechazados/mi-deuda/bags failed', {
+      error: err && err.message ? err.message : 'unknown',
+      code: err && err.code ? err.code : null,
+    });
+    return res.status(500).json({ error: 'Error interno' });
   }
 });
 

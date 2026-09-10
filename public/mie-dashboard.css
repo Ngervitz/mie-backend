@@ -5193,6 +5193,42 @@
     table-layout: fixed;
   }
 }
+
+/* Mi Deuda Stage 1E — bags (read-only sub-view under Rechazados) */
+#mie-dashboard-app #rechazados-panel > #rechazados-chrome.meta-subnav {
+  margin: 0 0 12px;
+}
+#mie-dashboard-app .mi-deuda-exclusions {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid #b45309;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: inherit;
+  font-size: 0.95rem;
+}
+#mie-dashboard-app .mi-deuda-exclusions[hidden] {
+  display: none;
+}
+#mie-dashboard-app .ga4-table.mi-deuda-bags-table {
+  width: 100%;
+}
+#mie-dashboard-app .ga4-table.mi-deuda-bags-table .mi-deuda-col-inst {
+  text-align: left;
+}
+#mie-dashboard-app .ga4-table.mi-deuda-bags-table .mi-deuda-col-people {
+  width: 7rem;
+}
+#mie-dashboard-app .ga4-table.mi-deuda-bags-table .mi-deuda-col-amount {
+  width: 14rem;
+  white-space: nowrap;
+}
+#mie-dashboard-app .mi-deuda-secondary {
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+}
+
 #mie-dashboard-app .rechazados-detail-modal {
   width: min(1200px, 96vw);
   max-width: calc(100vw - 32px);

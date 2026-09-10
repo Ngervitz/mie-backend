@@ -16907,4 +16907,255 @@ init();
   window.__openRechazados = function () {
     loadList();
   };
+  window.__rechazadosLoadList = loadList;
+})();
+
+/**
+ * Mi Deuda Stage 1E — bags table (read-only).
+ * Sub-view under Rechazados; reuses same section permission / auth.
+ */
+(function initMiDeudaBags() {
+  const MD = window.MiDeudaHelpers;
+  const panel = document.getElementById('rechazados-panel');
+  const chrome = document.getElementById('rechazados-chrome');
+  const listPane = document.getElementById('rechazados-landing');
+  const deudaPane = document.getElementById('mi-deuda-landing');
+  const statusEl = document.getElementById('mi-deuda-status');
+  const resultsEl = document.getElementById('mi-deuda-results');
+  const exclusionsEl = document.getElementById('mi-deuda-exclusions');
+  const reloadBtn = document.getElementById('mi-deuda-reload-btn');
+  if (
+    !MD ||
+    !panel ||
+    !chrome ||
+    !listPane ||
+    !deudaPane ||
+    !statusEl ||
+    !resultsEl ||
+    !exclusionsEl
+  ) {
+    return;
+  }
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+  const state = {
+    view: 'list',
+    loading: false,
+    error: null,
+    payload: null,
+  };
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function syncChrome() {
+    chrome.querySelectorAll('[data-rechazados-view]').forEach(function (btn) {
+      const on = btn.getAttribute('data-rechazados-view') === state.view;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const showList = state.view === 'list';
+    listPane.hidden = !showList;
+    if (showList) listPane.removeAttribute('hidden');
+    else listPane.setAttribute('hidden', '');
+    deudaPane.hidden = showList;
+    if (showList) deudaPane.setAttribute('hidden', '');
+    else deudaPane.removeAttribute('hidden');
+  }
+
+  function renderExclusions(counts) {
+    const unmapped =
+      counts && counts.unmapped != null
+        ? Number(counts.unmapped)
+        : 0;
+    const ambiguous =
+      counts && counts.ambiguous_consolidation != null
+        ? Number(counts.ambiguous_consolidation)
+        : 0;
+    const msg = MD.exclusionsWarningMessage(unmapped, ambiguous);
+    if (!msg) {
+      exclusionsEl.hidden = true;
+      exclusionsEl.textContent = '';
+      exclusionsEl.removeAttribute('role');
+      return;
+    }
+    exclusionsEl.hidden = false;
+    exclusionsEl.setAttribute('role', 'alert');
+    exclusionsEl.textContent = msg;
+  }
+
+  function renderBags() {
+    if (state.loading) {
+      resultsEl.innerHTML = '<div class="mcl-empty">Cargando…</div>';
+      renderExclusions(null);
+      return;
+    }
+    if (state.error) {
+      resultsEl.innerHTML =
+        '<div class="mcl-empty mcl-error">' +
+        escapeHtml(state.error) +
+        '</div>';
+      renderExclusions(null);
+      return;
+    }
+    const data = state.payload || {};
+    const counts = data.counts || {};
+    renderExclusions(counts);
+
+    const rows = MD.buildBagTableRows(data.bags || []);
+    if (!rows.length) {
+      resultsEl.innerHTML =
+        '<div class="mcl-empty">Sin bolsas canónicas</div>';
+      return;
+    }
+
+    const body = rows
+      .map(function (row) {
+        return (
+          '<tr>' +
+          '<td class="mi-deuda-col-inst">' +
+          escapeHtml(row.institution_canonical) +
+          '</td>' +
+          '<td class="ga4-num mi-deuda-col-people">' +
+          escapeHtml(String(row.people_count)) +
+          '</td>' +
+          '<td class="ga4-num mi-deuda-col-amount">' +
+          escapeHtml(MD.formatMoneyUy(row.monto_problematico_conocido)) +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+
+    const reestOutside = MD.countReestructuradoOutside(
+      data.reestructurado_universe,
+    );
+    const secondary =
+      reestOutside > 0
+        ? '<p class="mi-deuda-secondary text-muted">' +
+          escapeHtml(
+            'Reestructurado fuera de membresía de bolsa: ' +
+              String(reestOutside) +
+              ' persona×institución (no incluido en el monto problemático conocido).',
+          ) +
+          '</p>'
+        : '';
+
+    resultsEl.innerHTML =
+      '<div class="table-wrap"><table class="ga4-table mi-deuda-bags-table">' +
+      '<thead><tr>' +
+      '<th class="mi-deuda-col-inst">Institución</th>' +
+      '<th class="ga4-num mi-deuda-col-people">Personas</th>' +
+      '<th class="ga4-num mi-deuda-col-amount">Monto problemático conocido</th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>' +
+      secondary;
+  }
+
+  async function loadBags() {
+    state.loading = true;
+    state.error = null;
+    setStatus('Cargando…', false);
+    renderBags();
+    try {
+      const res = await fetch(MD.bagsEndpointUrl(API), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const body = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        state.payload = null;
+        state.error =
+          (body && body.error) || 'No se pudieron cargar las bolsas';
+        state.loading = false;
+        setStatus(state.error, true);
+        renderBags();
+        return;
+      }
+      state.payload = body && body.data ? body.data : null;
+      state.loading = false;
+      const bags =
+        state.payload && Array.isArray(state.payload.bags)
+          ? state.payload.bags
+          : [];
+      const membership =
+        state.payload &&
+        state.payload.counts &&
+        state.payload.counts.membership_true != null
+          ? state.payload.counts.membership_true
+          : null;
+      setStatus(
+        bags.length
+          ? String(bags.length) +
+              ' bolsa(s)' +
+              (membership != null
+                ? ' · ' + String(membership) + ' membresía(s)'
+                : '')
+          : '',
+        false,
+      );
+      renderBags();
+    } catch (_err) {
+      state.payload = null;
+      state.error = 'No se pudo conectar.';
+      state.loading = false;
+      setStatus(state.error, true);
+      renderBags();
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  function setView(name, opts) {
+    const next = name === 'mi-deuda' ? 'mi-deuda' : 'list';
+    const force = opts && opts.forceLoad;
+    const changed = state.view !== next;
+    state.view = next;
+    syncChrome();
+    if (next === 'list') {
+      if ((changed || force) && typeof window.__rechazadosLoadList === 'function') {
+        window.__rechazadosLoadList();
+      }
+      return;
+    }
+    if (changed || force || !state.payload) {
+      loadBags();
+    } else {
+      renderBags();
+    }
+  }
+
+  chrome.addEventListener('click', function (ev) {
+    const btn =
+      ev.target && ev.target.closest
+        ? ev.target.closest('[data-rechazados-view]')
+        : null;
+    if (!btn || btn.disabled) return;
+    setView(btn.getAttribute('data-rechazados-view'));
+  });
+
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', function () {
+      loadBags();
+    });
+  }
+
+  syncChrome();
+
+  const prevOpen = window.__openRechazados;
+  window.__openRechazados = function () {
+    setView(state.view, { forceLoad: true });
+  };
+  window.__openMiDeudaBags = function () {
+    setView('mi-deuda', { forceLoad: true });
+  };
+  // Keep reference so list open still works if something called prevOpen.
+  if (typeof prevOpen === 'function') {
+    window.__rechazadosOpenListLegacy = prevOpen;
+  }
 })();
