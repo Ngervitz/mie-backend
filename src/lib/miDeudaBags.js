@@ -83,15 +83,17 @@ function canonicalizeInstitutionName(rawName) {
 }
 
 /**
- * Membership: any of moroso/castigado MN|ME strictly > 0.
- * NULL ≠ 0. Does not sum MN+ME. Ignores category and reestructurado.
+ * Membership V2: any of moroso/castigado/colocacion_vencida MN|ME strictly > 0.
+ * NULL ≠ 0. Does not sum MN+ME. Ignores category, vigente, and reestructurado.
  */
 function isBagMember(row) {
   return (
     isPositiveAmount(row && row.moroso_mn) ||
     isPositiveAmount(row && row.moroso_me) ||
     isPositiveAmount(row && row.castigado_mn) ||
-    isPositiveAmount(row && row.castigado_me)
+    isPositiveAmount(row && row.castigado_me) ||
+    isPositiveAmount(row && row.colocacion_vencida_mn) ||
+    isPositiveAmount(row && row.colocacion_vencida_me)
   );
 }
 
@@ -199,6 +201,14 @@ function buildMiDeudaBagModel(input) {
         moroso_me: row.moroso_me != null ? Number(row.moroso_me) : null,
         castigado_mn: row.castigado_mn != null ? Number(row.castigado_mn) : null,
         castigado_me: row.castigado_me != null ? Number(row.castigado_me) : null,
+        colocacion_vencida_mn:
+          row.colocacion_vencida_mn != null
+            ? Number(row.colocacion_vencida_mn)
+            : null,
+        colocacion_vencida_me:
+          row.colocacion_vencida_me != null
+            ? Number(row.colocacion_vencida_me)
+            : null,
         reestructurado_mn: reest.mn,
         reestructurado_me: reest.me,
         has_reestructurado: hasPositiveReestructurado(row),
@@ -232,6 +242,8 @@ function buildMiDeudaBagModel(input) {
             moroso_me: r.moroso_me,
             castigado_mn: r.castigado_mn,
             castigado_me: r.castigado_me,
+            colocacion_vencida_mn: r.colocacion_vencida_mn,
+            colocacion_vencida_me: r.colocacion_vencida_me,
             reestructurado_mn: r.reestructurado_mn,
             reestructurado_me: r.reestructurado_me,
           };
@@ -264,6 +276,8 @@ function buildMiDeudaBagModel(input) {
         moroso_me: 0,
         castigado_mn: 0,
         castigado_me: 0,
+        colocacion_vencida_mn: 0,
+        colocacion_vencida_me: 0,
         reestructurado_mn: 0,
         reestructurado_me: 0,
         members: [],
@@ -275,6 +289,14 @@ function buildMiDeudaBagModel(input) {
     b.moroso_me = sumNonNull(b.moroso_me, r.moroso_me);
     b.castigado_mn = sumNonNull(b.castigado_mn, r.castigado_mn);
     b.castigado_me = sumNonNull(b.castigado_me, r.castigado_me);
+    b.colocacion_vencida_mn = sumNonNull(
+      b.colocacion_vencida_mn,
+      r.colocacion_vencida_mn,
+    );
+    b.colocacion_vencida_me = sumNonNull(
+      b.colocacion_vencida_me,
+      r.colocacion_vencida_me,
+    );
     b.reestructurado_mn = sumNonNull(b.reestructurado_mn, r.reestructurado_mn);
     b.reestructurado_me = sumNonNull(b.reestructurado_me, r.reestructurado_me);
     b.members.push({
@@ -285,6 +307,8 @@ function buildMiDeudaBagModel(input) {
       moroso_me: r.moroso_me,
       castigado_mn: r.castigado_mn,
       castigado_me: r.castigado_me,
+      colocacion_vencida_mn: r.colocacion_vencida_mn,
+      colocacion_vencida_me: r.colocacion_vencida_me,
       reestructurado_mn: r.reestructurado_mn,
       reestructurado_me: r.reestructurado_me,
     });
@@ -299,6 +323,8 @@ function buildMiDeudaBagModel(input) {
         moroso_me: b.moroso_me,
         castigado_mn: b.castigado_mn,
         castigado_me: b.castigado_me,
+        colocacion_vencida_mn: b.colocacion_vencida_mn,
+        colocacion_vencida_me: b.colocacion_vencida_me,
         reestructurado_mn: b.reestructurado_mn,
         reestructurado_me: b.reestructurado_me,
         members: b.members,

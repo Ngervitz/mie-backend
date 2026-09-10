@@ -32,7 +32,7 @@ const SNAPSHOT_SELECT =
   'id, ci, period_label, consulted_on, source, storage_path, original_filename, content_type, file_size_bytes, created_at, currency_view_selected, extraction_contract_version, document_ci_raw, summary, summary_validation_status, summary_validation';
 
 const INSTITUTION_SELECT =
-  'id, snapshot_id, institution_name, category, vigente_mn, vigente_me, vigente_no_autoliquidable_mn, vigente_no_autoliquidable_me, moroso_mn, moroso_me, castigado_mn, castigado_me, contingencias_mn, contingencias_me, creditos_reestructurados_mn, creditos_reestructurados_me, sort_order, created_at';
+  'id, snapshot_id, institution_name, category, vigente_mn, vigente_me, vigente_no_autoliquidable_mn, vigente_no_autoliquidable_me, colocacion_vencida_mn, colocacion_vencida_me, moroso_mn, moroso_me, castigado_mn, castigado_me, contingencias_mn, contingencias_me, creditos_reestructurados_mn, creditos_reestructurados_me, sort_order, created_at';
 
 /**
  * @param {unknown} raw
@@ -228,6 +228,8 @@ function formatInstitution(row) {
     vigente_me: formatAmount(row.vigente_me),
     vigente_no_autoliquidable_mn: formatAmount(row.vigente_no_autoliquidable_mn),
     vigente_no_autoliquidable_me: formatAmount(row.vigente_no_autoliquidable_me),
+    colocacion_vencida_mn: formatAmount(row.colocacion_vencida_mn),
+    colocacion_vencida_me: formatAmount(row.colocacion_vencida_me),
     moroso_mn: formatAmount(row.moroso_mn),
     moroso_me: formatAmount(row.moroso_me),
     castigado_mn: formatAmount(row.castigado_mn),

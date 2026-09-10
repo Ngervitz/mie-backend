@@ -217,6 +217,8 @@ async function getJson(base, path) {
   assert.ok(Array.isArray(data.ambiguous_cases));
   assert.strictEqual(data.bags[0].moroso_mn, 100);
   assert.strictEqual(data.bags[0].moroso_me, 0);
+  assert.ok('colocacion_vencida_mn' in data.bags[0]);
+  assert.ok('colocacion_vencida_me' in data.bags[0]);
   assert.strictEqual(hasMnMeTotals(data), false);
   assert.strictEqual(data.unmapped_rows[0].map_status, MAP_STATUS.UNMAPPED);
   assert.strictEqual(

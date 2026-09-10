@@ -44,6 +44,7 @@
   var EXTRACT_RUBRO_KEYS = Object.freeze([
     'vigente',
     'vigente_no_autoliquidable',
+    'colocacion_vencida',
     'moroso',
     'castigado_por_atraso',
     'contingencias',
@@ -425,6 +426,7 @@
       category: null,
       vigente: moneyPairNull(),
       vigente_no_autoliquidable: moneyPairNull(),
+      colocacion_vencida: moneyPairNull(),
       moroso: moneyPairNull(),
       castigado_por_atraso: moneyPairNull(),
       contingencias: moneyPairNull(),
@@ -561,6 +563,7 @@
   var EXTRACT_RUBRO_LABELS = Object.freeze({
     vigente: 'Vigente',
     vigente_no_autoliquidable: 'Vig. no autoliquidable',
+    colocacion_vencida: 'Colocación vencida',
     moroso: 'Moroso',
     castigado_por_atraso: 'Castigado por atraso',
     contingencias: 'Contingencias',
@@ -820,6 +823,9 @@
         { always: true },
       );
     }
+    pushRow('colocacion_vencida', 'Colocación vencida', src.colocacion_vencida, {
+      onlyIfPositive: true,
+    });
     pushRow('moroso', 'Moroso', src.moroso, { always: true });
     pushRow('castigado_por_atraso', 'Castigado', src.castigado_por_atraso, {
       always: true,
@@ -998,6 +1004,8 @@
       'vigente_me',
       'vigente_no_autoliquidable_mn',
       'vigente_no_autoliquidable_me',
+      'colocacion_vencida_mn',
+      'colocacion_vencida_me',
       'moroso_mn',
       'moroso_me',
       'castigado_mn',

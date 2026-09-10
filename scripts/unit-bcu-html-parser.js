@@ -274,6 +274,104 @@ for (let i = 0; i < RESULT_SPECS.length; i += 1) {
   assert.ok(admin.castigado_por_atraso.mn != null || admin.castigado_por_atraso.me != null);
 })();
 
+// --- colocacion_vencida recognition + null absence + 0 ---
+(function colocacionVencidaRubro() {
+  const { mapRubroKey } = require('../src/lib/bcuHtmlParser');
+  assert.strictEqual(mapRubroKey('COLOCACION VENCIDA'), 'colocacion_vencida');
+  assert.strictEqual(mapRubroKey('Colocación Vencida'), 'colocacion_vencida');
+
+  function miniResult(extraSummaryRows, inst0Rows, inst1Rows) {
+    return (
+      '<html><head><meta charset="utf-8"></head><body>' +
+      '<table><tr><td>Documento</td><td>UY IDE 000000000017994244</td></tr>' +
+      '<tr><td>Periodo</td><td>202607</td></tr></table>' +
+      '<input type="radio" name="rbtMons" value="A" checked="checked" />' +
+      '<table id="tabla"><tr>' +
+      '<td class="headerLeftGris">VIGENTE</td><td>100.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>100.00</td><td>0.00</td></tr>' +
+      (extraSummaryRows || '') +
+      '</table>' +
+      '<table id="tablaXInst0"><tr><td>SOCUR S.A.</td><td>CALIF: 3</td><td></td></tr>' +
+      (inst0Rows || '') +
+      '</table>' +
+      (inst1Rows != null
+        ? '<table id="tablaXInst1"><tr><td>OCA S.A.</td><td>CALIF: 2B</td><td></td></tr>' +
+          inst1Rows +
+          '</table>'
+        : '') +
+      '</body></html>'
+    );
+  }
+
+  const html = miniResult(
+    '<tr><td class="headerLeftGris">COLOCACION VENCIDA</td><td>60,420.61</td><td>916.21</td></tr>',
+    '<tr><td class="headerLeftGris">VIGENTE</td><td>100.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>100.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">COLOCACION VENCIDA</td><td>60,420.61</td><td>916.21</td></tr>',
+    '<tr><td class="headerLeftGris">VIGENTE</td><td>50.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>50.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">COLOCACION VENCIDA</td><td>0.00</td><td>0.00</td></tr>',
+  );
+  const parsed = parseBcuHtml(html, { charset: 'utf-8-fixture' });
+  assert.strictEqual(parsed.page_type, PAGE_TYPE.RESULT_PAGE);
+  const ex = parsed.extraction;
+  assert.strictEqual(ex.summary.colocacion_vencida.mn, 60420.61);
+  assert.strictEqual(ex.summary.colocacion_vencida.me, 916.21);
+  assert.strictEqual(ex.institutions[0].colocacion_vencida.mn, 60420.61);
+  assert.strictEqual(ex.institutions[0].colocacion_vencida.me, 916.21);
+  assert.strictEqual(ex.institutions[1].colocacion_vencida.mn, 0);
+  assert.strictEqual(ex.institutions[1].colocacion_vencida.me, 0);
+
+  const htmlAbs = miniResult(
+    '',
+    '<tr><td class="headerLeftGris">VIGENTE</td><td>50.00</td><td>0.00</td></tr>' +
+      '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>50.00</td><td>0.00</td></tr>',
+    null,
+  );
+  const abs = parseBcuHtml(htmlAbs, { charset: 'utf-8-fixture' }).extraction;
+  assert.strictEqual(abs.summary.colocacion_vencida.mn, null);
+  assert.strictEqual(abs.summary.colocacion_vencida.me, null);
+  assert.strictEqual(abs.institutions[0].colocacion_vencida.mn, null);
+  assert.strictEqual(abs.institutions[0].colocacion_vencida.me, null);
+})();
+
+// --- unmapped_rubro warning (no auto-persist) ---
+(function unmappedRubroWarning() {
+  const html =
+    '<html><head><meta charset="utf-8"></head><body>' +
+    '<table><tr><td>Documento</td><td>UY IDE 000000000017994244</td></tr>' +
+    '<tr><td>Periodo</td><td>202607</td></tr></table>' +
+    '<input type="radio" name="rbtMons" value="A" checked="checked" />' +
+    '<table id="tabla"><tr>' +
+    '<td class="headerLeftGris">VIGENTE</td><td>10.00</td><td>0.00</td></tr>' +
+    '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>10.00</td><td>0.00</td></tr>' +
+    '<tr><td class="headerLeftGris">CREDITOS EN GESTION</td><td>99.00</td><td>0.00</td></tr>' +
+    '</table>' +
+    '<table id="tablaXInst0"><tr><td>OCA S.A.</td><td>CALIF: 3</td><td></td></tr>' +
+    '<tr><td class="headerLeftGris">VIGENTE</td><td>10.00</td><td>0.00</td></tr>' +
+    '<tr><td class="headerLeftGris">VIGENTE - NO AUTOLIQUIDABLE</td><td>10.00</td><td>0.00</td></tr>' +
+    '<tr><td class="headerLeftGris">CREDITOS EN GESTION</td><td>99.00</td><td>0.00</td></tr>' +
+    '</table></body></html>';
+  const parsed = parseBcuHtml(html, { charset: 'utf-8-fixture' });
+  assert.strictEqual(parsed.page_type, PAGE_TYPE.RESULT_PAGE);
+  const warns =
+    parsed.extraction &&
+    parsed.extraction.review &&
+    parsed.extraction.review.warnings;
+  assert.ok(Array.isArray(warns));
+  assert.ok(
+    warns.indexOf('unmapped_rubro:CREDITOS EN GESTION') !== -1,
+    JSON.stringify(warns),
+  );
+  assert.strictEqual(parsed.extraction.summary.moroso.mn, null);
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(
+      parsed.extraction.summary,
+      'creditos_en_gestion',
+    ),
+  );
+})();
+
 // --- CONSULTA_FORM cases ---
 ['40564987', '59933359'].forEach(function (id) {
   const html = loadFixtureHtml(id);

@@ -17,12 +17,14 @@
     'moroso_me',
     'castigado_mn',
     'castigado_me',
+    'colocacion_vencida_mn',
+    'colocacion_vencida_me',
   ]);
 
   /**
-   * Monto problemático conocido = sum of known numeric Moroso/Castigado MN|ME.
+   * Monto problemático conocido = sum of known numeric Moroso/Castigado/ColV MN|ME.
    * NULL/undefined do not contribute (not treated as zero).
-   * Reestructurado is never included.
+   * Reestructurado / vigente / VigNA are never included.
    * @returns {number|null} null when no numeric known values
    */
   function knownProblematicAmount(bag) {
@@ -124,6 +126,8 @@
         moroso_me: src.moroso_me,
         castigado_mn: src.castigado_mn,
         castigado_me: src.castigado_me,
+        colocacion_vencida_mn: src.colocacion_vencida_mn,
+        colocacion_vencida_me: src.colocacion_vencida_me,
         reestructurado_mn: src.reestructurado_mn,
         reestructurado_me: src.reestructurado_me,
       };

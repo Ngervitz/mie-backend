@@ -21,6 +21,7 @@ const RUBROS = Object.freeze({
   required: [
     'vigente',
     'vigente_no_autoliquidable',
+    'colocacion_vencida',
     'moroso',
     'castigado_por_atraso',
     'contingencias',
@@ -29,6 +30,7 @@ const RUBROS = Object.freeze({
   properties: {
     vigente: MONEY_PAIR,
     vigente_no_autoliquidable: MONEY_PAIR,
+    colocacion_vencida: MONEY_PAIR,
     moroso: MONEY_PAIR,
     castigado_por_atraso: MONEY_PAIR,
     contingencias: MONEY_PAIR,
@@ -74,6 +76,7 @@ const BCU_V1_JSON_SCHEMA = Object.freeze({
           'category',
           'vigente',
           'vigente_no_autoliquidable',
+          'colocacion_vencida',
           'moroso',
           'castigado_por_atraso',
           'contingencias',
@@ -87,6 +90,7 @@ const BCU_V1_JSON_SCHEMA = Object.freeze({
           },
           vigente: MONEY_PAIR,
           vigente_no_autoliquidable: MONEY_PAIR,
+          colocacion_vencida: MONEY_PAIR,
           moroso: MONEY_PAIR,
           castigado_por_atraso: MONEY_PAIR,
           contingencias: MONEY_PAIR,

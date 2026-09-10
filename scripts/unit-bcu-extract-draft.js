@@ -127,6 +127,7 @@ function baseExtraction(over) {
           category: '1C',
           vigente: { mn: 17.5, me: 0 },
           vigente_no_autoliquidable: { mn: 17.5, me: 0 },
+          colocacion_vencida: { mn: null, me: null },
           moroso: { mn: null, me: null },
           castigado_por_atraso: { mn: null, me: null },
           contingencias: { mn: null, me: null },
@@ -136,6 +137,7 @@ function baseExtraction(over) {
       summary: {
         vigente: { mn: 17.5, me: 0 },
         vigente_no_autoliquidable: { mn: 17.5, me: 0 },
+        colocacion_vencida: { mn: null, me: null },
         moroso: { mn: null, me: null },
         castigado_por_atraso: { mn: null, me: null },
         contingencias: { mn: null, me: null },

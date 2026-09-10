@@ -38,6 +38,8 @@ const RUBRO_LABEL_TO_KEY = Object.freeze({
   'VIGENTE - NO AUTOLIQUIDABLE': 'vigente_no_autoliquidable',
   'VIGENTE-NO AUTOLIQUIDABLE': 'vigente_no_autoliquidable',
   'VIGENTE NO AUTOLIQUIDABLE': 'vigente_no_autoliquidable',
+  'COLOCACION VENCIDA': 'colocacion_vencida',
+  'COLOCACIÓN VENCIDA': 'colocacion_vencida',
   MOROSOS: 'moroso',
   MOROSO: 'moroso',
   'CASTIGADO POR ATRASO': 'castigado_por_atraso',
@@ -76,12 +78,25 @@ function mapRubroKey(label) {
     return 'vigente_no_autoliquidable';
   }
   if (flat === 'VIGENTE') return 'vigente';
+  if (flat === 'COLOCACION VENCIDA') return 'colocacion_vencida';
   if (flat.indexOf('MOROSO') === 0) return 'moroso';
   if (flat.indexOf('CONTINGENC') === 0) return 'contingencias';
   if (flat.indexOf('CREDITOS REESTRUCTURADOS') === 0) {
     return 'creditos_reestructurados';
   }
   return null;
+}
+
+/**
+ * True when the first cell looks like a BCU rubro label (not CALIF / RUBRO header /
+ * numeric / bare institution title without rubro styling).
+ */
+function looksLikeUnmappedRubroLabel(label, cls) {
+  const n = normLabel(label);
+  if (!n || n === 'RUBRO') return false;
+  if (/^CALIF/i.test(n)) return false;
+  if (/\d/.test(label) && !/^CALIF/i.test(label)) return false;
+  return Boolean(cls && cls.indexOf('headerLeftGris') !== -1);
 }
 
 /**
@@ -275,7 +290,15 @@ function parseRubroTable($, tableSel, currencyView, warnings, pathPrefix) {
         if (tableSel !== '#tabla' && !mapRubroKey(label)) return;
       }
       const key = mapRubroKey(label);
-      if (!key) return;
+      if (!key) {
+        if (looksLikeUnmappedRubroLabel(label, cls)) {
+          const warn =
+            'unmapped_rubro:' +
+            normLabel(label).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if (warnings.indexOf(warn) === -1) warnings.push(warn);
+        }
+        return;
+      }
       if (normLabel(label) === 'RUBRO') return;
       const cells = [];
       tds.each(function (_j, td) {

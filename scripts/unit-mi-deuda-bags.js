@@ -297,6 +297,58 @@ pass('castigado both 0 → no enter');
 
 {
   assert.strictEqual(
+    isBagMember(
+      row({
+        colocacion_vencida_mn: 60420.61,
+        colocacion_vencida_me: null,
+      }),
+    ),
+    true,
+  );
+  pass('colocacion_vencida_mn-only → member (V2)');
+}
+
+{
+  assert.strictEqual(
+    isBagMember(
+      row({
+        colocacion_vencida_mn: null,
+        colocacion_vencida_me: 916.21,
+      }),
+    ),
+    true,
+  );
+  pass('colocacion_vencida_me-only → member (V2)');
+}
+
+{
+  assert.strictEqual(
+    isBagMember(
+      row({
+        colocacion_vencida_mn: 0,
+        colocacion_vencida_me: 0,
+      }),
+    ),
+    false,
+  );
+  pass('colocacion_vencida 0/0 → no membership');
+}
+
+{
+  assert.strictEqual(
+    isBagMember(
+      row({
+        colocacion_vencida_mn: null,
+        colocacion_vencida_me: null,
+      }),
+    ),
+    false,
+  );
+  pass('colocacion_vencida null/null → no membership');
+}
+
+{
+  assert.strictEqual(
     isBagMember(row({ moroso_mn: 10, castigado_mn: 20 })),
     true,
   );
@@ -414,6 +466,81 @@ pass('castigado both 0 → no enter');
   assert.strictEqual(model.bags[0].castigado_me, 50);
   assert.ok(!('castigado_total' in model.bags[0]));
   pass('bag aggregate keeps MN/ME separate');
+}
+
+// --- colocacion_vencida aggregates + people_count ---
+{
+  const model = buildMiDeudaBagModel({
+    snapshots: [
+      {
+        id: 's1',
+        ci: 17994244,
+        consulted_on: '2026-09-01',
+        created_at: '2026-09-01T00:00:00Z',
+      },
+      {
+        id: 's2',
+        ci: 34027654,
+        consulted_on: '2026-09-01',
+        created_at: '2026-09-01T00:00:00Z',
+      },
+    ],
+    institutions: [
+      {
+        snapshot_id: 's1',
+        institution_name: 'SOCUR S.A.',
+        category: '3',
+        moroso_mn: null,
+        moroso_me: null,
+        castigado_mn: null,
+        castigado_me: null,
+        colocacion_vencida_mn: 60420.61,
+        colocacion_vencida_me: 916.21,
+      },
+      {
+        snapshot_id: 's2',
+        institution_name: 'SOCUR S.A.',
+        category: '5',
+        moroso_mn: 100,
+        moroso_me: null,
+        castigado_mn: null,
+        castigado_me: null,
+        colocacion_vencida_mn: null,
+        colocacion_vencida_me: null,
+      },
+      {
+        snapshot_id: 's2',
+        institution_name: 'Administradora de Soluciones Integrales S.A.',
+        category: '3',
+        moroso_mn: null,
+        moroso_me: null,
+        castigado_mn: null,
+        castigado_me: null,
+        colocacion_vencida_mn: 53545.43,
+        colocacion_vencida_me: 0,
+      },
+    ],
+  });
+  assert.strictEqual(model.counts.membership_true, 3);
+  const socur = model.bags.find(function (b) {
+    return b.institution_canonical === 'SOCUR S.A.';
+  });
+  assert.ok(socur);
+  assert.strictEqual(socur.people_count, 2);
+  assert.strictEqual(socur.colocacion_vencida_mn, 60420.61);
+  assert.strictEqual(socur.colocacion_vencida_me, 916.21);
+  assert.strictEqual(socur.moroso_mn, 100);
+  const adm = model.bags.find(function (b) {
+    return (
+      b.institution_canonical ===
+      'Administradora de Soluciones Integrales S.A.'
+    );
+  });
+  assert.ok(adm);
+  assert.strictEqual(adm.people_count, 1);
+  assert.strictEqual(adm.colocacion_vencida_mn, 53545.43);
+  assert.strictEqual(adm.colocacion_vencida_me, 0);
+  pass('colocacion_vencida aggregates + independent persona×inst memberships');
 }
 
 // --- reestructurado universe ---

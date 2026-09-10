@@ -42,10 +42,15 @@ assert.strictEqual(
     moroso_me: 20,
     castigado_mn: 3,
     castigado_me: 4,
+    colocacion_vencida_mn: 10,
+    colocacion_vencida_me: 5,
     reestructurado_mn: 999,
     reestructurado_me: 888,
+    vigente_mn: 1111,
+    vigente_no_autoliquidable_mn: 2222,
+    contingencias_mn: 3333,
   }),
-  127,
+  142,
 );
 
 assert.strictEqual(
@@ -54,6 +59,8 @@ assert.strictEqual(
     moroso_me: null,
     castigado_mn: null,
     castigado_me: null,
+    colocacion_vencida_mn: null,
+    colocacion_vencida_me: null,
     reestructurado_mn: 500,
   }),
   null,
@@ -71,10 +78,20 @@ assert.strictEqual(
 
 assert.strictEqual(
   MD.knownProblematicAmount({
+    colocacion_vencida_mn: 60420.61,
+    colocacion_vencida_me: 916.21,
+  }),
+  61336.82,
+);
+
+assert.strictEqual(
+  MD.knownProblematicAmount({
     moroso_mn: 0,
     moroso_me: 0,
     castigado_mn: 0,
     castigado_me: 0,
+    colocacion_vencida_mn: 0,
+    colocacion_vencida_me: 0,
   }),
   0,
 );
@@ -118,6 +135,8 @@ const rows = MD.buildBagTableRows([
     moroso_me: null,
     castigado_mn: 50,
     castigado_me: 0,
+    colocacion_vencida_mn: 25,
+    colocacion_vencida_me: null,
     reestructurado_mn: 9,
   },
   {
@@ -132,10 +151,11 @@ const rows = MD.buildBagTableRows([
 assert.strictEqual(rows.length, 2);
 assert.strictEqual(rows[0].institution_canonical, 'CASH S.A.'); // alpha tie-break
 assert.strictEqual(rows[0].monto_problematico_conocido, 15);
-assert.strictEqual(rows[1].monto_problematico_conocido, 150);
+assert.strictEqual(rows[1].monto_problematico_conocido, 175);
 assert.ok(!('members' in rows[0]));
 assert.strictEqual(rows[0].moroso_mn, 10);
 assert.strictEqual(rows[0].castigado_me, null);
+assert.strictEqual(rows[1].colocacion_vencida_mn, 25);
 
 assert.strictEqual(
   MD.countReestructuradoOutside([

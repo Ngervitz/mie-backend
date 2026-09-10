@@ -19,6 +19,10 @@
           "mn": 1410.4,
           "me": 0
         },
+        "colocacion_vencida": {
+          "mn": null,
+          "me": null
+        },
         "moroso": {
           "mn": null,
           "me": null
@@ -46,6 +50,10 @@
         "vigente_no_autoliquidable": {
           "mn": 483.99,
           "me": 0
+        },
+        "colocacion_vencida": {
+          "mn": null,
+          "me": null
         },
         "moroso": {
           "mn": 39881.24,
@@ -75,6 +83,10 @@
           "mn": 3805.48,
           "me": 0
         },
+        "colocacion_vencida": {
+          "mn": null,
+          "me": null
+        },
         "moroso": {
           "mn": 134121.32,
           "me": 0
@@ -100,6 +112,10 @@
           "me": null
         },
         "vigente_no_autoliquidable": {
+          "mn": null,
+          "me": null
+        },
+        "colocacion_vencida": {
           "mn": null,
           "me": null
         },
@@ -129,6 +145,10 @@
       "vigente_no_autoliquidable": {
         "mn": 5699.87,
         "me": 0
+      },
+      "colocacion_vencida": {
+        "mn": null,
+        "me": null
       },
       "moroso": {
         "mn": 174002.56,

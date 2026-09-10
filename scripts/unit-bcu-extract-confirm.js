@@ -40,6 +40,7 @@ function baseInstitution(overrides) {
       category: '1C',
       vigente: money(100, 0),
       vigente_no_autoliquidable: money(0, 0),
+      colocacion_vencida: money(0, 0),
       moroso: money(0, 0),
       castigado_por_atraso: money(0, 0),
       contingencias: money(0, 0),
@@ -61,6 +62,7 @@ function baseReviewed(overrides) {
       summary: {
         vigente: money(100, 0),
         vigente_no_autoliquidable: money(0, 0),
+        colocacion_vencida: money(0, 0),
         moroso: money(0, 0),
         castigado_por_atraso: money(0, 0),
         contingencias: money(0, 0),
@@ -322,6 +324,7 @@ assertBlocked(
     summary: {
       vigente: money(null, null),
       vigente_no_autoliquidable: money(null, null),
+      colocacion_vencida: money(null, null),
       moroso: money(null, null),
       castigado_por_atraso: money(null, null),
       contingencias: money(null, null),
@@ -366,6 +369,7 @@ assertBlocked(
       baseInstitution({
         vigente: money(null, 0),
         vigente_no_autoliquidable: money(1.5, null),
+        colocacion_vencida: money(null, null),
         moroso: money(0, 2),
         castigado_por_atraso: money(3, 4),
         contingencias: money(null, null),
@@ -386,10 +390,34 @@ assertBlocked(
   assert.strictEqual(row.castigado_me, 4);
   assert.strictEqual(row.contingencias_mn, null);
   assert.strictEqual(row.contingencias_me, null);
+  assert.strictEqual(row.colocacion_vencida_mn, null);
+  assert.strictEqual(row.colocacion_vencida_me, null);
   assert.strictEqual(row.creditos_reestructurados_mn, 5);
   assert.strictEqual(row.creditos_reestructurados_me, 0);
   assert.strictEqual(row.sort_order, 0);
   assert.strictEqual(row.institution_name, 'OCA S.A.');
+}
+
+// ---------- flatten colocacion_vencida >0 + 0 ----------
+{
+  const reviewedPos = baseReviewed({
+    institutions: [
+      baseInstitution({ colocacion_vencida: money(60420.61, 916.21) }),
+    ],
+    summary: Object.assign({}, baseReviewed().summary, {
+      colocacion_vencida: money(60420.61, 916.21),
+    }),
+  });
+  const rowPos = flattenInstitutionsForRpc(reviewedPos)[0];
+  assert.strictEqual(rowPos.colocacion_vencida_mn, 60420.61);
+  assert.strictEqual(rowPos.colocacion_vencida_me, 916.21);
+
+  const reviewedZero = baseReviewed({
+    institutions: [baseInstitution({ colocacion_vencida: money(0, 0) })],
+  });
+  const rowZero = flattenInstitutionsForRpc(reviewedZero)[0];
+  assert.strictEqual(rowZero.colocacion_vencida_mn, 0);
+  assert.strictEqual(rowZero.colocacion_vencida_me, 0);
 }
 
 // ---------- 23-25 read API null / 0 / Stage2 fields ----------
@@ -402,6 +430,8 @@ assertBlocked(
     vigente_me: 0,
     vigente_no_autoliquidable_mn: 1,
     vigente_no_autoliquidable_me: null,
+    colocacion_vencida_mn: 12.5,
+    colocacion_vencida_me: 0,
     moroso_mn: 0,
     moroso_me: null,
     castigado_mn: 2,
@@ -415,6 +445,8 @@ assertBlocked(
   assert.strictEqual(formatted.vigente_mn, null);
   assert.strictEqual(formatted.vigente_me, 0);
   assert.strictEqual(formatted.vigente_no_autoliquidable_mn, 1);
+  assert.strictEqual(formatted.colocacion_vencida_mn, 12.5);
+  assert.strictEqual(formatted.colocacion_vencida_me, 0);
   assert.strictEqual(formatted.creditos_reestructurados_mn, 3);
   assert.strictEqual(formatted.creditos_reestructurados_me, null);
   assert.strictEqual(formatAmount(null), null);
@@ -847,6 +879,7 @@ async function runConfirmServiceCases() {
         summary: {
           vigente: money(null, null),
           vigente_no_autoliquidable: money(null, null),
+          colocacion_vencida: money(null, null),
           moroso: money(null, null),
           castigado_por_atraso: money(null, null),
           contingencias: money(null, null),

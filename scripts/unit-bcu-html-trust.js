@@ -24,6 +24,7 @@ function baseInstitution(over) {
       category: '5',
       vigente: money(null, null),
       vigente_no_autoliquidable: money(null, null),
+      colocacion_vencida: money(null, null),
       moroso: money(null, null),
       castigado_por_atraso: money(5180.88, 5683.32),
       contingencias: money(null, null),
@@ -45,6 +46,7 @@ function baseExtraction(over) {
       summary: {
         vigente: money(null, null),
         vigente_no_autoliquidable: money(null, null),
+        colocacion_vencida: money(null, null),
         moroso: money(null, null),
         castigado_por_atraso: money(5180.88, 5683.32),
         contingencias: money(null, null),
@@ -93,6 +95,7 @@ function hasReason(r, code) {
     summary: {
       vigente: money(50, 0),
       vigente_no_autoliquidable: money(null, null),
+      colocacion_vencida: money(null, null),
       moroso: money(null, null),
       castigado_por_atraso: money(100, null),
       contingencias: money(null, null),
@@ -164,6 +167,7 @@ function hasReason(r, code) {
       summary: {
         vigente: money(null, null),
         vigente_no_autoliquidable: money(null, null),
+        colocacion_vencida: money(null, null),
         moroso: money(null, null),
         castigado_por_atraso: money(null, null),
         contingencias: money(null, null),

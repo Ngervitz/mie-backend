@@ -408,6 +408,19 @@ assert.strictEqual(H.formatMoneyUyInteger(12.5), '13');
 assert.ok(js.indexOf('formatMoneyUyInteger') !== -1);
 assert.ok(js.indexOf('rechazados-inst-money') !== -1);
 assert.ok(css.indexOf('rechazados-inst-money.is-bcu-5') !== -1);
+// Money headers must share .num with cells so they right-align together
+assert.ok(js.indexOf('<th class="num">Vig. MN</th>') !== -1);
+assert.ok(js.indexOf('<th class="num">Reest. ME</th>') !== -1);
+assert.ok(
+  css.indexOf(
+    '.ga4-table.rechazados-inst-table th.num',
+  ) !== -1,
+);
+assert.ok(
+  css.indexOf(
+    '.ga4-table.rechazados-inst-table td.num',
+  ) !== -1,
+);
 
 const emptyInst = H.emptyExtractInstitution();
 assert.strictEqual(emptyInst.institution_name_raw, '');
@@ -486,7 +499,9 @@ assert.strictEqual(H.shouldContinueExtractPoll(1000, 'pending_review'), false);
 assert.strictEqual(H.extractPollIntervalMs(), 3000);
 assert.strictEqual(H.extractPollMaxMs(), 90000);
 
-assert.strictEqual(H.institutionHistoryAmountKeys().length, 12);
+assert.strictEqual(H.institutionHistoryAmountKeys().length, 14);
+assert.ok(H.institutionHistoryAmountKeys().indexOf('colocacion_vencida_mn') !== -1);
+assert.ok(H.EXTRACT_RUBRO_KEYS.indexOf('colocacion_vencida') !== -1);
 
 assert.ok(js.indexOf('renderExtractAssist') !== -1);
 assert.ok(js.indexOf('bcu-extraction-drafts') !== -1);
@@ -496,6 +511,18 @@ assert.ok(js.indexOf('stopExtractPoll') !== -1);
 assert.ok(js.indexOf('refreshExtractLatest') !== -1);
 assert.ok(js.indexOf('creditos_reestructurados_mn') !== -1);
 assert.ok(js.indexOf('VigNA MN') !== -1);
+assert.ok(js.indexOf('<th class="num">ColV. MN</th>') !== -1);
+assert.ok(js.indexOf('<th class="num">ColV. ME</th>') !== -1);
+assert.ok(js.indexOf('inst.colocacion_vencida_mn') !== -1);
+assert.ok(js.indexOf('inst.colocacion_vencida_me') !== -1);
+// Order: VigNA then ColV then Mor
+{
+  const vigNa = js.indexOf('<th class="num">VigNA ME</th>');
+  const colV = js.indexOf('<th class="num">ColV. MN</th>');
+  const mor = js.indexOf('<th class="num">Mor. MN</th>');
+  assert.ok(vigNa !== -1 && colV !== -1 && mor !== -1);
+  assert.ok(vigNa < colV && colV < mor);
+}
 assert.ok(!/initRechazados[\s\S]*storage_path/.test(js));
 assert.ok(js.indexOf('file_url') !== -1);
 

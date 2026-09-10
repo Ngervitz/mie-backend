@@ -14811,6 +14811,8 @@ init();
           instMoneyTd(inst.vigente_me, catClass) +
           instMoneyTd(inst.vigente_no_autoliquidable_mn, catClass) +
           instMoneyTd(inst.vigente_no_autoliquidable_me, catClass) +
+          instMoneyTd(inst.colocacion_vencida_mn, catClass) +
+          instMoneyTd(inst.colocacion_vencida_me, catClass) +
           instMoneyTd(inst.moroso_mn, catClass) +
           instMoneyTd(inst.moroso_me, catClass) +
           instMoneyTd(inst.castigado_mn, catClass) +
@@ -14827,12 +14829,13 @@ init();
       '<div class="table-wrap"><table class="ga4-table rechazados-inst-table">' +
       '<thead><tr>' +
       '<th>Institución</th><th>Cat.</th>' +
-      '<th>Vig. MN</th><th>Vig. ME</th>' +
-      '<th>VigNA MN</th><th>VigNA ME</th>' +
-      '<th>Mor. MN</th><th>Mor. ME</th>' +
-      '<th>Cast. MN</th><th>Cast. ME</th>' +
-      '<th>Cont. MN</th><th>Cont. ME</th>' +
-      '<th>Reest. MN</th><th>Reest. ME</th>' +
+      '<th class="num">Vig. MN</th><th class="num">Vig. ME</th>' +
+      '<th class="num">VigNA MN</th><th class="num">VigNA ME</th>' +
+      '<th class="num">ColV. MN</th><th class="num">ColV. ME</th>' +
+      '<th class="num">Mor. MN</th><th class="num">Mor. ME</th>' +
+      '<th class="num">Cast. MN</th><th class="num">Cast. ME</th>' +
+      '<th class="num">Cont. MN</th><th class="num">Cont. ME</th>' +
+      '<th class="num">Reest. MN</th><th class="num">Reest. ME</th>' +
       '</tr></thead><tbody>' +
       rows +
       '</tbody></table></div>'

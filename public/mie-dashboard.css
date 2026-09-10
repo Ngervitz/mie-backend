@@ -5624,6 +5624,12 @@
 #mie-dashboard-app .rechazados-inst-table {
   min-width: 980px;
 }
+/* Money headers + cells: same right edge (headers previously lacked .num → left). */
+#mie-dashboard-app .ga4-table.rechazados-inst-table th.num,
+#mie-dashboard-app .ga4-table.rechazados-inst-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 /* Institution money cells: reuse BCU category text colors from .rechazados-bcu-badge */
 #mie-dashboard-app .rechazados-inst-money.is-bcu-1c {
   color: var(--accent-success);

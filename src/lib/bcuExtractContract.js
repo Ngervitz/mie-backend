@@ -20,6 +20,7 @@ const CURRENCY_VIEW_REVIEW_READY = 'MN_PESOS_ME_PESOS';
 const RUBRO_KEYS = Object.freeze([
   'vigente',
   'vigente_no_autoliquidable',
+  'colocacion_vencida',
   'moroso',
   'castigado_por_atraso',
   'contingencias',

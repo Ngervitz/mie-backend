@@ -13,7 +13,7 @@ const SNAPSHOT_SELECT =
   'id, ci, period_label, consulted_on, created_at, source';
 
 const INSTITUTION_SELECT =
-  'id, snapshot_id, institution_name, category, moroso_mn, moroso_me, castigado_mn, castigado_me, creditos_reestructurados_mn, creditos_reestructurados_me, sort_order, created_at';
+  'id, snapshot_id, institution_name, category, moroso_mn, moroso_me, castigado_mn, castigado_me, colocacion_vencida_mn, colocacion_vencida_me, creditos_reestructurados_mn, creditos_reestructurados_me, sort_order, created_at';
 
 async function fetchAllPages(queryFn) {
   const out = [];
@@ -63,6 +63,8 @@ function formatMiDeudaBagsResponse(model) {
       moroso_me: b.moroso_me,
       castigado_mn: b.castigado_mn,
       castigado_me: b.castigado_me,
+      colocacion_vencida_mn: b.colocacion_vencida_mn,
+      colocacion_vencida_me: b.colocacion_vencida_me,
       reestructurado_mn: b.reestructurado_mn,
       reestructurado_me: b.reestructurado_me,
       members: b.members || [],
