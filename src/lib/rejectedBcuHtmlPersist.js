@@ -57,6 +57,7 @@ function publicSnapshotFromRpc(snapshot, institutions) {
     content_type: snapshot.content_type != null ? snapshot.content_type : null,
     file_size_bytes:
       snapshot.file_size_bytes != null ? Number(snapshot.file_size_bytes) : null,
+    file_sha256: snapshot.file_sha256 != null ? snapshot.file_sha256 : null,
     created_by: snapshot.created_by != null ? snapshot.created_by : null,
     created_at: snapshot.created_at,
     currency_view_selected:
@@ -340,6 +341,101 @@ async function persistTrustedBcuHtmlObservation(input) {
   const gate = trust.gate;
   const createdBy = parseCreatedBy(input.createdBy);
 
+  let fileMeta = {
+    storage_path: null,
+    original_filename: null,
+    content_type: null,
+    file_size_bytes: null,
+    file_sha256: null,
+  };
+
+  // Optional sanitized HTML source (Stage 6D.7). Upload BEFORE RPC; compensate on fail.
+  if (input.sanitizedSourceBuffer || input.sanitizedSourceHtml) {
+    const {
+      prepareSanitizedBcuHtmlSource,
+      uploadSourceThenPersist,
+    } = require('./rejectedBcuHtmlSource');
+    const prepared = input.sanitizedSourceBuffer
+      ? {
+          buffer: input.sanitizedSourceBuffer,
+          sha256: require('crypto')
+            .createHash('sha256')
+            .update(input.sanitizedSourceBuffer)
+            .digest('hex'),
+          byteLength: input.sanitizedSourceBuffer.length,
+        }
+      : prepareSanitizedBcuHtmlSource(input.sanitizedSourceHtml);
+
+    const wrapped = await uploadSourceThenPersist(
+      client,
+      prepared,
+      async function (meta) {
+        fileMeta = {
+          storage_path: meta.storage_path,
+          original_filename: meta.original_filename,
+          content_type: meta.content_type,
+          file_size_bytes: meta.file_size_bytes,
+          file_sha256: meta.file_sha256,
+        };
+        const rpcOut = await callPersistRpc(client, {
+          ci: ci,
+          consultedOn: consultedOn,
+          extraction: extraction,
+          gate: gate,
+          institutions: institutions,
+          createdBy: createdBy,
+          payloadHash: payloadHash,
+          fileMeta: fileMeta,
+          includeFileSha256: input.includeFileSha256 === true,
+        });
+        if (rpcOut.error) {
+          return { ok: false, rpcOut: rpcOut };
+        }
+        return { ok: true, rpcOut: rpcOut };
+      },
+      { ci: ci },
+    );
+
+    if (!wrapped || wrapped.ok !== true) {
+      const rpcOut = wrapped && wrapped.rpcOut;
+      logger.error('html persist RPC failed', {
+        error: rpcOut && rpcOut.error && rpcOut.error.message,
+        ci: ci,
+      });
+      return {
+        result: RESULT.PERSIST_FAILED,
+        snapshot_id: null,
+        reasons: [
+          {
+            reason_code: 'PERSIST_RPC_FAILED',
+            detail: { rpc: PERSIST_RPC_NAME },
+          },
+        ],
+        warnings: trust.warnings,
+        ops: null,
+        active_draft_exists: active_draft_exists,
+        snapshot: null,
+        source_file: null,
+      };
+    }
+
+    const rpc = wrapped.rpcOut.data;
+    const snapshot = publicSnapshotFromRpc(rpc.snapshot, rpc.institutions);
+    return {
+      result: RESULT.IMPORTED,
+      snapshot_id:
+        rpc.confirmed_snapshot_id || (rpc.snapshot && rpc.snapshot.id) || null,
+      reasons: [],
+      warnings: trust.warnings,
+      ops: opsFromSnapshot(rpc.snapshot, rpc.institutions),
+      active_draft_exists: active_draft_exists,
+      snapshot: snapshot,
+      reviewed_payload_sha256: payloadHash,
+      draft_id: rpc.draft_id || null,
+      source_file: wrapped.source_file || fileMeta,
+    };
+  }
+
   const params = {
     p_ci: ci,
     p_period_label: extraction.period,
@@ -393,7 +489,42 @@ async function persistTrustedBcuHtmlObservation(input) {
     snapshot: snapshot,
     reviewed_payload_sha256: payloadHash,
     draft_id: rpc.draft_id || null,
+    source_file: null,
   };
+}
+
+async function callPersistRpc(client, args) {
+  const extraction = args.extraction;
+  const gate = args.gate;
+  const fileMeta = args.fileMeta || {};
+  const params = {
+    p_ci: args.ci,
+    p_period_label: extraction.period,
+    p_consulted_on: args.consultedOn,
+    p_source: 'html_import',
+    p_created_by: args.createdBy,
+    p_currency_view_selected: extraction.currency_view_selected,
+    p_extraction_contract_version:
+      extraction.extraction_contract_version || EXTRACTION_CONTRACT_VERSION,
+    p_document_ci_raw: extraction.document_ci_raw,
+    p_summary: extraction.summary || null,
+    p_summary_validation_status: gate.summary_validation_status,
+    p_summary_validation: gate.summary_validation,
+    p_reviewed_payload_sha256: args.payloadHash,
+    p_institutions: args.institutions,
+    p_storage_path: fileMeta.storage_path || null,
+    p_original_filename: fileMeta.original_filename || null,
+    p_content_type: fileMeta.content_type || null,
+    p_file_size_bytes: fileMeta.file_size_bytes != null ? fileMeta.file_size_bytes : null,
+    p_draft_id: null,
+  };
+  // Optional until migration 6D.7 applied — PostgREST errors on unknown params.
+  // Enable via includeFileSha256:true after ADD COLUMN + RPC replace.
+  if (args.includeFileSha256 === true && fileMeta.file_sha256) {
+    params.p_file_sha256 = fileMeta.file_sha256;
+  }
+  const { data, error } = await client.rpc(PERSIST_RPC_NAME, params);
+  return { data: data && typeof data === 'object' ? data : {}, error: error };
 }
 
 module.exports = {

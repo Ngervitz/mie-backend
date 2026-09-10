@@ -42,6 +42,10 @@ const {
   assertDraftReadableStatus,
   loadDraftFileBytes,
 } = require('../lib/rejectedBcuExtractRead');
+const {
+  assertSnapshotId,
+  loadSnapshotSourceFileBytes,
+} = require('../lib/rejectedBcuSnapshotSourceRead');
 
 const router = express.Router();
 
@@ -421,6 +425,53 @@ router.get(
       }
       logger.error(
         'GET /rechazados/:ci/bcu-extraction-drafts/:draftId/file failed',
+        {
+          error: err && err.message ? err.message : 'unknown',
+          code: err && err.code ? err.code : null,
+        },
+      );
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  },
+);
+
+/**
+ * Download sanitized BCU HTML source evidence for a snapshot (attachment only).
+ * Never serves text/html inline. Auth: dashboard permission on /rechazados mount.
+ */
+router.get(
+  '/:ci/bcu-snapshots/:snapshotId/source-file',
+  async function getBcuSnapshotSourceFile(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+    let snapshotId;
+    try {
+      snapshotId = assertSnapshotId(req.params && req.params.snapshotId);
+    } catch (err) {
+      return res.status(400).json({ error: 'snapshot inválido' });
+    }
+
+    try {
+      const inUniverse = await fetchCiHasRejectedHistorico(supabase, ci);
+      if (!inUniverse) {
+        return res.status(404).json({ error: 'No encontrado' });
+      }
+
+      const file = await loadSnapshotSourceFileBytes(supabase, snapshotId, ci);
+      const headers = file.headers || {};
+      Object.keys(headers).forEach(function (k) {
+        res.setHeader(k, headers[k]);
+      });
+      return res.status(200).send(file.buffer);
+    } catch (err) {
+      const status = err && err.statusCode;
+      if (status === 400 || status === 404) {
+        return sendWriteError(res, err);
+      }
+      logger.error(
+        'GET /rechazados/:ci/bcu-snapshots/:snapshotId/source-file failed',
         {
           error: err && err.message ? err.message : 'unknown',
           code: err && err.code ? err.code : null,

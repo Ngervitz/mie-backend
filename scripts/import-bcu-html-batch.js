@@ -8,7 +8,9 @@
  *   node scripts/import-bcu-html-batch.js --dir "C:\\Users\\Admin\\Pictures\\BCU" --execute --consulted-on 2026-09-09
  *
  * Does NOT create drafts. Does NOT call OpenAI. Does NOT push/deploy.
- * HTML source file: V1 does NOT upload (storage MIME is image/pdf only; no snapshot file endpoint).
+ * HTML source file: default OFF (source_file_not_persisted).
+ * Opt-in after 6D.7 review: --persist-source (uploads sanitized opaque .bcuhtml).
+ * Optional --include-file-sha256 after migration applied.
  */
 
 require('dotenv').config();
@@ -54,6 +56,8 @@ function parseArgs(argv) {
     dryRun: true,
     execute: false,
     consultedOn: null,
+    persistSource: false,
+    includeFileSha256: false,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
@@ -63,6 +67,10 @@ function parseArgs(argv) {
     } else if (a === '--execute') {
       out.execute = true;
       out.dryRun = false;
+    } else if (a === '--persist-source') {
+      out.persistSource = true;
+    } else if (a === '--include-file-sha256') {
+      out.includeFileSha256 = true;
     } else if (a === '--dir' && argv[i + 1]) {
       out.dir = argv[++i];
     } else if (a.indexOf('--dir=') === 0) {
@@ -435,9 +443,13 @@ async function main() {
   const out = {
     mode: args.execute ? 'execute' : 'dry-run',
     consulted_on: consultedOn,
-    source_file_policy: 'source_file_not_persisted',
-    source_file_reason:
-      'rejected-bcu-files MIME whitelist is image/pdf only; HTML needs storage+download Content-Disposition work; avoid XSS. Data import not blocked.',
+    source_file_policy: args.persistSource
+      ? 'source_file_persist_opt_in'
+      : 'source_file_not_persisted',
+    source_file_reason: args.persistSource
+      ? 'Uploading sanitized application/octet-stream .bcuhtml via upload-then-RPC compensation; ALREADY/CONFLICT skip upload.'
+      : 'Default off until 6D.7 storage MIME + migration reviewed. Pass --persist-source after review.',
+    include_file_sha256: args.includeFileSha256 === true,
     captcha_leak: false,
     dry_run: counts,
     rows: rows.map(function (r) {
@@ -529,6 +541,10 @@ async function main() {
       pageType: PAGE_TYPE.RESULT_PAGE,
       parserMeta: r._parser_meta || null,
       client: sb,
+      // ALREADY/CONFLICT paths never upload even if flag set.
+      sanitizedSourceHtml:
+        args.persistSource && r._sanitized_html ? r._sanitized_html : undefined,
+      includeFileSha256: args.includeFileSha256 === true,
     });
     batch.results.push({
       ci: r.ci,
@@ -586,6 +602,9 @@ async function main() {
       pageType: PAGE_TYPE.RESULT_PAGE,
       parserMeta: r._parser_meta || null,
       client: sb,
+      sanitizedSourceHtml:
+        args.persistSource && r._sanitized_html ? r._sanitized_html : undefined,
+      includeFileSha256: args.includeFileSha256 === true,
     });
 
     const entry = {
@@ -596,6 +615,14 @@ async function main() {
       reasons: res.reasons,
       ops: res.ops,
       active_draft_exists: res.active_draft_exists,
+      source_file: res.source_file
+        ? {
+            storage_path_present: !!res.source_file.storage_path,
+            content_type: res.source_file.content_type || null,
+            file_sha256: res.source_file.file_sha256 || null,
+            file_size_bytes: res.source_file.file_size_bytes || null,
+          }
+        : null,
       verify: null,
     };
 

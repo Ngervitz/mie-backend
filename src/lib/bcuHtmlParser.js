@@ -138,6 +138,14 @@ function sanitizeBcuHtmlSensitive(html) {
   return String(html || '')
     .replace(/g-recaptcha-response=[^&\s"'<>]*/gi, 'g-recaptcha-response=REDACTED')
     .replace(
+      /<textarea\b[^>]*\bname\s*=\s*["']?g-recaptcha-response["']?[^>]*>[\s\S]*?<\/textarea>/gi,
+      '<textarea name="g-recaptcha-response">REDACTED</textarea>',
+    )
+    .replace(
+      /<input\b[^>]*\bname\s*=\s*["']?g-recaptcha-response["']?[^>]*>/gi,
+      '<input type="hidden" name="g-recaptcha-response" value="REDACTED" />',
+    )
+    .replace(
       /<!--\s*saved from url=\([^)]*\)[^>]*-->/gi,
       '<!-- saved from url=(REDACTED) -->',
     )

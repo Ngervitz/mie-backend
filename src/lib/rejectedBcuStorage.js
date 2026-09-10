@@ -27,6 +27,14 @@ const EXTRACT_IMAGE_MIME_TYPES = Object.freeze([
   'image/webp',
 ]);
 
+/**
+ * Sanitized BCU HTML source evidence (Stage 6D.7).
+ * Stored as opaque bytes — never text/html — to avoid browser inline execution.
+ */
+const BCU_SOURCE_CONTENT_TYPE = 'application/octet-stream';
+const BCU_SOURCE_EXT = 'bcuhtml';
+const BCU_SOURCE_MAX_BYTES = MAX_FILE_BYTES;
+
 function normalizeMime(raw) {
   return String(raw || '')
     .trim()
@@ -199,12 +207,62 @@ async function downloadRejectedBcuFile(supabase, storagePath) {
   return Buffer.from(ab);
 }
 
+/**
+ * Upload sanitized BCU HTML source as opaque octets (no magic-byte image check).
+ * App-level allowlist only — does not relax image/PDF validation paths.
+ */
+async function uploadRejectedBcuSourceDocument(supabase, opts) {
+  if (!opts || !Buffer.isBuffer(opts.buffer) || !opts.buffer.length) {
+    throw storageHttpError('archivo no permitido', 400, 'SOURCE_INVALID');
+  }
+  if (opts.buffer.length > BCU_SOURCE_MAX_BYTES) {
+    throw storageHttpError('archivo demasiado grande', 400, 'SOURCE_TOO_LARGE');
+  }
+  const objectId = opts.objectId || randomUUID();
+  const ownerId = opts.ownerId || opts.snapshotId;
+  if (!ownerId) {
+    throw storageHttpError('Error interno', 500, 'SOURCE_OWNER_REQUIRED');
+  }
+  const storagePath = buildRejectedBcuObjectPath(
+    ownerId,
+    objectId,
+    BCU_SOURCE_EXT,
+  );
+  const { error } = await supabase.storage
+    .from(REJECTED_BCU_BUCKET)
+    .upload(storagePath, opts.buffer, {
+      contentType: BCU_SOURCE_CONTENT_TYPE,
+      upsert: false,
+    });
+  if (error) {
+    if (isBucketMissingError(error)) {
+      logger.error('rejected BCU storage bucket missing', {
+        bucket: REJECTED_BCU_BUCKET,
+        error: error.message,
+      });
+      throw storageHttpError(
+        'Almacenamiento BCU no configurado',
+        500,
+        'BCU_BUCKET_MISSING',
+      );
+    }
+    logger.error('rejected BCU source upload failed', {
+      error: error.message,
+    });
+    throw storageHttpError('Error interno', 500, 'BCU_UPLOAD_FAILED');
+  }
+  return storagePath;
+}
+
 module.exports = {
   REJECTED_BCU_BUCKET,
   MAX_FILE_BYTES,
   ALLOWED_MIME_TYPES,
   EXTRACT_IMAGE_MIME_TYPES,
   MIME_TO_EXT,
+  BCU_SOURCE_CONTENT_TYPE,
+  BCU_SOURCE_EXT,
+  BCU_SOURCE_MAX_BYTES,
   normalizeMime,
   detectMagicMime,
   validateRejectedBcuFile,
@@ -212,6 +270,7 @@ module.exports = {
   buildRejectedBcuObjectPath,
   pathContainsCi,
   uploadRejectedBcuFile,
+  uploadRejectedBcuSourceDocument,
   removeRejectedBcuFile,
   downloadRejectedBcuFile,
 };
