@@ -404,6 +404,17 @@
     return String(v);
   }
 
+  /**
+   * Snapshot institutions table money display: nearest-integer rounding, no decimals.
+   * Presentation only — does not mutate stored values. NULL/empty → —.
+   */
+  function formatMoneyUyInteger(v) {
+    if (v == null || v === '') return '—';
+    var n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    return String(Math.round(n));
+  }
+
   function moneyPairNull() {
     return { mn: null, me: null };
   }
@@ -1034,6 +1045,7 @@
     formatFileSize: formatFileSize,
     canRemoveInstitution: canRemoveInstitution,
     moneyCell: moneyCell,
+    formatMoneyUyInteger: formatMoneyUyInteger,
     emptyExtractInstitution: emptyExtractInstitution,
     emptyExtractSummary: emptyExtractSummary,
     extractionToReviewed: extractionToReviewed,

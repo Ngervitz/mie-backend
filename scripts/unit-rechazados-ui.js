@@ -395,6 +395,20 @@ assert.strictEqual(H.moneyCell(''), '—');
 assert.strictEqual(H.moneyCell(0), '0');
 assert.strictEqual(H.moneyCell(12.5), '12.5');
 
+// Institutions table presentation: integer rounding (no trunc), null → —
+assert.strictEqual(H.formatMoneyUyInteger(null), '—');
+assert.strictEqual(H.formatMoneyUyInteger(undefined), '—');
+assert.strictEqual(H.formatMoneyUyInteger(''), '—');
+assert.strictEqual(H.formatMoneyUyInteger(0), '0');
+assert.strictEqual(H.formatMoneyUyInteger(119623.68), '119624');
+assert.strictEqual(H.formatMoneyUyInteger(494.55), '495');
+assert.strictEqual(H.formatMoneyUyInteger(16377.91), '16378');
+assert.strictEqual(H.formatMoneyUyInteger('119623.68'), '119624');
+assert.strictEqual(H.formatMoneyUyInteger(12.5), '13');
+assert.ok(js.indexOf('formatMoneyUyInteger') !== -1);
+assert.ok(js.indexOf('rechazados-inst-money') !== -1);
+assert.ok(css.indexOf('rechazados-inst-money.is-bcu-5') !== -1);
+
 const emptyInst = H.emptyExtractInstitution();
 assert.strictEqual(emptyInst.institution_name_raw, '');
 assert.strictEqual(emptyInst.category, null);

@@ -14765,8 +14765,22 @@ init();
       '</tbody></table></div>';
   }
 
-  function moneyCell(v) {
-    return escapeHtml(H.moneyCell(v));
+  function instMoneyTd(v, catClass) {
+    const label = H.formatMoneyUyInteger(v);
+    if (label === '—') {
+      return (
+        '<td class="num rechazados-inst-money is-empty">' +
+        escapeHtml(label) +
+        '</td>'
+      );
+    }
+    return (
+      '<td class="num rechazados-inst-money ' +
+      escapeHtml(catClass) +
+      '">' +
+      escapeHtml(label) +
+      '</td>'
+    );
   }
 
   function renderInstitutionsTable(institutions) {
@@ -14776,50 +14790,35 @@ init();
     }
     const rows = list
       .map(function (inst) {
+        const catClass = H.bcuCategoryBadgeClass(inst.category);
+        const catLabel =
+          inst.category != null && String(inst.category).trim() !== ''
+            ? String(inst.category)
+            : '—';
         return (
           '<tr>' +
           '<td>' +
           escapeHtml(inst.institution_name || '—') +
           '</td>' +
-          '<td>' +
-          escapeHtml(inst.category || '—') +
+          '<td class="rechazados-inst-cat">' +
+          '<span class="rechazados-bcu-badge ' +
+          escapeHtml(catClass) +
+          '">' +
+          escapeHtml(catLabel) +
+          '</span>' +
           '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.vigente_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.vigente_me) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.vigente_no_autoliquidable_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.vigente_no_autoliquidable_me) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.moroso_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.moroso_me) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.castigado_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.castigado_me) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.contingencias_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.contingencias_me) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.creditos_reestructurados_mn) +
-          '</td>' +
-          '<td class="num">' +
-          moneyCell(inst.creditos_reestructurados_me) +
-          '</td>' +
+          instMoneyTd(inst.vigente_mn, catClass) +
+          instMoneyTd(inst.vigente_me, catClass) +
+          instMoneyTd(inst.vigente_no_autoliquidable_mn, catClass) +
+          instMoneyTd(inst.vigente_no_autoliquidable_me, catClass) +
+          instMoneyTd(inst.moroso_mn, catClass) +
+          instMoneyTd(inst.moroso_me, catClass) +
+          instMoneyTd(inst.castigado_mn, catClass) +
+          instMoneyTd(inst.castigado_me, catClass) +
+          instMoneyTd(inst.contingencias_mn, catClass) +
+          instMoneyTd(inst.contingencias_me, catClass) +
+          instMoneyTd(inst.creditos_reestructurados_mn, catClass) +
+          instMoneyTd(inst.creditos_reestructurados_me, catClass) +
           '</tr>'
         );
       })

@@ -5624,6 +5624,31 @@
 #mie-dashboard-app .rechazados-inst-table {
   min-width: 980px;
 }
+/* Institution money cells: reuse BCU category text colors from .rechazados-bcu-badge */
+#mie-dashboard-app .rechazados-inst-money.is-bcu-1c {
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-2a {
+  color: #6a9eaa;
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-2b {
+  color: var(--accent-warn);
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-3 {
+  color: #c47a3a;
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-4 {
+  color: var(--accent-danger);
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-5 {
+  color: #c45a5a;
+}
+#mie-dashboard-app .rechazados-inst-money.is-bcu-pending {
+  color: var(--text-muted);
+}
+#mie-dashboard-app .rechazados-inst-money.is-empty {
+  color: var(--text-muted);
+}
 @media (max-width: 800px) {
   #mie-dashboard-app .rechazados-extract-review-layout {
     grid-template-columns: minmax(0, 1fr);
