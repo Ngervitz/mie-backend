@@ -402,12 +402,6 @@ async function upsertSolicitudes(items) {
     upserted: histUpserted,
   });
 
-  await runCdvSheetSyncFailOpen({
-    historicoRows: mapped.rows,
-    solicitudes: rows,
-    supabase: supabase,
-  });
-
   await excludeOldBaseContactsByCi(
     rows
       .map((r) => r.ci)
@@ -552,6 +546,15 @@ async function runCzFunnelSync() {
       apiPath: '/solicitudes',
       upsertPage: upsertSolicitudes,
     });
+
+    // Post-sync reconcile: once per job, even when solicitudes itemsFetched=0.
+    // Loads persisted estado 8 from Janus → Google Sheet (fail-open).
+    await runCdvSheetSyncFailOpen({
+      historicoRows: [],
+      solicitudes: [],
+      supabase: supabase,
+    });
+
     summary.encuestas = await syncSource({
       sourceName: SOURCE_ENCUESTAS,
       apiPath: '/encuestas',

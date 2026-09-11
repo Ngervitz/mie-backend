@@ -555,7 +555,7 @@ function resetLogs() {
   assert.strictEqual(histUpserts[1].rows.length, 1);
   assert.strictEqual(chunkStore.estados.size, 501);
 
-  // Google / CDV sheet throw after historico persist → funnel continues
+  // CDV sheet hook moved to runCzFunnelSync — upsertSolicitudes must not call it
   const cdvFailStore = createStore();
   let cdvCalls = 0;
   setCdvSheetSyncForTests(async function () {
@@ -576,7 +576,11 @@ function resetLogs() {
   ]);
   setCdvSheetSyncForTests(null);
   assert.strictEqual(cdvFailCount, 1);
-  assert.strictEqual(cdvCalls, 1);
+  assert.strictEqual(
+    cdvCalls,
+    0,
+    'upsertSolicitudes must not invoke CDV sheet sync',
+  );
   assert.strictEqual(cdvFailStore.solicitudes.size, 1);
   assert.ok(cdvFailStore.estados.get(80));
   assert.strictEqual(cdvFailStore.estados.get(80).solicitudes_estados_id, 8);
