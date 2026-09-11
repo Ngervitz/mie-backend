@@ -9,6 +9,10 @@ const assert = require('assert');
 const FAKE_CI = 19999998;
 const OBSERVACIONES = 'CV rechazó la proporcionar una oferta.';
 
+delete process.env.CDV_GOOGLE_SERVICE_ACCOUNT_JSON;
+delete process.env.CDV_GOOGLE_SHEET_ID;
+delete process.env.CDV_GOOGLE_SHEET_TAB;
+
 const envPath = require.resolve('../src/config/env');
 require.cache[envPath] = {
   id: envPath,
@@ -70,6 +74,7 @@ const {
   mapHistoricoRows,
   upsertSolicitudes,
   upsertGrantedLoans,
+  setCdvSheetSyncForTests,
 } = require('../src/jobs/czFunnelSync');
 
 assert.strictEqual(SOURCE_SOLICITUD_ESTADOS, 'cz_funnel_solicitud_estados');
@@ -549,6 +554,32 @@ function resetLogs() {
   assert.strictEqual(histUpserts[0].rows.length, 500);
   assert.strictEqual(histUpserts[1].rows.length, 1);
   assert.strictEqual(chunkStore.estados.size, 501);
+
+  // Google / CDV sheet throw after historico persist → funnel continues
+  const cdvFailStore = createStore();
+  let cdvCalls = 0;
+  setCdvSheetSyncForTests(async function () {
+    cdvCalls += 1;
+    throw new Error('google sheets boom');
+  });
+  const cdvFailCount = await upsertSolicitudes([
+    solicitudItem({
+      historico: [
+        {
+          id: 80,
+          solicitudes_estados_id: 8,
+          estado: '🟡 En Créditos de valor',
+          fechahora: '2026-09-01 18:33:40',
+        },
+      ],
+    }),
+  ]);
+  setCdvSheetSyncForTests(null);
+  assert.strictEqual(cdvFailCount, 1);
+  assert.strictEqual(cdvCalls, 1);
+  assert.strictEqual(cdvFailStore.solicitudes.size, 1);
+  assert.ok(cdvFailStore.estados.get(80));
+  assert.strictEqual(cdvFailStore.estados.get(80).solicitudes_estados_id, 8);
 
   assertNoForbiddenLogs();
 

@@ -19,6 +19,26 @@ const {
   normalizeJt,
   applyJtFirstValidWins,
 } = require('../lib/sanitizeCzTrackingData');
+const {
+  syncCdvSheetAfterHistoricoPersist: defaultCdvSheetSync,
+} = require('../lib/cdvSheetSync');
+
+let cdvSheetSyncFn = defaultCdvSheetSync;
+
+function setCdvSheetSyncForTests(fn) {
+  cdvSheetSyncFn = typeof fn === 'function' ? fn : defaultCdvSheetSync;
+}
+
+async function runCdvSheetSyncFailOpen(payload) {
+  try {
+    await cdvSheetSyncFn(payload);
+  } catch (err) {
+    logger.error('CDV sheet sync failed', {
+      kind: 'cdv_sheet',
+      error: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
+    });
+  }
+}
 
 function isCzApiAuthFailure(message) {
   const m = String(message || '');
@@ -382,6 +402,12 @@ async function upsertSolicitudes(items) {
     upserted: histUpserted,
   });
 
+  await runCdvSheetSyncFailOpen({
+    historicoRows: mapped.rows,
+    solicitudes: rows,
+    supabase: supabase,
+  });
+
   await excludeOldBaseContactsByCi(
     rows
       .map((r) => r.ci)
@@ -601,4 +627,6 @@ module.exports = {
   upsertSolicitudes,
   upsertGrantedLoans,
   upsertSolicitudEstados,
+  setCdvSheetSyncForTests,
+  runCdvSheetSyncFailOpen,
 };
