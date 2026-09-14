@@ -4,10 +4,13 @@
  * Temporary Janus → Google Sheet sync for CDV (estado 8).
  * Write-only. Fail-open. Never logs CDV_GOOGLE_SERVICE_ACCOUNT_JSON.
  *
- * Sheet columns (A:J):
- * A BASE | B DOCUMENTO | C FECHA ENVÍO | D ESTADO | E MONTO OTORGADO |
- * F FECHA RESPUESTA | G OBSERVACIÓN | H CZ_SOLICITUD_ID |
- * I PROCESADO_ESTADO | J FECHA_PROCESADO
+ * Sheet columns (A:K):
+ * A BASE | B DOCUMENTO | C CELULAR | D FECHA ENVÍO | E ESTADO |
+ * F MONTO OTORGADO | G FECHA RESPUESTA | H OBSERVACIÓN |
+ * I CZ_SOLICITUD_ID | J PROCESADO_ESTADO | K FECHA_PROCESADO
+ *
+ * New rows are written with values.update on A{row}:K{row}.
+ * Do not append an open range: Sheets can pick the contiguous block and shift the payload.
  */
 
 const logger = require('./logger');
@@ -18,9 +21,13 @@ const TZ_MONTEVIDEO = 'America/Montevideo';
 const IN_CHUNK = 200;
 const HEADER_SOLICITUD_ID = 'CZ_SOLICITUD_ID';
 const HEADER_BASE = 'BASE';
-/** 0-based sheet columns */
+const SHEET_VALUE_RANGE = 'A:K';
+const SHEET_ROW_WIDTH = 11;
+/** 0-based sheet columns. Idempotency is column I only. */
 const COL_BASE = 0;
-const COL_CZ_SOLICITUD_ID = 7;
+const COL_CELULAR = 2;
+const COL_FECHA_ENVIO = 3;
+const COL_CZ_SOLICITUD_ID = 8;
 
 let loggedMissingConfig = false;
 
@@ -205,9 +212,25 @@ function ciMapFromSolicitudes(solicitudes) {
   return map;
 }
 
+function sheetSolicitudHeaderMatches(values) {
+  const table = Array.isArray(values) ? values : [];
+  const header = Array.isArray(table[0]) ? table[0] : [];
+  const cell = header[COL_CZ_SOLICITUD_ID];
+  return String(cell == null ? '' : cell).trim() === HEADER_SOLICITUD_ID;
+}
+
 /**
- * Parse sheet values A:H (or wider). Returns Map cz_solicitud_id →
- * { rowNumber (1-based), base }.
+ * Next 1-based row after the last row returned for A:K.
+ * Does not scan for a hole and does not let Sheets choose a start column.
+ */
+function nextFreeSheetRowNumber(values) {
+  const table = Array.isArray(values) ? values : [];
+  return table.length + 1;
+}
+
+/**
+ * Parse sheet values A:K. Idempotency key is column I only.
+ * Returns Map cz_solicitud_id → { rowNumber (1-based), base }.
  */
 function indexExistingSheetRows(values) {
   const byId = new Map();
@@ -236,20 +259,22 @@ function indexExistingSheetRows(values) {
   return byId;
 }
 
-/** @deprecated use indexExistingSheetRows; kept for unit compatibility name */
+/**
+ * Single-column lists are treated as column I (CZ_SOLICITUD_ID), not H.
+ * Wider rows are indexed as-is. Name kept for existing unit imports.
+ */
 function existingIdsFromColumnH(values) {
   const indexed = indexExistingSheetRows(
     (Array.isArray(values) ? values : []).map(function (cell) {
-      // Legacy tests passed G:G as single-column — treat as H-only list.
       if (Array.isArray(cell)) {
         if (cell.length === 1) {
-          const padded = new Array(COL_CZ_SOLICITUD_ID + 1).fill('');
+          const padded = new Array(SHEET_ROW_WIDTH).fill('');
           padded[COL_CZ_SOLICITUD_ID] = cell[0];
           return padded;
         }
         return cell;
       }
-      const padded = new Array(COL_CZ_SOLICITUD_ID + 1).fill('');
+      const padded = new Array(SHEET_ROW_WIDTH).fill('');
       padded[COL_CZ_SOLICITUD_ID] = cell;
       return padded;
     }),
@@ -263,18 +288,14 @@ function existingIdsFromColumnG(values) {
 
 function buildSheetRow(candidate) {
   const base = normalizeSourceSystem(candidate && candidate.base);
-  return [
-    base,
-    candidate.ci != null && candidate.ci !== '' ? String(candidate.ci) : '',
-    formatFechaEnvioMontevideo(candidate.fechahora_src),
-    '',
-    '',
-    '',
-    '',
-    String(candidate.cz_solicitud_id),
-    '',
-    '',
-  ];
+  const row = new Array(SHEET_ROW_WIDTH).fill('');
+  row[COL_BASE] = base;
+  row[1] =
+    candidate.ci != null && candidate.ci !== '' ? String(candidate.ci) : '';
+  row[COL_CELULAR] = '';
+  row[COL_FECHA_ENVIO] = formatFechaEnvioMontevideo(candidate.fechahora_src);
+  row[COL_CZ_SOLICITUD_ID] = String(candidate.cz_solicitud_id);
+  return row;
 }
 
 /**
@@ -601,11 +622,30 @@ async function ensureCdvSheetRows(input, deps) {
 
   const got = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: tabRange + '!A:H',
+    range: tabRange + '!' + SHEET_VALUE_RANGE,
   });
-  const existingById = indexExistingSheetRows(
-    got && got.data && got.data.values ? got.data.values : [],
-  );
+  const sheetValues =
+    got && got.data && got.data.values ? got.data.values : [];
+  if (!sheetSolicitudHeaderMatches(sheetValues)) {
+    const headerRow = Array.isArray(sheetValues[0]) ? sheetValues[0] : [];
+    const actual = headerRow[COL_CZ_SOLICITUD_ID];
+    logger.error(
+      'CDV sheet sync aborted — I1 is not CZ_SOLICITUD_ID; no rows written',
+      {
+        kind: 'cdv_sheet',
+        expected: HEADER_SOLICITUD_ID,
+        actual: actual == null ? '' : String(actual).slice(0, 80),
+      },
+    );
+    return {
+      status: 'header_mismatch',
+      inserted: 0,
+      skipped: 0,
+      base_updated: 0,
+      considered: candidates.length,
+    };
+  }
+  const existingById = indexExistingSheetRows(sheetValues);
 
   const toInsert = [];
   const baseUpdates = [];
@@ -659,16 +699,19 @@ async function ensureCdvSheetRows(input, deps) {
   }
 
   if (toInsert.length) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: config.spreadsheetId,
-      range: tabRange + '!A:J',
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: toInsert },
-    });
-    const insertedIds = toInsert.map(function (row) {
-      return row[COL_CZ_SOLICITUD_ID];
-    });
+    let nextRow = nextFreeSheetRowNumber(sheetValues);
+    const insertedIds = [];
+    for (let i = 0; i < toInsert.length; i += 1) {
+      const rowNumber = nextRow;
+      nextRow += 1;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: config.spreadsheetId,
+        range: tabRange + '!A' + rowNumber + ':K' + rowNumber,
+        valueInputOption: 'RAW',
+        requestBody: { values: [toInsert[i]] },
+      });
+      insertedIds.push(toInsert[i][COL_CZ_SOLICITUD_ID]);
+    }
     logger.info('CDV sheet sync inserted', {
       kind: 'cdv_sheet',
       inserted: toInsert.length,
@@ -714,7 +757,13 @@ module.exports = {
   CDV_ESTADO_ID,
   SHEETS_SCOPE,
   COL_BASE,
+  COL_CELULAR,
+  COL_FECHA_ENVIO,
   COL_CZ_SOLICITUD_ID,
+  SHEET_VALUE_RANGE,
+  SHEET_ROW_WIDTH,
+  sheetSolicitudHeaderMatches,
+  nextFreeSheetRowNumber,
   readCdvSheetConfig,
   parseServiceAccountJson,
   quoteSheetTab,

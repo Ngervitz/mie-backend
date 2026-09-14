@@ -5,6 +5,8 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const {
   CDV_ESTADO_ID,
@@ -27,7 +29,12 @@ assert.strictEqual(
   SHEETS_SCOPE,
   'https://www.googleapis.com/auth/spreadsheets',
 );
-assert.strictEqual(COL_CZ_SOLICITUD_ID, 7);
+assert.strictEqual(COL_CZ_SOLICITUD_ID, 8);
+assert.strictEqual(
+  fs.readFileSync(path.join(__dirname, '../src/lib/cdvSheetSync.js'), 'utf8').indexOf('values.append'),
+  -1,
+  'CDV sheet sync must not call values.append',
+);
 
 const FAKE_SA_JSON = JSON.stringify({
   type: 'service_account',
@@ -55,7 +62,7 @@ function historicoRow(overrides) {
 }
 
 function padRow(partial) {
-  const row = new Array(8).fill('');
+  const row = new Array(11).fill('');
   Object.keys(partial).forEach(function (k) {
     row[Number(k)] = partial[k];
   });
@@ -68,8 +75,8 @@ function fakeSheets(options) {
     ? opts.grid.map(function (r) {
         return r.slice();
       })
-    : [padRow({ 0: 'BASE', 7: 'CZ_SOLICITUD_ID' })];
-  const calls = { get: 0, append: [], batchUpdate: [] };
+    : [padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' })];
+  const calls = { get: 0, update: [], batchUpdate: [], append: [] };
   return {
     grid: grid,
     calls: calls,
@@ -82,21 +89,28 @@ function fakeSheets(options) {
               calls.get += 1;
               if (opts.getError) throw opts.getError;
               assert.ok(
-                String(req.range).indexOf('!A:H') !== -1,
-                'must read A:H for id+base',
+                String(req.range).indexOf('!A:K') !== -1,
+                'must read A:K for id+base',
               );
-              return { data: { values: grid } };
+              return { data: { values: grid.map(function (r) { return r.slice(); }) } };
             },
-            append: async function (req) {
-              if (opts.appendError) throw opts.appendError;
-              calls.append.push(req);
-              const rows =
+            append: async function () {
+              calls.append.push('append');
+              throw new Error('values.append must not be used');
+            },
+            update: async function (req) {
+              if (opts.updateError) throw opts.updateError;
+              calls.update.push(req);
+              const m = String(req.range || '').match(/!A(\d+):K\1$/);
+              assert.ok(m, 'new row must be values.update A{row}:K{row}');
+              const rowNum = Number(m[1]);
+              const written =
                 req && req.requestBody && Array.isArray(req.requestBody.values)
-                  ? req.requestBody.values
-                  : [];
-              rows.forEach(function (row) {
-                grid.push(row.slice(0, 8));
-              });
+                  ? req.requestBody.values[0]
+                  : null;
+              assert.ok(written && written.length === 11, 'row must be A:K');
+              while (grid.length < rowNum) grid.push(new Array(11).fill(''));
+              grid[rowNum - 1] = written.slice();
               return { data: {} };
             },
             batchUpdate: async function (req) {
@@ -108,13 +122,18 @@ function fakeSheets(options) {
                   : [];
               data.forEach(function (item) {
                 const m = String(item.range || '').match(/!A(\d+)$/);
-                assert.ok(m, 'BASE update must target A{row}');
+                assert.ok(m, 'BASE update must target A{row} only');
+                assert.strictEqual(
+                  item.values[0].length,
+                  1,
+                  'BASE update must not touch other cells',
+                );
                 const rowNum = Number(m[1]);
                 const val =
                   item.values && item.values[0] ? item.values[0][0] : '';
-                while (grid.length < rowNum) grid.push([]);
-                const row = grid[rowNum - 1] || [];
-                while (row.length < 8) row.push('');
+                while (grid.length < rowNum) grid.push(new Array(11).fill(''));
+                const row = grid[rowNum - 1] || new Array(11).fill('');
+                while (row.length < 11) row.push('');
                 row[0] = val;
                 grid[rowNum - 1] = row;
               });
@@ -210,6 +229,7 @@ const built = buildSheetRow({
 assert.deepStrictEqual(built, [
   'prestafacil',
   '29108021',
+  '',
   '01/09/2026 18:33:40',
   '',
   '',
@@ -219,17 +239,27 @@ assert.deepStrictEqual(built, [
   '',
   '',
 ]);
+assert.strictEqual(built.length, 11);
+assert.strictEqual(built[2], '');
 assert.strictEqual(built[COL_CZ_SOLICITUD_ID], '1168');
 
 const indexed = indexExistingSheetRows([
-  padRow({ 0: 'BASE', 7: 'CZ_SOLICITUD_ID' }),
-  padRow({ 0: '', 7: '1168' }),
-  padRow({ 0: 'prestafacil', 7: 1171 }),
+  padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+  padRow({ 0: '', 8: '1168' }),
+  padRow({ 0: 'prestafacil', 8: 1171 }),
 ]);
 assert.strictEqual(indexed.get('1168').base, '');
 assert.strictEqual(indexed.get('1168').rowNumber, 2);
 assert.strictEqual(indexed.get('1171').base, 'prestafacil');
 assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
+assert.strictEqual(
+  indexExistingSheetRows([
+    padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+    padRow({ 7: '1168' }),
+  ]).has('1168'),
+  false,
+  'ID in H must not count as existing',
+);
 
 (async function main() {
   // 1. jt + sms_messages.source_system → snapshot
@@ -322,8 +352,8 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   // 5. fila existente BASE vacío → completa solo BASE
   const sheets5 = fakeSheets({
     grid: [
-      padRow({ 0: 'BASE', 7: 'CZ_SOLICITUD_ID' }),
-      padRow({ 0: '', 1: '29108021', 7: '1168' }),
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({ 0: '', 1: '29108021', 4: 'RECHAZADO', 7: 'nota', 8: '1168' }),
     ],
   });
   const r5 = await ensureCdvSheetRows(
@@ -342,17 +372,21 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   );
   assert.strictEqual(r5.inserted, 0);
   assert.strictEqual(r5.base_updated, 1);
+  assert.strictEqual(sheets5.calls.update.length, 0);
   assert.strictEqual(sheets5.calls.append.length, 0);
   assert.strictEqual(sheets5.calls.batchUpdate.length, 1);
+  assert.strictEqual(sheets5.calls.batchUpdate[0].requestBody.data[0].range, "'CDV'!A2");
   assert.strictEqual(sheets5.grid[1][0], 'prestafacil');
   assert.strictEqual(sheets5.grid[1][1], '29108021');
-  assert.strictEqual(sheets5.grid[1][7], '1168');
+  assert.strictEqual(sheets5.grid[1][4], 'RECHAZADO');
+  assert.strictEqual(sheets5.grid[1][7], 'nota');
+  assert.strictEqual(sheets5.grid[1][8], '1168');
 
   // 6. fila existente BASE ya cargada → no modifica
   const sheets6 = fakeSheets({
     grid: [
-      padRow({ 0: 'BASE', 7: 'CZ_SOLICITUD_ID' }),
-      padRow({ 0: 'prestafacil', 1: '29108021', 7: '1168' }),
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({ 0: 'prestafacil', 1: '29108021', 4: 'RECHAZADO', 7: 'nota', 8: '1168' }),
     ],
   });
   const r6 = await ensureCdvSheetRows(
@@ -372,9 +406,12 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   assert.strictEqual(r6.base_updated, 0);
   assert.strictEqual(r6.skipped, 1);
   assert.strictEqual(sheets6.calls.batchUpdate.length, 0);
+  assert.strictEqual(sheets6.calls.update.length, 0);
   assert.strictEqual(sheets6.grid[1][0], 'prestafacil');
+  assert.strictEqual(sheets6.grid[1][4], 'RECHAZADO');
+  assert.strictEqual(sheets6.grid[1][7], 'nota');
 
-  // 7. idempotencia CZ_SOLICITUD_ID en H — nuevo insert usa A:J / H
+  // 7. idempotencia en I — insert explícito A{n}:K{n}, sin append
   const sheets7 = fakeSheets();
   const r7 = await ensureCdvSheetRows(
     {
@@ -396,11 +433,16 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
     },
   );
   assert.strictEqual(r7.inserted, 1);
-  assert.ok(sheets7.calls.append[0].range.indexOf('!A:J') !== -1);
-  const appended = sheets7.calls.append[0].requestBody.values[0];
-  assert.strictEqual(appended[0], 'prestafacil');
-  assert.strictEqual(appended[7], '1168');
-  assert.strictEqual(appended[3], '');
+  assert.strictEqual(sheets7.calls.append.length, 0);
+  assert.strictEqual(sheets7.calls.update.length, 1);
+  assert.strictEqual(sheets7.calls.update[0].range, "'CDV'!A2:K2");
+  const written = sheets7.calls.update[0].requestBody.values[0];
+  assert.strictEqual(written[0], 'prestafacil');
+  assert.strictEqual(written[2], '');
+  assert.strictEqual(written[3], '01/09/2026 18:33:40');
+  assert.strictEqual(written[8], '1168');
+  assert.strictEqual(written[4], '');
+  assert.strictEqual(written[7], '');
 
   // second pass: same id → skip, no duplicate
   const r7b = await ensureCdvSheetRows(
@@ -418,7 +460,8 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   );
   assert.strictEqual(r7b.inserted, 0);
   assert.strictEqual(r7b.skipped, 1);
-  assert.strictEqual(sheets7.calls.append.length, 1);
+  assert.strictEqual(sheets7.calls.update.length, 1);
+  assert.strictEqual(sheets7.calls.append.length, 0);
 
   // sin jt en insert → BASE vacío
   const sheetsEmptyBase = fakeSheets();
@@ -439,13 +482,76 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   );
   assert.strictEqual(rEmpty.inserted, 1);
   assert.strictEqual(
-    sheetsEmptyBase.calls.append[0].requestBody.values[0][0],
+    sheetsEmptyBase.calls.update[0].requestBody.values[0][0],
     '',
   );
+  assert.strictEqual(sheetsEmptyBase.calls.update[0].requestBody.values[0][2], '');
+  assert.strictEqual(sheetsEmptyBase.calls.append.length, 0);
+
+  // mismo CI, distintos CZ_SOLICITUD_ID → dos filas
+  const sheetsSameCi = fakeSheets();
+  const rSameCi = await ensureCdvSheetRows(
+    {
+      historicoRows: [
+        historicoRow({ cz_solicitud_id: 1171, cz_historico_id: 201 }),
+        historicoRow({
+          cz_solicitud_id: 1196,
+          cz_historico_id: 202,
+          fechahora_src: '2026-09-04T14:34:36.000Z',
+        }),
+      ],
+      solicitudes: [
+        { cz_id: 1171, ci: 32430417 },
+        { cz_id: 1196, ci: 32430417 },
+      ],
+    },
+    {
+      env: ENABLED_ENV,
+      createSheetsClient: sheetsSameCi.createSheetsClient,
+      resolveBasesForCandidates: async function () {
+        return new Map([
+          ['1171', ''],
+          ['1196', ''],
+        ]);
+      },
+    },
+  );
+  assert.strictEqual(rSameCi.inserted, 2);
+  assert.strictEqual(sheetsSameCi.calls.update.length, 2);
+  assert.strictEqual(sheetsSameCi.calls.update[0].range, "'CDV'!A2:K2");
+  assert.strictEqual(sheetsSameCi.calls.update[1].range, "'CDV'!A3:K3");
+  assert.strictEqual(sheetsSameCi.calls.update[0].requestBody.values[0][1], '32430417');
+  assert.strictEqual(sheetsSameCi.calls.update[1].requestBody.values[0][1], '32430417');
+  assert.strictEqual(sheetsSameCi.calls.update[0].requestBody.values[0][8], '1171');
+  assert.strictEqual(sheetsSameCi.calls.update[1].requestBody.values[0][8], '1196');
+  assert.strictEqual(sheetsSameCi.calls.append.length, 0);
+
+  // header I1 incorrecto → no escribe
+  const sheetsBadHeader = fakeSheets({
+    grid: [padRow({ 0: 'BASE', 7: 'OBSERVACIÓN', 8: 'NOT_THE_ID' })],
+  });
+  const rBadHeader = await ensureCdvSheetRows(
+    {
+      historicoRows: [historicoRow()],
+      solicitudes: [{ cz_id: 1168, ci: 29108021 }],
+    },
+    {
+      env: ENABLED_ENV,
+      createSheetsClient: sheetsBadHeader.createSheetsClient,
+      resolveBasesForCandidates: async function () {
+        return new Map([['1168', 'prestafacil']]);
+      },
+    },
+  );
+  assert.strictEqual(rBadHeader.status, 'header_mismatch');
+  assert.strictEqual(rBadHeader.inserted, 0);
+  assert.strictEqual(sheetsBadHeader.calls.update.length, 0);
+  assert.strictEqual(sheetsBadHeader.calls.batchUpdate.length, 0);
+  assert.strictEqual(sheetsBadHeader.calls.append.length, 0);
 
   // 8. Google falla → fail-open
   const sheets8 = fakeSheets({
-    appendError: new Error('Sheets API unavailable'),
+    updateError: new Error('Sheets API unavailable'),
   });
   let thrown = null;
   let r8 = null;
@@ -488,6 +594,8 @@ assert.ok(existingIdsFromColumnH([['CZ_SOLICITUD_ID'], ['1168']]).has('1168'));
   );
   assert.strictEqual(r9.inserted, 0);
   assert.strictEqual(sheets9.calls.get, 0);
+  assert.strictEqual(sheets9.calls.update.length, 0);
+  assert.strictEqual(sheets9.calls.append.length, 0);
 
   // collectEstado8 still works
   const collected = collectEstado8FromHistorico(
