@@ -85,7 +85,9 @@ function sortRejectionsDesc(rows) {
   return rows.slice().sort(function (a, b) {
     const t = cmpTsDescNullsLast(a.fechahora_src, b.fechahora_src);
     if (t !== 0) return t;
-    return Number(b.cz_historico_id) - Number(a.cz_historico_id);
+    const hb = Number(b && b.cz_historico_id);
+    const ha = Number(a && a.cz_historico_id);
+    return (Number.isFinite(hb) ? hb : 0) - (Number.isFinite(ha) ? ha : 0);
   });
 }
 
@@ -167,6 +169,47 @@ function rejectionsByCi(estadoRows, solById) {
     map.get(ci).push(e);
   }
   return map;
+}
+
+/**
+ * Synthetic rejection row when membership comes only from current solicitud estado 3.
+ * rejected_at uses fecha_reg (existing historico path keeps fechahora_src unchanged).
+ * @param {object} sol
+ * @returns {object}
+ */
+function syntheticRejectionFromCurrentEstado(sol) {
+  return {
+    cz_historico_id: null,
+    cz_solicitud_id: toNum(sol && sol.cz_id),
+    solicitudes_estados_id: REJECTED_ESTADO_ID,
+    estado: null,
+    fechahora_src: sol && sol.fecha_reg != null ? sol.fecha_reg : null,
+    _source: 'current_estado',
+  };
+}
+
+/**
+ * Universe membership: historico estado 3 OR current solicitud estado 3.
+ * One CI key. Prefer real historico rows when present (date semantics unchanged).
+ * @returns {Map<number, object[]>}
+ */
+function rejectedUniverseByCi(estadoRows, solicitudRows) {
+  const solById = solicitudesById(solicitudRows || []);
+  const byCi = rejectionsByCi(estadoRows || [], solById);
+  const fromHistorico = new Set(byCi.keys());
+  const sols = Array.isArray(solicitudRows) ? solicitudRows : [];
+  for (let i = 0; i < sols.length; i += 1) {
+    const sol = sols[i];
+    if (Number(sol && sol.solicitudes_estados_id) !== REJECTED_ESTADO_ID) {
+      continue;
+    }
+    const ci = toNum(sol && sol.ci);
+    if (ci == null || !Number.isSafeInteger(ci)) continue;
+    if (fromHistorico.has(ci)) continue;
+    if (!byCi.has(ci)) byCi.set(ci, []);
+    byCi.get(ci).push(syntheticRejectionFromCurrentEstado(sol));
+  }
+  return byCi;
 }
 
 function resolvePersonName(lastRejection, solById, solsForCi) {
@@ -347,7 +390,10 @@ function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
  */
 function assembleRejectedList(input) {
   const solById = solicitudesById(input.solicitudRows || []);
-  const byCi = rejectionsByCi(input.estadoRows || [], solById);
+  const byCi = rejectedUniverseByCi(
+    input.estadoRows || [],
+    input.solicitudRows || [],
+  );
   const encuestasByCi = mapByCi(input.encuestaRows || []);
   const snapshotsByCi = mapByCi(input.snapshotRows || []);
   const instMap = institutionsBySnapshotId(input.institutionRows || []);
@@ -377,12 +423,15 @@ function assembleRejectedList(input) {
 }
 
 /**
- * @returns {object|null} null when CI has no estado 3
+ * @returns {object|null} null when CI has no estado 3 (historico or current)
  */
 function assembleRejectedDetail(input) {
   const ci = input.ci;
   const solById = solicitudesById(input.solicitudRows || []);
-  const byCi = rejectionsByCi(input.estadoRows || [], solById);
+  const byCi = rejectedUniverseByCi(
+    input.estadoRows || [],
+    input.solicitudRows || [],
+  );
   const rejections = byCi.get(ci) || [];
   if (!rejections.length) return null;
 
@@ -523,28 +572,54 @@ async function fetchRejectedEstadoRows(supabase, solicitudIds) {
   });
 }
 
+const SOLICITUD_LIST_SELECT =
+  'cz_id, ci, nombre, apellido, fecha_reg, solicitudes_estados_id';
+
+async function fetchCurrentEstadoRejectedSolicitudes(supabase) {
+  return fetchAllPages(function (from, to) {
+    return supabase
+      .from('cz_funnel_solicitudes')
+      .select(SOLICITUD_LIST_SELECT)
+      .eq('solicitudes_estados_id', REJECTED_ESTADO_ID)
+      .range(from, to);
+  });
+}
+
 async function fetchRejectedListBundle(supabase) {
   const estadoRows = await fetchRejectedEstadoRows(supabase, null);
   const solicitudIds = estadoRows.map(function (e) {
     return e.cz_solicitud_id;
   });
-  const rejectedSolicitudes = await fetchInChunks(
+  const rejectedSolicitudesFromHist = await fetchInChunks(
     supabase,
     'cz_funnel_solicitudes',
-    'cz_id, ci, nombre, apellido, fecha_reg',
+    SOLICITUD_LIST_SELECT,
     'cz_id',
     solicitudIds,
   );
+  const rejectedSolicitudesFromCurrent =
+    await fetchCurrentEstadoRejectedSolicitudes(supabase);
+
+  const ciSeen = new Set();
   const cis = [];
-  for (let i = 0; i < rejectedSolicitudes.length; i += 1) {
-    const ci = toNum(rejectedSolicitudes[i].ci);
-    if (ci != null) cis.push(ci);
+  function addCi(raw) {
+    const ci = toNum(raw);
+    if (ci == null || !Number.isSafeInteger(ci) || ciSeen.has(ci)) return;
+    ciSeen.add(ci);
+    cis.push(ci);
   }
+  for (let i = 0; i < rejectedSolicitudesFromHist.length; i += 1) {
+    addCi(rejectedSolicitudesFromHist[i].ci);
+  }
+  for (let i = 0; i < rejectedSolicitudesFromCurrent.length; i += 1) {
+    addCi(rejectedSolicitudesFromCurrent[i].ci);
+  }
+
   const solicitudRows = cis.length
     ? await fetchInChunks(
         supabase,
         'cz_funnel_solicitudes',
-        'cz_id, ci, nombre, apellido, fecha_reg',
+        SOLICITUD_LIST_SELECT,
         'ci',
         cis,
       )
@@ -602,7 +677,7 @@ async function fetchRejectedDetailBundle(supabase, ci) {
   const solicitudRows = await fetchAllPages(function (from, to) {
     return supabase
       .from('cz_funnel_solicitudes')
-      .select('cz_id, ci, nombre, apellido, fecha_reg')
+      .select(SOLICITUD_LIST_SELECT)
       .eq('ci', ci)
       .range(from, to);
   });
@@ -657,22 +732,21 @@ async function fetchRejectedDetailBundle(supabase, ci) {
 }
 
 function hasRejectedHistorico(estadoRows, solicitudRows, ci) {
-  const byCi = rejectionsByCi(estadoRows || [], solicitudesById(solicitudRows || []));
-  return byCi.has(ci);
+  return rejectedUniverseByCi(estadoRows || [], solicitudRows || []).has(ci);
 }
 
 async function fetchCiHasRejectedHistorico(supabase, ci) {
   const solicitudRows = await fetchAllPages(function (from, to) {
     return supabase
       .from('cz_funnel_solicitudes')
-      .select('cz_id, ci')
+      .select('cz_id, ci, solicitudes_estados_id, fecha_reg')
       .eq('ci', ci)
       .range(from, to);
   });
+  if (!solicitudRows.length) return false;
   const solicitudIds = solicitudRows.map(function (s) {
     return s.cz_id;
   });
-  if (!solicitudIds.length) return false;
   const estadoRows = await fetchRejectedEstadoRows(supabase, solicitudIds);
   return hasRejectedHistorico(estadoRows, solicitudRows, ci);
 }
@@ -710,6 +784,7 @@ module.exports = {
   sortInstitutions,
   assembleRejectedList,
   assembleRejectedDetail,
+  rejectedUniverseByCi,
   fetchRejectedListBundle,
   fetchRejectedDetailBundle,
   hasRejectedHistorico,

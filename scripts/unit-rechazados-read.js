@@ -19,6 +19,8 @@ const {
   sortSnapshotsDesc,
   sortInstitutions,
   sortRejectionsDesc,
+  rejectedUniverseByCi,
+  hasRejectedHistorico,
 } = require('../src/lib/rejectedOpsRead');
 
 function inst(category, extras) {
@@ -458,5 +460,184 @@ assert.deepStrictEqual(
   }),
   [9, 1, 2],
 );
+
+// --- Universe: historico 3 OR current estado 3 ---
+const solCurrentOnly = {
+  cz_id: 1105,
+  ci: 27754105,
+  nombre: 'Solo',
+  apellido: 'Actual',
+  fecha_reg: '2026-07-27T13:17:43.000Z',
+  solicitudes_estados_id: 3,
+};
+const currentOnlyList = assembleRejectedList({
+  estadoRows: [],
+  solicitudRows: [solCurrentOnly],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.strictEqual(currentOnlyList.length, 1);
+assert.strictEqual(currentOnlyList[0].ci, 27754105);
+assert.strictEqual(currentOnlyList[0].rejected_at, '2026-07-27T13:17:43.000Z');
+assert.strictEqual(currentOnlyList[0].nombre, 'Solo');
+
+const solHistOtherEstado = {
+  cz_id: 50,
+  ci: 555,
+  nombre: 'Hist',
+  apellido: 'Only',
+  fecha_reg: '2026-01-01T00:00:00.000Z',
+  solicitudes_estados_id: 1,
+};
+const histOnlyList = assembleRejectedList({
+  estadoRows: [
+    {
+      cz_historico_id: 500,
+      cz_solicitud_id: 50,
+      solicitudes_estados_id: 3,
+      estado: 'Autorización negada',
+      fechahora_src: '2026-01-02T00:00:00.000Z',
+    },
+  ],
+  solicitudRows: [solHistOtherEstado],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.strictEqual(histOnlyList.length, 1);
+assert.strictEqual(histOnlyList[0].ci, 555);
+assert.strictEqual(histOnlyList[0].rejected_at, '2026-01-02T00:00:00.000Z');
+
+const bothSourcesList = assembleRejectedList({
+  estadoRows: [
+    {
+      cz_historico_id: 501,
+      cz_solicitud_id: 50,
+      solicitudes_estados_id: 3,
+      estado: 'Autorización negada',
+      fechahora_src: '2026-01-02T00:00:00.000Z',
+    },
+  ],
+  solicitudRows: [
+    Object.assign({}, solHistOtherEstado, { solicitudes_estados_id: 3 }),
+  ],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.strictEqual(bothSourcesList.length, 1);
+assert.strictEqual(bothSourcesList[0].ci, 555);
+assert.strictEqual(bothSourcesList[0].rejected_at, '2026-01-02T00:00:00.000Z');
+
+const multiSolSameCi = assembleRejectedList({
+  estadoRows: [
+    {
+      cz_historico_id: 1,
+      cz_solicitud_id: 10,
+      solicitudes_estados_id: 3,
+      fechahora_src: '2026-01-10T12:00:00.000Z',
+    },
+    {
+      cz_historico_id: 2,
+      cz_solicitud_id: 11,
+      solicitudes_estados_id: 3,
+      fechahora_src: '2026-07-01T12:00:00.000Z',
+    },
+  ],
+  solicitudRows: [
+    Object.assign({}, solA1, { solicitudes_estados_id: 3 }),
+    Object.assign({}, solA2, { solicitudes_estados_id: 3 }),
+  ],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.strictEqual(multiSolSameCi.length, 1);
+assert.strictEqual(multiSolSameCi[0].ci, 111);
+
+const invalidCiList = assembleRejectedList({
+  estadoRows: [],
+  solicitudRows: [
+    {
+      cz_id: 1,
+      ci: null,
+      solicitudes_estados_id: 3,
+      fecha_reg: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      cz_id: 2,
+      ci: 'nope',
+      solicitudes_estados_id: 3,
+      fecha_reg: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.strictEqual(invalidCiList.length, 0);
+
+const statusAfterUniverse = assembleRejectedList({
+  estadoRows: [],
+  solicitudRows: [solCurrentOnly],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+  status: OPS_STATUS.BCU_PENDING,
+});
+assert.strictEqual(statusAfterUniverse.length, 1);
+assert.strictEqual(statusAfterUniverse[0].ops_status, OPS_STATUS.BCU_PENDING);
+
+const statusNone = assembleRejectedList({
+  estadoRows: [],
+  solicitudRows: [solCurrentOnly],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+  status: OPS_STATUS.RETRY_ELIGIBLE,
+});
+assert.strictEqual(statusNone.length, 0);
+
+assert.strictEqual(
+  hasRejectedHistorico([], [solCurrentOnly], 27754105),
+  true,
+);
+assert.strictEqual(
+  hasRejectedHistorico([], [solCurrentOnly], 111),
+  false,
+);
+
+const uni = rejectedUniverseByCi(
+  [
+    {
+      cz_historico_id: 1,
+      cz_solicitud_id: 10,
+      solicitudes_estados_id: 3,
+      fechahora_src: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  [
+    Object.assign({}, solA1, { solicitudes_estados_id: 3 }),
+    solCurrentOnly,
+  ],
+);
+assert.strictEqual(uni.size, 2);
+assert.ok(uni.has(111));
+assert.ok(uni.has(27754105));
+assert.strictEqual(uni.get(111)[0].cz_historico_id, 1);
+assert.strictEqual(uni.get(27754105)[0]._source, 'current_estado');
+
+const detailCurrent = assembleRejectedDetail({
+  ci: 27754105,
+  estadoRows: [],
+  solicitudRows: [solCurrentOnly],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+});
+assert.ok(detailCurrent);
+assert.strictEqual(detailCurrent.ci, 27754105);
+assert.strictEqual(detailCurrent.rejected_at, '2026-07-27T13:17:43.000Z');
 
 console.log('OK unit-rechazados-read');

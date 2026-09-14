@@ -440,8 +440,13 @@ async function upsertEncuestas(items) {
 
 /**
  * Sync one funnel source. On failure: do not advance cursor; record error.
+ *
+ * fullRefresh=true: always read from INITIAL_SINCE (ignore stored last_since).
+ * Used for /solicitudes so historico/estado updates on older rows are re-upserted.
+ * Cursor last_since may still be written for observability on complete runs;
+ * the next fullRefresh run does not use it as a read floor.
  */
-async function syncSource({ sourceName, apiPath, upsertPage }) {
+async function syncSource({ sourceName, apiPath, upsertPage, fullRefresh }) {
   const result = {
     status: 'success',
     pagesFetched: 0,
@@ -451,12 +456,14 @@ async function syncSource({ sourceName, apiPath, upsertPage }) {
     nextSince: null,
     error: null,
     hitPageLimit: false,
+    fullRefresh: Boolean(fullRefresh),
   };
 
   try {
     const cursor = await readCursor(sourceName);
-    const initialSince =
-      cursor && cursor.last_since
+    const initialSince = fullRefresh
+      ? INITIAL_SINCE
+      : cursor && cursor.last_since
         ? String(cursor.last_since)
         : INITIAL_SINCE;
     result.initialSince = initialSince;
@@ -470,7 +477,8 @@ async function syncSource({ sourceName, apiPath, upsertPage }) {
     result.itemsUpserted = upserted;
 
     if (pageBundle.incomplete) {
-      // Partial run: do not advance cursor (will resume from same since).
+      // Partial run: do not advance cursor / do not claim a complete sync.
+      // fullRefresh will re-read from INITIAL_SINCE on the next run.
       result.status = 'success';
       result.nextSince = initialSince;
       result.error =
@@ -545,6 +553,9 @@ async function runCzFunnelSync() {
       sourceName: SOURCE_SOLICITUDES,
       apiPath: '/solicitudes',
       upsertPage: upsertSolicitudes,
+      // Volume is one API page today: full refresh so estado/historico
+      // changes on older solicitudes are never skipped by last_since.
+      fullRefresh: true,
     });
 
     // Post-sync reconcile: once per job, even when solicitudes itemsFetched=0.
@@ -630,6 +641,7 @@ module.exports = {
   upsertSolicitudes,
   upsertGrantedLoans,
   upsertSolicitudEstados,
+  syncSource,
   setCdvSheetSyncForTests,
   runCdvSheetSyncFailOpen,
 };
