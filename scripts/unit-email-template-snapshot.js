@@ -251,7 +251,7 @@ async function main() {
   assert.notStrictEqual(state.recipient.error_reason, ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE);
 
   seed({
-    recipient: { provider_send_started_at: '2026-09-13T12:00:00.000Z' },
+    recipient: { provider_send_started_at: new Date().toISOString() },
   });
   process.env.EMAIL_CAMPAIGNS_FROM = 'Janus <legacy@credizona.com.uy>';
   state.campaign.subject = 'Still legacy';
@@ -268,7 +268,7 @@ async function main() {
       payload_from: null,
       payload_subject: null,
       payload_html: null,
-      provider_send_started_at: '2026-09-13T12:00:00.000Z',
+      provider_send_started_at: new Date().toISOString(),
     },
   });
   await runQueue();

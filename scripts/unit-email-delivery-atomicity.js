@@ -740,8 +740,11 @@ async function main() {
     const { ensureProviderSendStartedAt, buildProviderIdempotencyKey } =
       loadProcessor();
     const [w1, w2] = await Promise.all([
-      ensureProviderSendStartedAt(101, '2026-09-13T15:00:00.000Z'),
-      ensureProviderSendStartedAt(101, '2026-09-13T15:00:01.000Z'),
+      ensureProviderSendStartedAt(101, new Date().toISOString()),
+      ensureProviderSendStartedAt(
+        101,
+        new Date(Date.now() + 1000).toISOString(),
+      ),
     ]);
     assert.strictEqual(
       w1.provider_send_started_at,

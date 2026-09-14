@@ -17,6 +17,12 @@ const {
   requireCampaignsFrom,
   buildRecipientPayloadSnapshot,
 } = require('./payloadSnapshot');
+const {
+  getUnsubscribeSecret,
+  resolveEmailPublicBaseUrl,
+  campaignContentNeedsUnsubscribeUrl,
+  buildUnsubscribeUrl,
+} = require('./unsubscribeToken');
 
 const PAGE_SIZE = 1000;
 const INSERT_BATCH_SIZE = 500;
@@ -446,6 +452,26 @@ async function materializeCampaign(campaignIdRaw) {
 
   const matched = filterBySegment(segment.rules, eligible);
 
+  // Detect once on campaign-owned copy (not per recipient). Token still per email.
+  const needsUnsubscribeUrl = campaignContentNeedsUnsubscribeUrl(
+    campaign.subject,
+    campaign.body_html,
+  );
+  let unsubscribePublicBase = null;
+  if (needsUnsubscribeUrl) {
+    unsubscribePublicBase = resolveEmailPublicBaseUrl();
+    if (!unsubscribePublicBase) {
+      throw new Error(
+        'materializeCampaign: EMAIL_PUBLIC_BASE_URL is not configured (required for {{unsubscribe_url}})',
+      );
+    }
+    if (!getUnsubscribeSecret()) {
+      throw new Error(
+        'materializeCampaign: EMAIL_UNSUBSCRIBE_HMAC_SECRET is not configured (required for {{unsubscribe_url}})',
+      );
+    }
+  }
+
   const seenEmails = new Set();
   const recipientRows = [];
   for (const record of matched) {
@@ -455,14 +481,29 @@ async function materializeCampaign(campaignIdRaw) {
       continue;
     }
     seenEmails.add(emailNorm);
+    const templateVars = {};
+    if (needsUnsubscribeUrl) {
+      templateVars.unsubscribe_url = buildUnsubscribeUrl(
+        unsubscribePublicBase,
+        emailNorm,
+      );
+    }
     const snap = buildRecipientPayloadSnapshot({
       to: emailNorm,
       from: fromAddr,
       subject: campaign.subject,
       bodyHtml: campaign.body_html,
-      templateVars: {},
+      templateVars: templateVars,
       purpose: null,
     });
+    if (
+      needsUnsubscribeUrl &&
+      String(snap.payload_html || '').indexOf('{{unsubscribe_url}}') !== -1
+    ) {
+      throw new Error(
+        'materializeCampaign: unsubscribe_url unresolved in payload_html',
+      );
+    }
     recipientRows.push({
       campaign_id: campaignId,
       idempotency_key: randomUUID(),

@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const env = require('../../config/env');
 
 const TOKEN_TYP = 'email_unsub';
+const UNSUBSCRIBE_PLACEHOLDER = '{{unsubscribe_url}}';
 
 /**
  * @returns {string|null}
@@ -23,6 +24,35 @@ function getUnsubscribeSecret() {
   if (raw == null) return null;
   const trimmed = String(raw).trim();
   return trimmed || null;
+}
+
+/**
+ * Public base for unsubscribe links (HTTPS production host).
+ * Same resolution contract as Stage 2A / survey-invite callers.
+ * @returns {string|null}
+ */
+function resolveEmailPublicBaseUrl() {
+  const fromEnvModule =
+    env && env.emailPublicBaseUrl != null
+      ? String(env.emailPublicBaseUrl).trim()
+      : '';
+  if (fromEnvModule) return fromEnvModule.replace(/\/+$/, '');
+  const raw = process.env.EMAIL_PUBLIC_BASE_URL;
+  if (raw == null) return null;
+  const t = String(raw).trim().replace(/\/+$/, '');
+  return t || null;
+}
+
+/**
+ * True when campaign-owned subject/body reference {{unsubscribe_url}}.
+ * Call once per campaign before the recipient loop (not per recipient).
+ * @param {unknown} subject
+ * @param {unknown} bodyHtml
+ * @returns {boolean}
+ */
+function campaignContentNeedsUnsubscribeUrl(subject, bodyHtml) {
+  const hay = String(subject || '') + '\n' + String(bodyHtml || '');
+  return hay.indexOf(UNSUBSCRIBE_PLACEHOLDER) !== -1;
 }
 
 /**
@@ -141,7 +171,10 @@ function buildUnsubscribeUrl(publicBaseUrl, email) {
 
 module.exports = {
   TOKEN_TYP,
+  UNSUBSCRIBE_PLACEHOLDER,
   getUnsubscribeSecret,
+  resolveEmailPublicBaseUrl,
+  campaignContentNeedsUnsubscribeUrl,
   normalizeEmail,
   signUnsubscribeToken,
   verifyUnsubscribeToken,
