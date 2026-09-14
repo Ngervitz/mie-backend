@@ -11455,6 +11455,15 @@ init();
   const subjectInput = document.getElementById('email-form-subject');
   const bodyInput = document.getElementById('email-form-body');
   const scoreInput = document.getElementById('email-form-score');
+  const templateSelect = document.getElementById('email-form-template');
+  const manualFields = document.getElementById('email-form-manual');
+  const templateList = document.getElementById('email-template-list');
+  const templateNameInput = document.getElementById('email-template-name');
+  const templateSubjectInput = document.getElementById('email-template-subject');
+  const templateBodyInput = document.getElementById('email-template-body');
+  const templateIdInput = document.getElementById('email-template-id');
+  const templateSaveBtn = document.getElementById('email-template-save');
+  const templateCancelBtn = document.getElementById('email-template-cancel');
 
   let listenersAttached = false;
 
@@ -11482,7 +11491,87 @@ init();
     return Array.isArray(data.campaigns) ? data.campaigns : [];
   }
 
-  async function createCampaign({ name, subject, bodyHtml, minScore }) {
+  async function fetchTemplates() {
+    const response = await fetch('/email/templates');
+    const data = await readJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data, 'No se pudieron cargar los templates.'));
+    }
+    return Array.isArray(data.templates) ? data.templates : [];
+  }
+
+  function resetTemplateForm() {
+    if (templateIdInput) templateIdInput.value = '';
+    if (templateNameInput) templateNameInput.value = '';
+    if (templateSubjectInput) templateSubjectInput.value = '';
+    if (templateBodyInput) templateBodyInput.value = '';
+  }
+
+  function syncManualFields() {
+    const usingTemplate = templateSelect && templateSelect.value !== '';
+    if (manualFields) manualFields.classList.toggle('hidden', usingTemplate);
+  }
+
+  async function renderTemplates() {
+    const templates = await fetchTemplates();
+    if (templateSelect) {
+      const current = templateSelect.value;
+      templateSelect.innerHTML = '<option value="">Manual (asunto y cuerpo)</option>';
+      templates.filter(function (t) { return t.active === true; }).forEach(function (t) {
+        const opt = document.createElement('option');
+        opt.value = String(t.id);
+        opt.textContent = t.name;
+        templateSelect.appendChild(opt);
+      });
+      if (current) templateSelect.value = current;
+      syncManualFields();
+    }
+    if (!templateList) return;
+    if (!templates.length) {
+      templateList.innerHTML = '<div class="sms-empty">No hay templates todavía.</div>';
+      return;
+    }
+    templateList.innerHTML = templates.map(function (t) {
+      return (
+        '<div class="sms-row" style="display:flex;gap:8px;align-items:center;margin:6px 0;">' +
+          '<span>' + escapeHtml(t.name) + (t.active === true ? '' : ' (inactivo)') + '</span>' +
+          '<button type="button" class="btn email-template-edit" data-id="' + escapeHtml(t.id) + '">Editar</button>' +
+          '<button type="button" class="btn email-template-toggle" data-id="' + escapeHtml(t.id) + '" data-active="' + (t.active === true ? '1' : '0') + '">' +
+            (t.active === true ? 'Desactivar' : 'Activar') +
+          '</button>' +
+        '</div>'
+      );
+    }).join('');
+    templateList.querySelectorAll('.email-template-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const found = templates.find(function (t) { return String(t.id) === btn.getAttribute('data-id'); });
+        if (!found) return;
+        if (templateIdInput) templateIdInput.value = String(found.id);
+        if (templateNameInput) templateNameInput.value = found.name || '';
+        if (templateSubjectInput) templateSubjectInput.value = found.subject || '';
+        if (templateBodyInput) templateBodyInput.value = found.body_html || '';
+      });
+    });
+    templateList.querySelectorAll('.email-template-toggle').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const id = btn.getAttribute('data-id');
+        const nextActive = btn.getAttribute('data-active') !== '1';
+        const response = await fetch('/email/templates/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ active: nextActive }),
+        });
+        const data = await readJsonSafe(response);
+        if (!response.ok) {
+          alert(getErrorMessage(data, 'No se pudo actualizar el template.'));
+          return;
+        }
+        await renderTemplates();
+      });
+    });
+  }
+
+  async function createCampaign({ name, subject, bodyHtml, minScore, templateId }) {
     const segmentResponse = await fetch('/email/segments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -11499,16 +11588,21 @@ init();
       throw new Error('El servidor creó el segmento pero no devolvió un ID válido.');
     }
 
+    const payload = {
+      name: name,
+      segment_id: segmentData.segment.id,
+      scheduled_at: new Date().toISOString(),
+    };
+    if (templateId) payload.template_id = templateId;
+    else {
+      payload.subject = subject;
+      payload.body_html = bodyHtml;
+    }
+
     const campaignResponse = await fetch('/email/campaigns', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        subject,
-        body_html: bodyHtml,
-        segment_id: segmentData.segment.id,
-        scheduled_at: new Date().toISOString(),
-      }),
+      body: JSON.stringify(payload),
     });
     const campaignData = await readJsonSafe(campaignResponse);
     if (!campaignResponse.ok) {
@@ -11628,13 +11722,18 @@ init();
     if (formSubmit) {
       formSubmit.addEventListener('click', async function () {
         const name = nameInput ? nameInput.value.trim() : '';
+        const templateId = templateSelect ? templateSelect.value : '';
         const subject = subjectInput ? subjectInput.value.trim() : '';
         const bodyHtml = bodyInput ? bodyInput.value.trim() : '';
         const rawMinScore = scoreInput ? scoreInput.value.trim() : '';
         const minScore = Number(rawMinScore);
 
-        if (!name || !subject || !bodyHtml) {
-          alert('Completá nombre, asunto y cuerpo.');
+        if (!name) {
+          alert('Completá el nombre.');
+          return;
+        }
+        if (!templateId && (!subject || !bodyHtml)) {
+          alert('Completá asunto y cuerpo, o elegí un template.');
           return;
         }
         if (rawMinScore === '' || !Number.isFinite(minScore) || minScore < 0) {
@@ -11646,7 +11745,7 @@ init();
         const origText = formSubmit.textContent;
         formSubmit.textContent = 'Creando...';
         try {
-          await createCampaign({ name, subject, bodyHtml, minScore });
+          await createCampaign({ name, subject, bodyHtml, minScore, templateId });
           if (form) form.classList.add('hidden');
           resetForm();
           await renderList();
@@ -11688,10 +11787,50 @@ init();
         }
       });
     }
+    if (templateSelect) {
+      templateSelect.addEventListener('change', syncManualFields);
+    }
+    if (templateCancelBtn) {
+      templateCancelBtn.addEventListener('click', resetTemplateForm);
+    }
+    if (templateSaveBtn) {
+      templateSaveBtn.addEventListener('click', async function () {
+        const id = templateIdInput ? templateIdInput.value.trim() : '';
+        const payload = {
+          name: templateNameInput ? templateNameInput.value.trim() : '',
+          subject: templateSubjectInput ? templateSubjectInput.value.trim() : '',
+          body_html: templateBodyInput ? templateBodyInput.value.trim() : '',
+        };
+        if (!payload.name || !payload.subject || !payload.body_html) {
+          alert('Completá nombre, asunto y cuerpo del template.');
+          return;
+        }
+        const url = id
+          ? '/email/templates/' + encodeURIComponent(id)
+          : '/email/templates';
+        const response = await fetch(url, {
+          method: id ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await readJsonSafe(response);
+        if (!response.ok) {
+          alert(getErrorMessage(data, 'No se pudo guardar el template.'));
+          return;
+        }
+        resetTemplateForm();
+        await renderTemplates();
+      });
+    }
     listenersAttached = true;
   }
 
   window.__openEmail = function () {
+    renderTemplates().catch(function (error) {
+      if (templateList) {
+        templateList.innerHTML = '<div class="sms-empty">Error cargando templates: ' + escapeHtml(error.message) + '</div>';
+      }
+    });
     renderList();
   };
 })();

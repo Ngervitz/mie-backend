@@ -22,6 +22,7 @@ const adminUsersRouter = require('./routes/admin-users');
 const logger = require('./lib/logger');
 const smsShortLinksRouter = require('./routes/sms-short-links');
 const trackingEventsRouter = require('./routes/tracking-events');
+const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 
 const app = express();
 
@@ -39,6 +40,8 @@ app.use(
 app.use(express.json());
 // Public SMS short-link redirects — must run before requireAuth.
 app.use(smsShortLinksRouter);
+// Public email unsubscribe (GET confirm / POST suppress) — before requireAuth.
+app.use(emailUnsubscribeRouter);
 // login / logout / bootstrap (allowlisted inside requireAuth)
 app.use('/', authRouter);
 app.use(requireAuth);

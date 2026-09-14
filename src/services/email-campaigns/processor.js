@@ -9,15 +9,170 @@ const supabase = require('../../clients/supabase');
 const logger = require('../../lib/logger');
 const { getEmailProvider } = require('../email-provider');
 const { validateRule, filterBySegment } = require('./rule-engine');
+const { renderOutboundEmail } = require('./renderTemplate');
+const {
+  ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE,
+  classifyRecipientPayload,
+  isSnapshotPayloadComplete,
+  requireCampaignsFrom,
+  buildRecipientPayloadSnapshot,
+} = require('./payloadSnapshot');
 
 const PAGE_SIZE = 1000;
 const INSERT_BATCH_SIZE = 500;
 const QUEUE_LIMIT = 50;
 const PROCESS_QUEUE_JOB_NAME = 'email_campaigns_process_queue';
 const PROCESS_QUEUE_LOCK_TTL_SECONDS = 15 * 60;
+const ERROR_SUPPRESSED = 'email_suppressed';
+const ERROR_PROVIDER_INVALID_IDEMPOTENT = 'provider_invalid_idempotent_request';
+const ERROR_PROVIDER_TTL_EXPIRED =
+  'provider_delivery_unknown_after_idempotency_ttl';
+const PROVIDER_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 const MATERIALIZE_ALLOWED_STATUSES = new Set(['draft', 'scheduled']);
 const SEND_ALLOWED_STATUSES = new Set(['draft', 'scheduled', 'sending']);
+
+/**
+ * Stable Resend/provider identity for a recipient row.
+ * Independent of attempt_count — same recipient always same key.
+ * @param {string|number} recipientId
+ * @returns {string}
+ */
+function buildProviderIdempotencyKey(recipientId) {
+  return `janus-email-recipient:${recipientId}`;
+}
+
+/**
+ * @param {unknown} err
+ * @returns {string}
+ */
+function providerErrorName(err) {
+  if (!err || typeof err !== 'object') return '';
+  if (err.name) return String(err.name);
+  if (err.code) return String(err.code);
+  return '';
+}
+
+/**
+ * Classify provider failures conservatively.
+ * invalid_idempotent_request → terminal; concurrent → retryable; else existing retry model.
+ * @param {unknown} err
+ * @returns {{ kind: 'terminal'|'retryable', errorReason: string }}
+ */
+function classifyProviderSendError(err) {
+  const name = providerErrorName(err);
+  const msg =
+    err && err.message != null ? String(err.message) : 'send failed';
+  if (
+    name === 'invalid_idempotent_request' ||
+    /invalid_idempotent_request/i.test(msg)
+  ) {
+    return {
+      kind: 'terminal',
+      errorReason: ERROR_PROVIDER_INVALID_IDEMPOTENT,
+    };
+  }
+  if (
+    name === 'concurrent_idempotent_requests' ||
+    /concurrent_idempotent_requests/i.test(msg)
+  ) {
+    return {
+      kind: 'retryable',
+      errorReason: 'concurrent_idempotent_requests',
+    };
+  }
+  return { kind: 'retryable', errorReason: msg };
+}
+
+/**
+ * Atomic init of provider_send_started_at when NULL; otherwise re-read existing.
+ * Uses conditional UPDATE … WHERE provider_send_started_at IS NULL (not SELECT-then-UPDATE).
+ * @param {string|number} recipientId
+ * @param {string} nowIso
+ * @returns {Promise<{ provider_send_started_at: string, initialized: boolean }>}
+ */
+async function ensureProviderSendStartedAt(recipientId, nowIso) {
+  const { data: claimed, error: claimErr } = await supabase
+    .from('email_campaign_recipients')
+    .update({ provider_send_started_at: nowIso })
+    .eq('id', recipientId)
+    .is('provider_send_started_at', null)
+    .select('provider_send_started_at')
+    .maybeSingle();
+
+  if (claimErr) {
+    throw new Error(
+      'processQueue: provider_send_started_at claim failed: ' +
+        claimErr.message,
+    );
+  }
+
+  if (claimed && claimed.provider_send_started_at) {
+    return {
+      provider_send_started_at: String(claimed.provider_send_started_at),
+      initialized: true,
+    };
+  }
+
+  const { data: existing, error: readErr } = await supabase
+    .from('email_campaign_recipients')
+    .select('provider_send_started_at')
+    .eq('id', recipientId)
+    .maybeSingle();
+
+  if (readErr) {
+    throw new Error(
+      'processQueue: provider_send_started_at re-read failed: ' +
+        readErr.message,
+    );
+  }
+
+  if (!existing || !existing.provider_send_started_at) {
+    throw new Error(
+      'processQueue: provider_send_started_at missing after claim race',
+    );
+  }
+
+  return {
+    provider_send_started_at: String(existing.provider_send_started_at),
+    initialized: false,
+  };
+}
+
+/**
+ * Fresh single-email suppression check (do not rely only on batch preload).
+ * @param {string} emailNorm
+ * @returns {Promise<boolean>}
+ */
+async function isEmailCurrentlySuppressed(emailNorm) {
+  if (!emailNorm) return false;
+  const { data, error } = await supabase
+    .from('email_suppressions')
+    .select('email')
+    .eq('email', emailNorm)
+    .limit(1);
+  if (error) {
+    throw new Error(
+      'processQueue: fresh suppression check failed: ' + error.message,
+    );
+  }
+  return !!(data && data.length > 0);
+}
+
+/**
+ * True when the idempotency window is expired OR cannot be proven still valid.
+ * Invalid/unparseable started_at (or now) → UNKNOWN → treat as expired (do not send).
+ * @param {string} startedAtIso
+ * @param {string} nowIso
+ * @returns {boolean}
+ */
+function isProviderIdempotencyTtlExpired(startedAtIso, nowIso) {
+  const startedMs = Date.parse(startedAtIso);
+  const nowMs = Date.parse(nowIso);
+  // INVALID_TIMESTAMP → UNKNOWN ≠ NOT_SENT — same terminal path as post-TTL unknown.
+  if (!Number.isFinite(startedMs) || !Number.isFinite(nowMs)) return true;
+  return nowMs >= startedMs + PROVIDER_IDEMPOTENCY_TTL_MS;
+}
 
 /**
  * @param {unknown} campaignId
@@ -200,6 +355,9 @@ async function materializeCampaign(campaignIdRaw) {
     throw new Error(`materializeCampaign: campaign not found: ${campaignId}`);
   }
 
+  // Fail before any recipient insert if From cannot be frozen.
+  const fromAddr = requireCampaignsFrom();
+
   if (!MATERIALIZE_ALLOWED_STATUSES.has(campaign.status)) {
     throw new Error(
       `materializeCampaign: campaign status must be draft or scheduled (got ${campaign.status})`,
@@ -297,12 +455,27 @@ async function materializeCampaign(campaignIdRaw) {
       continue;
     }
     seenEmails.add(emailNorm);
+    const snap = buildRecipientPayloadSnapshot({
+      to: emailNorm,
+      from: fromAddr,
+      subject: campaign.subject,
+      bodyHtml: campaign.body_html,
+      templateVars: {},
+      purpose: null,
+    });
     recipientRows.push({
       campaign_id: campaignId,
       idempotency_key: randomUUID(),
       ci: record.ci != null ? String(record.ci) : null,
-      email: emailNorm,
+      email: snap.email,
       status: 'queued',
+      template_vars: snap.template_vars,
+      payload_to: snap.payload_to,
+      payload_from: snap.payload_from,
+      payload_subject: snap.payload_subject,
+      payload_html: snap.payload_html,
+      template_subject_snapshot: snap.template_subject_snapshot,
+      template_body_html_snapshot: snap.template_body_html_snapshot,
     });
   }
 
@@ -400,6 +573,20 @@ function buildFailurePatch(previousAttemptCount, nowIso, errorReason) {
     patch.next_attempt_at = null;
   }
   return { patch, newAttemptCount, deferred: patch.status === 'queued' };
+}
+
+/**
+ * Terminal non-send (suppressed / bad template). Does not retry.
+ * @param {string} nowIso
+ * @param {string} errorReason
+ */
+function buildTerminalFailPatch(nowIso, errorReason) {
+  return {
+    status: 'failed',
+    error_reason: errorReason ? String(errorReason).slice(0, 2000) : null,
+    last_attempt_at: nowIso,
+    next_attempt_at: null,
+  };
 }
 
 /**
@@ -501,11 +688,8 @@ async function processQueue() {
   };
 
   try {
+    // Snapshot sends use payload_from. Env From is required only for legacy recipients.
     const fromAddr = (process.env.EMAIL_CAMPAIGNS_FROM || '').trim();
-    if (!fromAddr) {
-      logger.error('processQueue: EMAIL_CAMPAIGNS_FROM is not configured');
-      throw new Error('EMAIL_CAMPAIGNS_FROM is not configured');
-    }
 
     const nowIso = new Date().toISOString();
     const { data: recipients, error: queueErr } = await supabase
@@ -602,22 +786,171 @@ async function processQueue() {
       affected.add(campaignId);
       const attemptAt = new Date().toISOString();
       const previousAttemptCount = Number(recipient.attempt_count) || 0;
+      const providerKey = buildProviderIdempotencyKey(recipient.id);
+      const payloadClass = classifyRecipientPayload(recipient);
+
+      let sendTo;
+      let sendFrom;
+      let sendSubject;
+      let sendHtml;
+
+      if (payloadClass === 'snapshot') {
+        if (!isSnapshotPayloadComplete(recipient)) {
+          const { error: incErr } = await supabase
+            .from('email_campaign_recipients')
+            .update(
+              buildTerminalFailPatch(
+                attemptAt,
+                ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE,
+              ),
+            )
+            .eq('id', recipient.id);
+          if (incErr) {
+            throw new Error(
+              'processQueue: failed to persist incomplete snapshot: ' +
+                incErr.message,
+            );
+          }
+          summary.failed += 1;
+          continue;
+        }
+        sendTo = String(recipient.payload_to).trim();
+        sendFrom = String(recipient.payload_from).trim();
+        sendSubject = String(recipient.payload_subject).trim();
+        sendHtml = String(recipient.payload_html).trim();
+      } else {
+        if (!fromAddr) {
+          logger.error('processQueue: EMAIL_CAMPAIGNS_FROM is not configured');
+          throw new Error('EMAIL_CAMPAIGNS_FROM is not configured');
+        }
+        const rendered = renderOutboundEmail({
+          purpose: recipient.purpose != null ? recipient.purpose : null,
+          subject: campaign.subject,
+          bodyHtml: campaign.body_html,
+          templateVars:
+            recipient.template_vars != null ? recipient.template_vars : {},
+        });
+
+        if (!rendered.ok) {
+          const { error: tmplUpdErr } = await supabase
+            .from('email_campaign_recipients')
+            .update(buildTerminalFailPatch(attemptAt, rendered.errorReason))
+            .eq('id', recipient.id);
+          if (tmplUpdErr) {
+            logger.error('processQueue: failed to persist template failure', {
+              recipientId: recipient.id,
+              campaignId,
+              error: tmplUpdErr.message,
+            });
+            throw new Error(
+              'processQueue: failed to persist template failure: ' +
+                tmplUpdErr.message,
+            );
+          }
+          summary.failed += 1;
+          continue;
+        }
+        sendTo = recipient.email;
+        sendFrom = fromAddr;
+        sendSubject = rendered.subject;
+        sendHtml = rendered.html;
+      }
+
+      const emailNorm = normalizeEmail(sendTo);
+
+      // Fresh suppression after content resolve, before started_at / provider.
+      if (await isEmailCurrentlySuppressed(emailNorm)) {
+        const { error: supUpdErr } = await supabase
+          .from('email_campaign_recipients')
+          .update(buildTerminalFailPatch(attemptAt, ERROR_SUPPRESSED))
+          .eq('id', recipient.id);
+        if (supUpdErr) {
+          logger.error('processQueue: failed to persist suppressed status', {
+            recipientId: recipient.id,
+            campaignId,
+            error: supUpdErr.message,
+          });
+          throw new Error(
+            'processQueue: failed to persist suppressed status: ' +
+              supUpdErr.message,
+          );
+        }
+        summary.failed += 1;
+        continue;
+      }
+
+      const started = await ensureProviderSendStartedAt(
+        recipient.id,
+        attemptAt,
+      );
+      recipient.provider_send_started_at = started.provider_send_started_at;
+
+      if (
+        isProviderIdempotencyTtlExpired(
+          started.provider_send_started_at,
+          attemptAt,
+        )
+      ) {
+        const { error: ttlUpdErr } = await supabase
+          .from('email_campaign_recipients')
+          .update(
+            buildTerminalFailPatch(attemptAt, ERROR_PROVIDER_TTL_EXPIRED),
+          )
+          .eq('id', recipient.id);
+        if (ttlUpdErr) {
+          logger.error('processQueue: failed to persist TTL expiry', {
+            recipientId: recipient.id,
+            campaignId,
+            error: ttlUpdErr.message,
+          });
+          throw new Error(
+            'processQueue: failed to persist TTL expiry: ' + ttlUpdErr.message,
+          );
+        }
+        summary.failed += 1;
+        continue;
+      }
 
       let sendResult;
       try {
         sendResult = await provider.send({
-          to: recipient.email,
-          subject: campaign.subject,
-          html: campaign.body_html,
-          from: fromAddr,
+          to: sendTo,
+          subject: sendSubject,
+          html: sendHtml,
+          from: sendFrom,
+          idempotencyKey: providerKey,
         });
       } catch (sendErr) {
-        const reason =
-          sendErr && sendErr.message ? sendErr.message : 'send failed';
+        const classified = classifyProviderSendError(sendErr);
+        if (classified.kind === 'terminal') {
+          const { error: termErr } = await supabase
+            .from('email_campaign_recipients')
+            .update(
+              buildTerminalFailPatch(attemptAt, classified.errorReason),
+            )
+            .eq('id', recipient.id);
+          if (termErr) {
+            logger.error(
+              'processQueue: failed to persist terminal provider failure',
+              {
+                recipientId: recipient.id,
+                campaignId,
+                error: termErr.message,
+              },
+            );
+            throw new Error(
+              'processQueue: failed to persist terminal provider failure: ' +
+                termErr.message,
+            );
+          }
+          summary.failed += 1;
+          continue;
+        }
+
         const { patch, deferred } = buildFailurePatch(
           previousAttemptCount,
           attemptAt,
-          reason,
+          classified.errorReason,
         );
         const { error: failUpdErr } = await supabase
           .from('email_campaign_recipients')
@@ -662,11 +995,12 @@ async function processQueue() {
             recipientId: recipient.id,
             campaignId,
             providerMessageId: sendResult.providerMessageId,
+            providerIdempotencyKey: providerKey,
             idempotencyKey: recipient.idempotency_key,
             error: successUpdErr.message,
           },
         );
-        // Do not retry send in this run.
+        // Do not retry send in this run; next processQueue reuses same provider key.
         summary.skipped += 1;
         continue;
       }
@@ -691,5 +1025,18 @@ module.exports = {
   processQueue,
   normalizeEncuestaRecord,
   normalizeCampaignId,
+  normalizeEmail,
+  buildFailurePatch,
+  buildTerminalFailPatch,
+  buildProviderIdempotencyKey,
+  classifyProviderSendError,
+  ensureProviderSendStartedAt,
+  isEmailCurrentlySuppressed,
+  isProviderIdempotencyTtlExpired,
+  ERROR_SUPPRESSED,
+  ERROR_PROVIDER_INVALID_IDEMPOTENT,
+  ERROR_PROVIDER_TTL_EXPIRED,
+  ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE,
+  PROVIDER_IDEMPOTENCY_TTL_MS,
   PROCESS_QUEUE_JOB_NAME,
 };

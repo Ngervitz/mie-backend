@@ -52,6 +52,14 @@ module.exports = {
   cronSecret: process.env.CRON_SECRET || null,
   // Optional at boot. Required for POST /tracking/events HMAC from Credizona.
   czTrackingHmacSecret: optionalTrimmedEnv('CZ_TRACKING_HMAC_SECRET'),
+  // Optional at boot. Required to sign/verify email unsubscribe tokens.
+  // No fallback to SESSION_SECRET.
+  emailUnsubscribeHmacSecret: optionalTrimmedEnv(
+    'EMAIL_UNSUBSCRIBE_HMAC_SECRET',
+  ),
+  // Optional at boot. Public Janus origin for email unsubscribe links (no trailing slash).
+  // Do NOT reuse SMS_SHORT_LINK_BASE_URL.
+  emailPublicBaseUrl: optionalTrimmedEnv('EMAIL_PUBLIC_BASE_URL'),
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
   // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.

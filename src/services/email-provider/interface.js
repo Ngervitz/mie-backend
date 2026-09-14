@@ -5,8 +5,15 @@
  * @property {string} providerId
  * @property {string} providerMessageId
  *
+ * @typedef {object} EmailSendArgs
+ * @property {string} to
+ * @property {string} subject
+ * @property {string} html
+ * @property {string} from
+ * @property {string} [idempotencyKey] optional stable provider identity for safe retries
+ *
  * @typedef {object} EmailProvider
- * @property {(args: { to: string, subject: string, html: string, from: string }) => Promise<EmailSendResult>} send
+ * @property {(args: EmailSendArgs) => Promise<EmailSendResult>} send
  */
 
 const NOT_CONFIGURED_MESSAGE =

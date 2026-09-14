@@ -4164,6 +4164,16 @@
   max-width: 36rem;
 }
 
+#mie-dashboard-app #email-landing .email-template-box {
+  margin: 0 0 22px;
+  max-width: 42rem;
+}
+
+#mie-dashboard-app #email-landing .email-template-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
 #mie-dashboard-app #ai-visibility-landing .email-action-block {
   display: flex;
   flex-direction: column;

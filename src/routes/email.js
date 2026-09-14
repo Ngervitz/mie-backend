@@ -11,6 +11,13 @@ const {
   materializeCampaign,
   processQueue,
 } = require('../services/email-campaigns/processor');
+const {
+  listEmailTemplates,
+  createEmailTemplate,
+  updateEmailTemplate,
+  loadActiveTemplateForCampaign,
+  campaignOwnedCopyFromTemplate,
+} = require('../services/email-campaigns/templates');
 
 const router = express.Router();
 
@@ -90,32 +97,50 @@ router.get('/segments', async (req, res) => {
 
 /**
  * POST /email/campaigns
- * Body: { name, subject, body_html, segment_id, scheduled_at? }
+ * Body: { name, segment_id, scheduled_at?, subject?, body_html?, template_id? }
+ * template_id copies subject/body from an active template. Without it, subject and body_html are required (legacy).
  */
 router.post('/campaigns', async (req, res) => {
   const name = req.body && req.body.name;
-  const subject = req.body && req.body.subject;
-  const bodyHtml = req.body && req.body.body_html;
   const segmentId = req.body && req.body.segment_id;
   const scheduledAt =
     req.body && req.body.scheduled_at != null
       ? req.body.scheduled_at
       : null;
+  const templateId =
+    req.body && req.body.template_id != null && req.body.template_id !== ''
+      ? req.body.template_id
+      : null;
 
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'name must be a non-empty string' });
-  }
-  if (typeof subject !== 'string' || !subject.trim()) {
-    return res.status(400).json({ error: 'subject must be a non-empty string' });
-  }
-  if (typeof bodyHtml !== 'string' || !bodyHtml.trim()) {
-    return res.status(400).json({ error: 'body_html must be a non-empty string' });
   }
   if (segmentId == null || segmentId === '') {
     return res.status(400).json({ error: 'segment_id is required' });
   }
 
+  let subject = req.body && req.body.subject;
+  let bodyHtml = req.body && req.body.body_html;
+
   try {
+    if (templateId != null) {
+      const template = await loadActiveTemplateForCampaign(supabase, templateId);
+      const copied = campaignOwnedCopyFromTemplate(template);
+      subject = copied.subject;
+      bodyHtml = copied.body_html;
+    } else {
+      if (typeof subject !== 'string' || !subject.trim()) {
+        return res
+          .status(400)
+          .json({ error: 'subject must be a non-empty string' });
+      }
+      if (typeof bodyHtml !== 'string' || !bodyHtml.trim()) {
+        return res
+          .status(400)
+          .json({ error: 'body_html must be a non-empty string' });
+      }
+    }
+
     const { data: segment, error: segErr } = await supabase
       .from('email_segments')
       .select('*')
@@ -135,13 +160,16 @@ router.post('/campaigns', async (req, res) => {
 
     const insertRow = {
       name: name.trim(),
-      subject: subject.trim(),
-      body_html: bodyHtml,
+      subject: String(subject).trim(),
+      body_html: String(bodyHtml).trim(),
       segment_id: segment.id,
       segment_rules_snapshot: segment.rules,
       recipient_count: 0,
       status: 'draft',
     };
+    if (templateId != null) {
+      insertRow.template_id = templateId;
+    }
     if (scheduledAt != null && scheduledAt !== '') {
       insertRow.scheduled_at = scheduledAt;
     }
@@ -161,10 +189,11 @@ router.post('/campaigns', async (req, res) => {
 
     return res.status(201).json({ campaign });
   } catch (err) {
+    const status = err && err.statusCode ? err.statusCode : 500;
     logger.error('POST /email/campaigns unexpected', {
       error: err && err.message ? err.message : 'unknown',
     });
-    return res.status(500).json({
+    return res.status(status).json({
       error: err && err.message ? err.message : 'Internal error',
     });
   }
@@ -300,6 +329,48 @@ router.post('/campaigns/:id/materialize', async (req, res) => {
       error: message,
     });
     return res.status(400).json({ error: message });
+  }
+});
+
+router.get('/templates', async function (req, res) {
+  try {
+    const templates = await listEmailTemplates(supabase);
+    return res.json({ templates: templates });
+  } catch (err) {
+    logger.error('GET /email/templates failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      error: err && err.message ? err.message : 'Internal error',
+    });
+  }
+});
+
+router.post('/templates', async function (req, res) {
+  try {
+    const template = await createEmailTemplate(supabase, req.body || {});
+    return res.status(201).json({ template: template });
+  } catch (err) {
+    const status = err && err.statusCode ? err.statusCode : 400;
+    return res.status(status).json({
+      error: err && err.message ? err.message : 'Internal error',
+    });
+  }
+});
+
+router.patch('/templates/:id', async function (req, res) {
+  try {
+    const template = await updateEmailTemplate(
+      supabase,
+      req.params.id,
+      req.body || {},
+    );
+    return res.json({ template: template });
+  } catch (err) {
+    const status = err && err.statusCode ? err.statusCode : 400;
+    return res.status(status).json({
+      error: err && err.message ? err.message : 'Internal error',
+    });
   }
 });
 

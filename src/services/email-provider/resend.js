@@ -4,6 +4,8 @@
  * Observed successful response (terminal smoke test):
  *   { data: { id: "<uuid>" }, error: null, headers: { ... } }
  * Message id extracted as result.data.id (not data.data.id).
+ *
+ * Idempotency: Resend SDK v6 accepts second arg { idempotencyKey } → Idempotency-Key header.
  */
 
 const { Resend } = require('resend');
@@ -13,10 +15,10 @@ const { Resend } = require('resend');
  */
 class ResendEmailProvider {
   /**
-   * @param {{ to: string, subject: string, html: string, from: string }} args
+   * @param {{ to: string, subject: string, html: string, from: string, idempotencyKey?: string }} args
    * @returns {Promise<import('./interface').EmailSendResult>}
    */
-  async send({ to, subject, html, from }) {
+  async send({ to, subject, html, from, idempotencyKey }) {
     const toAddr = to == null ? '' : String(to).trim();
     const subjectText = subject == null ? '' : String(subject).trim();
     const htmlBody = html == null ? '' : String(html).trim();
@@ -42,16 +44,32 @@ class ResendEmailProvider {
 
     const resend = new Resend(apiKey);
 
-    // Same call shape as scripts/test-resend.js (to as array).
-    const result = await resend.emails.send({
+    const payload = {
       from: fromAddr,
       to: [toAddr],
       subject: subjectText,
       html: htmlBody,
-    });
+    };
+
+    const options = {};
+    if (idempotencyKey != null && String(idempotencyKey).trim() !== '') {
+      options.idempotencyKey = String(idempotencyKey).trim();
+    }
+
+    // Same call shape as scripts/test-resend.js (to as array); options for Idempotency-Key.
+    const result =
+      Object.keys(options).length > 0
+        ? await resend.emails.send(payload, options)
+        : await resend.emails.send(payload);
 
     if (result.error) {
-      throw result.error;
+      const err = result.error;
+      const wrapped = new Error(
+        err && err.message ? String(err.message) : 'Resend send failed',
+      );
+      if (err && err.name) wrapped.name = String(err.name);
+      if (err && err.statusCode != null) wrapped.statusCode = err.statusCode;
+      throw wrapped;
     }
 
     const providerMessageId =

@@ -1102,7 +1102,31 @@
           <button type="button" id="email-create-btn" class="btn btn-primary">
             + Nueva campaña
           </button>
-          <p class="text-muted">💡 Armá un envío segmentado por puntaje de encuesta</p>
+          <p class="text-muted">💡 Elegí un template y segmentá por puntaje de encuesta</p>
+        </div>
+
+        <div id="email-template-box" class="email-template-box">
+          <h3 class="email-template-title">Templates</h3>
+          <div id="email-template-form">
+            <input type="hidden" id="email-template-id" value="" />
+            <label class="mcl-field">
+              <span class="mcl-field-label">Nombre del template</span>
+              <input type="text" id="email-template-name" class="mcl-input" autocomplete="off" />
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Asunto</span>
+              <input type="text" id="email-template-subject" class="mcl-input" autocomplete="off" />
+            </label>
+            <label class="mcl-field">
+              <span class="mcl-field-label">Cuerpo (HTML)</span>
+              <textarea id="email-template-body" class="mcl-input sms-textarea" rows="5"></textarea>
+            </label>
+            <div class="sms-form-actions">
+              <button type="button" id="email-template-save" class="btn">Guardar template</button>
+              <button type="button" id="email-template-cancel" class="btn">Limpiar</button>
+            </div>
+          </div>
+          <div id="email-template-list"></div>
         </div>
 
         <div id="email-create-form" class="hidden">
@@ -1112,14 +1136,23 @@
           </label>
 
           <label class="mcl-field">
-            <span class="mcl-field-label">✉️ Asunto</span>
-            <input type="text" id="email-form-subject" class="mcl-input" autocomplete="off" />
+            <span class="mcl-field-label">📄 Template</span>
+            <select id="email-form-template" class="mcl-input">
+              <option value="">Manual (asunto y cuerpo)</option>
+            </select>
           </label>
 
-          <label class="mcl-field">
-            <span class="mcl-field-label">📄 Cuerpo (HTML)</span>
-            <textarea id="email-form-body" class="mcl-input sms-textarea" rows="8"></textarea>
-          </label>
+          <div id="email-form-manual">
+            <label class="mcl-field">
+              <span class="mcl-field-label">✉️ Asunto</span>
+              <input type="text" id="email-form-subject" class="mcl-input" autocomplete="off" />
+            </label>
+
+            <label class="mcl-field">
+              <span class="mcl-field-label">📄 Cuerpo (HTML)</span>
+              <textarea id="email-form-body" class="mcl-input sms-textarea" rows="8"></textarea>
+            </label>
+          </div>
 
           <label class="mcl-field">
             <span class="mcl-field-label">🎯 Puntaje mínimo de encuesta</span>
