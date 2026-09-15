@@ -76,14 +76,72 @@ function fakeSheets(options) {
         return r.slice();
       })
     : [padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' })];
-  const calls = { get: 0, update: [], batchUpdate: [], append: [] };
+  const sheetId = opts.sheetId != null ? opts.sheetId : 42;
+  const validationByRow = opts.validationByRow || { 2: true };
+  const calls = {
+    get: 0,
+    update: [],
+    batchUpdate: [],
+    append: [],
+    spreadsheetGet: 0,
+    spreadsheetBatchUpdate: [],
+  };
   return {
     grid: grid,
     calls: calls,
+    validationByRow: validationByRow,
     createSheetsClient: async function () {
       if (opts.createError) throw opts.createError;
       return {
         spreadsheets: {
+          get: async function (req) {
+            calls.spreadsheetGet += 1;
+            if (opts.spreadsheetGetError) throw opts.spreadsheetGetError;
+            assert.ok(req && req.spreadsheetId, 'spreadsheet get needs id');
+            return {
+              data: {
+                sheets: [
+                  {
+                    properties: {
+                      sheetId: sheetId,
+                      title: opts.tabTitle || 'CDV',
+                    },
+                  },
+                ],
+              },
+            };
+          },
+          batchUpdate: async function (req) {
+            calls.spreadsheetBatchUpdate.push(req);
+            if (opts.validationCopyError) throw opts.validationCopyError;
+            const requests =
+              req && req.requestBody && Array.isArray(req.requestBody.requests)
+                ? req.requestBody.requests
+                : [];
+            assert.strictEqual(requests.length, 1, 'one copyPaste per call');
+            const cp = requests[0] && requests[0].copyPaste;
+            assert.ok(cp, 'must use copyPaste');
+            assert.strictEqual(cp.pasteType, 'PASTE_DATA_VALIDATION');
+            assert.strictEqual(cp.source.sheetId, sheetId);
+            assert.strictEqual(cp.source.startRowIndex, 1);
+            assert.strictEqual(cp.source.endRowIndex, 2);
+            assert.strictEqual(cp.source.startColumnIndex, 4);
+            assert.strictEqual(cp.source.endColumnIndex, 5);
+            assert.strictEqual(cp.destination.sheetId, sheetId);
+            assert.strictEqual(cp.destination.startColumnIndex, 4);
+            assert.strictEqual(cp.destination.endColumnIndex, 5);
+            const destRow = cp.destination.startRowIndex + 1;
+            assert.strictEqual(
+              cp.destination.endRowIndex,
+              cp.destination.startRowIndex + 1,
+            );
+            // Paste validation only — never copy E2 value into destination.
+            validationByRow[destRow] = true;
+            if (grid[destRow - 1]) {
+              // leave grid[destRow-1][4] as written by values.update
+            }
+            return { data: {} };
+          },
           values: {
             get: async function (req) {
               calls.get += 1;
@@ -411,8 +469,19 @@ assert.strictEqual(
   assert.strictEqual(sheets6.grid[1][4], 'RECHAZADO');
   assert.strictEqual(sheets6.grid[1][7], 'nota');
 
-  // 7. idempotencia en I — insert explícito A{n}:K{n}, sin append
-  const sheets7 = fakeSheets();
+  // 7. idempotencia en I — insert explícito A{n}:K{n}, sin append;
+  //    copia dataValidation E2→E{n} sin copiar valor de ESTADO
+  const sheets7 = fakeSheets({
+    grid: [
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({
+        0: 'prestafacil',
+        1: '11111111',
+        4: 'RECHAZADO',
+        8: '1000',
+      }),
+    ],
+  });
   const r7 = await ensureCdvSheetRows(
     {
       historicoRows: [historicoRow()],
@@ -435,16 +504,32 @@ assert.strictEqual(
   assert.strictEqual(r7.inserted, 1);
   assert.strictEqual(sheets7.calls.append.length, 0);
   assert.strictEqual(sheets7.calls.update.length, 1);
-  assert.strictEqual(sheets7.calls.update[0].range, "'CDV'!A2:K2");
+  assert.strictEqual(sheets7.calls.update[0].range, "'CDV'!A3:K3");
   const written = sheets7.calls.update[0].requestBody.values[0];
   assert.strictEqual(written[0], 'prestafacil');
   assert.strictEqual(written[2], '');
   assert.strictEqual(written[3], '01/09/2026 18:33:40');
   assert.strictEqual(written[8], '1168');
-  assert.strictEqual(written[4], '');
+  assert.strictEqual(written[4], '', 'ESTADO must stay empty on insert');
   assert.strictEqual(written[7], '');
+  assert.strictEqual(sheets7.calls.spreadsheetGet, 1);
+  assert.strictEqual(sheets7.calls.spreadsheetBatchUpdate.length, 1);
+  assert.strictEqual(
+    sheets7.calls.spreadsheetBatchUpdate[0].requestBody.requests[0].copyPaste
+      .pasteType,
+    'PASTE_DATA_VALIDATION',
+  );
+  assert.strictEqual(
+    sheets7.calls.spreadsheetBatchUpdate[0].requestBody.requests[0].copyPaste
+      .destination.startRowIndex,
+    2,
+  );
+  assert.strictEqual(sheets7.validationByRow[3], true);
+  assert.strictEqual(sheets7.grid[2][4], '', 'must not paste E2 value');
+  assert.strictEqual(sheets7.grid[2][8], '1168');
+  assert.strictEqual(sheets7.grid[1][4], 'RECHAZADO', 'template E2 unchanged');
 
-  // second pass: same id → skip, no duplicate
+  // second pass: same id → skip, no duplicate, no extra validation copy
   const r7b = await ensureCdvSheetRows(
     {
       historicoRows: [historicoRow()],
@@ -461,10 +546,16 @@ assert.strictEqual(
   assert.strictEqual(r7b.inserted, 0);
   assert.strictEqual(r7b.skipped, 1);
   assert.strictEqual(sheets7.calls.update.length, 1);
+  assert.strictEqual(sheets7.calls.spreadsheetBatchUpdate.length, 1);
   assert.strictEqual(sheets7.calls.append.length, 0);
 
   // sin jt en insert → BASE vacío
-  const sheetsEmptyBase = fakeSheets();
+  const sheetsEmptyBase = fakeSheets({
+    grid: [
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({ 0: 'x', 1: '1', 4: 'RECHAZADO', 8: '1' }),
+    ],
+  });
   const rEmpty = await ensureCdvSheetRows(
     {
       historicoRows: [
@@ -486,10 +577,17 @@ assert.strictEqual(
     '',
   );
   assert.strictEqual(sheetsEmptyBase.calls.update[0].requestBody.values[0][2], '');
+  assert.strictEqual(sheetsEmptyBase.calls.update[0].requestBody.values[0][4], '');
+  assert.strictEqual(sheetsEmptyBase.calls.spreadsheetBatchUpdate.length, 1);
   assert.strictEqual(sheetsEmptyBase.calls.append.length, 0);
 
-  // mismo CI, distintos CZ_SOLICITUD_ID → dos filas
-  const sheetsSameCi = fakeSheets();
+  // mismo CI, distintos CZ_SOLICITUD_ID → dos filas + validation cada una
+  const sheetsSameCi = fakeSheets({
+    grid: [
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({ 0: 'x', 1: '1', 4: 'RECHAZADO', 8: '1' }),
+    ],
+  });
   const rSameCi = await ensureCdvSheetRows(
     {
       historicoRows: [
@@ -518,13 +616,65 @@ assert.strictEqual(
   );
   assert.strictEqual(rSameCi.inserted, 2);
   assert.strictEqual(sheetsSameCi.calls.update.length, 2);
-  assert.strictEqual(sheetsSameCi.calls.update[0].range, "'CDV'!A2:K2");
-  assert.strictEqual(sheetsSameCi.calls.update[1].range, "'CDV'!A3:K3");
+  assert.strictEqual(sheetsSameCi.calls.update[0].range, "'CDV'!A3:K3");
+  assert.strictEqual(sheetsSameCi.calls.update[1].range, "'CDV'!A4:K4");
   assert.strictEqual(sheetsSameCi.calls.update[0].requestBody.values[0][1], '32430417');
   assert.strictEqual(sheetsSameCi.calls.update[1].requestBody.values[0][1], '32430417');
   assert.strictEqual(sheetsSameCi.calls.update[0].requestBody.values[0][8], '1171');
   assert.strictEqual(sheetsSameCi.calls.update[1].requestBody.values[0][8], '1196');
+  assert.strictEqual(sheetsSameCi.calls.spreadsheetGet, 1);
+  assert.strictEqual(sheetsSameCi.calls.spreadsheetBatchUpdate.length, 2);
+  assert.strictEqual(sheetsSameCi.validationByRow[3], true);
+  assert.strictEqual(sheetsSameCi.validationByRow[4], true);
+  assert.strictEqual(sheetsSameCi.grid[2][4], '');
+  assert.strictEqual(sheetsSameCi.grid[3][4], '');
   assert.strictEqual(sheetsSameCi.calls.append.length, 0);
+
+  // fallo al copiar validation → fila queda insertada; 2ª corrida no duplica
+  const sheetsValFail = fakeSheets({
+    grid: [
+      padRow({ 0: 'BASE', 8: 'CZ_SOLICITUD_ID' }),
+      padRow({ 0: 'x', 1: '1', 4: 'RECHAZADO', 8: '1' }),
+    ],
+    validationCopyError: new Error('copyPaste denied'),
+  });
+  const rValFail = await ensureCdvSheetRows(
+    {
+      historicoRows: [historicoRow()],
+      solicitudes: [{ cz_id: 1168, ci: 29108021 }],
+    },
+    {
+      env: ENABLED_ENV,
+      createSheetsClient: sheetsValFail.createSheetsClient,
+      resolveBasesForCandidates: async function () {
+        return new Map([['1168', 'prestafacil']]);
+      },
+    },
+  );
+  assert.strictEqual(rValFail.status, 'ok');
+  assert.strictEqual(rValFail.inserted, 1);
+  assert.strictEqual(sheetsValFail.calls.update.length, 1);
+  assert.strictEqual(sheetsValFail.grid[2][8], '1168');
+  assert.strictEqual(sheetsValFail.grid[2][4], '');
+  assert.strictEqual(sheetsValFail.calls.spreadsheetBatchUpdate.length, 1);
+
+  const rValFail2 = await ensureCdvSheetRows(
+    {
+      historicoRows: [historicoRow()],
+      solicitudes: [{ cz_id: 1168, ci: 29108021 }],
+    },
+    {
+      env: ENABLED_ENV,
+      createSheetsClient: sheetsValFail.createSheetsClient,
+      resolveBasesForCandidates: async function () {
+        return new Map([['1168', 'prestafacil']]);
+      },
+    },
+  );
+  assert.strictEqual(rValFail2.inserted, 0);
+  assert.strictEqual(rValFail2.skipped, 1);
+  assert.strictEqual(sheetsValFail.calls.update.length, 1);
+  assert.strictEqual(sheetsValFail.calls.append.length, 0);
 
   // header I1 incorrecto → no escribe
   const sheetsBadHeader = fakeSheets({
@@ -547,6 +697,7 @@ assert.strictEqual(
   assert.strictEqual(rBadHeader.inserted, 0);
   assert.strictEqual(sheetsBadHeader.calls.update.length, 0);
   assert.strictEqual(sheetsBadHeader.calls.batchUpdate.length, 0);
+  assert.strictEqual(sheetsBadHeader.calls.spreadsheetBatchUpdate.length, 0);
   assert.strictEqual(sheetsBadHeader.calls.append.length, 0);
 
   // 8. Google falla → fail-open

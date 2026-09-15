@@ -27,7 +27,10 @@ const SHEET_ROW_WIDTH = 11;
 const COL_BASE = 0;
 const COL_CELULAR = 2;
 const COL_FECHA_ENVIO = 3;
+const COL_ESTADO = 4;
 const COL_CZ_SOLICITUD_ID = 8;
+/** 1-based template row for ESTADO dropdown (dataValidation only). */
+const ESTADO_VALIDATION_TEMPLATE_ROW = 2;
 
 let loggedMissingConfig = false;
 
@@ -477,6 +480,70 @@ function defaultCreateSheetsClient(credentials) {
   return google.sheets({ version: 'v4', auth: auth });
 }
 
+/**
+ * Resolve numeric sheetId for a tab title (needed by copyPaste).
+ */
+async function resolveSheetIdByTitle(sheets, spreadsheetId, tab) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: spreadsheetId,
+    fields: 'sheets.properties(sheetId,title)',
+  });
+  const list =
+    meta && meta.data && Array.isArray(meta.data.sheets) ? meta.data.sheets : [];
+  const want = String(tab || '');
+  for (let i = 0; i < list.length; i += 1) {
+    const props = list[i] && list[i].properties ? list[i].properties : null;
+    if (!props) continue;
+    if (String(props.title || '') === want) {
+      const id = props.sheetId;
+      if (id == null || !Number.isFinite(Number(id))) {
+        throw new Error('CDV sheet tab has no sheetId: ' + want);
+      }
+      return Number(id);
+    }
+  }
+  throw new Error('CDV sheet tab not found: ' + want);
+}
+
+/**
+ * Copy only dataValidation from E{template} → E{targetRow}.
+ * Does not copy values or general formatting (PASTE_DATA_VALIDATION).
+ */
+async function copyEstadoDataValidation(
+  sheets,
+  spreadsheetId,
+  sheetId,
+  targetRow,
+) {
+  const templateRow = ESTADO_VALIDATION_TEMPLATE_ROW;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          copyPaste: {
+            source: {
+              sheetId: sheetId,
+              startRowIndex: templateRow - 1,
+              endRowIndex: templateRow,
+              startColumnIndex: COL_ESTADO,
+              endColumnIndex: COL_ESTADO + 1,
+            },
+            destination: {
+              sheetId: sheetId,
+              startRowIndex: targetRow - 1,
+              endRowIndex: targetRow,
+              startColumnIndex: COL_ESTADO,
+              endColumnIndex: COL_ESTADO + 1,
+            },
+            pasteType: 'PASTE_DATA_VALIDATION',
+          },
+        },
+      ],
+    },
+  });
+}
+
 async function loadPersistedEstado8(supabase) {
   if (!supabase || typeof supabase.from !== 'function') return [];
   const { data: estadoRows, error: estadoErr } = await supabase
@@ -701,6 +768,8 @@ async function ensureCdvSheetRows(input, deps) {
   if (toInsert.length) {
     let nextRow = nextFreeSheetRowNumber(sheetValues);
     const insertedIds = [];
+    let sheetIdForValidation = null;
+    let sheetIdLookupFailed = false;
     for (let i = 0; i < toInsert.length; i += 1) {
       const rowNumber = nextRow;
       nextRow += 1;
@@ -711,6 +780,36 @@ async function ensureCdvSheetRows(input, deps) {
         requestBody: { values: [toInsert[i]] },
       });
       insertedIds.push(toInsert[i][COL_CZ_SOLICITUD_ID]);
+
+      // Fail-open: row already has CZ_SOLICITUD_ID in I — do not rethrow.
+      try {
+        if (sheetIdLookupFailed) {
+          // already logged; skip remaining validation copies this run
+        } else {
+          if (sheetIdForValidation == null) {
+            sheetIdForValidation = await resolveSheetIdByTitle(
+              sheets,
+              config.spreadsheetId,
+              config.tab,
+            );
+          }
+          await copyEstadoDataValidation(
+            sheets,
+            config.spreadsheetId,
+            sheetIdForValidation,
+            rowNumber,
+          );
+        }
+      } catch (err) {
+        if (sheetIdForValidation == null) sheetIdLookupFailed = true;
+        logger.warn('CDV sheet sync ESTADO dataValidation copy failed', {
+          kind: 'cdv_sheet',
+          row: rowNumber,
+          cz_solicitud_id: toInsert[i][COL_CZ_SOLICITUD_ID],
+          error:
+            err && err.message ? String(err.message).slice(0, 300) : 'unknown',
+        });
+      }
     }
     logger.info('CDV sheet sync inserted', {
       kind: 'cdv_sheet',
@@ -759,7 +858,9 @@ module.exports = {
   COL_BASE,
   COL_CELULAR,
   COL_FECHA_ENVIO,
+  COL_ESTADO,
   COL_CZ_SOLICITUD_ID,
+  ESTADO_VALIDATION_TEMPLATE_ROW,
   SHEET_VALUE_RANGE,
   SHEET_ROW_WIDTH,
   sheetSolicitudHeaderMatches,
@@ -776,6 +877,8 @@ module.exports = {
   existingIdsFromColumnG,
   buildSheetRow,
   resolveBasesForCandidates,
+  resolveSheetIdByTitle,
+  copyEstadoDataValidation,
   ensureCdvSheetRows,
   syncCdvSheetAfterHistoricoPersist,
 };
