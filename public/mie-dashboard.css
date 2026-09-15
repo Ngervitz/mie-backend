@@ -3995,15 +3995,32 @@
   color: var(--text-faint);
 }
 
+/* Keep the campaigns list inside the panel; scroll lives on the wrap only.
+   Global `thead th { white-space: nowrap }` makes the 10-col SMS table wider
+   than --maxw / the content column, which previously spilled the page. */
+#mie-dashboard-app .sms-list-section,
+#mie-dashboard-app .sms-list,
+#mie-dashboard-app .sms-campaigns-block {
+  min-width: 0;
+  max-width: 100%;
+}
+
 #mie-dashboard-app .sms-table-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
 #mie-dashboard-app .sms-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
 }
@@ -4014,6 +4031,13 @@
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
+}
+
+/* Clear the fixed Assist FAB so Acciones/Tracking stay reachable when
+   scrolled to the end of the campaigns table. */
+#mie-dashboard-app #sms-list .sms-table th:last-child,
+#mie-dashboard-app #sms-list .sms-table td:last-child {
+  padding-right: 168px;
 }
 
 #mie-dashboard-app .sms-table th {
