@@ -60,6 +60,10 @@ module.exports = {
   // Optional at boot. Public Janus origin for email unsubscribe links (no trailing slash).
   // Do NOT reuse SMS_SHORT_LINK_BASE_URL.
   emailPublicBaseUrl: optionalTrimmedEnv('EMAIL_PUBLIC_BASE_URL'),
+  // Optional at boot. First-wave email_campaigns.id for rechazados_survey_invite.
+  rechazadosSurveyInviteCampaignId: optionalTrimmedEnv(
+    'RECHAZADOS_SURVEY_INVITE_CAMPAIGN_ID',
+  ),
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
   // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.

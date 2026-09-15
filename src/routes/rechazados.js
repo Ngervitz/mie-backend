@@ -48,6 +48,13 @@ const {
   loadSnapshotSourceFileBytes,
 } = require('../lib/rejectedBcuSnapshotSourceRead');
 const { loadMiDeudaBags } = require('../lib/miDeudaBagsRead');
+const {
+  getRejectedSurveyInviteEligibility,
+  attachSurveyInviteToListRows,
+} = require('../lib/rejectedSurveyInviteEligibility');
+const {
+  materializeRejectedSurveyInvite,
+} = require('../lib/rejectedSurveyInviteMaterialize');
 
 const router = express.Router();
 
@@ -121,7 +128,8 @@ router.get('/', async function getRechazadosList(req, res) {
       outreachRows: bundle.outreachRows,
       status: parsed.status,
     });
-    return res.json({ ok: true, data: { rows: rows } });
+    const withInvite = await attachSurveyInviteToListRows(supabase, rows);
+    return res.json({ ok: true, data: { rows: withInvite } });
   } catch (err) {
     logger.error('GET /rechazados failed', {
       error: err && err.message ? err.message : 'unknown',
@@ -542,6 +550,41 @@ router.get(
   },
 );
 
+router.post(
+  '/:ci/survey-invite',
+  async function postSurveyInvite(req, res) {
+    const ci = normalizeCi(req.params && req.params.ci);
+    if (ci == null) {
+      return res.status(400).json({ error: 'CI inválida' });
+    }
+    try {
+      const outcome = await materializeRejectedSurveyInvite(supabase, ci);
+      const status =
+        outcome.ok &&
+        (outcome.result === 'queued' || outcome.result === 'already_pending')
+          ? 200
+          : outcome.ok
+            ? 200
+            : 409;
+      return res.status(status).json({
+        ok: outcome.ok,
+        result: outcome.result,
+        recipient_id: outcome.recipient_id != null ? outcome.recipient_id : null,
+        status: outcome.status != null ? outcome.status : null,
+        email_masked:
+          outcome.email_masked != null ? outcome.email_masked : null,
+        repaired: outcome.repaired === true,
+      });
+    } catch (err) {
+      logger.error('POST /rechazados/:ci/survey-invite failed', {
+        ci: ci,
+        error: err && err.message ? err.message : 'unknown',
+      });
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  },
+);
+
 router.get('/:ci', async function getRechazadosDetail(req, res) {
   const ci = normalizeCi(req.params && req.params.ci);
   if (ci == null) {
@@ -554,6 +597,12 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
     if (!detail) {
       return res.status(404).json({ error: 'No encontrado' });
     }
+    const surveyInvite = await getRejectedSurveyInviteEligibility(supabase, ci);
+    detail.survey_invite = {
+      reason: surveyInvite.reason,
+      eligible: surveyInvite.eligible,
+      email_masked: surveyInvite.email_masked,
+    };
     return res.json({ ok: true, data: detail });
   } catch (err) {
     logger.error('GET /rechazados/:ci failed', {

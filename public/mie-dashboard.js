@@ -14772,7 +14772,22 @@ init();
       }
       if (cell.muted) {
         return (
-          '<span class="rechazados-muted">' + escapeHtml(label) + '</span>'
+          '<span class="rechazados-muted"' +
+          (cell.title
+            ? ' title="' + escapeHtml(String(cell.title)) + '"'
+            : '') +
+          '>' +
+          escapeHtml(label) +
+          '</span>'
+        );
+      }
+      if (cell.title) {
+        return (
+          '<span title="' +
+          escapeHtml(String(cell.title)) +
+          '">' +
+          escapeHtml(label) +
+          '</span>'
         );
       }
       return escapeHtml(label);
@@ -14781,13 +14796,19 @@ init();
     const action = cell.action ? String(cell.action) : '';
     const btnTone = cell.btnTone ? String(cell.btnTone) : '';
     const toneClass = btnTone ? ' is-' + btnTone : '';
+    const titleAttr =
+      cell.title != null && String(cell.title)
+        ? ' title="' + escapeHtml(String(cell.title)) + '"'
+        : '';
     if (enabled && action) {
       return (
         '<button type="button" class="btn rechazados-cell-btn" data-action="' +
         escapeHtml(action) +
         '" data-ci="' +
         escapeHtml(String(ci)) +
-        '">' +
+        '"' +
+        titleAttr +
+        '>' +
         escapeHtml(cell.label) +
         '</button>'
       );
@@ -14795,7 +14816,9 @@ init();
     return (
       '<button type="button" class="btn rechazados-cell-btn' +
       toneClass +
-      '" disabled title="Próximamente">' +
+      '" disabled' +
+      (titleAttr || ' title="Próximamente"') +
+      '>' +
       escapeHtml(cell.label) +
       '</button>'
     );
@@ -14848,6 +14871,7 @@ init();
         );
         const bcu = H.worstBcuCell(row.worst_bcu);
         const retry = H.retryReviewCell(row.ops_status, row.next_review_on);
+        const survey = H.surveyInviteCell(row.survey_invite);
         return (
           '<tr>' +
           '<td class="rechazados-col-ci">' +
@@ -14874,6 +14898,9 @@ init();
           '<td class="rechazados-col-deuda">' +
           renderCellDescriptor(deuda, row.ci) +
           '</td>' +
+          '<td class="rechazados-col-survey">' +
+          renderCellDescriptor(survey, row.ci) +
+          '</td>' +
           '<td class="rechazados-col-bcu">' +
           renderCellDescriptor(bcu, row.ci) +
           '</td>' +
@@ -14896,6 +14923,7 @@ init();
       '<th class="rechazados-col-score">Score</th>' +
       '<th class="rechazados-col-plan">Mi Plan</th>' +
       '<th class="rechazados-col-deuda">Mi Deuda</th>' +
+      '<th class="rechazados-col-survey">Encuesta</th>' +
       '<th class="rechazados-col-bcu">Peor BCU</th>' +
       '<th class="rechazados-col-retry">Retry / Próx. revisión</th>' +
       '<th class="rechazados-col-ver">Ver</th>' +
@@ -16000,6 +16028,14 @@ init();
           ),
         ) +
         '</div></div>' +
+        '<div><div class="ad-modal-label">Encuesta email</div><div>' +
+        renderCellDescriptor(H.surveyInviteCell(d.survey_invite), d.ci) +
+        (d.survey_invite && d.survey_invite.email_masked
+          ? ' <span class="rechazados-muted">' +
+            escapeHtml(String(d.survey_invite.email_masked)) +
+            '</span>'
+          : '') +
+        '</div></div>' +
         '<div><div class="ad-modal-label">Peor BCU</div><div>' +
         renderCellDescriptor(H.worstBcuCell(d.worst_bcu), d.ci) +
         '</div></div>' +
@@ -16920,8 +16956,51 @@ init();
       openDetail(ci);
       return;
     }
+    if (action === 'survey-invite') {
+      postSurveyInvite(ci, btn);
+      return;
+    }
   });
 
+  async function postSurveyInvite(ci, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const response = await fetch(
+        '/rechazados/' + encodeURIComponent(ci) + '/survey-invite',
+        { method: 'POST', headers: { Accept: 'application/json' } },
+      );
+      const data = await response.json().catch(function () {
+        return {};
+      });
+      const result = data && data.result != null ? String(data.result) : '';
+      const masked =
+        data && data.email_masked != null ? String(data.email_masked) : '';
+      if (statusEl) {
+        if (data && data.ok && (result === 'queued' || result === 'already_pending')) {
+          statusEl.textContent =
+            (result === 'queued' ? 'Invitación en cola' : 'Ya pendiente') +
+            (masked ? ' · ' + masked : '');
+        } else {
+          statusEl.textContent =
+            'Encuesta: ' +
+            (result || 'error') +
+            (masked ? ' · ' + masked : '');
+        }
+      }
+      await loadList();
+      if (state.detailCi && String(state.detailCi) === String(ci)) {
+        await openDetail(ci);
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent =
+          'Error al materializar encuesta: ' +
+          (err && err.message ? err.message : 'unknown');
+      }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
   modalRoot.addEventListener('click', function (ev) {
     const t = ev.target;
     if (!t || !t.closest) return;
@@ -16941,6 +17020,11 @@ init();
     const action = actionEl.getAttribute('data-action');
     if (action === 'close-detail') {
       closeDetail();
+      return;
+    }
+    if (action === 'survey-invite') {
+      const ciInvite = actionEl.getAttribute('data-ci') || state.detailCi;
+      if (ciInvite) postSurveyInvite(ciInvite, actionEl);
       return;
     }
     if (action === 'open-form') {

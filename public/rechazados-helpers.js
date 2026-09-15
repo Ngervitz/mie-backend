@@ -174,6 +174,42 @@
     };
   }
 
+  /**
+   * @param {{ reason?: string, eligible?: boolean, email_masked?: string|null }|null|undefined} invite
+   */
+  function surveyInviteCell(invite) {
+    var reason =
+      invite && invite.reason != null ? String(invite.reason) : 'unknown';
+    var masked =
+      invite && invite.email_masked != null ? String(invite.email_masked) : '';
+    if (invite && invite.eligible === true) {
+      return {
+        kind: 'cta',
+        label: 'Encuestar',
+        enabled: true,
+        action: 'survey-invite',
+        title: masked ? 'Enviar a ' + masked : 'Enviar invitación a encuesta',
+      };
+    }
+    var labelMap = {
+      already_pending: 'Pendiente',
+      already_sent: 'Enviado',
+      survey_already_completed: 'Completó',
+      email_suppressed: 'Baja',
+      missing_email: 'Sin email',
+      missing_lrw: 'Sin LRW',
+      no_current_rejection: '—',
+      prior_attempt_blocks: 'Bloqueado',
+      campaign_not_configured: 'Config',
+      public_base_url_missing: 'Config',
+    };
+    return {
+      kind: 'text',
+      label: labelMap[reason] != null ? labelMap[reason] : 'No',
+      title: reason + (masked ? ' · ' + masked : ''),
+    };
+  }
+
   function worstBcuCell(cat) {
     if (cat == null || cat === '') {
       return {
@@ -1036,6 +1072,7 @@
     scoreTone: scoreTone,
     miPlanCell: miPlanCell,
     miDeudaCell: miDeudaCell,
+    surveyInviteCell: surveyInviteCell,
     worstBcuCell: worstBcuCell,
     retryReviewCell: retryReviewCell,
     miPlanLabel: miPlanLabel,
