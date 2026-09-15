@@ -4018,11 +4018,33 @@
   background: var(--surface);
 }
 
+/* Campaigns list: capped viewport so the horizontal scrollbar stays in view
+   (not after 22+ rows). Vertical + horizontal scroll both on this wrap. */
+#mie-dashboard-app #sms-list .sms-table-wrap {
+  max-height: min(70vh, calc(100vh - 240px));
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 #mie-dashboard-app .sms-table {
   width: max-content;
   min-width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
+}
+
+/* separate + sticky so headers track columns while scrolling inside the wrap */
+#mie-dashboard-app #sms-list .sms-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#mie-dashboard-app #sms-list .sms-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
 }
 
 #mie-dashboard-app .sms-table th,
