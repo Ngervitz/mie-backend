@@ -3995,9 +3995,9 @@
   color: var(--text-faint);
 }
 
-/* Keep the campaigns list inside the panel; scroll lives on the wrap only.
-   Global `thead th { white-space: nowrap }` makes the 10-col SMS table wider
-   than --maxw / the content column, which previously spilled the page. */
+/* Campaigns SMS list: fit all 10 columns in the panel width.
+   Prefer compact type/padding/wrap over any internal scrollbars.
+   (Replaces the overflow/max-content/sticky approach from 5735edf / ee56a90.) */
 #mie-dashboard-app .sms-list-section,
 #mie-dashboard-app .sms-list,
 #mie-dashboard-app .sms-campaigns-block {
@@ -4005,61 +4005,35 @@
   max-width: 100%;
 }
 
+/* Clear Assist FAB vertically when page-scrolling to the list end —
+   without inventing horizontal padding that blows column fit. */
+#mie-dashboard-app .sms-list-section {
+  padding-bottom: 80px;
+}
+
 #mie-dashboard-app .sms-table-wrap {
   display: block;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
-/* Campaigns list: capped viewport so the horizontal scrollbar stays in view
-   (not after 22+ rows). Vertical + horizontal scroll both on this wrap. */
-#mie-dashboard-app #sms-list .sms-table-wrap {
-  max-height: min(70vh, calc(100vh - 240px));
-  overflow-x: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
 #mie-dashboard-app .sms-table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
 }
 
-/* separate + sticky so headers track columns while scrolling inside the wrap */
-#mie-dashboard-app #sms-list .sms-table {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-#mie-dashboard-app #sms-list .sms-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--surface-2);
-}
-
 #mie-dashboard-app .sms-table th,
 #mie-dashboard-app .sms-table td {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
-}
-
-/* Clear the fixed Assist FAB so Acciones/Tracking stay reachable when
-   scrolled to the end of the campaigns table. */
-#mie-dashboard-app #sms-list .sms-table th:last-child,
-#mie-dashboard-app #sms-list .sms-table td:last-child {
-  padding-right: 168px;
 }
 
 #mie-dashboard-app .sms-table th {
@@ -4068,6 +4042,175 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* --- #sms-list only: fixed compact columns, page scroll only --- */
+#mie-dashboard-app #sms-list .sms-table-wrap {
+  overflow: hidden;
+}
+
+#mie-dashboard-app #sms-list .sms-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.78rem;
+}
+
+/* Override global `thead th { white-space: nowrap }` for this table only */
+#mie-dashboard-app #sms-list .sms-table thead th {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.2;
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  padding: 6px 5px;
+  hyphens: manual;
+}
+
+#mie-dashboard-app #sms-list .sms-table th,
+#mie-dashboard-app #sms-list .sms-table td {
+  padding: 6px 5px;
+  vertical-align: top;
+}
+
+/* 1 NOMBRE */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(1),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(1) {
+  width: 17%;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+/* 2 CREADA */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(2),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(2) {
+  width: 11%;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3 ESTADO — badge only */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(3),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(3) {
+  width: 9%;
+}
+
+#mie-dashboard-app #sms-list .sms-table .sms-badge {
+  font-size: 0.66rem;
+  padding: 2px 6px;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+/* 4–8 numeric (Total … Pendientes) */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(4),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(4),
+#mie-dashboard-app #sms-list .sms-table th:nth-child(5),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(5),
+#mie-dashboard-app #sms-list .sms-table th:nth-child(6),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(6),
+#mie-dashboard-app #sms-list .sms-table th:nth-child(7),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(7),
+#mie-dashboard-app #sms-list .sms-table th:nth-child(8),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(8) {
+  width: 6.5%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 4px;
+}
+
+/* 9 COSTO EST. */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(9),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(9) {
+  width: 9%;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+#mie-dashboard-app #sms-list .sms-table .sms-cost-note {
+  font-size: 0.62rem;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* 10 ACCIONES — Tracking + Ver on one line */
+#mie-dashboard-app #sms-list .sms-table th:nth-child(10),
+#mie-dashboard-app #sms-list .sms-table td:nth-child(10) {
+  width: 14%;
+  white-space: nowrap;
+  padding-right: 6px;
+}
+
+#mie-dashboard-app #sms-list .sms-table td:nth-child(10) > div {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+
+#mie-dashboard-app #sms-list .sms-table td:nth-child(10) .btn {
+  font-size: 0.7rem;
+  padding: 3px 7px;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1440px) {
+  #mie-dashboard-app #sms-list .sms-table {
+    font-size: 0.74rem;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table thead th {
+    font-size: 0.62rem;
+    padding: 5px 4px;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table th,
+  #mie-dashboard-app #sms-list .sms-table td {
+    padding: 5px 4px;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table td:nth-child(10) .btn {
+    font-size: 0.66rem;
+    padding: 2px 6px;
+  }
+}
+
+@media (max-width: 1366px) {
+  #mie-dashboard-app #sms-list .sms-table {
+    font-size: 0.72rem;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table th:nth-child(1),
+  #mie-dashboard-app #sms-list .sms-table td:nth-child(1) {
+    width: 16%;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table th:nth-child(2),
+  #mie-dashboard-app #sms-list .sms-table td:nth-child(2) {
+    width: 10%;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table th:nth-child(10),
+  #mie-dashboard-app #sms-list .sms-table td:nth-child(10) {
+    width: 15%;
+  }
+
+  #mie-dashboard-app #sms-list .sms-table td:nth-child(10) .btn {
+    font-size: 0.64rem;
+    padding: 2px 5px;
+  }
 }
 
 #mie-dashboard-app .sms-table tr.sms-row {
