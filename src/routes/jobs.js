@@ -39,6 +39,9 @@ const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
 const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
 const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
+const {
+  runRechazadosSurveyInviteDue,
+} = require('../jobs/rechazadosSurveyInviteDue');
 const { getCzApiBearerTokenDiagnostic } = require('../clients/czApiClient');
 const env = require('../config/env');
 const logger = require('../lib/logger');
@@ -1358,6 +1361,31 @@ router.post('/run-sms-notifyme-poll', async (req, res) => {
     return res.status(200).json(result);
   } catch (err) {
     logger.error('sms_notifyme_poll failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+/**
+ * Rechazados Encuesta 3-step catch-up materialize (no provider send).
+ * Auth: session cookie (dashboard rechazados) or X-Cron-Key.
+ * Cadence: cron-job.org → POST /jobs/run-rechazados-survey-invite-due
+ */
+router.post('/run-rechazados-survey-invite-due', async (req, res) => {
+  logger.info('POST /jobs/run-rechazados-survey-invite-due — started');
+  try {
+    const result = await runRechazadosSurveyInviteDue();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('rechazados_survey_invite_due finished', result);
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('rechazados_survey_invite_due failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({

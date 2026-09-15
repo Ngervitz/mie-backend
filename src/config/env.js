@@ -60,9 +60,20 @@ module.exports = {
   // Optional at boot. Public Janus origin for email unsubscribe links (no trailing slash).
   // Do NOT reuse SMS_SHORT_LINK_BASE_URL.
   emailPublicBaseUrl: optionalTrimmedEnv('EMAIL_PUBLIC_BASE_URL'),
-  // Optional at boot. First-wave email_campaigns.id for rechazados_survey_invite.
+  // Optional at boot. Legacy single-campaign id (Stage 2B wave1).
+  // The 3-step Encuesta sequence does NOT read this — use STEP1/2/3 below.
   rechazadosSurveyInviteCampaignId: optionalTrimmedEnv(
     'RECHAZADOS_SURVEY_INVITE_CAMPAIGN_ID',
+  ),
+  // Optional at boot. Independent campaigns for Encuesta catch-up sequence.
+  rechazadosSurveyInviteStep1CampaignId: optionalTrimmedEnv(
+    'RECHAZADOS_SURVEY_INVITE_STEP1_CAMPAIGN_ID',
+  ),
+  rechazadosSurveyInviteStep2CampaignId: optionalTrimmedEnv(
+    'RECHAZADOS_SURVEY_INVITE_STEP2_CAMPAIGN_ID',
+  ),
+  rechazadosSurveyInviteStep3CampaignId: optionalTrimmedEnv(
+    'RECHAZADOS_SURVEY_INVITE_STEP3_CAMPAIGN_ID',
   ),
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,

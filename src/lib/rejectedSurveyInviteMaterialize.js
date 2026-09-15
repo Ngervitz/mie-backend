@@ -185,13 +185,22 @@ async function repairSurveyInviteRecipient(supabase, args) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
+ * @param {string|number|null|undefined} [campaignId]
+ *   Explicit campaign for sequence step. If omitted, legacy wave1 env
+ *   (Stage 2B single-campaign path only — sequence always passes STEP id).
  */
-async function materializeRejectedSurveyInvite(supabase, ciRaw) {
+async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
   assertValidEmailPurpose(PURPOSE);
+
+  const resolvedCampaignId =
+    campaignId != null && String(campaignId).trim() !== ''
+      ? String(campaignId).trim()
+      : eligibility.getWave1CampaignId();
 
   const elig = await eligibility.getRejectedSurveyInviteEligibility(
     supabase,
     ciRaw,
+    { campaignId: resolvedCampaignId },
   );
 
   if (!elig.eligible) {
@@ -200,19 +209,22 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
       result: elig.reason,
       email_masked: elig.email_masked,
       recipient_id: elig.prior_recipient_id,
+      campaign_id: resolvedCampaignId,
+      due_step: null,
     };
   }
 
-  const campaignId = eligibility.getWave1CampaignId();
   const publicBase = eligibility.getEmailPublicBaseUrl();
-  if (!campaignId || !publicBase) {
+  if (!resolvedCampaignId || !publicBase) {
     return {
       ok: false,
-      result: !campaignId
+      result: !resolvedCampaignId
         ? REASONS.CAMPAIGN_NOT_CONFIGURED
         : REASONS.PUBLIC_BASE_URL_MISSING,
       email_masked: elig.email_masked,
       recipient_id: null,
+      campaign_id: resolvedCampaignId,
+      due_step: null,
     };
   }
 
@@ -224,7 +236,10 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
     survey_url: surveyUrl,
     unsubscribe_url: unsubscribeUrl,
   };
-  const idempotencyKey = buildSurveyInviteIdempotencyKey(campaignId, elig.ci);
+  const idempotencyKey = buildSurveyInviteIdempotencyKey(
+    resolvedCampaignId,
+    elig.ci,
+  );
   const emailNorm = normalizeEmail(elig.email);
 
   if (elig.repairable && elig.prior_recipient_id != null) {
@@ -237,14 +252,17 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
       emailMasked: elig.email_masked,
       ci: elig.ci,
     });
-    if (repaired) return repaired;
+    if (repaired) {
+      repaired.campaign_id = resolvedCampaignId;
+      return repaired;
+    }
   }
 
   const fromAddr = requireCampaignsFrom();
   const { data: campaign, error: campErr } = await supabase
     .from('email_campaigns')
     .select('id, subject, body_html')
-    .eq('id', campaignId)
+    .eq('id', resolvedCampaignId)
     .maybeSingle();
   if (campErr) {
     throw new Error('survey invite campaign load failed: ' + campErr.message);
@@ -255,6 +273,8 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
       result: REASONS.CAMPAIGN_NOT_CONFIGURED,
       email_masked: elig.email_masked,
       recipient_id: null,
+      campaign_id: resolvedCampaignId,
+      due_step: null,
     };
   }
 
@@ -268,7 +288,7 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
   });
 
   const insertRow = {
-    campaign_id: campaignId,
+    campaign_id: resolvedCampaignId,
     idempotency_key: idempotencyKey,
     ci: String(elig.ci),
     email: snap.email,
@@ -297,6 +317,7 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
       status: 'queued',
       email_masked: elig.email_masked,
       repaired: false,
+      campaign_id: resolvedCampaignId,
     };
   }
 
@@ -326,7 +347,7 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
     const { data: byEmail, error: emErr } = await supabase
       .from('email_campaign_recipients')
       .select('id, status, email, error_reason, idempotency_key')
-      .eq('campaign_id', campaignId)
+      .eq('campaign_id', resolvedCampaignId)
       .eq('email', emailNorm)
       .maybeSingle();
     if (emErr || !byEmail) {
@@ -338,12 +359,14 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
     const mapped = mapExistingRecipientResult(byEmail);
     mapped.email_masked = elig.email_masked;
     mapped.ok = false;
+    mapped.campaign_id = resolvedCampaignId;
     return mapped;
   }
 
   const mapped = mapExistingRecipientResult(existing);
   mapped.email_masked = elig.email_masked;
   mapped.ok = false;
+  mapped.campaign_id = resolvedCampaignId;
   if (mapped.result === REASONS.ALREADY_PENDING) {
     // Concurrent insert that won — treat success-equivalent for caller UX
     return {
@@ -353,6 +376,7 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw) {
       status: existing.status,
       email_masked: elig.email_masked,
       repaired: false,
+      campaign_id: resolvedCampaignId,
     };
   }
   return mapped;

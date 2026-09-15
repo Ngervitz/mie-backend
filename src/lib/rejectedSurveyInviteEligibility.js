@@ -28,6 +28,45 @@ function getWave1CampaignId() {
   return t || null;
 }
 
+/**
+ * Step campaign ids for the 3-step Encuesta sequence.
+ * Never falls back to RECHAZADOS_SURVEY_INVITE_CAMPAIGN_ID (legacy).
+ * @param {1|2|3|number} step
+ * @returns {string|null}
+ */
+function getSurveyInviteStepCampaignId(step) {
+  const n = Number(step);
+  let key = null;
+  let envProp = null;
+  if (n === 1) {
+    key = 'RECHAZADOS_SURVEY_INVITE_STEP1_CAMPAIGN_ID';
+    envProp = 'rechazadosSurveyInviteStep1CampaignId';
+  } else if (n === 2) {
+    key = 'RECHAZADOS_SURVEY_INVITE_STEP2_CAMPAIGN_ID';
+    envProp = 'rechazadosSurveyInviteStep2CampaignId';
+  } else if (n === 3) {
+    key = 'RECHAZADOS_SURVEY_INVITE_STEP3_CAMPAIGN_ID';
+    envProp = 'rechazadosSurveyInviteStep3CampaignId';
+  } else {
+    return null;
+  }
+  const fromEnv =
+    env && env[envProp] != null ? String(env[envProp]).trim() : '';
+  if (fromEnv) return fromEnv;
+  const raw = process.env[key];
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  return t || null;
+}
+
+function getAllSurveyInviteStepCampaignIds() {
+  return {
+    1: getSurveyInviteStepCampaignId(1),
+    2: getSurveyInviteStepCampaignId(2),
+    3: getSurveyInviteStepCampaignId(3),
+  };
+}
+
 function getEmailPublicBaseUrl() {
   const fromEnv =
     env && env.emailPublicBaseUrl != null
@@ -43,8 +82,10 @@ function getEmailPublicBaseUrl() {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
+ * @param {{ campaignId?: string|number|null }} [opts]
+ *   campaignId — required for sequence steps; if omitted, legacy wave1 env.
  */
-async function getRejectedSurveyInviteEligibility(supabase, ciRaw) {
+async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
   const ci = normalizeCi(ciRaw);
   if (ci == null) {
     return evaluateRejectedSurveyInviteEligibility({
@@ -59,7 +100,11 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw) {
     });
   }
 
-  const campaignId = getWave1CampaignId();
+  const options = opts || {};
+  const campaignId =
+    options.campaignId != null && String(options.campaignId).trim() !== ''
+      ? String(options.campaignId).trim()
+      : getWave1CampaignId();
   const publicBase = getEmailPublicBaseUrl();
 
   const { data: estadoRows, error: estErr } = await supabase
@@ -144,16 +189,24 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw) {
 }
 
 /**
- * Batch attach survey_invite summary onto list rows (same reasons as eligibility).
+ * Batch attach survey_invite summary onto list rows.
+ * Uses the same catch-up due-step rules as the job (T0 → dueStep → gates).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} rows
+ * @param {{ now?: Date }} [opts]
  */
-async function attachSurveyInviteToListRows(supabase, rows) {
+async function attachSurveyInviteToListRows(supabase, rows, opts) {
   const list = rows || [];
   if (!list.length) return list;
 
-  const campaignId = getWave1CampaignId();
+  const now = (opts && opts.now) || new Date();
   const publicBase = getEmailPublicBaseUrl();
+  const stepCampaignIds = getAllSurveyInviteStepCampaignIds();
+  const configuredStepIds = [1, 2, 3]
+    .map(function (s) {
+      return stepCampaignIds[s];
+    })
+    .filter(Boolean);
 
   const cis = list.map(function (r) {
     return Number(r.ci);
@@ -183,29 +236,29 @@ async function attachSurveyInviteToListRows(supabase, rows) {
     }),
   );
 
-  let priorByCi = new Map();
-  if (campaignId) {
+  /** @type {Map<string, object>} key = campaignId + ':' + ci */
+  const priorByCampaignCi = new Map();
+  if (configuredStepIds.length) {
     const { data: priors, error: pErr } = await supabase
       .from('email_campaign_recipients')
       .select(
-        'id, campaign_id, ci, email, status, error_reason, purpose, created_at',
+        'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at',
       )
-      .eq('campaign_id', campaignId)
+      .in('campaign_id', configuredStepIds)
       .eq('purpose', PURPOSE)
       .in(
         'ci',
         cis.map(String),
       );
     if (pErr) throw new Error('list survey recipients: ' + pErr.message);
-    // keep latest per ci
     for (const p of priors || []) {
-      const c = Number(p.ci);
-      const prev = priorByCi.get(c);
+      const key = String(p.campaign_id) + ':' + String(p.ci);
+      const prev = priorByCampaignCi.get(key);
       if (
         !prev ||
         String(p.created_at || '') > String(prev.created_at || '')
       ) {
-        priorByCi.set(c, p);
+        priorByCampaignCi.set(key, p);
       }
     }
   }
@@ -240,6 +293,13 @@ async function attachSurveyInviteToListRows(supabase, rows) {
     }
   }
 
+  const {
+    resolveDueSurveyInviteStep,
+    findPreviousUnresolvedSurveyInvite,
+    isSurveyInviteSequenceComplete,
+    SEQUENCE_REASONS,
+  } = require('./rejectedSurveyInviteSequence');
+
   return list.map(function (row) {
     const ci = Number(row.ci);
     const last = lastByCi.get(ci) || null;
@@ -253,21 +313,115 @@ async function attachSurveyInviteToListRows(supabase, rows) {
     const emailNorm = solicitud
       ? normalizeEmail(nullableTrimmedText(solicitud.email) || '')
       : '';
+
+    if (!configuredStepIds.length) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: REASONS.CAMPAIGN_NOT_CONFIGURED,
+          eligible: false,
+          email_masked: null,
+          due_step: null,
+        },
+      });
+    }
+
+    const dueStep = last
+      ? resolveDueSurveyInviteStep(last.fechahora_src, now)
+      : null;
+
+    if (!last) {
+      const elig = evaluateRejectedSurveyInviteEligibility({
+        ci: ci,
+        campaignId: stepCampaignIds[1],
+        publicBaseUrlConfigured: Boolean(publicBase),
+        lastRejection: null,
+        solicitud: null,
+        hasEncuesta: encuestaCis.has(ci),
+        isSuppressed: false,
+        priorRecipient: null,
+      });
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: elig.reason,
+          eligible: false,
+          email_masked: elig.email_masked,
+          due_step: null,
+        },
+      });
+    }
+
+    if (dueStep == null) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: SEQUENCE_REASONS.NOT_DUE,
+          eligible: false,
+          email_masked: null,
+          due_step: null,
+        },
+      });
+    }
+
+    const attemptsByStep = { 1: null, 2: null, 3: null };
+    for (let s = 1; s <= 3; s += 1) {
+      const cid = stepCampaignIds[s];
+      if (!cid) continue;
+      attemptsByStep[s] =
+        priorByCampaignCi.get(String(cid) + ':' + String(ci)) || null;
+    }
+
+    if (isSurveyInviteSequenceComplete(attemptsByStep)) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: SEQUENCE_REASONS.SEQUENCE_COMPLETE,
+          eligible: false,
+          email_masked: null,
+          due_step: dueStep,
+        },
+      });
+    }
+
+    const dueCampaignId = stepCampaignIds[dueStep];
+    if (!dueCampaignId) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: REASONS.CAMPAIGN_NOT_CONFIGURED,
+          eligible: false,
+          email_masked: null,
+          due_step: dueStep,
+        },
+      });
+    }
+
+    const prev = findPreviousUnresolvedSurveyInvite(attemptsByStep, dueStep);
+    if (prev) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: SEQUENCE_REASONS.PREVIOUS_PENDING,
+          eligible: false,
+          email_masked: null,
+          due_step: dueStep,
+        },
+      });
+    }
+
+    const priorRecipient =
+      priorByCampaignCi.get(String(dueCampaignId) + ':' + String(ci)) || null;
     const elig = evaluateRejectedSurveyInviteEligibility({
       ci: ci,
-      campaignId: campaignId,
+      campaignId: dueCampaignId,
       publicBaseUrlConfigured: Boolean(publicBase),
       lastRejection: last,
       solicitud: solicitud,
       hasEncuesta: encuestaCis.has(ci),
       isSuppressed: emailNorm ? suppressed.has(emailNorm) : false,
-      priorRecipient: priorByCi.get(ci) || null,
+      priorRecipient: priorRecipient,
     });
     return Object.assign({}, row, {
       survey_invite: {
         reason: elig.reason,
         eligible: elig.eligible,
         email_masked: elig.email_masked,
+        due_step: dueStep,
       },
     });
   });
@@ -275,6 +429,8 @@ async function attachSurveyInviteToListRows(supabase, rows) {
 
 module.exports = {
   getWave1CampaignId,
+  getSurveyInviteStepCampaignId,
+  getAllSurveyInviteStepCampaignIds,
   getEmailPublicBaseUrl,
   getRejectedSurveyInviteEligibility,
   attachSurveyInviteToListRows,

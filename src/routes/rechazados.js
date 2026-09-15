@@ -49,12 +49,12 @@ const {
 } = require('../lib/rejectedBcuSnapshotSourceRead');
 const { loadMiDeudaBags } = require('../lib/miDeudaBagsRead');
 const {
-  getRejectedSurveyInviteEligibility,
   attachSurveyInviteToListRows,
 } = require('../lib/rejectedSurveyInviteEligibility');
 const {
-  materializeRejectedSurveyInvite,
-} = require('../lib/rejectedSurveyInviteMaterialize');
+  runSurveyInviteSequenceForCi,
+  evaluateSurveyInviteSequenceForCi,
+} = require('../lib/rejectedSurveyInviteEvaluate');
 
 const router = express.Router();
 
@@ -558,7 +558,8 @@ router.post(
       return res.status(400).json({ error: 'CI inválida' });
     }
     try {
-      const outcome = await materializeRejectedSurveyInvite(supabase, ci);
+      // Same catch-up rules as the due job (evaluate now → at most one due step).
+      const outcome = await runSurveyInviteSequenceForCi(supabase, ci);
       const status =
         outcome.ok &&
         (outcome.result === 'queued' || outcome.result === 'already_pending')
@@ -574,6 +575,9 @@ router.post(
         email_masked:
           outcome.email_masked != null ? outcome.email_masked : null,
         repaired: outcome.repaired === true,
+        due_step: outcome.due_step != null ? outcome.due_step : null,
+        campaign_id:
+          outcome.campaign_id != null ? outcome.campaign_id : null,
       });
     } catch (err) {
       logger.error('POST /rechazados/:ci/survey-invite failed', {
@@ -597,11 +601,15 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
     if (!detail) {
       return res.status(404).json({ error: 'No encontrado' });
     }
-    const surveyInvite = await getRejectedSurveyInviteEligibility(supabase, ci);
+    const surveyDecision = await evaluateSurveyInviteSequenceForCi(
+      supabase,
+      ci,
+    );
     detail.survey_invite = {
-      reason: surveyInvite.reason,
-      eligible: surveyInvite.eligible,
-      email_masked: surveyInvite.email_masked,
+      reason: surveyDecision.result,
+      eligible: surveyDecision.action === 'materialize',
+      email_masked: surveyDecision.email_masked,
+      due_step: surveyDecision.due_step,
     };
     return res.json({ ok: true, data: detail });
   } catch (err) {

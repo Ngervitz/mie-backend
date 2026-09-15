@@ -202,6 +202,9 @@
       prior_attempt_blocks: 'Bloqueado',
       campaign_not_configured: 'Config',
       public_base_url_missing: 'Config',
+      not_due: '—',
+      previous_pending: 'Pendiente',
+      sequence_complete: 'Cerrado',
     };
     return {
       kind: 'text',
