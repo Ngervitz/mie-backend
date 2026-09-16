@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const jobsRouter = require('./routes/jobs');
 const reportsRouter = require('./routes/reports');
@@ -26,6 +27,8 @@ const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 
 const app = express();
 
+const EMAIL_ASSETS_ROOT = path.join(__dirname, '..', 'public', 'email-assets');
+
 // Public Credizona tracking ingest — HMAC auth, must run before requireAuth.
 // Own JSON parser so rawBody is available for HMAC and other routes stay unchanged.
 app.use(
@@ -42,6 +45,23 @@ app.use(express.json());
 app.use(smsShortLinksRouter);
 // Public email unsubscribe (GET confirm / POST suppress) — before requireAuth.
 app.use(emailUnsubscribeRouter);
+// Public email HTML assets only (Encuesta STEP1–3). Must run before requireAuth.
+// Does NOT expose the rest of public/ — that remains behind requireAuth below.
+app.use(
+  '/email-assets',
+  express.static(EMAIL_ASSETS_ROOT, {
+    index: false,
+    fallthrough: false,
+  }),
+  function emailAssetsStaticError(err, req, res, next) {
+    const code = Number(err && (err.statusCode || err.status)) || 0;
+    if (code >= 400 && code < 500) {
+      res.sendStatus(code);
+      return;
+    }
+    next(err);
+  },
+);
 // login / logout / bootstrap (allowlisted inside requireAuth)
 app.use('/', authRouter);
 app.use(requireAuth);
