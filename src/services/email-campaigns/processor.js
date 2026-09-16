@@ -23,6 +23,7 @@ const {
   campaignContentNeedsUnsubscribeUrl,
   buildUnsubscribeUrl,
 } = require('./unsubscribeToken');
+const { EMAIL_AUDIENCE_MODES } = require('./audienceMode');
 
 const PAGE_SIZE = 1000;
 const INSERT_BATCH_SIZE = 500;
@@ -390,8 +391,35 @@ async function materializeCampaign(campaignIdRaw) {
     );
   }
 
+  const audienceMode =
+    campaign.audience_mode != null
+      ? String(campaign.audience_mode).trim()
+      : '';
+
+  // DIRECTED campaigns use specific materializers (e.g. survey invite by CI).
+  // Generic segment materialize must fail closed — no audiencia fetch.
+  if (audienceMode === EMAIL_AUDIENCE_MODES.DIRECTED) {
+    throw new Error(
+      `materializeCampaign: campaign ${campaignId} is DIRECTED — generic materialize is not allowed`,
+    );
+  }
+
   if (campaign.segment_id == null) {
-    throw new Error(`materializeCampaign: campaign ${campaignId} has no segment_id`);
+    throw new Error(
+      `materializeCampaign: campaign ${campaignId} has no segment_id` +
+        (audienceMode === EMAIL_AUDIENCE_MODES.SEGMENT_DRIVEN
+          ? ' (corrupt SEGMENT_DRIVEN row)'
+          : ''),
+    );
+  }
+
+  if (
+    audienceMode === EMAIL_AUDIENCE_MODES.SEGMENT_DRIVEN &&
+    campaign.segment_rules_snapshot == null
+  ) {
+    throw new Error(
+      `materializeCampaign: campaign ${campaignId} is SEGMENT_DRIVEN but segment_rules_snapshot is null`,
+    );
   }
 
   const { data: segment, error: segmentErr } = await supabase

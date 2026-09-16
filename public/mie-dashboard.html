@@ -1155,9 +1155,19 @@
           </div>
 
           <label class="mcl-field">
-            <span class="mcl-field-label">🎯 Puntaje mínimo de encuesta</span>
-            <input type="number" id="email-form-score" class="mcl-input" value="70" min="0" step="1" />
+            <span class="mcl-field-label">Tipo de audiencia</span>
+            <select id="email-form-audience-mode" class="mcl-input">
+              <option value="SEGMENT_DRIVEN" selected>Por segmento (encuesta sync)</option>
+              <option value="DIRECTED">Materialización dirigida</option>
+            </select>
           </label>
+
+          <div id="email-form-segment-fields">
+            <label class="mcl-field">
+              <span class="mcl-field-label">🎯 Puntaje mínimo de encuesta</span>
+              <input type="number" id="email-form-score" class="mcl-input" value="70" min="0" step="1" />
+            </label>
+          </div>
 
           <div class="sms-form-actions">
             <div class="email-form-submit-wrap">

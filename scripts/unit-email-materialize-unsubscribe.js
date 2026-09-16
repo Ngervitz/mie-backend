@@ -247,7 +247,11 @@ function seedBase(bodyHtml) {
     status: 'draft',
     subject: 'Hola {{nombre}}',
     body_html: bodyHtml,
+    audience_mode: 'SEGMENT_DRIVEN',
     segment_id: 5,
+    segment_rules_snapshot: [
+      { field: 'attributes.marker', operator: '=', value: 'unit-unsub' },
+    ],
     scheduled_at: null,
   };
   segmentRow = {

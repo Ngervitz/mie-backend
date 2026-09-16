@@ -101,6 +101,7 @@ async function main() {
       name: `E2E campaign ${marker}`,
       subject: 'E2E Test EmailProvider campaign',
       body_html: '<p>Hola — email de prueba E2E (LogEmailProvider).</p>',
+      audience_mode: 'SEGMENT_DRIVEN',
       segment_id: segment.id,
       segment_rules_snapshot: RULES,
       recipient_count: 0,

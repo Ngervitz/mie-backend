@@ -18,6 +18,10 @@ const {
   loadActiveTemplateForCampaign,
   campaignOwnedCopyFromTemplate,
 } = require('../services/email-campaigns/templates');
+const {
+  EMAIL_AUDIENCE_MODES,
+  resolveAudienceModeForCreate,
+} = require('../services/email-campaigns/audienceMode');
 
 const router = express.Router();
 
@@ -97,7 +101,14 @@ router.get('/segments', async (req, res) => {
 
 /**
  * POST /email/campaigns
- * Body: { name, segment_id, scheduled_at?, subject?, body_html?, template_id? }
+ * Body: {
+ *   name,
+ *   audience_mode? | mode?,   // SEGMENT_DRIVEN | DIRECTED
+ *   segment_id?,              // required for SEGMENT_DRIVEN; forbidden for DIRECTED
+ *   scheduled_at?,
+ *   subject?, body_html?, template_id?
+ * }
+ * Legacy: segment_id present + mode omitted → SEGMENT_DRIVEN (explicit app mapping).
  * template_id copies subject/body from an active template. Without it, subject and body_html are required (legacy).
  */
 router.post('/campaigns', async (req, res) => {
@@ -115,9 +126,12 @@ router.post('/campaigns', async (req, res) => {
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'name must be a non-empty string' });
   }
-  if (segmentId == null || segmentId === '') {
-    return res.status(400).json({ error: 'segment_id is required' });
+
+  const modeResolved = resolveAudienceModeForCreate(req.body || {});
+  if (!modeResolved.ok) {
+    return res.status(400).json({ error: modeResolved.error });
   }
+  const audienceMode = modeResolved.mode;
 
   let subject = req.body && req.body.subject;
   let bodyHtml = req.body && req.body.body_html;
@@ -141,32 +155,42 @@ router.post('/campaigns', async (req, res) => {
       }
     }
 
-    const { data: segment, error: segErr } = await supabase
-      .from('email_segments')
-      .select('*')
-      .eq('id', segmentId)
-      .maybeSingle();
-
-    if (segErr) {
-      logger.error('POST /email/campaigns segment lookup failed', {
-        segmentId,
-        error: segErr.message,
-      });
-      return res.status(500).json({ error: segErr.message });
-    }
-    if (!segment) {
-      return res.status(400).json({ error: `segment_id not found: ${segmentId}` });
-    }
-
     const insertRow = {
       name: name.trim(),
       subject: String(subject).trim(),
       body_html: String(bodyHtml).trim(),
-      segment_id: segment.id,
-      segment_rules_snapshot: segment.rules,
+      audience_mode: audienceMode,
       recipient_count: 0,
       status: 'draft',
     };
+
+    if (audienceMode === EMAIL_AUDIENCE_MODES.DIRECTED) {
+      insertRow.segment_id = null;
+      insertRow.segment_rules_snapshot = null;
+    } else {
+      const { data: segment, error: segErr } = await supabase
+        .from('email_segments')
+        .select('*')
+        .eq('id', segmentId)
+        .maybeSingle();
+
+      if (segErr) {
+        logger.error('POST /email/campaigns segment lookup failed', {
+          segmentId,
+          error: segErr.message,
+        });
+        return res.status(500).json({ error: segErr.message });
+      }
+      if (!segment) {
+        return res
+          .status(400)
+          .json({ error: `segment_id not found: ${segmentId}` });
+      }
+
+      insertRow.segment_id = segment.id;
+      insertRow.segment_rules_snapshot = segment.rules;
+    }
+
     if (templateId != null) {
       insertRow.template_id = templateId;
     }
@@ -198,7 +222,6 @@ router.post('/campaigns', async (req, res) => {
     });
   }
 });
-
 /**
  * GET /email/campaigns
  * Must be registered before /campaigns/:id.

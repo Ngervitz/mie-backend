@@ -11455,6 +11455,8 @@ init();
   const subjectInput = document.getElementById('email-form-subject');
   const bodyInput = document.getElementById('email-form-body');
   const scoreInput = document.getElementById('email-form-score');
+  const audienceModeSelect = document.getElementById('email-form-audience-mode');
+  const segmentFields = document.getElementById('email-form-segment-fields');
   const templateSelect = document.getElementById('email-form-template');
   const manualFields = document.getElementById('email-form-manual');
   const templateList = document.getElementById('email-template-list');
@@ -11472,6 +11474,12 @@ init();
       'draft', 'scheduled', 'sending', 'completed', 'partial_error', 'error',
     ];
     return allowedStatuses.includes(status) ? ' email-badge--' + status : '';
+  }
+
+  function syncAudienceModeFields() {
+    const mode = audienceModeSelect ? audienceModeSelect.value : 'SEGMENT_DRIVEN';
+    const directed = mode === 'DIRECTED';
+    if (segmentFields) segmentFields.classList.toggle('hidden', directed);
   }
 
   async function readJsonSafe(response) {
@@ -11571,32 +11579,36 @@ init();
     });
   }
 
-  async function createCampaign({ name, subject, bodyHtml, minScore, templateId }) {
-    const segmentResponse = await fetch('/email/segments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Segmento para ' + name,
-        rules: [{ field: 'encuesta_score', operator: '>=', value: minScore }],
-      }),
-    });
-    const segmentData = await readJsonSafe(segmentResponse);
-    if (!segmentResponse.ok) {
-      throw new Error(getErrorMessage(segmentData, 'No se pudo crear el segmento.'));
-    }
-    if (!segmentData.segment || !segmentData.segment.id) {
-      throw new Error('El servidor creó el segmento pero no devolvió un ID válido.');
-    }
-
+  async function createCampaign({ name, subject, bodyHtml, minScore, templateId, audienceMode }) {
+    const mode = audienceMode === 'DIRECTED' ? 'DIRECTED' : 'SEGMENT_DRIVEN';
     const payload = {
       name: name,
-      segment_id: segmentData.segment.id,
+      audience_mode: mode,
       scheduled_at: new Date().toISOString(),
     };
     if (templateId) payload.template_id = templateId;
     else {
       payload.subject = subject;
       payload.body_html = bodyHtml;
+    }
+
+    if (mode === 'SEGMENT_DRIVEN') {
+      const segmentResponse = await fetch('/email/segments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Segmento para ' + name,
+          rules: [{ field: 'encuesta_score', operator: '>=', value: minScore }],
+        }),
+      });
+      const segmentData = await readJsonSafe(segmentResponse);
+      if (!segmentResponse.ok) {
+        throw new Error(getErrorMessage(segmentData, 'No se pudo crear el segmento.'));
+      }
+      if (!segmentData.segment || !segmentData.segment.id) {
+        throw new Error('El servidor creó el segmento pero no devolvió un ID válido.');
+      }
+      payload.segment_id = segmentData.segment.id;
     }
 
     const campaignResponse = await fetch('/email/campaigns', {
@@ -11606,7 +11618,14 @@ init();
     });
     const campaignData = await readJsonSafe(campaignResponse);
     if (!campaignResponse.ok) {
-      throw new Error(getErrorMessage(campaignData, 'El segmento fue creado, pero no se pudo crear la campaña.'));
+      throw new Error(
+        getErrorMessage(
+          campaignData,
+          mode === 'SEGMENT_DRIVEN'
+            ? 'El segmento fue creado, pero no se pudo crear la campaña.'
+            : 'No se pudo crear la campaña dirigida.',
+        ),
+      );
     }
     return campaignData;
   }
@@ -11649,11 +11668,19 @@ init();
     return Number.isFinite(count) ? String(count) : '0';
   }
 
+  function formatAudienceMode(mode) {
+    if (mode === 'DIRECTED') return 'Materialización dirigida';
+    if (mode === 'SEGMENT_DRIVEN') return 'Por segmento';
+    return mode ? String(mode) : '—';
+  }
+
   function resetForm() {
     if (nameInput) nameInput.value = '';
     if (subjectInput) subjectInput.value = '';
     if (bodyInput) bodyInput.value = '';
     if (scoreInput) scoreInput.value = '70';
+    if (audienceModeSelect) audienceModeSelect.value = 'SEGMENT_DRIVEN';
+    syncAudienceModeFields();
   }
 
   async function renderList() {
@@ -11666,12 +11693,17 @@ init();
         return;
       }
       const rows = campaigns.map(function (campaign) {
-        const materializeButton = campaign.status === 'draft'
-          ? '<button type="button" class="btn email-materialize-btn" data-id="' + escapeHtml(campaign.id) + '">Materializar</button>'
-          : '';
+        const isDirected = campaign.audience_mode === 'DIRECTED';
+        const materializeButton =
+          campaign.status === 'draft' && !isDirected
+            ? '<button type="button" class="btn email-materialize-btn" data-id="' + escapeHtml(campaign.id) + '">Materializar</button>'
+            : isDirected && campaign.status === 'draft'
+              ? '<span class="text-muted">Sin materializar genérico</span>'
+              : '';
         return (
           '<tr class="sms-row">' +
             '<td>' + escapeHtml(campaign.name) + '</td>' +
+            '<td>' + escapeHtml(formatAudienceMode(campaign.audience_mode)) + '</td>' +
             '<td>' + escapeHtml(formatDate(campaign.created_at)) + '</td>' +
             '<td><span class="email-badge' + emailStatusClass(campaign.status) + '">' + escapeHtml(campaign.status) + '</span></td>' +
             '<td>' + escapeHtml(formatRecipientCount(campaign.recipient_count)) + '</td>' +
@@ -11682,7 +11714,7 @@ init();
 
       list.innerHTML =
         '<div class="sms-table-wrap"><table class="sms-table">' +
-          '<thead><tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>Destinatarios</th><th></th></tr></thead>' +
+          '<thead><tr><th>Nombre</th><th>Audiencia</th><th>Creada</th><th>Estado</th><th>Destinatarios</th><th></th></tr></thead>' +
           '<tbody>' + rows + '</tbody></table></div>';
 
       list.querySelectorAll('.email-materialize-btn').forEach(function (button) {
@@ -11709,6 +11741,10 @@ init();
   }
 
   if (!listenersAttached) {
+    if (audienceModeSelect) {
+      audienceModeSelect.addEventListener('change', syncAudienceModeFields);
+      syncAudienceModeFields();
+    }
     if (createButton && form) {
       createButton.addEventListener('click', function () {
         form.classList.toggle('hidden');
@@ -11725,6 +11761,9 @@ init();
         const templateId = templateSelect ? templateSelect.value : '';
         const subject = subjectInput ? subjectInput.value.trim() : '';
         const bodyHtml = bodyInput ? bodyInput.value.trim() : '';
+        const audienceMode = audienceModeSelect
+          ? audienceModeSelect.value
+          : 'SEGMENT_DRIVEN';
         const rawMinScore = scoreInput ? scoreInput.value.trim() : '';
         const minScore = Number(rawMinScore);
 
@@ -11736,16 +11775,25 @@ init();
           alert('Completá asunto y cuerpo, o elegí un template.');
           return;
         }
-        if (rawMinScore === '' || !Number.isFinite(minScore) || minScore < 0) {
-          alert('Ingresá un puntaje mínimo válido.');
-          return;
+        if (audienceMode !== 'DIRECTED') {
+          if (rawMinScore === '' || !Number.isFinite(minScore) || minScore < 0) {
+            alert('Ingresá un puntaje mínimo válido.');
+            return;
+          }
         }
 
         formSubmit.disabled = true;
         const origText = formSubmit.textContent;
         formSubmit.textContent = 'Creando...';
         try {
-          await createCampaign({ name, subject, bodyHtml, minScore, templateId });
+          await createCampaign({
+            name: name,
+            subject: subject,
+            bodyHtml: bodyHtml,
+            minScore: minScore,
+            templateId: templateId,
+            audienceMode: audienceMode,
+          });
           if (form) form.classList.add('hidden');
           resetForm();
           await renderList();

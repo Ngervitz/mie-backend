@@ -206,7 +206,11 @@ function campaignRow(over) {
       status: 'draft',
       subject: 'Hola {{nombre}}',
       body_html: '<p>Survey {{survey_url}}</p>',
+      audience_mode: 'SEGMENT_DRIVEN',
       segment_id: 1,
+      segment_rules_snapshot: [
+        { field: 'encuesta_score', operator: '>=', value: 70 },
+      ],
     },
     over || {},
   );
