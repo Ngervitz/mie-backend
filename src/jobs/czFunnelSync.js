@@ -166,14 +166,24 @@ function nullableText(raw) {
 }
 
 /**
+ * Trimmed text; empty / whitespace-only → null.
+ * Used for email, lrw_id, and person display names.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function nullableTrimmedText(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return s === '' ? null : s;
+}
+
+/**
  * Display name from CZ /solicitudes. Blank / missing → null (no empty strings).
  * @param {unknown} raw
  * @returns {string|null}
  */
 function nullablePersonName(raw) {
-  if (raw == null) return null;
-  const s = String(raw).trim();
-  return s === '' ? null : s;
+  return nullableTrimmedText(raw);
 }
 
 function normalizeExtraData(raw) {
@@ -358,6 +368,8 @@ async function upsertSolicitudes(items) {
       ci: item.ci != null && item.ci !== '' ? Number(item.ci) : null,
       nombre: nullablePersonName(item.nombre),
       apellido: nullablePersonName(item.apellido),
+      email: nullableTrimmedText(item.email),
+      lrw_id: nullableTrimmedText(item.lrw_id),
       fecha_reg: parseCzDateTime(fechaRaw),
       updated_at_src: parseCzDateTime(updatedRaw),
       updated_raw: updatedRaw,
@@ -635,6 +647,7 @@ module.exports = {
   loadExistingJtByCzId,
   isCzApiAuthFailure,
   parseCzDateTime,
+  nullableTrimmedText,
   nullablePersonName,
   normalizeExtraData,
   mapHistoricoRows,
