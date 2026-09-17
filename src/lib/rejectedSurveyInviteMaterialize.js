@@ -2,6 +2,12 @@
 
 /**
  * Materialize rechazados_survey_invite recipient (queued). No provider send.
+ *
+ * Flow:
+ *   eligibility → REAL_SURVEY_URL → RPC(recipient+impact+link) → PUBLIC_TRACKED_URL
+ *   → templateVars.survey_url → buildRecipientPayloadSnapshot → UPDATE recipient
+ *
+ * RPC unit is atomic; RPC→snapshot frontier is not.
  */
 
 const logger = require('./logger');
@@ -23,6 +29,10 @@ const {
   requireCampaignsFrom,
   buildRecipientPayloadSnapshot,
 } = require('../services/email-campaigns/payloadSnapshot');
+const {
+  buildEmailClickTrackedUrl,
+  upsertEmailSurveyInviteRecipientImpact,
+} = require('./emailClickTracking');
 
 function isUniqueViolation(err) {
   if (!err) return false;
@@ -62,132 +72,154 @@ function mapExistingRecipientResult(recipient) {
 }
 
 /**
- * Pre-start snapshot repair uses frozen template source, never the live campaign.
- * Post-start snapshot rows are not rewritten. Legacy rows keep the old var-only repair.
+ * Apply / refresh frozen snapshot on a recipient that already has marketing_impact_id.
+ * Pre-start only (provider_send_started_at IS NULL).
  *
- * @returns {Promise<object|null>} result, or null to fall through to insert
+ * @returns {Promise<object|null>}
  */
-async function repairSurveyInviteRecipient(supabase, args) {
+async function applySurveyInviteSnapshot(supabase, args) {
   const { data: existing, error: loadErr } = await supabase
     .from('email_campaign_recipients')
     .select(
-      'id, status, email, error_reason, idempotency_key, provider_send_started_at, template_subject_snapshot, template_body_html_snapshot, payload_to, payload_from, payload_subject, payload_html, template_vars',
+      'id, status, email, error_reason, idempotency_key, provider_send_started_at, marketing_impact_id, template_subject_snapshot, template_body_html_snapshot, payload_to, payload_from, payload_subject, payload_html, template_vars',
     )
     .eq('id', args.recipientId)
     .eq('idempotency_key', args.idempotencyKey)
     .maybeSingle();
   if (loadErr) {
-    throw new Error('survey invite repair load failed: ' + loadErr.message);
+    throw new Error('survey invite snapshot load failed: ' + loadErr.message);
   }
   if (!existing) return null;
 
-  if (classifyRecipientPayload(existing) === 'snapshot') {
-    if (existing.provider_send_started_at != null) {
-      return {
-        ok: false,
-        result: REASONS.PRIOR_ATTEMPT_BLOCKS,
-        recipient_id: existing.id,
-        status: existing.status,
-        email_masked: args.emailMasked,
-        repaired: false,
-      };
-    }
-    const sourceSubject = existing.template_subject_snapshot;
-    const sourceHtml = existing.template_body_html_snapshot;
-    if (sourceSubject == null || sourceHtml == null) {
-      const err = new Error('payload_snapshot_incomplete');
-      err.code = 'PAYLOAD_SNAPSHOT_INCOMPLETE';
-      throw err;
-    }
-    const fromFrozen = existing.payload_from;
-    if (fromFrozen == null || String(fromFrozen).trim() === '') {
-      const err = new Error('payload_snapshot_incomplete');
-      err.code = 'PAYLOAD_SNAPSHOT_INCOMPLETE';
-      throw err;
-    }
-    const snap = buildRecipientPayloadSnapshot({
-      to: args.emailNorm,
-      from: fromFrozen,
-      subject: sourceSubject,
-      bodyHtml: sourceHtml,
-      templateVars: args.templateVars,
-      purpose: args.purpose,
-    });
-    const { data: repaired, error: repErr } = await supabase
-      .from('email_campaign_recipients')
-      .update({
-        email: snap.email,
-        template_vars: snap.template_vars,
-        payload_to: snap.payload_to,
-        payload_from: snap.payload_from,
-        payload_subject: snap.payload_subject,
-        payload_html: snap.payload_html,
-        template_subject_snapshot: snap.template_subject_snapshot,
-        template_body_html_snapshot: snap.template_body_html_snapshot,
-        status: 'queued',
-        error_reason: null,
-        next_attempt_at: null,
-      })
-      .eq('id', existing.id)
-      .eq('idempotency_key', args.idempotencyKey)
-      .is('provider_send_started_at', null)
-      .select('id, status, email')
-      .maybeSingle();
-    if (repErr) {
-      logger.error('survey invite repair failed', {
-        ci: args.ci,
-        error: repErr.message,
-      });
-      throw new Error('survey invite repair failed: ' + repErr.message);
-    }
-    if (!repaired) return null;
+  if (existing.provider_send_started_at != null) {
     return {
-      ok: true,
-      result: 'queued',
-      recipient_id: repaired.id,
-      status: 'queued',
+      ok: false,
+      result: REASONS.PRIOR_ATTEMPT_BLOCKS,
+      recipient_id: existing.id,
+      status: existing.status,
       email_masked: args.emailMasked,
-      repaired: true,
+      repaired: false,
+      marketing_impact_id: existing.marketing_impact_id || null,
     };
   }
 
-  const { data: repaired, error: repErr } = await supabase
+  let sourceSubject = existing.template_subject_snapshot;
+  let sourceHtml = existing.template_body_html_snapshot;
+  let fromAddr = existing.payload_from;
+
+  if (
+    sourceSubject == null ||
+    sourceHtml == null ||
+    fromAddr == null ||
+    String(fromAddr).trim() === ''
+  ) {
+    const { data: campaign, error: campErr } = await supabase
+      .from('email_campaigns')
+      .select('id, subject, body_html')
+      .eq('id', args.campaignId)
+      .maybeSingle();
+    if (campErr) {
+      throw new Error('survey invite campaign load failed: ' + campErr.message);
+    }
+    if (!campaign) {
+      return {
+        ok: false,
+        result: REASONS.CAMPAIGN_NOT_CONFIGURED,
+        email_masked: args.emailMasked,
+        recipient_id: existing.id,
+        status: existing.status,
+        repaired: false,
+        marketing_impact_id: existing.marketing_impact_id || null,
+      };
+    }
+    if (sourceSubject == null) sourceSubject = campaign.subject;
+    if (sourceHtml == null) sourceHtml = campaign.body_html;
+    if (fromAddr == null || String(fromAddr).trim() === '') {
+      fromAddr = requireCampaignsFrom();
+    }
+  }
+
+  const snap = buildRecipientPayloadSnapshot({
+    to: args.emailNorm,
+    from: fromAddr,
+    subject: sourceSubject,
+    bodyHtml: sourceHtml,
+    templateVars: args.templateVars,
+    purpose: args.purpose,
+  });
+
+  const { data: updated, error: updErr } = await supabase
     .from('email_campaign_recipients')
     .update({
-      template_vars: args.templateVars,
-      email: args.emailNorm,
+      email: snap.email,
+      template_vars: snap.template_vars,
+      payload_to: snap.payload_to,
+      payload_from: snap.payload_from,
+      payload_subject: snap.payload_subject,
+      payload_html: snap.payload_html,
+      template_subject_snapshot: snap.template_subject_snapshot,
+      template_body_html_snapshot: snap.template_body_html_snapshot,
       status: 'queued',
       error_reason: null,
       next_attempt_at: null,
     })
-    .eq('id', args.recipientId)
+    .eq('id', existing.id)
     .eq('idempotency_key', args.idempotencyKey)
-    .select('id, status, email')
+    .is('provider_send_started_at', null)
+    .select('id, status, email, marketing_impact_id')
     .maybeSingle();
-  if (repErr) {
-    logger.error('survey invite repair failed', {
+
+  if (updErr) {
+    logger.error('survey invite snapshot update failed', {
       ci: args.ci,
-      error: repErr.message,
+      error: updErr.message,
     });
-    throw new Error('survey invite repair failed: ' + repErr.message);
+    throw new Error('survey invite snapshot update failed: ' + updErr.message);
   }
-  if (!repaired) return null;
+  if (!updated) return null;
+
+  const hadCompleteSnapshot =
+    classifyRecipientPayload(existing) === 'snapshot' &&
+    existing.payload_html != null &&
+    String(existing.payload_html).trim() !== '';
+  const wasFailedAttempt =
+    String(existing.status || '') === 'failed' ||
+    (existing.error_reason != null && String(existing.error_reason).trim() !== '');
+
   return {
     ok: true,
     result: 'queued',
-    recipient_id: repaired.id,
+    recipient_id: updated.id,
     status: 'queued',
     email_masked: args.emailMasked,
-    repaired: true,
+    repaired: hadCompleteSnapshot || wasFailedAttempt,
+    marketing_impact_id: updated.marketing_impact_id || null,
   };
+}
+
+/**
+ * Pre-start snapshot repair — kept for callers/tests; uses tracked templateVars.
+ * Prefer materializeRejectedSurveyInvite which runs RPC first.
+ *
+ * @returns {Promise<object|null>}
+ */
+async function repairSurveyInviteRecipient(supabase, args) {
+  return applySurveyInviteSnapshot(supabase, {
+    recipientId: args.recipientId,
+    idempotencyKey: args.idempotencyKey,
+    emailNorm: args.emailNorm,
+    templateVars: args.templateVars,
+    purpose: args.purpose,
+    emailMasked: args.emailMasked,
+    ci: args.ci,
+    campaignId: args.campaignId,
+  });
 }
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
  * @param {string|number|null|undefined} [campaignId]
- *   Explicit campaign for sequence step. If omitted, legacy wave1 env
- *   (Stage 2B single-campaign path only — sequence always passes STEP id).
  */
 async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
   assertValidEmailPurpose(PURPOSE);
@@ -228,162 +260,70 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
     };
   }
 
-  const surveyUrl = buildSurveyUrl(elig.lrw_id);
-  const unsubscribeUrl = buildUnsubscribeUrl(publicBase, elig.email);
-  const nombre = resolveInviteNombre(elig.nombre);
-  const templateVars = {
-    nombre: nombre,
-    survey_url: surveyUrl,
-    unsubscribe_url: unsubscribeUrl,
-  };
+  const realSurveyUrl = buildSurveyUrl(elig.lrw_id);
   const idempotencyKey = buildSurveyInviteIdempotencyKey(
     resolvedCampaignId,
     elig.ci,
   );
   const emailNorm = normalizeEmail(elig.email);
 
-  if (elig.repairable && elig.prior_recipient_id != null) {
-    const repaired = await repairSurveyInviteRecipient(supabase, {
-      recipientId: elig.prior_recipient_id,
-      idempotencyKey: idempotencyKey,
-      emailNorm: emailNorm,
-      templateVars: templateVars,
-      purpose: PURPOSE,
-      emailMasked: elig.email_masked,
-      ci: elig.ci,
-    });
-    if (repaired) {
-      repaired.campaign_id = resolvedCampaignId;
-      return repaired;
-    }
-  }
-
-  const fromAddr = requireCampaignsFrom();
-  const { data: campaign, error: campErr } = await supabase
-    .from('email_campaigns')
-    .select('id, subject, body_html')
-    .eq('id', resolvedCampaignId)
-    .maybeSingle();
-  if (campErr) {
-    throw new Error('survey invite campaign load failed: ' + campErr.message);
-  }
-  if (!campaign) {
-    return {
-      ok: false,
-      result: REASONS.CAMPAIGN_NOT_CONFIGURED,
-      email_masked: elig.email_masked,
-      recipient_id: null,
-      campaign_id: resolvedCampaignId,
-      due_step: null,
-    };
-  }
-
-  const snap = buildRecipientPayloadSnapshot({
-    to: emailNorm,
-    from: fromAddr,
-    subject: campaign.subject,
-    bodyHtml: campaign.body_html,
-    templateVars: templateVars,
+  // Unit: recipient + impact + link (atomic). Snapshot is a later frontier.
+  const unit = await upsertEmailSurveyInviteRecipientImpact(supabase, {
+    idempotencyKey: idempotencyKey,
+    campaignId: resolvedCampaignId,
+    ci: elig.ci,
+    email: emailNorm,
     purpose: PURPOSE,
+    destinationUrl: realSurveyUrl,
   });
 
-  const insertRow = {
-    campaign_id: resolvedCampaignId,
-    idempotency_key: idempotencyKey,
-    ci: String(elig.ci),
-    email: snap.email,
-    status: 'queued',
-    purpose: PURPOSE,
-    template_vars: snap.template_vars,
-    payload_to: snap.payload_to,
-    payload_from: snap.payload_from,
-    payload_subject: snap.payload_subject,
-    payload_html: snap.payload_html,
-    template_subject_snapshot: snap.template_subject_snapshot,
-    template_body_html_snapshot: snap.template_body_html_snapshot,
+  const trackedUrl = buildEmailClickTrackedUrl(unit.tracking_token, publicBase);
+  const unsubscribeUrl = buildUnsubscribeUrl(publicBase, elig.email);
+  const nombre = resolveInviteNombre(elig.nombre);
+  const templateVars = {
+    nombre: nombre,
+    survey_url: trackedUrl,
+    unsubscribe_url: unsubscribeUrl,
   };
 
-  const { data: inserted, error: insErr } = await supabase
-    .from('email_campaign_recipients')
-    .insert(insertRow)
-    .select('id, status, email, idempotency_key')
-    .maybeSingle();
-
-  if (!insErr && inserted) {
-    return {
-      ok: true,
-      result: 'queued',
-      recipient_id: inserted.id,
-      status: 'queued',
-      email_masked: elig.email_masked,
-      repaired: false,
-      campaign_id: resolvedCampaignId,
-    };
-  }
-
-  if (!isUniqueViolation(insErr)) {
-    logger.error('survey invite insert failed', {
-      ci: elig.ci,
-      error: insErr && insErr.message,
+  if (unit.provider_send_started_at) {
+    const mapped = mapExistingRecipientResult({
+      id: unit.recipient_id,
+      status: unit.status,
     });
-    throw new Error(
-      'survey invite insert failed: ' +
-        (insErr && insErr.message ? insErr.message : 'unknown'),
-    );
-  }
-
-  // Conflict: load by idempotency_key (same logical attempt).
-  const { data: existing, error: exErr } = await supabase
-    .from('email_campaign_recipients')
-    .select('id, status, email, error_reason, idempotency_key')
-    .eq('idempotency_key', idempotencyKey)
-    .maybeSingle();
-
-  if (exErr) {
-    throw new Error('survey invite conflict load failed: ' + exErr.message);
-  }
-  if (!existing) {
-    // Fallback: campaign + email unique
-    const { data: byEmail, error: emErr } = await supabase
-      .from('email_campaign_recipients')
-      .select('id, status, email, error_reason, idempotency_key')
-      .eq('campaign_id', resolvedCampaignId)
-      .eq('email', emailNorm)
-      .maybeSingle();
-    if (emErr || !byEmail) {
-      throw new Error(
-        'survey invite conflict but existing row not found: ' +
-          (emErr && emErr.message ? emErr.message : 'missing'),
-      );
-    }
-    const mapped = mapExistingRecipientResult(byEmail);
-    mapped.email_masked = elig.email_masked;
     mapped.ok = false;
+    mapped.email_masked = elig.email_masked;
     mapped.campaign_id = resolvedCampaignId;
+    mapped.marketing_impact_id = unit.impact_id;
+    mapped.tracking_token = unit.tracking_token;
     return mapped;
   }
 
-  const mapped = mapExistingRecipientResult(existing);
-  mapped.email_masked = elig.email_masked;
-  mapped.ok = false;
-  mapped.campaign_id = resolvedCampaignId;
-  if (mapped.result === REASONS.ALREADY_PENDING) {
-    // Concurrent insert that won — treat success-equivalent for caller UX
-    return {
-      ok: true,
-      result: REASONS.ALREADY_PENDING,
-      recipient_id: existing.id,
-      status: existing.status,
-      email_masked: elig.email_masked,
-      repaired: false,
-      campaign_id: resolvedCampaignId,
-    };
+  const applied = await applySurveyInviteSnapshot(supabase, {
+    recipientId: unit.recipient_id,
+    idempotencyKey: idempotencyKey,
+    emailNorm: emailNorm,
+    templateVars: templateVars,
+    purpose: PURPOSE,
+    emailMasked: elig.email_masked,
+    ci: elig.ci,
+    campaignId: resolvedCampaignId,
+  });
+
+  if (!applied) {
+    throw new Error('survey invite snapshot apply returned empty');
   }
-  return mapped;
+
+  applied.campaign_id = resolvedCampaignId;
+  applied.marketing_impact_id = unit.impact_id;
+  applied.tracking_token = unit.tracking_token;
+  return applied;
 }
 
 module.exports = {
   materializeRejectedSurveyInvite,
+  repairSurveyInviteRecipient,
+  applySurveyInviteSnapshot,
   isUniqueViolation,
   mapExistingRecipientResult,
 };

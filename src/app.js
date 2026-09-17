@@ -24,6 +24,7 @@ const logger = require('./lib/logger');
 const smsShortLinksRouter = require('./routes/sms-short-links');
 const trackingEventsRouter = require('./routes/tracking-events');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
+const emailClickRouter = require('./routes/email-click');
 
 const app = express();
 
@@ -45,6 +46,8 @@ app.use(express.json());
 app.use(smsShortLinksRouter);
 // Public email unsubscribe (GET confirm / POST suppress) — before requireAuth.
 app.use(emailUnsubscribeRouter);
+// Public email click redirect (GET records event; HEAD does not) — before requireAuth.
+app.use(emailClickRouter);
 // Public email HTML assets only (Encuesta STEP1–3). Must run before requireAuth.
 // Does NOT expose the rest of public/ — that remains behind requireAuth below.
 app.use(

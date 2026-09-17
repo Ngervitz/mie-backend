@@ -628,7 +628,11 @@ function makeFakeSb(state) {
   };
 }
 
-// Patch insert chain — supabase client uses .insert().select().maybeSingle()
+// Materialize fixture: productive path uses supabase.rpc (recipient+impact), then snapshot UPDATE.
+// RPC contract aligned with unit-email-survey-click-materialize / unit-rejected-survey-invite-2b.
+const MATERIALIZE_RPC_IMPACT = '11111111-1111-4111-8111-111111111111';
+const MATERIALIZE_RPC_TOKEN = 'abcdefghijABCDEFGHIJ12';
+
 function makeMaterializeSb(opts) {
   const o = opts || {};
   const recipients = o.recipients || [];
@@ -636,6 +640,55 @@ function makeMaterializeSb(opts) {
   let lastCampaignId = null;
   return {
     _recipients: recipients,
+    rpc: async function (name, params) {
+      assert.strictEqual(name, 'upsert_email_survey_invite_recipient_impact');
+      let row = recipients.find(function (r) {
+        return r.idempotency_key === params.p_idempotency_key;
+      });
+      let created = false;
+      if (!row) {
+        created = true;
+        row = {
+          id: o.force23505 ? 'race-1' : 'ins-' + (recipients.length + 1),
+          campaign_id: String(params.p_campaign_id),
+          idempotency_key: params.p_idempotency_key,
+          ci: params.p_ci,
+          email: params.p_email,
+          status: 'queued',
+          purpose: params.p_purpose,
+          marketing_impact_id: MATERIALIZE_RPC_IMPACT,
+          provider_send_started_at: null,
+          template_vars: {},
+          payload_html: null,
+          payload_to: null,
+          payload_from: null,
+          payload_subject: null,
+          template_subject_snapshot: null,
+          template_body_html_snapshot: null,
+          error_reason: null,
+          next_attempt_at: null,
+          created_at: new Date().toISOString(),
+        };
+        recipients.push(row);
+      } else if (!row.marketing_impact_id) {
+        row.marketing_impact_id = MATERIALIZE_RPC_IMPACT;
+        created = true;
+      }
+      return {
+        data: {
+          created: created,
+          recipient_id: row.id,
+          impact_id: MATERIALIZE_RPC_IMPACT,
+          tracking_token: MATERIALIZE_RPC_TOKEN,
+          destination_url: params.p_destination_url,
+          campaign_id: Number(params.p_campaign_id),
+          idempotency_key: row.idempotency_key,
+          status: row.status,
+          provider_send_started_at: row.provider_send_started_at || null,
+        },
+        error: null,
+      };
+    },
     from: function (table) {
       if (table === 'cz_funnel_solicitud_estados') {
         return {
@@ -876,49 +929,46 @@ function makeMaterializeSb(opts) {
               },
             };
           },
-          update: function () {
-            return {
+          update: function (patch) {
+            const api = {
               eq: function () {
+                return api;
+              },
+              is: function () {
+                return api;
+              },
+              select: function () {
                 return {
-                  eq: function () {
+                  maybeSingle: async function () {
+                    const row =
+                      recipients.find(function (r) {
+                        return (
+                          String(r.id) === String(o.repairId) ||
+                          r.idempotency_key != null
+                        );
+                      }) || recipients[recipients.length - 1];
+                    if (!row) return { data: null, error: null };
+                    if (row.provider_send_started_at != null) {
+                      return { data: null, error: null };
+                    }
+                    Object.assign(row, patch, {
+                      status: 'queued',
+                      error_reason: null,
+                    });
                     return {
-                      is: function () {
-                        return {
-                          select: function () {
-                            return {
-                              maybeSingle: async function () {
-                                return {
-                                  data: {
-                                    id: o.repairId || 'r1',
-                                    status: 'queued',
-                                    email: 'lead@example.com',
-                                  },
-                                  error: null,
-                                };
-                              },
-                            };
-                          },
-                        };
+                      data: {
+                        id: row.id,
+                        status: row.status,
+                        email: row.email,
+                        marketing_impact_id: row.marketing_impact_id || null,
                       },
-                      select: function () {
-                        return {
-                          maybeSingle: async function () {
-                            return {
-                              data: {
-                                id: o.repairId || 'r1',
-                                status: 'queued',
-                                email: 'lead@example.com',
-                              },
-                              error: null,
-                            };
-                          },
-                        };
-                      },
+                      error: null,
                     };
                   },
                 };
               },
             };
+            return api;
           },
         };
       }
@@ -961,12 +1011,14 @@ async function runMaterializeCases() {
       18,
       r1.ok === true &&
         r1.result === 'queued' &&
+        r1.tracking_token === MATERIALIZE_RPC_TOKEN &&
+        String(r1.marketing_impact_id) === MATERIALIZE_RPC_IMPACT &&
         r2.ok === false &&
         r2.result === REASONS.ALREADY_PENDING,
     );
   }
 
-  // 19 23505 recover
+  // 19 race/idempotent RPC recover (replaces legacy insert 23505 path)
   {
     const recipients = [];
     const sb = makeMaterializeSb({ recipients: recipients, force23505: true });
@@ -974,8 +1026,10 @@ async function runMaterializeCases() {
     pass(
       19,
       r.ok === true &&
-        r.result === REASONS.ALREADY_PENDING &&
-        r.recipient_id === 'race-1',
+        r.result === 'queued' &&
+        r.recipient_id === 'race-1' &&
+        r.tracking_token === MATERIALIZE_RPC_TOKEN &&
+        String(r.marketing_impact_id) === MATERIALIZE_RPC_IMPACT,
     );
   }
 
@@ -994,7 +1048,10 @@ async function runMaterializeCases() {
     const b = await materializeRejectedSurveyInvite(sb, CI, '102');
     pass(
       35,
-      a.recipient_id === b.recipient_id &&
+      a.ok === true &&
+        a.result === 'queued' &&
+        a.recipient_id === b.recipient_id &&
+        a.tracking_token === MATERIALIZE_RPC_TOKEN &&
         recipients.filter(function (r) {
           return String(r.campaign_id) === '102';
         }).length === 1,

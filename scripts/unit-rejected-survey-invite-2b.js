@@ -404,7 +404,59 @@ async function runMaterializeWithFixture(fixture) {
   };
 
   let store = fixture.store || { rows: [], insertCount: 0 };
+  const IMPACT = '11111111-1111-4111-8111-111111111111';
+  const TOKEN = 'abcdefghijABCDEFGHIJ12';
+
   const supabase = {
+    rpc: async function (name, params) {
+      assert.strictEqual(name, 'upsert_email_survey_invite_recipient_impact');
+      let row = store.rows.find(function (r) {
+        return r.idempotency_key === params.p_idempotency_key;
+      });
+      let created = false;
+      if (!row) {
+        store.insertCount += 1;
+        row = {
+          id: store.insertCount,
+          campaign_id: Number(params.p_campaign_id),
+          idempotency_key: params.p_idempotency_key,
+          ci: params.p_ci,
+          email: params.p_email,
+          status: 'queued',
+          purpose: params.p_purpose,
+          marketing_impact_id: IMPACT,
+          provider_send_started_at: null,
+          template_vars: {},
+          payload_html: null,
+          payload_to: null,
+          payload_from: null,
+          payload_subject: null,
+          template_subject_snapshot: null,
+          template_body_html_snapshot: null,
+          error_reason: null,
+          next_attempt_at: null,
+        };
+        store.rows.push(row);
+        created = true;
+      } else if (!row.marketing_impact_id) {
+        row.marketing_impact_id = IMPACT;
+        created = true;
+      }
+      return {
+        data: {
+          created: created,
+          recipient_id: row.id,
+          impact_id: IMPACT,
+          tracking_token: TOKEN,
+          destination_url: params.p_destination_url,
+          campaign_id: row.campaign_id,
+          idempotency_key: row.idempotency_key,
+          status: row.status,
+          provider_send_started_at: row.provider_send_started_at || null,
+        },
+        error: null,
+      };
+    },
     from: function (table) {
       if (table === 'email_campaigns') {
         return {
@@ -429,39 +481,22 @@ async function runMaterializeWithFixture(fixture) {
       }
       assert.strictEqual(table, 'email_campaign_recipients');
       return {
-        insert: function (row) {
-          return {
-            select: function () {
-              return {
-                maybeSingle: async function () {
-                  store.insertCount += 1;
-                  const clash = store.rows.find(function (r) {
-                    return r.idempotency_key === row.idempotency_key;
-                  });
-                  if (clash) {
-                    return {
-                      data: null,
-                      error: { code: '23505', message: 'duplicate' },
-                    };
-                  }
-                  const created = Object.assign({ id: store.insertCount }, row);
-                  store.rows.push(created);
-                  return { data: created, error: null };
-                },
-              };
-            },
-          };
-        },
         update: function (patch) {
           const api = {
             eq: function () {
+              return api;
+            },
+            is: function () {
               return api;
             },
             select: function () {
               return {
                 maybeSingle: async function () {
                   const row = store.rows[0];
-                  Object.assign(row, patch);
+                  Object.assign(row, patch, {
+                    status: 'queued',
+                    error_reason: null,
+                  });
                   return { data: row, error: null };
                 },
               };
@@ -472,14 +507,22 @@ async function runMaterializeWithFixture(fixture) {
         select: function () {
           return {
             eq: function (col, val) {
-              this._col = col;
-              this._val = val;
+              this._filters = this._filters || {};
+              this._filters[col] = val;
               return this;
             },
             maybeSingle: async function () {
+              const f = this._filters || {};
               const row = store.rows.find(function (r) {
-                return String(r.idempotency_key) === String(this._val);
-              }.bind(this));
+                if (f.id != null && String(r.id) !== String(f.id)) return false;
+                if (
+                  f.idempotency_key != null &&
+                  String(r.idempotency_key) !== String(f.idempotency_key)
+                ) {
+                  return false;
+                }
+                return true;
+              });
               return { data: row || null, error: null };
             },
           };
@@ -521,15 +564,22 @@ const eligOk = {
   assert.strictEqual(store.rows[0].purpose, PURPOSE);
   assert.strictEqual(
     store.rows[0].template_vars.survey_url,
-    'https://www.credizona.com.uy/solicitudes/sinoferta?lrw=LRW-NEW',
+    'https://janus.test/email/c/abcdefghijABCDEFGHIJ12',
+  );
+  assert.ok(
+    String(store.rows[0].payload_html || '').indexOf(
+      '/email/c/abcdefghijABCDEFGHIJ12',
+    ) !== -1,
   );
   assert.ok(
     store.rows[0].template_vars.unsubscribe_url.indexOf(
       'https://janus.test/email/unsubscribe?t=',
     ) === 0,
   );
-  assert.strictEqual(b.result, REASONS.ALREADY_PENDING);
+  assert.strictEqual(b.ok, true);
   assert.strictEqual(b.recipient_id, a.recipient_id);
+  assert.strictEqual(b.tracking_token, a.tracking_token);
+  assert.strictEqual(store.rows.length, 1);
 
   // suppressed eligibility short-circuit (no insert)
   const blocked = await runMaterializeWithFixture({
@@ -553,6 +603,15 @@ const eligOk = {
         status: 'failed',
         error_reason: 'missing_required_template_var:survey_url',
         ci: '111',
+        marketing_impact_id: null,
+        provider_send_started_at: null,
+        template_vars: {},
+        payload_html: null,
+        payload_to: null,
+        payload_from: null,
+        payload_subject: null,
+        template_subject_snapshot: null,
+        template_body_html_snapshot: null,
       },
     ],
     insertCount: 0,
