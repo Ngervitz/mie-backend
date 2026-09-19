@@ -97,7 +97,7 @@ assert.deepStrictEqual(H.scoreCell(0), {
 });
 assert.deepStrictEqual(
   H.scoreCell(null, { step2_sent_at: '2026-09-19T00:00:00.000Z' }),
-  { kind: 'badge', label: 'STEP 2', badgeClass: 'is-survey-step' },
+  { kind: 'badge', label: 'S2', badgeClass: 'is-survey-step' },
 );
 assert.deepStrictEqual(H.miPlanCell('not_invited'), {
   kind: 'cta',

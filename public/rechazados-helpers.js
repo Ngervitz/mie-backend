@@ -149,14 +149,14 @@
     if (seq.step2_sent_at) {
       return {
         kind: 'badge',
-        label: 'STEP 2',
+        label: 'S2',
         badgeClass: 'is-survey-step',
       };
     }
     if (seq.step1_sent_at) {
       return {
         kind: 'badge',
-        label: 'STEP 1',
+        label: 'S1',
         badgeClass: 'is-survey-step',
       };
     }

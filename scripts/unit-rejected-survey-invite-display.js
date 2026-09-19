@@ -142,11 +142,11 @@ assert.deepStrictEqual(H.scoreCell(null), {
 });
 assert.deepStrictEqual(
   H.scoreCell(null, { step1_sent_at: 't1' }),
-  { kind: 'badge', label: 'STEP 1', badgeClass: 'is-survey-step' },
+  { kind: 'badge', label: 'S1', badgeClass: 'is-survey-step' },
 );
 assert.deepStrictEqual(
   H.scoreCell(null, { step1_sent_at: 't1', step2_sent_at: 't2' }),
-  { kind: 'badge', label: 'STEP 2', badgeClass: 'is-survey-step' },
+  { kind: 'badge', label: 'S2', badgeClass: 'is-survey-step' },
 );
 assert.deepStrictEqual(
   H.scoreCell(null, {
