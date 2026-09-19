@@ -14777,13 +14777,33 @@ init();
 
   function renderCellDescriptor(cell, ci) {
     if (!cell) return '—';
+    if (cell.kind === 'clock') {
+      return (
+        '<span class="rechazados-survey-clock" title="' +
+        escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
+        '" aria-label="' +
+        escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
+        '">' +
+        '<svg class="rechazados-survey-clock-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+        '<circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+        '<path d="M8 4.5v3.75L10.25 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '</svg>' +
+        '</span>'
+      );
+    }
     if (cell.kind === 'badge') {
       const badgeClass =
         cell.badgeClass != null
           ? String(cell.badgeClass)
           : 'is-bcu-pending';
+      const surveyBadge =
+        badgeClass.indexOf('is-survey-') === 0
+          ? 'rechazados-survey-badge'
+          : 'rechazados-bcu-badge';
       return (
-        '<span class="rechazados-bcu-badge ' +
+        '<span class="' +
+        surveyBadge +
+        ' ' +
         escapeHtml(badgeClass) +
         '">' +
         escapeHtml(cell.label != null ? cell.label : '—') +
@@ -14911,7 +14931,7 @@ init();
       .map(function (row) {
         const name = H.formatPersonName(row.nombre, row.apellido);
         const dateCell = H.formatRejectedAtDateCell(row.rejected_at);
-        const score = H.scoreCell(row.score_v2);
+        const score = H.scoreCell(row.score_v2, row.survey_sequence);
         const plan = H.miPlanCell(row.mi_plan_status);
         const deuda = H.miDeudaCell(
           row.mi_deuda_status,
@@ -14919,7 +14939,6 @@ init();
         );
         const bcu = H.worstBcuCell(row.worst_bcu);
         const retry = H.retryReviewCell(row.ops_status, row.next_review_on);
-        const survey = H.surveyInviteCell(row.survey_invite);
         return (
           '<tr>' +
           '<td class="rechazados-col-ci">' +
@@ -14946,9 +14965,6 @@ init();
           '<td class="rechazados-col-deuda">' +
           renderCellDescriptor(deuda, row.ci) +
           '</td>' +
-          '<td class="rechazados-col-survey">' +
-          renderCellDescriptor(survey, row.ci) +
-          '</td>' +
           '<td class="rechazados-col-bcu">' +
           renderCellDescriptor(bcu, row.ci) +
           '</td>' +
@@ -14971,7 +14987,6 @@ init();
       '<th class="rechazados-col-score">Score</th>' +
       '<th class="rechazados-col-plan">Mi Plan</th>' +
       '<th class="rechazados-col-deuda">Mi Deuda</th>' +
-      '<th class="rechazados-col-survey">Encuesta</th>' +
       '<th class="rechazados-col-bcu">Peor BCU</th>' +
       '<th class="rechazados-col-retry">Retry / Próx. revisión</th>' +
       '<th class="rechazados-col-ver">Ver</th>' +

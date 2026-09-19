@@ -113,28 +113,56 @@
   /**
    * List/detail presentation descriptors (no DOM).
    */
-  function scoreCell(score) {
-    if (score == null || score === '') {
+  /**
+   * SCORE column: numeric score OR survey email sequence state.
+   * Precedence: valid score (incl. 0) > STEP3 sent > STEP2 > STEP1 > clock.
+   * No "Encuestar". No email attribution glyph.
+   *
+   * @param {unknown} score
+   * @param {{
+   *   step1_sent_at?: string|null,
+   *   step2_sent_at?: string|null,
+   *   step3_sent_at?: string|null,
+   * }=} [surveySequence]
+   */
+  function scoreCell(score, surveySequence) {
+    if (score != null && score !== '') {
+      var n = Number(score);
+      if (Number.isFinite(n)) {
+        return {
+          kind: 'text',
+          label: String(n),
+          tone: scoreTone(n),
+        };
+      }
+    }
+    var seq = surveySequence && typeof surveySequence === 'object'
+      ? surveySequence
+      : {};
+    if (seq.step3_sent_at) {
       return {
-        kind: 'cta',
-        label: 'Encuestar',
-        enabled: false,
-        action: null,
+        kind: 'badge',
+        label: 'Sin respuesta',
+        badgeClass: 'is-survey-no-reply',
       };
     }
-    var n = Number(score);
-    if (!Number.isFinite(n)) {
+    if (seq.step2_sent_at) {
       return {
-        kind: 'cta',
-        label: 'Encuestar',
-        enabled: false,
-        action: null,
+        kind: 'badge',
+        label: 'STEP 2',
+        badgeClass: 'is-survey-step',
+      };
+    }
+    if (seq.step1_sent_at) {
+      return {
+        kind: 'badge',
+        label: 'STEP 1',
+        badgeClass: 'is-survey-step',
       };
     }
     return {
-      kind: 'text',
-      label: String(score),
-      tone: scoreTone(n),
+      kind: 'clock',
+      title: 'Encuesta programada',
     };
   }
 

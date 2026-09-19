@@ -52,6 +52,9 @@ const {
   attachSurveyInviteToListRows,
 } = require('../lib/rejectedSurveyInviteEligibility');
 const {
+  attachSurveySequenceToListRows,
+} = require('../lib/rejectedSurveyInviteDisplay');
+const {
   runSurveyInviteSequenceForCi,
   evaluateSurveyInviteSequenceForCi,
 } = require('../lib/rejectedSurveyInviteEvaluate');
@@ -129,7 +132,11 @@ router.get('/', async function getRechazadosList(req, res) {
       status: parsed.status,
     });
     const withInvite = await attachSurveyInviteToListRows(supabase, rows);
-    return res.json({ ok: true, data: { rows: withInvite } });
+    const withSequence = await attachSurveySequenceToListRows(
+      supabase,
+      withInvite,
+    );
+    return res.json({ ok: true, data: { rows: withSequence } });
   } catch (err) {
     logger.error('GET /rechazados failed', {
       error: err && err.message ? err.message : 'unknown',

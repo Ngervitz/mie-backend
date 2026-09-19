@@ -87,11 +87,18 @@ assert.strictEqual(H.scoreTone(0), 'danger');
 assert.strictEqual(H.scoreTone(31), null);
 assert.strictEqual(H.scoreTone(null), null);
 assert.deepStrictEqual(H.scoreCell(null), {
-  kind: 'cta',
-  label: 'Encuestar',
-  enabled: false,
-  action: null,
+  kind: 'clock',
+  title: 'Encuesta programada',
 });
+assert.deepStrictEqual(H.scoreCell(0), {
+  kind: 'text',
+  label: '0',
+  tone: 'danger',
+});
+assert.deepStrictEqual(
+  H.scoreCell(null, { step2_sent_at: '2026-09-19T00:00:00.000Z' }),
+  { kind: 'badge', label: 'STEP 2', badgeClass: 'is-survey-step' },
+);
 assert.deepStrictEqual(H.miPlanCell('not_invited'), {
   kind: 'cta',
   label: 'Invitar',
