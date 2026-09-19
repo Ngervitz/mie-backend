@@ -207,6 +207,15 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       return stepCampaignIds[s];
     })
     .filter(Boolean);
+  const {
+    resolveNormalCutoffAt,
+    isT0AtOrAfterNormalCutoff,
+  } = require('./rejectedSurveyInviteNormalCutoff');
+  const normalCutoff = resolveNormalCutoffAt({
+    cutoffRaw: opts && opts.cutoffRaw,
+    cutoffMs: opts && opts.cutoffMs,
+    env: opts && opts.env,
+  });
 
   const cis = list.map(function (r) {
     return Number(r.ci);
@@ -325,6 +334,17 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       });
     }
 
+    if (!normalCutoff.ok) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED,
+          eligible: false,
+          email_masked: null,
+          due_step: null,
+        },
+      });
+    }
+
     const dueStep = last
       ? resolveDueSurveyInviteStep(last.fechahora_src, now)
       : null;
@@ -345,6 +365,19 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
           reason: elig.reason,
           eligible: false,
           email_masked: elig.email_masked,
+          due_step: null,
+        },
+      });
+    }
+
+    if (
+      isT0AtOrAfterNormalCutoff(last.fechahora_src, normalCutoff.ms) !== true
+    ) {
+      return Object.assign({}, row, {
+        survey_invite: {
+          reason: SEQUENCE_REASONS.BEFORE_NORMAL_CUTOFF,
+          eligible: false,
+          email_masked: null,
           due_step: null,
         },
       });

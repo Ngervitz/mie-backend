@@ -378,6 +378,7 @@ module.exports = {
   maskEmail,
   classifyPriorRecipient,
   evaluateRejectedSurveyInviteEligibility,
+  resolveLastRejectionByCi,
   resolveCurrentLastRejectionForCi,
   isValidEmail,
   isValidLrwId,

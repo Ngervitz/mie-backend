@@ -75,6 +75,11 @@ module.exports = {
   rechazadosSurveyInviteStep3CampaignId: optionalTrimmedEnv(
     'RECHAZADOS_SURVEY_INVITE_STEP3_CAMPAIGN_ID',
   ),
+  // Optional at boot. Fail-closed for NORMAL survey-invite orchestration when
+  // unset/invalid at job/evaluate time. ISO-8601 with timezone required.
+  rechazadosSurveyInviteNormalCutoffAt: optionalTrimmedEnv(
+    'RECHAZADOS_SURVEY_INVITE_NORMAL_CUTOFF_AT',
+  ),
   // Optional at boot — required when POST /jobs/run-serp-import-sync runs.
   serperApiKey: process.env.SERPER_API_KEY || null,
   // Optional at boot — required when POST /jobs/run-keyword-cpc-sync runs.

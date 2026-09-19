@@ -27,6 +27,10 @@ const {
   ATTEMPT_KIND,
   SEQUENCE_REASONS,
 } = require('./rejectedSurveyInviteSequence');
+const {
+  resolveNormalCutoffAt,
+  isT0AtOrAfterNormalCutoff,
+} = require('./rejectedSurveyInviteNormalCutoff');
 const eligibilityIo = require('./rejectedSurveyInviteEligibility');
 const { materializeRejectedSurveyInvite } = require('./rejectedSurveyInviteMaterialize');
 const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken');
@@ -44,6 +48,8 @@ const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken
  *   stepCampaignIds: {1:string|null,2:string|null,3:string|null},
  *   attemptsByStep: {1:object|null,2:object|null,3:object|null},
  *   publicBaseUrlConfigured: boolean,
+ *   normalCutoffAtMs?: number|null,
+ *   normalCutoff?: { ok: boolean, ms?: number },
  * }} input
  */
 function decideSurveyInviteSequenceAction(input) {
@@ -64,6 +70,40 @@ function decideSurveyInviteSequenceAction(input) {
   if (!input.lastRejection) {
     return Object.assign({}, base, {
       result: REASONS.NO_CURRENT_REJECTION,
+    });
+  }
+
+  let cutoffOk = false;
+  let cutoffMs = null;
+  if (input.normalCutoff && typeof input.normalCutoff === 'object') {
+    cutoffOk = input.normalCutoff.ok === true;
+    cutoffMs =
+      cutoffOk && Number.isFinite(input.normalCutoff.ms)
+        ? input.normalCutoff.ms
+        : null;
+  } else if (
+    input.normalCutoffAtMs != null &&
+    Number.isFinite(Number(input.normalCutoffAtMs))
+  ) {
+    cutoffOk = true;
+    cutoffMs = Number(input.normalCutoffAtMs);
+  }
+
+  if (!cutoffOk || cutoffMs == null) {
+    return Object.assign({}, base, {
+      action: 'skip',
+      result: SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED,
+    });
+  }
+
+  const atOrAfter = isT0AtOrAfterNormalCutoff(
+    input.lastRejection.fechahora_src,
+    cutoffMs,
+  );
+  if (atOrAfter !== true) {
+    return Object.assign({}, base, {
+      action: 'skip',
+      result: SEQUENCE_REASONS.BEFORE_NORMAL_CUTOFF,
     });
   }
 
@@ -154,6 +194,13 @@ function decideSurveyInviteSequenceAction(input) {
 async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
   const options = opts || {};
   const now = options.now || new Date();
+  const normalCutoff =
+    options.normalCutoff ||
+    resolveNormalCutoffAt({
+      cutoffRaw: options.cutoffRaw,
+      cutoffMs: options.cutoffMs,
+      env: options.env,
+    });
   const ci = normalizeCi(ciRaw);
   if (ci == null) {
     return decideSurveyInviteSequenceAction({
@@ -166,6 +213,7 @@ async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
       stepCampaignIds: eligibilityIo.getAllSurveyInviteStepCampaignIds(),
       attemptsByStep: { 1: null, 2: null, 3: null },
       publicBaseUrlConfigured: Boolean(eligibilityIo.getEmailPublicBaseUrl()),
+      normalCutoff: normalCutoff,
     });
   }
 
@@ -265,6 +313,7 @@ async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
     stepCampaignIds: stepCampaignIds,
     attemptsByStep: attemptsByStep,
     publicBaseUrlConfigured: Boolean(publicBase),
+    normalCutoff: normalCutoff,
   });
 }
 

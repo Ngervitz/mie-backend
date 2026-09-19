@@ -14,6 +14,8 @@ process.env.EMAIL_CAMPAIGNS_FROM = 'Janus <noreply@credizona.com.uy>';
 process.env.RECHAZADOS_SURVEY_INVITE_STEP1_CAMPAIGN_ID = '101';
 process.env.RECHAZADOS_SURVEY_INVITE_STEP2_CAMPAIGN_ID = '102';
 process.env.RECHAZADOS_SURVEY_INVITE_STEP3_CAMPAIGN_ID = '103';
+process.env.RECHAZADOS_SURVEY_INVITE_NORMAL_CUTOFF_AT =
+  '2020-01-01T00:00:00.000Z';
 // Legacy must NOT drive the sequence.
 process.env.RECHAZADOS_SURVEY_INVITE_CAMPAIGN_ID = '999-legacy-must-not-be-used';
 
@@ -38,6 +40,7 @@ require.cache[envPath] = {
     rechazadosSurveyInviteStep1CampaignId: '101',
     rechazadosSurveyInviteStep2CampaignId: '102',
     rechazadosSurveyInviteStep3CampaignId: '103',
+    rechazadosSurveyInviteNormalCutoffAt: '2020-01-01T00:00:00.000Z',
   },
 };
 
@@ -115,6 +118,7 @@ function decide(over) {
         stepCampaignIds: stepIds(),
         attemptsByStep: { 1: null, 2: null, 3: null },
         publicBaseUrlConfigured: true,
+        normalCutoffAtMs: Date.parse('2020-01-01T00:00:00.000Z'),
       },
       over || {},
     ),

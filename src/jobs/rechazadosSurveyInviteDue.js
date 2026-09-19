@@ -33,6 +33,9 @@ const {
 const {
   normalizeEmail,
 } = require('../services/email-campaigns/unsubscribeToken');
+const {
+  resolveNormalCutoffAt,
+} = require('../lib/rejectedSurveyInviteNormalCutoff');
 
 const JOB_NAME = 'rechazados_survey_invite_due';
 const JOB_LOCK_TTL_SECONDS = 10 * 60;
@@ -75,6 +78,7 @@ function emptyCounters() {
     ok: true,
     candidates: 0,
     not_due: 0,
+    before_normal_cutoff: 0,
     eligible: 0,
     materialized_step1: 0,
     materialized_step2: 0,
@@ -112,6 +116,19 @@ function bumpAlreadyAttempted(counters, reason) {
  *   materializeFn?: Function,
  * }} [opts]
  */
+/**
+ * @param {{
+ *   supabase?: object,
+ *   now?: Date,
+ *   acquireLockFn?: Function,
+ *   releaseLockFn?: Function,
+ *   skipLock?: boolean,
+ *   materializeFn?: Function,
+ *   cutoffRaw?: unknown,
+ *   cutoffMs?: number,
+ *   env?: object,
+ * }} [opts]
+ */
 async function runRechazadosSurveyInviteDue(opts) {
   const options = opts || {};
   const now = options.now || new Date();
@@ -142,6 +159,27 @@ async function runRechazadosSurveyInviteDue(opts) {
   }
 
   try {
+    const normalCutoff = resolveNormalCutoffAt({
+      cutoffRaw: options.cutoffRaw,
+      cutoffMs: options.cutoffMs,
+      env: options.env,
+    });
+    if (!normalCutoff.ok) {
+      logger.error('rechazados_survey_invite_due fail-closed: cutoff', {
+        jobName: JOB_NAME,
+        reason: SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED,
+      });
+      return Object.assign(
+        {
+          ok: false,
+          reason: SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED,
+          job: JOB_NAME,
+        },
+        emptyCounters(),
+        { ok: false },
+      );
+    }
+
     const supabase = getSupabase(options.supabase);
     const stepCampaignIds = eligibilityIo.getAllSurveyInviteStepCampaignIds();
     const publicBase = eligibilityIo.getEmailPublicBaseUrl();
@@ -287,10 +325,21 @@ async function runRechazadosSurveyInviteDue(opts) {
           stepCampaignIds: stepCampaignIds,
           attemptsByStep: attemptsByStep,
           publicBaseUrlConfigured: Boolean(publicBase),
+          normalCutoff: normalCutoff,
         });
 
         if (decision.result === SEQUENCE_REASONS.NOT_DUE) {
           counters.not_due += 1;
+          continue;
+        }
+        if (decision.result === SEQUENCE_REASONS.BEFORE_NORMAL_CUTOFF) {
+          counters.before_normal_cutoff += 1;
+          continue;
+        }
+        if (
+          decision.result === SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED
+        ) {
+          counters.config_missing += 1;
           continue;
         }
         if (decision.result === SEQUENCE_REASONS.PREVIOUS_PENDING) {

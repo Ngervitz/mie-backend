@@ -29,6 +29,8 @@ const SEQUENCE_REASONS = Object.freeze({
   NOT_DUE: 'not_due',
   PREVIOUS_PENDING: 'previous_pending',
   SEQUENCE_COMPLETE: 'sequence_complete',
+  BEFORE_NORMAL_CUTOFF: 'before_normal_cutoff',
+  NORMAL_CUTOFF_NOT_CONFIGURED: 'normal_cutoff_not_configured',
 });
 
 function tsMs(raw) {
