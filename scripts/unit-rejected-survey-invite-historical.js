@@ -213,4 +213,293 @@ assert.strictEqual(STEP3_OFFSET_MS - STEP2_OFFSET_MS, 48 * MS_HOUR);
   assert.strictEqual(d.result, HISTORICAL_RESULTS.NOT_DUE);
 }
 
+// --- Legacy NULL bridge (historical pilot attempts) ---
+const {
+  buildHistoricalPilotAttemptsByStep,
+  putPreferredAttempt,
+} = require('../src/lib/rejectedSurveyInviteHistorical');
+
+function legacyMapsFromRows(episodeRows, legacyRows) {
+  const episodeScoped = new Map();
+  for (const r of episodeRows || []) {
+    putPreferredAttempt(
+      episodeScoped,
+      String(r.campaign_id) + ':' + String(r.cz_solicitud_id),
+      r,
+    );
+  }
+  const legacyNull = new Map();
+  for (const r of legacyRows || []) {
+    putPreferredAttempt(
+      legacyNull,
+      String(r.campaign_id) + ':' + String(r.ci),
+      r,
+    );
+  }
+  return { episodeScoped, legacyNull };
+}
+
+const CI_1154 = 15088043;
+const tHist1154 = '2026-09-17T21:25:55.290Z';
+const legacyS1_1154 = {
+  id: 9,
+  campaign_id: 6,
+  ci: String(CI_1154),
+  status: 'sent',
+  sent_at: tHist1154,
+  cz_solicitud_id: null,
+  created_at: '2026-09-17T21:25:00Z',
+};
+const legacyS2_1154 = {
+  id: 19,
+  campaign_id: 7,
+  ci: String(CI_1154),
+  status: 'sent',
+  sent_at: '2026-09-19T14:20:20.032Z',
+  cz_solicitud_id: null,
+  created_at: '2026-09-19T14:20:00Z',
+};
+
+// TEST 1 — historical 1154 legacy bridge → due_step 3 / campaign 8
+{
+  const maps = legacyMapsFromRows([], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  assert.strictEqual(attempts[1] && attempts[1].id, 9);
+  assert.strictEqual(attempts[2] && attempts[2].id, 19);
+  assert.strictEqual(attempts[3], null);
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 72 * MS_HOUR + 1000),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.action, 'materialize');
+  assert.strictEqual(d.due_step, 3);
+  assert.strictEqual(d.campaign_id, 8);
+  assert.notStrictEqual(d.due_step, 1);
+}
+
+// TEST 2 — current episode 1357 must NOT inherit legacy NULL
+{
+  const maps = legacyMapsFromRows([], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1357,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  assert.strictEqual(attempts[1], null);
+  assert.strictEqual(attempts[2], null);
+  assert.strictEqual(attempts[3], null);
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 80 * MS_HOUR),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  // No S1 recognized → materialize STEP1 (episode-scoped normal), not STEP3
+  assert.strictEqual(d.due_step, 1);
+  assert.strictEqual(d.campaign_id, 6);
+}
+
+// TEST 3 — all 10 historical CZs with legacy S1/S2 → STEP3
+{
+  for (let i = 0; i < HISTORICAL_PILOT_CZ_IDS.length; i += 1) {
+    const cz = HISTORICAL_PILOT_CZ_IDS[i];
+    const ci = 10000000 + cz;
+    const sentAt = '2026-09-17T21:26:00.000Z';
+    const maps = legacyMapsFromRows(
+      [],
+      [
+        {
+          id: 1000 + i,
+          campaign_id: 6,
+          ci: String(ci),
+          status: 'sent',
+          sent_at: sentAt,
+          cz_solicitud_id: null,
+        },
+        {
+          id: 2000 + i,
+          campaign_id: 7,
+          ci: String(ci),
+          status: 'sent',
+          sent_at: '2026-09-19T14:20:00.000Z',
+          cz_solicitud_id: null,
+        },
+      ],
+    );
+    const attempts = buildHistoricalPilotAttemptsByStep({
+      episodeId: cz,
+      ci: ci,
+      episodeScopedByCampaignEpisode: maps.episodeScoped,
+      legacyNullByCiCampaign: maps.legacyNull,
+    });
+    const d = decideHistoricalSurveyInviteAction({
+      now: new Date(Date.parse(sentAt) + 72 * MS_HOUR + 1),
+      inCohort: true,
+      dataEligible: true,
+      hasEncuesta: false,
+      isSuppressed: false,
+      attemptsByStep: attempts,
+    });
+    assert.strictEqual(d.due_step, 3, 'cz ' + cz + ' due_step');
+    assert.strictEqual(d.campaign_id, 8, 'cz ' + cz + ' campaign');
+  }
+}
+
+// TEST 4 — lifetime completion blocks STEP3
+{
+  const maps = legacyMapsFromRows([], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 80 * MS_HOUR),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: true,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.SEQUENCE_STOPPED_SURVEY);
+  assert.strictEqual(d.action, 'skip');
+}
+
+// TEST 5 — suppression blocks STEP3
+{
+  const maps = legacyMapsFromRows([], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 80 * MS_HOUR),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: true,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.SEQUENCE_STOPPED_SUPPRESSION);
+  assert.strictEqual(d.action, 'skip');
+}
+
+// TEST 6 — S3 already present → no duplicate materialize
+{
+  const s3 = {
+    id: 99,
+    campaign_id: 8,
+    ci: String(CI_1154),
+    status: 'queued',
+    sent_at: null,
+    cz_solicitud_id: 1154,
+  };
+  const maps = legacyMapsFromRows([s3], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  assert.strictEqual(attempts[3] && attempts[3].id, 99);
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 80 * MS_HOUR),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.SEQUENCE_COMPLETE);
+  assert.strictEqual(d.action, 'skip');
+}
+
+// TEST 7 — timing <72h → STEP3 not due (S1.sent_at only)
+{
+  const maps = legacyMapsFromRows([], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date(Date.parse(tHist1154) + 71 * MS_HOUR),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.NOT_DUE);
+  assert.strictEqual(d.action, 'skip');
+  assert.strictEqual(d.t_hist, tHist1154);
+}
+
+// TEST 8 — S1 exists but sent_at NULL → waiting_step1_send (no created_at fallback)
+{
+  const s1Queued = {
+    id: 9,
+    campaign_id: 6,
+    ci: String(CI_1154),
+    status: 'queued',
+    sent_at: null,
+    created_at: '2026-09-01T00:00:00Z',
+    cz_solicitud_id: null,
+  };
+  const maps = legacyMapsFromRows([], [s1Queued]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date('2026-09-21T00:00:00Z'),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: attempts,
+  });
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.WAITING_STEP1_SEND);
+  assert.strictEqual(d.t_hist, null);
+}
+
+// Episode-scoped attempt wins over legacy NULL for same step
+{
+  const episodeS1 = {
+    id: 900,
+    campaign_id: 6,
+    ci: String(CI_1154),
+    status: 'sent',
+    sent_at: '2026-09-20T00:00:00Z',
+    cz_solicitud_id: 1154,
+  };
+  const maps = legacyMapsFromRows([episodeS1], [legacyS1_1154, legacyS2_1154]);
+  const attempts = buildHistoricalPilotAttemptsByStep({
+    episodeId: 1154,
+    ci: CI_1154,
+    episodeScopedByCampaignEpisode: maps.episodeScoped,
+    legacyNullByCiCampaign: maps.legacyNull,
+  });
+  assert.strictEqual(attempts[1] && attempts[1].id, 900);
+  assert.strictEqual(attempts[2] && attempts[2].id, 19);
+}
+
 console.log('OK unit-rejected-survey-invite-historical');

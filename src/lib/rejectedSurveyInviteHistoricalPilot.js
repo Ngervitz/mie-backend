@@ -24,6 +24,8 @@ const {
   HISTORICAL_RESULTS,
   decideHistoricalSurveyInviteAction,
   isAuthorizedPilotCzId,
+  putPreferredAttempt,
+  buildHistoricalPilotAttemptsByStep,
 } = require('./rejectedSurveyInviteHistorical');
 
 function normalizeEmail(email) {
@@ -192,10 +194,30 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
     if (p.cz_solicitud_id == null) continue;
     const key =
       String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
-    const prev = priorByCampaignEpisode.get(key);
-    if (!prev || String(p.created_at || '') > String(prev.created_at || '')) {
-      priorByCampaignEpisode.set(key, p);
-    }
+    putPreferredAttempt(priorByCampaignEpisode, key, p);
+  }
+
+  // Legacy NULL bridge (pilot-only): S1/S2 created before episode-scope.
+  // Same gate as display — only attach when episode is HISTORICAL_PILOT_CZ_IDS.
+  // Does NOT backfill; does NOT leak to non-pilot episodes (e.g. 1357).
+  /** @type {Map<string, object>} campaignId:ci → recipient */
+  const legacyNullByCiCampaign = new Map();
+  const { data: legacyPriors, error: legErr } = await supabase
+    .from('email_campaign_recipients')
+    .select(RECIPIENT_SELECT)
+    .eq('purpose', PURPOSE)
+    .in('campaign_id', campaignIds)
+    .in(
+      'ci',
+      cis.map(String),
+    )
+    .is('cz_solicitud_id', null);
+  if (legErr) throw new Error('pilot legacy recipients: ' + legErr.message);
+  for (const p of legacyPriors || []) {
+    if (p.cz_solicitud_id != null) continue;
+    if (p.ci == null || String(p.ci).trim() === '') continue;
+    const key = String(p.campaign_id) + ':' + String(p.ci);
+    putPreferredAttempt(legacyNullByCiCampaign, key, p);
   }
 
   const { data: anyPurpose, error: apErr } = await supabase
@@ -237,26 +259,12 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
       nullableTrimmedText(row.sol.email) || '',
     );
     const episodeId = Number(row.cz_id);
-    const attemptsByStep = {
-      1:
-        priorByCampaignEpisode.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[1]) +
-            ':' +
-            String(episodeId),
-        ) || null,
-      2:
-        priorByCampaignEpisode.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2]) +
-            ':' +
-            String(episodeId),
-        ) || null,
-      3:
-        priorByCampaignEpisode.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[3]) +
-            ':' +
-            String(episodeId),
-        ) || null,
-    };
+    const attemptsByStep = buildHistoricalPilotAttemptsByStep({
+      episodeId: episodeId,
+      ci: ci,
+      episodeScopedByCampaignEpisode: priorByCampaignEpisode,
+      legacyNullByCiCampaign: legacyNullByCiCampaign,
+    });
 
     const dueStepGuess = !attemptsByStep[1]
       ? 1

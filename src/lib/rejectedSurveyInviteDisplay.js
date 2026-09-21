@@ -139,6 +139,9 @@ function buildSurveySequenceForCi(sentRows, resolution) {
  * Does NOT attach those NULLs to any newer/non-pilot episode (e.g. 1357).
  * Does not persist; does not change delivery/eligibility.
  *
+ * Delivery-side twin: buildHistoricalPilotAttemptsByStep in
+ * rejectedSurveyInviteHistorical.js (same isAuthorizedPilotCzId gate).
+ *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} rows
  * @param {object=} opts

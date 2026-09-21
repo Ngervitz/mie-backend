@@ -218,6 +218,65 @@ function isAuthorizedPilotCzId(czId) {
   return HISTORICAL_PILOT_CZ_IDS.indexOf(n) !== -1;
 }
 
+/**
+ * Prefer newer created_at when indexing attempt maps.
+ * @param {Map<string, object>} map
+ * @param {string} key
+ * @param {object} row
+ */
+function putPreferredAttempt(map, key, row) {
+  const prev = map.get(key);
+  if (!prev || String(row.created_at || '') > String(prev.created_at || '')) {
+    map.set(key, row);
+  }
+}
+
+/**
+ * Build STEP1/2/3 attempts for one historical-pilot episode.
+ *
+ * Episode-scoped recipients (cz_solicitud_id = episodeId) win.
+ * Legacy NULL recipients (cz_solicitud_id IS NULL, same CI + historical
+ * campaign) are only attached when episodeId is in HISTORICAL_PILOT_CZ_IDS.
+ *
+ * Non-pilot episodes (e.g. 1357) never inherit legacy NULL attempts —
+ * same gate as display attachSurveySequenceToListRows.
+ *
+ * @param {{
+ *   episodeId: unknown,
+ *   ci: unknown,
+ *   episodeScopedByCampaignEpisode: Map<string, object>|null|undefined,
+ *   legacyNullByCiCampaign: Map<string, object>|null|undefined,
+ * }} input
+ * @returns {{ 1: object|null, 2: object|null, 3: object|null }}
+ */
+function buildHistoricalPilotAttemptsByStep(input) {
+  const episodeId = Number(input && input.episodeId);
+  const ciKey =
+    input && input.ci != null && String(input.ci).trim() !== ''
+      ? String(input.ci)
+      : '';
+  const episodeMap = input && input.episodeScopedByCampaignEpisode;
+  const legacyMap = input && input.legacyNullByCiCampaign;
+  const allowLegacy = isAuthorizedPilotCzId(episodeId);
+
+  /** @type {{ 1: object|null, 2: object|null, 3: object|null }} */
+  const attempts = { 1: null, 2: null, 3: null };
+  for (let step = 1; step <= 3; step += 1) {
+    const campId = HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[step];
+    const epKey = String(campId) + ':' + String(episodeId);
+    let rec =
+      episodeMap && typeof episodeMap.get === 'function'
+        ? episodeMap.get(epKey) || null
+        : null;
+    if (!rec && allowLegacy && ciKey && legacyMap && typeof legacyMap.get === 'function') {
+      const legKey = String(campId) + ':' + ciKey;
+      rec = legacyMap.get(legKey) || null;
+    }
+    attempts[step] = rec;
+  }
+  return attempts;
+}
+
 module.exports = {
   MS_HOUR,
   STEP2_OFFSET_MS,
@@ -230,5 +289,7 @@ module.exports = {
   historicalStep3DueAt,
   decideHistoricalSurveyInviteAction,
   isAuthorizedPilotCzId,
+  putPreferredAttempt,
+  buildHistoricalPilotAttemptsByStep,
   tsMs,
 };
