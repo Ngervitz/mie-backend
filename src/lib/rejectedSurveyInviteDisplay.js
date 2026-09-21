@@ -12,6 +12,7 @@
 
 const {
   HISTORICAL_PILOT_STEP_CAMPAIGN_IDS,
+  isAuthorizedPilotCzId,
 } = require('./rejectedSurveyInviteHistorical');
 const { PURPOSE } = require('./rejectedSurveyInvite');
 const {
@@ -130,8 +131,13 @@ function buildSurveySequenceForCi(sentRows, resolution) {
 
 /**
  * Batch-attach survey_sequence to list rows. No N+1.
- * Episode-scoped: only recipients with cz_solicitud_id matching the row.
- * Legacy NULL recipients do not contaminate a new episode.
+ * Episode-scoped: recipients with cz_solicitud_id matching the row.
+ *
+ * Display-only legacy bridge: for authorized historical pilot episodes
+ * (HISTORICAL_PILOT_CZ_IDS), also include sent recipients with
+ * cz_solicitud_id IS NULL for that row's CI and historical campaigns.
+ * Does NOT attach those NULLs to any newer/non-pilot episode (e.g. 1357).
+ * Does not persist; does not change delivery/eligibility.
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} rows
@@ -187,10 +193,54 @@ async function attachSurveySequenceToListRows(supabase, rows, opts) {
     }
   }
 
+  // Legacy NULL bridge — only for authorized historical pilot episodes.
+  /** @type {Map<string, object[]>} */
+  const legacyByCi = new Map();
+  const pilotCis = [];
+  const seenPilotCi = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    if (!isAuthorizedPilotCzId(list[i].cz_solicitud_id)) continue;
+    const ciKey = list[i].ci != null ? String(list[i].ci) : '';
+    if (!ciKey || seenPilotCi.has(ciKey)) continue;
+    seenPilotCi.add(ciKey);
+    pilotCis.push(ciKey);
+  }
+
+  const histCampaignIds = [...resolution.historicalCampaignIdSet];
+  if (pilotCis.length && histCampaignIds.length) {
+    const { data: legacyRows, error: legErr } = await supabase
+      .from('email_campaign_recipients')
+      .select('ci, campaign_id, status, purpose, sent_at, cz_solicitud_id')
+      .in('campaign_id', histCampaignIds)
+      .eq('purpose', PURPOSE)
+      .eq('status', 'sent')
+      .in('ci', pilotCis)
+      .is('cz_solicitud_id', null);
+    if (legErr) {
+      throw new Error(
+        'list survey_sequence legacy recipients: ' + legErr.message,
+      );
+    }
+    for (let i = 0; i < (legacyRows || []).length; i += 1) {
+      const row = legacyRows[i];
+      const ciKey = row.ci != null ? String(row.ci) : '';
+      if (!ciKey) continue;
+      if (!legacyByCi.has(ciKey)) legacyByCi.set(ciKey, []);
+      legacyByCi.get(ciKey).push(row);
+    }
+  }
+
   return list.map(function (row) {
     const epKey =
       row.cz_solicitud_id != null ? String(row.cz_solicitud_id) : '';
-    const sentRows = epKey ? byEpisode.get(epKey) || [] : [];
+    let sentRows = epKey ? byEpisode.get(epKey) || [] : [];
+    if (isAuthorizedPilotCzId(row.cz_solicitud_id)) {
+      const ciKey = row.ci != null ? String(row.ci) : '';
+      const legacy = ciKey ? legacyByCi.get(ciKey) || [] : [];
+      if (legacy.length) {
+        sentRows = sentRows.concat(legacy);
+      }
+    }
     return Object.assign({}, row, {
       survey_sequence: buildSurveySequenceForCi(sentRows, resolution),
     });
