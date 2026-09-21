@@ -363,6 +363,10 @@ function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
   return Object.assign(
     {
       ci: ci,
+      cz_solicitud_id:
+        lastRejection && lastRejection.cz_solicitud_id != null
+          ? toNum(lastRejection.cz_solicitud_id)
+          : null,
       nombre: name.nombre,
       apellido: name.apellido,
       rejected_at: lastRejection.fechahora_src || null,

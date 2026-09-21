@@ -646,6 +646,7 @@ function makeMaterializeSb(opts) {
     _recipients: recipients,
     rpc: async function (name, params) {
       assert.strictEqual(name, 'upsert_email_survey_invite_recipient_impact');
+      assert.ok(params.p_cz_solicitud_id != null);
       let row = recipients.find(function (r) {
         return r.idempotency_key === params.p_idempotency_key;
       });
@@ -660,6 +661,7 @@ function makeMaterializeSb(opts) {
           email: params.p_email,
           status: 'queued',
           purpose: params.p_purpose,
+          cz_solicitud_id: Number(params.p_cz_solicitud_id),
           marketing_impact_id: MATERIALIZE_RPC_IMPACT,
           provider_send_started_at: null,
           template_vars: {},
@@ -996,7 +998,7 @@ async function runMaterializeCases() {
     const r1 = await materializeRejectedSurveyInvite(sb, CI, '101');
     // Rebuild with existing recipient for second eligibility
     const key =
-      'rechazados_survey_invite:campaign:101:ci:' + String(CI);
+      'rechazados_survey_invite:campaign:101:cz:5001';
     recipients.length = 0;
     recipients.push({
       id: 'ins-1',
@@ -1066,7 +1068,7 @@ async function runMaterializeCases() {
 // 9 repair path with materialize
 async function runRepairCase() {
   const key =
-    'rechazados_survey_invite:campaign:101:ci:' + String(CI);
+    'rechazados_survey_invite:campaign:101:cz:5001';
   const recipients = [
     {
       id: 'r-repair',

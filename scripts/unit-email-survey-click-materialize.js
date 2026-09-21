@@ -52,6 +52,10 @@ function makeSupabase() {
   return {
     rpc: async function (name, params) {
       assert.strictEqual(name, 'upsert_email_survey_invite_recipient_impact');
+      assert.ok(
+        params.p_cz_solicitud_id != null,
+        'p_cz_solicitud_id required',
+      );
       rpcCalls += 1;
       if (!recipientStore) {
         recipientStore = {
@@ -255,6 +259,7 @@ require.cache[eligibilityPath] = {
         nombre: 'Ana',
         prior_recipient_id: null,
         repairable: false,
+        cz_solicitud_id: 5001,
       };
     },
     getAllSurveyInviteStepCampaignIds: function () {

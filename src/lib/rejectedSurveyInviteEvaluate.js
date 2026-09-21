@@ -270,20 +270,22 @@ async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
   }
 
   const attemptsByStep = { 1: null, 2: null, 3: null };
+  const episodeId =
+    last && last.cz_solicitud_id != null ? Number(last.cz_solicitud_id) : null;
   const configuredIds = [1, 2, 3]
     .map(function (s) {
       return stepCampaignIds[s];
     })
     .filter(Boolean);
-  if (configuredIds.length) {
+  if (configuredIds.length && episodeId != null && Number.isFinite(episodeId)) {
     const { data: priors, error: pErr } = await supabase
       .from('email_campaign_recipients')
       .select(
-        'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at',
+        'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
       )
       .in('campaign_id', configuredIds)
       .eq('purpose', PURPOSE)
-      .eq('ci', String(ci));
+      .eq('cz_solicitud_id', episodeId);
     if (pErr) throw new Error('sequence recipients: ' + pErr.message);
     const latestByCampaign = new Map();
     for (const p of priors || []) {

@@ -260,29 +260,37 @@ async function runRechazadosSurveyInviteDue(opts) {
       })
       .filter(Boolean);
 
-    /** @type {Map<string, object>} campaignId:ci → recipient */
-    const priorByCampaignCi = new Map();
-    if (configuredIds.length) {
+    /** @type {Map<string, object>} campaignId:cz_solicitud_id → recipient */
+    const priorByCampaignEpisode = new Map();
+    const episodeIds = [];
+    const seenEp = new Set();
+    for (let i = 0; i < candidateCis.length; i += 1) {
+      const last = lastByCi.get(candidateCis[i]);
+      if (!last || last.cz_solicitud_id == null) continue;
+      const ep = Number(last.cz_solicitud_id);
+      if (!Number.isFinite(ep) || seenEp.has(ep)) continue;
+      seenEp.add(ep);
+      episodeIds.push(ep);
+    }
+    if (configuredIds.length && episodeIds.length) {
       const { data: priors, error: pErr } = await supabase
         .from('email_campaign_recipients')
         .select(
-          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at',
+          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
         )
         .in('campaign_id', configuredIds)
         .eq('purpose', PURPOSE)
-        .in(
-          'ci',
-          candidateCis.map(String),
-        );
+        .in('cz_solicitud_id', episodeIds);
       if (pErr) throw new Error('job recipients: ' + pErr.message);
       for (const p of priors || []) {
-        const key = String(p.campaign_id) + ':' + String(p.ci);
-        const prev = priorByCampaignCi.get(key);
+        const key =
+          String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
+        const prev = priorByCampaignEpisode.get(key);
         if (
           !prev ||
           String(p.created_at || '') > String(prev.created_at || '')
         ) {
-          priorByCampaignCi.set(key, p);
+          priorByCampaignEpisode.set(key, p);
         }
       }
     }
@@ -308,11 +316,19 @@ async function runRechazadosSurveyInviteDue(opts) {
           : '';
 
         const attemptsByStep = { 1: null, 2: null, 3: null };
+        const episodeId =
+          last && last.cz_solicitud_id != null
+            ? Number(last.cz_solicitud_id)
+            : null;
         for (let s = 1; s <= 3; s += 1) {
           const cid = stepCampaignIds[s];
-          if (!cid) continue;
+          if (!cid || episodeId == null || !Number.isFinite(episodeId)) {
+            continue;
+          }
           attemptsByStep[s] =
-            priorByCampaignCi.get(String(cid) + ':' + String(ci)) || null;
+            priorByCampaignEpisode.get(
+              String(cid) + ':' + String(episodeId),
+            ) || null;
         }
 
         const decision = decideSurveyInviteSequenceAction({

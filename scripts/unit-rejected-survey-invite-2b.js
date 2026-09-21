@@ -58,7 +58,7 @@ const { buildUnsubscribeUrl } = require('../src/services/email-campaigns/unsubsc
 assert.strictEqual(PURPOSE, 'rechazados_survey_invite');
 assert.strictEqual(
   buildSurveyInviteIdempotencyKey(42, 12345678),
-  'rechazados_survey_invite:campaign:42:ci:12345678',
+  'rechazados_survey_invite:campaign:42:cz:12345678',
 );
 assert.strictEqual(
   buildSurveyUrl('LRW-ABC'),
@@ -410,6 +410,7 @@ async function runMaterializeWithFixture(fixture) {
   const supabase = {
     rpc: async function (name, params) {
       assert.strictEqual(name, 'upsert_email_survey_invite_recipient_impact');
+      assert.ok(params.p_cz_solicitud_id != null);
       let row = store.rows.find(function (r) {
         return r.idempotency_key === params.p_idempotency_key;
       });
@@ -424,6 +425,7 @@ async function runMaterializeWithFixture(fixture) {
           email: params.p_email,
           status: 'queued',
           purpose: params.p_purpose,
+          cz_solicitud_id: Number(params.p_cz_solicitud_id),
           marketing_impact_id: IMPACT,
           provider_send_started_at: null,
           template_vars: {},
@@ -548,6 +550,7 @@ const eligOk = {
   nombre: 'Ana',
   repairable: false,
   prior_recipient_id: null,
+  cz_solicitud_id: 9001,
 };
 
 (async function () {
@@ -559,7 +562,7 @@ const eligOk = {
   assert.strictEqual(store.rows.length, 1);
   assert.strictEqual(
     store.rows[0].idempotency_key,
-    'rechazados_survey_invite:campaign:42:ci:111',
+    'rechazados_survey_invite:campaign:42:cz:9001',
   );
   assert.strictEqual(store.rows[0].purpose, PURPOSE);
   assert.strictEqual(
@@ -599,7 +602,7 @@ const eligOk = {
     rows: [
       {
         id: 77,
-        idempotency_key: 'rechazados_survey_invite:campaign:42:ci:111',
+        idempotency_key: 'rechazados_survey_invite:campaign:42:cz:9001',
         status: 'failed',
         error_reason: 'missing_required_template_var:survey_url',
         ci: '111',

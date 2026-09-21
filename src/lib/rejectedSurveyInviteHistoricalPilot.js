@@ -39,7 +39,7 @@ function defaultMaterializeFn() {
 
 const REJECTED_ESTADO_ID = 3;
 const RECIPIENT_SELECT =
-  'id, campaign_id, ci, email, status, error_reason, purpose, created_at, sent_at, provider_send_started_at, idempotency_key';
+  'id, campaign_id, ci, email, status, error_reason, purpose, created_at, sent_at, provider_send_started_at, idempotency_key, cz_solicitud_id';
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -175,23 +175,26 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2],
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[3],
   ];
+  const episodeIds = cohort.map(function (row) {
+    return Number(row.cz_id);
+  });
   const { data: priors, error: pErr } = await supabase
     .from('email_campaign_recipients')
     .select(RECIPIENT_SELECT)
     .eq('purpose', PURPOSE)
     .in('campaign_id', campaignIds)
-    .in(
-      'ci',
-      cis.map(String),
-    );
+    .in('cz_solicitud_id', episodeIds);
   if (pErr) throw new Error('pilot recipients: ' + pErr.message);
 
-  const priorByCampaignCi = new Map();
+  /** @type {Map<string, object>} campaignId:cz_solicitud_id → recipient */
+  const priorByCampaignEpisode = new Map();
   for (const p of priors || []) {
-    const key = String(p.campaign_id) + ':' + String(p.ci);
-    const prev = priorByCampaignCi.get(key);
+    if (p.cz_solicitud_id == null) continue;
+    const key =
+      String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
+    const prev = priorByCampaignEpisode.get(key);
     if (!prev || String(p.created_at || '') > String(prev.created_at || '')) {
-      priorByCampaignCi.set(key, p);
+      priorByCampaignEpisode.set(key, p);
     }
   }
 
@@ -233,18 +236,25 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
     const emailNorm = normalizeEmail(
       nullableTrimmedText(row.sol.email) || '',
     );
+    const episodeId = Number(row.cz_id);
     const attemptsByStep = {
       1:
-        priorByCampaignCi.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[1]) + ':' + String(ci),
+        priorByCampaignEpisode.get(
+          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[1]) +
+            ':' +
+            String(episodeId),
         ) || null,
       2:
-        priorByCampaignCi.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2]) + ':' + String(ci),
+        priorByCampaignEpisode.get(
+          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2]) +
+            ':' +
+            String(episodeId),
         ) || null,
       3:
-        priorByCampaignCi.get(
-          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[3]) + ':' + String(ci),
+        priorByCampaignEpisode.get(
+          String(HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[3]) +
+            ':' +
+            String(episodeId),
         ) || null,
     };
 

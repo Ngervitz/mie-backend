@@ -90,9 +90,9 @@ function resolveDisplaySurveyInviteStepCampaigns(opts) {
 }
 
 /**
- * Pure: build survey_sequence for one CI from sent recipient rows.
+ * Pure: build survey_sequence for one episode from sent recipient rows.
  *
- * @param {object[]} sentRows rows already filtered to purpose + status=sent
+ * @param {object[]} sentRows rows already filtered to purpose + status=sent + episode
  * @param {ReturnType<typeof resolveDisplaySurveyInviteStepCampaigns>} resolution
  */
 function buildSurveySequenceForCi(sentRows, resolution) {
@@ -130,7 +130,8 @@ function buildSurveySequenceForCi(sentRows, resolution) {
 
 /**
  * Batch-attach survey_sequence to list rows. No N+1.
- * Does not change survey_invite / eligibility semantics.
+ * Episode-scoped: only recipients with cz_solicitud_id matching the row.
+ * Legacy NULL recipients do not contaminate a new episode.
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} rows
@@ -155,32 +156,41 @@ async function attachSurveySequenceToListRows(supabase, rows, opts) {
     });
   }
 
-  const cis = list.map(function (r) {
-    return Number(r.ci);
-  });
-
-  const { data: priors, error } = await supabase
-    .from('email_campaign_recipients')
-    .select('ci, campaign_id, status, purpose, sent_at')
-    .in('campaign_id', ids)
-    .eq('purpose', PURPOSE)
-    .eq('status', 'sent')
-    .in('ci', cis);
-  if (error) {
-    throw new Error('list survey_sequence recipients: ' + error.message);
+  const episodeIds = [];
+  const seenEp = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const ep = Number(list[i].cz_solicitud_id);
+    if (!Number.isFinite(ep) || seenEp.has(ep)) continue;
+    seenEp.add(ep);
+    episodeIds.push(ep);
   }
 
   /** @type {Map<string, object[]>} */
-  const byCi = new Map();
-  for (let i = 0; i < (priors || []).length; i += 1) {
-    const row = priors[i];
-    const key = String(row.ci);
-    if (!byCi.has(key)) byCi.set(key, []);
-    byCi.get(key).push(row);
+  const byEpisode = new Map();
+
+  if (episodeIds.length) {
+    const { data: priors, error } = await supabase
+      .from('email_campaign_recipients')
+      .select('ci, campaign_id, status, purpose, sent_at, cz_solicitud_id')
+      .in('campaign_id', ids)
+      .eq('purpose', PURPOSE)
+      .eq('status', 'sent')
+      .in('cz_solicitud_id', episodeIds);
+    if (error) {
+      throw new Error('list survey_sequence recipients: ' + error.message);
+    }
+    for (let i = 0; i < (priors || []).length; i += 1) {
+      const row = priors[i];
+      const key = String(row.cz_solicitud_id);
+      if (!byEpisode.has(key)) byEpisode.set(key, []);
+      byEpisode.get(key).push(row);
+    }
   }
 
   return list.map(function (row) {
-    const sentRows = byCi.get(String(row.ci)) || [];
+    const epKey =
+      row.cz_solicitud_id != null ? String(row.cz_solicitud_id) : '';
+    const sentRows = epKey ? byEpisode.get(epKey) || [] : [];
     return Object.assign({}, row, {
       survey_sequence: buildSurveySequenceForCi(sentRows, resolution),
     });

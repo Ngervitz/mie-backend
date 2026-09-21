@@ -245,29 +245,43 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     }),
   );
 
-  /** @type {Map<string, object>} key = campaignId + ':' + ci */
-  const priorByCampaignCi = new Map();
-  if (configuredStepIds.length) {
+  /** @type {Map<string, object>} key = campaignId + ':' + cz_solicitud_id */
+  const priorByCampaignEpisode = new Map();
+  const episodeIdsForPriors = [];
+  const seenEpPriors = new Set();
+  for (const ci of cis) {
+    const last = resolveCurrentLastRejectionForCi(
+      estadoRows || [],
+      solicitudRows || [],
+      ci,
+    );
+    if (last && last.cz_solicitud_id != null) {
+      const ep = Number(last.cz_solicitud_id);
+      if (Number.isFinite(ep) && !seenEpPriors.has(ep)) {
+        seenEpPriors.add(ep);
+        episodeIdsForPriors.push(ep);
+      }
+    }
+  }
+  if (configuredStepIds.length && episodeIdsForPriors.length) {
     const { data: priors, error: pErr } = await supabase
       .from('email_campaign_recipients')
       .select(
-        'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at',
+        'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
       )
       .in('campaign_id', configuredStepIds)
       .eq('purpose', PURPOSE)
-      .in(
-        'ci',
-        cis.map(String),
-      );
+      .in('cz_solicitud_id', episodeIdsForPriors);
     if (pErr) throw new Error('list survey recipients: ' + pErr.message);
     for (const p of priors || []) {
-      const key = String(p.campaign_id) + ':' + String(p.ci);
-      const prev = priorByCampaignCi.get(key);
+      const key =
+        String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
+      const prev = priorByCampaignEpisode.get(key);
       if (
         !prev ||
         String(p.created_at || '') > String(prev.created_at || '')
       ) {
-        priorByCampaignCi.set(key, p);
+        priorByCampaignEpisode.set(key, p);
       }
     }
   }
@@ -394,12 +408,18 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       });
     }
 
+    const episodeId =
+      last && last.cz_solicitud_id != null
+        ? Number(last.cz_solicitud_id)
+        : null;
     const attemptsByStep = { 1: null, 2: null, 3: null };
     for (let s = 1; s <= 3; s += 1) {
       const cid = stepCampaignIds[s];
-      if (!cid) continue;
+      if (!cid || episodeId == null || !Number.isFinite(episodeId)) continue;
       attemptsByStep[s] =
-        priorByCampaignCi.get(String(cid) + ':' + String(ci)) || null;
+        priorByCampaignEpisode.get(
+          String(cid) + ':' + String(episodeId),
+        ) || null;
     }
 
     if (isSurveyInviteSequenceComplete(attemptsByStep)) {
@@ -438,7 +458,11 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     }
 
     const priorRecipient =
-      priorByCampaignCi.get(String(dueCampaignId) + ':' + String(ci)) || null;
+      episodeId != null && Number.isFinite(episodeId)
+        ? priorByCampaignEpisode.get(
+            String(dueCampaignId) + ':' + String(episodeId),
+          ) || null
+        : null;
     const elig = evaluateRejectedSurveyInviteEligibility({
       ci: ci,
       campaignId: dueCampaignId,

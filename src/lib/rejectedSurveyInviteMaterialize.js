@@ -260,10 +260,23 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
     };
   }
 
+  const czSolicitudId =
+    elig.cz_solicitud_id != null ? Number(elig.cz_solicitud_id) : null;
+  if (czSolicitudId == null || !Number.isFinite(czSolicitudId)) {
+    return {
+      ok: false,
+      result: REASONS.NO_CURRENT_REJECTION,
+      email_masked: elig.email_masked,
+      recipient_id: null,
+      campaign_id: resolvedCampaignId,
+      due_step: null,
+    };
+  }
+
   const realSurveyUrl = buildSurveyUrl(elig.lrw_id);
   const idempotencyKey = buildSurveyInviteIdempotencyKey(
     resolvedCampaignId,
-    elig.ci,
+    czSolicitudId,
   );
   const emailNorm = normalizeEmail(elig.email);
 
@@ -275,6 +288,7 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
     email: emailNorm,
     purpose: PURPOSE,
     destinationUrl: realSurveyUrl,
+    czSolicitudId: czSolicitudId,
   });
 
   const trackedUrl = buildEmailClickTrackedUrl(unit.tracking_token, publicBase);

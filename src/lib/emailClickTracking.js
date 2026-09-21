@@ -52,9 +52,13 @@ function appendJtToDestination(destinationUrl, trackingToken) {
  *   email: string,
  *   purpose: string,
  *   destinationUrl: string,
+ *   czSolicitudId: string|number,
  * }} input
  */
 async function upsertEmailSurveyInviteRecipientImpact(supabase, input) {
+  if (input.czSolicitudId == null || String(input.czSolicitudId).trim() === '') {
+    throw new Error('cz_solicitud_id required for survey invite RPC');
+  }
   const { data, error } = await supabase.rpc(RPC_NAME, {
     p_idempotency_key: String(input.idempotencyKey),
     p_campaign_id: Number(input.campaignId),
@@ -62,6 +66,7 @@ async function upsertEmailSurveyInviteRecipientImpact(supabase, input) {
     p_email: String(input.email),
     p_purpose: String(input.purpose),
     p_destination_url: String(input.destinationUrl),
+    p_cz_solicitud_id: Number(input.czSolicitudId),
   });
   if (error) {
     const err = new Error(
@@ -94,6 +99,8 @@ async function upsertEmailSurveyInviteRecipientImpact(supabase, input) {
       data.provider_send_started_at != null
         ? String(data.provider_send_started_at)
         : null,
+    cz_solicitud_id:
+      data.cz_solicitud_id != null ? Number(data.cz_solicitud_id) : null,
   };
 }
 

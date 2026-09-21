@@ -137,18 +137,22 @@ const REASONS = Object.freeze({
 });
 
 /**
+ * Episode-scoped unit key (campaign = STEP, cz_solicitud_id = episode).
  * @param {number|string} campaignId
- * @param {number} ci
+ * @param {number|string} czSolicitudId
  * @returns {string}
  */
-function buildSurveyInviteIdempotencyKey(campaignId, ci) {
+function buildSurveyInviteIdempotencyKey(campaignId, czSolicitudId) {
   assertValidEmailPurpose(PURPOSE);
+  if (czSolicitudId == null || String(czSolicitudId).trim() === '') {
+    throw new Error('cz_solicitud_id required for survey invite idempotency key');
+  }
   return (
     PURPOSE +
     ':campaign:' +
     String(campaignId) +
-    ':ci:' +
-    String(ci)
+    ':cz:' +
+    String(czSolicitudId)
   );
 }
 
