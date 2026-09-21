@@ -4,10 +4,11 @@
  * Materialize rechazados_survey_invite recipient (queued). No provider send.
  *
  * Flow:
- *   eligibility → REAL_SURVEY_URL → RPC(recipient+impact+link) → PUBLIC_TRACKED_URL
- *   → templateVars.survey_url → buildRecipientPayloadSnapshot → UPDATE recipient
+ *   eligibility → REAL_SURVEY_URL → RPC(recipient+impact+link[+reopen completed→sending])
+ *   → PUBLIC_TRACKED_URL → templateVars.survey_url → buildRecipientPayloadSnapshot → UPDATE recipient
  *
- * RPC unit is atomic; RPC→snapshot frontier is not.
+ * RPC unit is atomic (incl. continuous-campaign reopen when migration applied).
+ * RPC→snapshot frontier is not.
  */
 
 const logger = require('./logger');

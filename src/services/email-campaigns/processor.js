@@ -8,6 +8,10 @@ const { randomUUID } = require('crypto');
 const supabase = require('../../clients/supabase');
 const logger = require('../../lib/logger');
 const { getEmailProvider } = require('../email-provider');
+const {
+  isContinuousRejectedSurveyCampaign,
+  resolveRecalculatedCampaignStatus,
+} = require('../../lib/rejectedSurveyInviteContinuousCampaigns');
 const { validateRule, filterBySegment } = require('./rule-engine');
 const { renderOutboundEmail } = require('./renderTemplate');
 const {
@@ -685,19 +689,13 @@ async function recalculateCampaignStatus(campaignId) {
     else if (r.status === 'failed') failed += 1;
   }
 
-  let nextStatus = 'sending';
-  if (queued > 0) {
-    nextStatus = 'sending';
-  } else if (sent > 0 && failed === 0) {
-    nextStatus = 'completed';
-  } else if (sent > 0 && failed > 0) {
-    nextStatus = 'partial_error';
-  } else if (sent === 0 && failed > 0) {
-    nextStatus = 'error';
-  } else {
-    // No recipients left in known buckets — keep sending as safe default.
-    nextStatus = 'sending';
-  }
+  // Continuous STEP campaigns (env STEP1/2/3) stay always-open: never auto-complete.
+  const nextStatus = resolveRecalculatedCampaignStatus({
+    queued: queued,
+    sent: sent,
+    failed: failed,
+    isContinuous: isContinuousRejectedSurveyCampaign(campaignId),
+  });
 
   const nowIso = new Date().toISOString();
   const updatePayload = {
@@ -1092,6 +1090,7 @@ async function processQueue() {
 module.exports = {
   materializeCampaign,
   processQueue,
+  recalculateCampaignStatus,
   normalizeEncuestaRecord,
   normalizeCampaignId,
   normalizeEmail,

@@ -101,6 +101,7 @@ async function upsertEmailSurveyInviteRecipientImpact(supabase, input) {
         : null,
     cz_solicitud_id:
       data.cz_solicitud_id != null ? Number(data.cz_solicitud_id) : null,
+    campaign_reopened: Boolean(data.campaign_reopened),
   };
 }
 
