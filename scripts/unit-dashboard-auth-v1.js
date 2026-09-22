@@ -60,7 +60,13 @@ async function main() {
     'rechazados',
   );
   assert.ok(SECTION_KEYS.includes('rechazados'));
-  assert.strictEqual(SECTION_KEYS.length, 11);
+  assert.strictEqual(resolveSectionForPath('/preaprobados'), 'preaprobados');
+  assert.strictEqual(
+    resolveSectionForPath('/preaprobados/1168'),
+    'preaprobados',
+  );
+  assert.ok(SECTION_KEYS.includes('preaprobados'));
+  assert.strictEqual(SECTION_KEYS.length, 12);
 
   const hash = await hashPassword('UnitTest!password1');
   assert.ok(await verifyPassword('UnitTest!password1', hash));

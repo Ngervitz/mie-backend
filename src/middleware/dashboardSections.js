@@ -22,6 +22,7 @@ const SECTION_KEYS = Object.freeze([
   'inbox',
   'cz-funnel',
   'rechazados',
+  'preaprobados',
 ]);
 
 /**
@@ -111,6 +112,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/jobs/run-bcu-usd-rate-sync',
   ]),
   rechazados: Object.freeze(['/rechazados']),
+  preaprobados: Object.freeze(['/preaprobados']),
 });
 
 /**
@@ -135,6 +137,7 @@ const SECTION_MOUNT_PREFIXES = Object.freeze({
   ]),
   meta: Object.freeze(['/api/liquidity-cycle', '/api/bcu-usura-rate']),
   rechazados: Object.freeze(['/rechazados']),
+  preaprobados: Object.freeze(['/preaprobados']),
 });
 
 /**

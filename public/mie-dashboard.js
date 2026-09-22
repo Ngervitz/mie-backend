@@ -17467,3 +17467,610 @@ init();
     window.__rechazadosOpenListLegacy = prevOpen;
   }
 })();
+
+/* ----------------------------------------------------------------------------
+ * Preaprobados V1 — CZ→CDV observation (estado 8 cohort)
+ * ------------------------------------------------------------------------- */
+(function initPreaprobados() {
+  const panel = document.getElementById('preaprobados-panel');
+  const statusEl = document.getElementById('preaprobados-status');
+  const resultsEl = document.getElementById('preaprobados-results');
+  const filtersEl = document.getElementById('preaprobados-filters');
+  const kpisEl = document.getElementById('preaprobados-kpis');
+  const reloadBtn = document.getElementById('preaprobados-reload-btn');
+  const modalRoot = document.getElementById('preaprobados-modal-root');
+  if (!panel || !statusEl || !resultsEl || !filtersEl || !kpisEl || !modalRoot) {
+    return;
+  }
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+
+  const state = {
+    period: '30d',
+    fromCustom: '',
+    toCustom: '',
+    resultado: 'all',
+    estado: '',
+    q: '',
+    loading: false,
+    payload: null,
+    error: null,
+    offset: 0,
+    limit: 100,
+    detail: null,
+    detailLoading: false,
+    detailError: null,
+  };
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('mcl-error', Boolean(isError));
+  }
+
+  function startOfDayIso(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x.toISOString();
+  }
+
+  function endOfDayIso(d) {
+    const x = new Date(d);
+    x.setHours(23, 59, 59, 999);
+    return x.toISOString();
+  }
+
+  function periodRange() {
+    const now = new Date();
+    if (state.period === 'hoy') {
+      return { from: startOfDayIso(now), to: endOfDayIso(now) };
+    }
+    if (state.period === '7d') {
+      const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+      return { from: startOfDayIso(from), to: endOfDayIso(now) };
+    }
+    if (state.period === '30d') {
+      const from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
+      return { from: startOfDayIso(from), to: endOfDayIso(now) };
+    }
+    if (state.period === 'custom') {
+      const from = state.fromCustom
+        ? startOfDayIso(state.fromCustom + 'T12:00:00')
+        : null;
+      const to = state.toCustom
+        ? endOfDayIso(state.toCustom + 'T12:00:00')
+        : null;
+      return { from: from, to: to };
+    }
+    return { from: null, to: null };
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('es-UY', {
+      timeZone: 'America/Montevideo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function fmtMoney(n) {
+    if (n == null || n === '') return '—';
+    const x = Number(n);
+    if (!Number.isFinite(x)) return '—';
+    return x.toLocaleString('es-UY', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function fmtPct(ratio) {
+    if (ratio == null || !Number.isFinite(ratio)) return '—';
+    return (Math.round(ratio * 1000) / 10).toFixed(1) + '%';
+  }
+
+  function clientName(row) {
+    const parts = [];
+    if (row.nombre) parts.push(row.nombre);
+    if (row.apellido) parts.push(row.apellido);
+    return parts.length ? parts.join(' ') : '—';
+  }
+
+  function buildQuery() {
+    const range = periodRange();
+    const params = new URLSearchParams();
+    if (range.from) params.set('from', range.from);
+    if (range.to) params.set('to', range.to);
+    if (state.resultado && state.resultado !== 'all') {
+      params.set('resultado', state.resultado);
+    }
+    if (state.estado) params.set('estado', state.estado);
+    if (state.q) params.set('q', state.q);
+    params.set('limit', String(state.limit));
+    params.set('offset', String(state.offset));
+    return params.toString();
+  }
+
+  function renderFilters() {
+    const periods = [
+      { id: 'hoy', label: 'Hoy' },
+      { id: '7d', label: '7 días' },
+      { id: '30d', label: '30 días' },
+      { id: 'custom', label: 'Personalizado' },
+    ];
+    const resultados = [
+      { id: 'all', label: 'Todos' },
+      { id: 'granted', label: 'GRANTED' },
+      { id: 'sin_resultado', label: 'Sin resultado' },
+    ];
+    let html =
+      '<div class="preaprobados-filter-row">' +
+      periods
+        .map(function (p) {
+          return (
+            '<button type="button" class="preaprobados-filter-btn' +
+            (state.period === p.id ? ' is-active' : '') +
+            '" data-period="' +
+            p.id +
+            '">' +
+            escapeHtml(p.label) +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>';
+    if (state.period === 'custom') {
+      html +=
+        '<div class="preaprobados-filter-row">' +
+        '<label class="mcl-field"><span class="mcl-field-label">Desde</span>' +
+        '<input type="date" class="mcl-input" id="preaprobados-from" value="' +
+        escapeHtml(state.fromCustom) +
+        '" /></label>' +
+        '<label class="mcl-field"><span class="mcl-field-label">Hasta</span>' +
+        '<input type="date" class="mcl-input" id="preaprobados-to" value="' +
+        escapeHtml(state.toCustom) +
+        '" /></label>' +
+        '<button type="button" class="btn" data-action="apply-custom">Aplicar</button>' +
+        '</div>';
+    }
+    html +=
+      '<div class="preaprobados-filter-row">' +
+      resultados
+        .map(function (r) {
+          return (
+            '<button type="button" class="preaprobados-filter-btn' +
+            (state.resultado === r.id ? ' is-active' : '') +
+            '" data-resultado="' +
+            r.id +
+            '">' +
+            escapeHtml(r.label) +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>';
+    html +=
+      '<div class="preaprobados-filter-row">' +
+      '<label class="mcl-field"><span class="mcl-field-label">Estado actual</span>' +
+      '<select class="mcl-select" id="preaprobados-estado">' +
+      '<option value="">Todos</option>' +
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        .map(function (n) {
+          return (
+            '<option value="' +
+            n +
+            '"' +
+            (String(state.estado) === String(n) ? ' selected' : '') +
+            '>' +
+            n +
+            '</option>'
+          );
+        })
+        .join('') +
+      '</select></label>' +
+      '<label class="mcl-field preaprobados-search-field"><span class="mcl-field-label">Buscar</span>' +
+      '<input type="search" class="mcl-input" id="preaprobados-q" placeholder="CI, nombre, cz_id, lrw" value="' +
+      escapeHtml(state.q) +
+      '" /></label>' +
+      '<button type="button" class="btn" data-action="search">Buscar</button>' +
+      '</div>';
+    filtersEl.innerHTML = html;
+  }
+
+  function renderKpis() {
+    const data = state.payload;
+    if (!data || !data.kpis) {
+      kpisEl.innerHTML = '';
+      return;
+    }
+    const k = data.kpis;
+    const inProgress =
+      data.cohort && data.cohort.in_progress
+        ? '<span class="preaprobados-in-progress">Cohorte en curso</span>'
+        : '';
+    kpisEl.innerHTML =
+      '<div class="preaprobados-kpi-grid">' +
+      kpiCard('Preaprobados', String(k.preaprobados)) +
+      kpiCard('GRANTED', String(k.granted)) +
+      kpiCard('Sin resultado', String(k.sin_resultado)) +
+      kpiCard('$ otorgado', fmtMoney(k.monto_otorgado)) +
+      kpiCard('Conversión', fmtPct(k.conversion)) +
+      '</div>' +
+      inProgress;
+  }
+
+  function kpiCard(label, value) {
+    return (
+      '<div class="preaprobados-kpi-card">' +
+      '<div class="preaprobados-kpi-value">' +
+      escapeHtml(value) +
+      '</div>' +
+      '<div class="preaprobados-kpi-label">' +
+      escapeHtml(label) +
+      '</div></div>'
+    );
+  }
+
+  function resultadoBadge(resultado) {
+    if (resultado === 'granted') {
+      return '<span class="preaprobados-result is-granted">GRANTED</span>';
+    }
+    return '<span class="preaprobados-result is-sin">Sin resultado</span>';
+  }
+
+  function estadoCell(row) {
+    const id = row.estado_id != null ? String(row.estado_id) : '—';
+    if (row.estado_label) {
+      return escapeHtml(id) + ' · ' + escapeHtml(row.estado_label);
+    }
+    return escapeHtml(id);
+  }
+
+  function renderTable() {
+    const data = state.payload;
+    if (state.loading && !data) {
+      resultsEl.innerHTML = '<p class="mcl-empty">Cargando…</p>';
+      return;
+    }
+    if (state.error) {
+      resultsEl.innerHTML =
+        '<p class="mcl-empty">' + escapeHtml(state.error) + '</p>';
+      return;
+    }
+    const rows = (data && data.rows) || [];
+    if (!rows.length) {
+      resultsEl.innerHTML =
+        '<p class="mcl-empty">Sin preaprobados en el período.</p>';
+      return;
+    }
+    const body = rows
+      .map(function (row) {
+        return (
+          '<tr>' +
+          '<td>' +
+          escapeHtml(fmtDate(row.cohort_entered_at)) +
+          '</td>' +
+          '<td title="' +
+          escapeHtml(clientName(row)) +
+          '">' +
+          escapeHtml(clientName(row)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(row.ci != null ? String(row.ci) : '—') +
+          '</td>' +
+          '<td>' +
+          estadoCell(row) +
+          '</td>' +
+          '<td>' +
+          resultadoBadge(row.resultado) +
+          '</td>' +
+          '<td class="num">' +
+          escapeHtml(fmtMoney(row.monto_otorgado)) +
+          '</td>' +
+          '<td><button type="button" class="btn preaprobados-cell-btn" data-action="view" data-cz-id="' +
+          escapeHtml(String(row.cz_id)) +
+          '">Ver</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    const total = data.total != null ? data.total : rows.length;
+    const offset = data.offset != null ? data.offset : 0;
+    const limit = data.limit != null ? data.limit : state.limit;
+    const canPrev = offset > 0;
+    const canNext = offset + rows.length < total;
+    resultsEl.innerHTML =
+      '<div class="table-wrap"><table class="ga4-table preaprobados-table">' +
+      '<thead><tr>' +
+      '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th>' +
+      '<th>Estado actual</th><th>Resultado</th><th>Monto otorgado</th><th></th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>' +
+      '<div class="mcl-pagination preaprobados-pagination">' +
+      '<span>' +
+      escapeHtml(String(Math.min(offset + 1, total))) +
+      '–' +
+      escapeHtml(String(offset + rows.length)) +
+      ' de ' +
+      escapeHtml(String(total)) +
+      '</span>' +
+      '<button type="button" class="btn" data-action="prev-page"' +
+      (canPrev ? '' : ' disabled') +
+      '>Anterior</button>' +
+      '<button type="button" class="btn" data-action="next-page"' +
+      (canNext ? '' : ' disabled') +
+      '>Siguiente</button>' +
+      '</div>';
+  }
+
+  function closeModal() {
+    state.detail = null;
+    state.detailError = null;
+    state.detailLoading = false;
+    modalRoot.innerHTML = '';
+  }
+
+  function renderDetailModal() {
+    if (!state.detail && !state.detailLoading && !state.detailError) {
+      modalRoot.innerHTML = '';
+      return;
+    }
+    if (state.detailLoading) {
+      modalRoot.innerHTML =
+        '<div class="ad-modal-backdrop" data-action="close-modal">' +
+        '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true">' +
+        '<p>Cargando…</p></div></div>';
+      return;
+    }
+    if (state.detailError) {
+      modalRoot.innerHTML =
+        '<div class="ad-modal-backdrop" data-action="close-modal">' +
+        '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true">' +
+        '<button type="button" class="btn" data-action="close-modal">Cerrar</button>' +
+        '<p class="mcl-error">' +
+        escapeHtml(state.detailError) +
+        '</p></div></div>';
+      return;
+    }
+    const d = state.detail;
+    const hist = (d.historico || [])
+      .map(function (h) {
+        return (
+          '<tr><td>' +
+          escapeHtml(fmtDate(h.fechahora_src)) +
+          '</td><td>' +
+          escapeHtml(
+            h.solicitudes_estados_id != null
+              ? String(h.solicitudes_estados_id)
+              : '—',
+          ) +
+          (h.estado ? ' · ' + escapeHtml(h.estado) : '') +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    modalRoot.innerHTML =
+      '<div class="ad-modal-backdrop" data-action="close-modal">' +
+      '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle preaprobado" onclick="event.stopPropagation()">' +
+      '<div class="preaprobados-modal-header">' +
+      '<h2>Detalle · ' +
+      escapeHtml(String(d.cz_id)) +
+      '</h2>' +
+      '<button type="button" class="btn" data-action="close-modal">Cerrar</button>' +
+      '</div>' +
+      '<section><h3>Persona</h3><dl class="preaprobados-dl">' +
+      dlRow('Nombre', [d.nombre, d.apellido].filter(Boolean).join(' ') || '—') +
+      dlRow('CI', d.ci != null ? String(d.ci) : '—') +
+      dlRow('Email', d.email || '—') +
+      '</dl></section>' +
+      '<section><h3>Solicitud</h3><dl class="preaprobados-dl">' +
+      dlRow('cz_id', String(d.cz_id)) +
+      dlRow('Ingreso cohorte', fmtDate(d.cohort_entered_at)) +
+      dlRow('fecha_reg', fmtDate(d.fecha_reg)) +
+      dlRow('lrw_id', d.lrw_id || '—') +
+      '</dl></section>' +
+      '<section><h3>Resultado</h3><dl class="preaprobados-dl">' +
+      dlRow(
+        'Resultado',
+        d.resultado === 'granted' ? 'GRANTED' : 'Sin resultado',
+      ) +
+      dlRow(
+        'Estado actual',
+        (d.estado_id != null ? String(d.estado_id) : '—') +
+          (d.estado_label ? ' · ' + d.estado_label : ''),
+      ) +
+      dlRow('Monto otorgado', fmtMoney(d.monto_otorgado)) +
+      '</dl></section>' +
+      '<section><h3>Sincronización</h3><dl class="preaprobados-dl">' +
+      dlRow('synced_at', fmtDate(d.synced_at)) +
+      dlRow('updated_at_src', fmtDate(d.updated_at_src)) +
+      '</dl></section>' +
+      '<section><h3>Historial</h3>' +
+      '<p class="preaprobados-muted">' +
+      escapeHtml(d.historico_note || '') +
+      '</p>' +
+      (hist
+        ? '<div class="table-wrap"><table class="ga4-table"><thead><tr><th>Fecha</th><th>Estado</th></tr></thead><tbody>' +
+          hist +
+          '</tbody></table></div>'
+        : '<p class="mcl-empty">Sin eventos en JANUS.</p>') +
+      '</section></div></div>';
+  }
+
+  function dlRow(label, value) {
+    return (
+      '<div><dt>' +
+      escapeHtml(label) +
+      '</dt><dd>' +
+      escapeHtml(value) +
+      '</dd></div>'
+    );
+  }
+
+  async function loadList() {
+    state.loading = true;
+    state.error = null;
+    setStatus('Cargando…', false);
+    renderFilters();
+    renderTable();
+    try {
+      const res = await fetch(API + '/preaprobados?' + buildQuery(), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
+      if (res.status === 403) {
+        state.error = 'Sin permiso para esta sección';
+        state.payload = null;
+        setStatus(state.error, true);
+        renderKpis();
+        renderTable();
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        state.error = (data && data.error) || 'Error al cargar';
+        state.payload = null;
+        setStatus(state.error, true);
+        renderKpis();
+        renderTable();
+        return;
+      }
+      state.payload = data.data;
+      setStatus(
+        String(data.data.total || 0) + ' preaprobado(s) en cohorte',
+        false,
+      );
+      renderKpis();
+      renderTable();
+    } catch (_err) {
+      state.error = 'No se pudo conectar.';
+      state.payload = null;
+      setStatus(state.error, true);
+      renderKpis();
+      renderTable();
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function openDetail(czId) {
+    state.detailLoading = true;
+    state.detailError = null;
+    state.detail = null;
+    renderDetailModal();
+    try {
+      const res = await fetch(
+        API + '/preaprobados/' + encodeURIComponent(czId),
+        {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) {
+        state.detailError = (data && data.error) || 'Error al cargar detalle';
+        state.detail = null;
+      } else {
+        state.detail = data.data;
+      }
+    } catch (_err) {
+      state.detailError = 'No se pudo conectar.';
+      state.detail = null;
+    } finally {
+      state.detailLoading = false;
+      renderDetailModal();
+    }
+  }
+
+  filtersEl.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t) return;
+    const periodBtn = t.closest && t.closest('[data-period]');
+    if (periodBtn) {
+      state.period = periodBtn.getAttribute('data-period');
+      state.offset = 0;
+      renderFilters();
+      if (state.period !== 'custom') loadList();
+      return;
+    }
+    const resBtn = t.closest && t.closest('[data-resultado]');
+    if (resBtn) {
+      state.resultado = resBtn.getAttribute('data-resultado');
+      state.offset = 0;
+      loadList();
+      return;
+    }
+    const action = t.getAttribute && t.getAttribute('data-action');
+    if (action === 'apply-custom') {
+      const fromEl = document.getElementById('preaprobados-from');
+      const toEl = document.getElementById('preaprobados-to');
+      state.fromCustom = fromEl ? fromEl.value : '';
+      state.toCustom = toEl ? toEl.value : '';
+      state.offset = 0;
+      loadList();
+      return;
+    }
+    if (action === 'search') {
+      const qEl = document.getElementById('preaprobados-q');
+      const estEl = document.getElementById('preaprobados-estado');
+      state.q = qEl ? String(qEl.value || '').trim() : '';
+      state.estado = estEl ? String(estEl.value || '') : '';
+      state.offset = 0;
+      loadList();
+    }
+  });
+
+  resultsEl.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    const btn = t.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-action');
+    if (action === 'view') {
+      openDetail(btn.getAttribute('data-cz-id'));
+      return;
+    }
+    if (action === 'prev-page' && !btn.disabled) {
+      state.offset = Math.max(0, state.offset - state.limit);
+      loadList();
+      return;
+    }
+    if (action === 'next-page' && !btn.disabled) {
+      state.offset = state.offset + state.limit;
+      loadList();
+    }
+  });
+
+  modalRoot.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    if (t.closest('[data-action="close-modal"]')) {
+      closeModal();
+    }
+  });
+
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', function () {
+      state.offset = 0;
+      loadList();
+    });
+  }
+
+  window.__openPreaprobados = function () {
+    renderFilters();
+    loadList();
+  };
+})();

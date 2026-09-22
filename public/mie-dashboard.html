@@ -142,6 +142,15 @@
         class="dashboard-tab"
         role="tab"
         aria-selected="false"
+        data-dashboard-tab="preaprobados"
+        id="tab-preaprobados">
+        Preaprobados
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
         data-dashboard-tab="meta"
         id="tab-meta">
         <!-- Official Meta infinity logomark (unmodified artwork, incl. gradients).
@@ -808,6 +817,39 @@
         <div id="mi-deuda-results"></div>
       </div>
       <div id="rechazados-modal-root"></div>
+    </div>
+
+    <!-- Preaprobados V1: observación CZ→CDV (estado 8 histórico). Solo lectura. -->
+    <div
+      class="dashboard-panel hidden"
+      id="preaprobados-panel"
+      role="tabpanel"
+      aria-labelledby="tab-preaprobados"
+      hidden>
+      <div id="preaprobados-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Preaprobados</h1>
+            <p class="mcl-subtitle">
+              Cohorte CZ→CDV · observación post-preaprobación (estado 8)
+            </p>
+          </div>
+          <div class="mcl-header-actions">
+            <button type="button" id="preaprobados-reload-btn" class="btn">
+              Recargar
+            </button>
+          </div>
+        </header>
+        <div
+          id="preaprobados-filters"
+          class="preaprobados-filters"
+          role="group"
+          aria-label="Filtros de preaprobados"></div>
+        <div id="preaprobados-kpis" class="preaprobados-kpis"></div>
+        <div id="preaprobados-status" class="mcl-status" aria-live="polite"></div>
+        <div id="preaprobados-results"></div>
+      </div>
+      <div id="preaprobados-modal-root"></div>
     </div>
 
     <!-- Search Console: honest placeholder only. The backend integration
@@ -1623,8 +1665,9 @@
         admin: document.getElementById('admin-panel'),
         'cz-funnel': document.getElementById('cz-funnel-panel'),
         rechazados: document.getElementById('rechazados-panel'),
+        preaprobados: document.getElementById('preaprobados-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.rechazados || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.rechazados || !panels.preaprobados || !tabs.length) return;
 
       var SECTION_ORDER = [
         'market',
@@ -1634,6 +1677,7 @@
         'searchconsole',
         'cz-funnel',
         'rechazados',
+        'preaprobados',
         'meta',
         'sms',
         'email',
@@ -1708,6 +1752,9 @@
         if (name === 'cz-funnel' && window.__openCzFunnel) window.__openCzFunnel();
         if (name === 'rechazados' && window.__openRechazados) {
           window.__openRechazados();
+        }
+        if (name === 'preaprobados' && window.__openPreaprobados) {
+          window.__openPreaprobados();
         }
         if (name === 'sms' && window.__openSms) window.__openSms();
         if (name === 'email' && window.__openEmail) window.__openEmail();

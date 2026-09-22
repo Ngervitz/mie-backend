@@ -6,6 +6,7 @@ const smsContactsRouter = require('./routes/sms-contacts');
 const emailRouter = require('./routes/email');
 const aiVisibilityRouter = require('./routes/ai-visibility');
 const rechazadosRouter = require('./routes/rechazados');
+const preaprobadosRouter = require('./routes/preaprobados');
 const {
   requireDashboardPermission,
 } = require('./middleware/requireDashboardPermission');
@@ -26,6 +27,11 @@ app.use(
   '/rechazados',
   requireDashboardPermission('rechazados'),
   rechazadosRouter,
+);
+app.use(
+  '/preaprobados',
+  requireDashboardPermission('preaprobados'),
+  preaprobadosRouter,
 );
 
 app.listen(env.port, () => {

@@ -5917,3 +5917,118 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Preaprobados V1 */
+#mie-dashboard-app .preaprobados-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+#mie-dashboard-app .preaprobados-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+#mie-dashboard-app .preaprobados-filter-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#mie-dashboard-app .preaprobados-filter-btn.is-active {
+  background: var(--accent-info-soft);
+  color: var(--accent-info);
+  border-color: var(--accent-info);
+}
+#mie-dashboard-app .preaprobados-search-field {
+  min-width: 220px;
+  flex: 1;
+}
+#mie-dashboard-app .preaprobados-kpis {
+  margin: 8px 0 12px;
+}
+#mie-dashboard-app .preaprobados-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+#mie-dashboard-app .preaprobados-kpi-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+#mie-dashboard-app .preaprobados-kpi-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+#mie-dashboard-app .preaprobados-kpi-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+#mie-dashboard-app .preaprobados-in-progress {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent-info);
+}
+#mie-dashboard-app .preaprobados-result {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+#mie-dashboard-app .preaprobados-result.is-granted {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-result.is-sin {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+#mie-dashboard-app .ga4-table.preaprobados-table th,
+#mie-dashboard-app .ga4-table.preaprobados-table td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+#mie-dashboard-app .preaprobados-pagination {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+#mie-dashboard-app .preaprobados-detail-modal {
+  max-width: 640px;
+  max-height: 90vh;
+  overflow: auto;
+}
+#mie-dashboard-app .preaprobados-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+#mie-dashboard-app .preaprobados-dl {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+#mie-dashboard-app .preaprobados-dl dt {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .preaprobados-dl dd {
+  margin: 0;
+}
+#mie-dashboard-app .preaprobados-muted {
+  font-size: 12px;
+  color: var(--text-muted);
+}
