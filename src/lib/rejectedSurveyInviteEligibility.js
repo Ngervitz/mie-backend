@@ -82,8 +82,14 @@ function getEmailPublicBaseUrl() {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
- * @param {{ campaignId?: string|number|null }} [opts]
+ * @param {{
+ *   campaignId?: string|number|null,
+ *   czSolicitudId?: string|number|null,
+ * }} [opts]
  *   campaignId — required for sequence steps; if omitted, legacy wave1 env.
+ *   czSolicitudId — optional explicit episode. When set, eligibility uses that
+ *   solicitud (must belong to ciRaw) instead of global last-rejection-by-CI.
+ *   Used by the historical pilot so STEP materialization preserves the pilot CZ.
  */
 async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
   const ci = normalizeCi(ciRaw);
@@ -107,6 +113,14 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
       : getWave1CampaignId();
   const publicBase = getEmailPublicBaseUrl();
 
+  const explicitCzRaw = options.czSolicitudId;
+  const explicitCz =
+    explicitCzRaw != null && String(explicitCzRaw).trim() !== ''
+      ? Number(explicitCzRaw)
+      : null;
+  const hasExplicitEpisode =
+    explicitCz != null && Number.isFinite(explicitCz);
+
   const { data: estadoRows, error: estErr } = await supabase
     .from('cz_funnel_solicitud_estados')
     .select(
@@ -120,18 +134,66 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
     .select('cz_id, ci, email, lrw_id, nombre');
   if (solErr) throw new Error('eligibility solicitudes: ' + solErr.message);
 
-  const last = resolveCurrentLastRejectionForCi(
-    estadoRows || [],
-    solicitudRows || [],
-    ci,
-  );
-
+  /** @type {{ cz_solicitud_id: number, ci: number, cz_historico_id: number, fechahora_src: string|null }|null} */
+  let last = null;
+  /** @type {object|null} */
   let solicitud = null;
-  if (last) {
+
+  if (hasExplicitEpisode) {
     solicitud =
       (solicitudRows || []).find(function (s) {
-        return Number(s.cz_id) === Number(last.cz_solicitud_id);
+        return Number(s.cz_id) === explicitCz;
       }) || null;
+    if (!solicitud) {
+      return evaluateRejectedSurveyInviteEligibility({
+        ci: ci,
+        campaignId: campaignId,
+        publicBaseUrlConfigured: Boolean(publicBase),
+        lastRejection: null,
+        solicitud: null,
+        hasEncuesta: false,
+        isSuppressed: false,
+        priorRecipient: null,
+      });
+    }
+    const solCi = normalizeCi(solicitud.ci);
+    if (solCi == null || Number(solCi) !== Number(ci)) {
+      return Object.assign(
+        evaluateRejectedSurveyInviteEligibility({
+          ci: ci,
+          campaignId: campaignId,
+          publicBaseUrlConfigured: Boolean(publicBase),
+          lastRejection: null,
+          solicitud: null,
+          hasEncuesta: false,
+          isSuppressed: false,
+          priorRecipient: null,
+        }),
+        {
+          reason: REASONS.EPISODE_CI_MISMATCH,
+          eligible: false,
+          cz_solicitud_id: explicitCz,
+        },
+      );
+    }
+    last = {
+      ci: ci,
+      cz_solicitud_id: explicitCz,
+      cz_historico_id: 0,
+      fechahora_src: null,
+    };
+  } else {
+    last = resolveCurrentLastRejectionForCi(
+      estadoRows || [],
+      solicitudRows || [],
+      ci,
+    );
+    if (last) {
+      solicitud =
+        (solicitudRows || []).find(function (s) {
+          return Number(s.cz_id) === Number(last.cz_solicitud_id);
+        }) || null;
+    }
   }
 
   const { count: encCount, error: encErr } = await supabase
@@ -156,21 +218,23 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
   }
 
   let priorRecipient = null;
-  if (campaignId) {
+  const episodeForPrior =
+    last && last.cz_solicitud_id != null
+      ? Number(last.cz_solicitud_id)
+      : null;
+  if (campaignId && episodeForPrior != null && Number.isFinite(episodeForPrior)) {
     const { data: prior, error: priorErr } = await supabase
       .from('email_campaign_recipients')
       .select(
-        'id, campaign_id, ci, email, status, error_reason, purpose, template_vars, idempotency_key',
+        'id, campaign_id, ci, email, status, error_reason, purpose, template_vars, idempotency_key, cz_solicitud_id',
       )
       .eq('campaign_id', campaignId)
       .eq('purpose', PURPOSE)
-      .eq('ci', String(ci))
+      .eq('cz_solicitud_id', episodeForPrior)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (priorErr) {
-      // Columns purpose may be missing if 2A migration not applied locally —
-      // surface clearly.
       throw new Error('eligibility prior recipients: ' + priorErr.message);
     }
     priorRecipient = prior || null;

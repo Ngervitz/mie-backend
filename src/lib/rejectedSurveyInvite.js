@@ -125,6 +125,7 @@ const ERROR_SUPPRESSED = 'email_suppressed';
 const REASONS = Object.freeze({
   ELIGIBLE: 'eligible',
   NO_CURRENT_REJECTION: 'no_current_rejection',
+  EPISODE_CI_MISMATCH: 'episode_ci_mismatch',
   MISSING_EMAIL: 'missing_email',
   MISSING_LRW: 'missing_lrw',
   SURVEY_ALREADY_COMPLETED: 'survey_already_completed',

@@ -328,10 +328,13 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
     }
 
     try {
+      // Preserve the pilot episode decided by the runner — do NOT re-resolve
+      // via global last-rejection-by-CI (e.g. 1154 must not become 1357).
       const outcome = await materializeFn(
         supabase,
         ci,
         decision.campaign_id,
+        { czSolicitudId: episodeId },
       );
       const ok =
         outcome &&

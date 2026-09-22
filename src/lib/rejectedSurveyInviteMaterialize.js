@@ -221,8 +221,16 @@ async function repairSurveyInviteRecipient(supabase, args) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
  * @param {string|number|null|undefined} [campaignId]
+ * @param {{ czSolicitudId?: string|number|null }} [opts]
+ *   czSolicitudId — optional explicit episode for historical pilot materialize.
+ *   When omitted, eligibility uses global last-rejection-by-CI (normal flow).
  */
-async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
+async function materializeRejectedSurveyInvite(
+  supabase,
+  ciRaw,
+  campaignId,
+  opts,
+) {
   assertValidEmailPurpose(PURPOSE);
 
   const resolvedCampaignId =
@@ -230,10 +238,19 @@ async function materializeRejectedSurveyInvite(supabase, ciRaw, campaignId) {
       ? String(campaignId).trim()
       : eligibility.getWave1CampaignId();
 
+  const options = opts || {};
+  const eligOpts = { campaignId: resolvedCampaignId };
+  if (
+    options.czSolicitudId != null &&
+    String(options.czSolicitudId).trim() !== ''
+  ) {
+    eligOpts.czSolicitudId = options.czSolicitudId;
+  }
+
   const elig = await eligibility.getRejectedSurveyInviteEligibility(
     supabase,
     ciRaw,
-    { campaignId: resolvedCampaignId },
+    eligOpts,
   );
 
   if (!elig.eligible) {
