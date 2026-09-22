@@ -56,16 +56,41 @@ assert.strictEqual(
     .emailClicked,
   true,
 );
+// Sin respuesta + click → NO glyph (UI exception)
+assert.deepStrictEqual(
+  H.scoreCell(
+    null,
+    { step1_sent_at: 'a', step2_sent_at: 'b', step3_sent_at: 'c' },
+    true,
+  ),
+  {
+    kind: 'badge',
+    label: 'Sin respuesta',
+    badgeClass: 'is-survey-no-reply',
+  },
+);
 assert.strictEqual(
   H.scoreCell(
     null,
     { step1_sent_at: 'a', step2_sent_at: 'b', step3_sent_at: 'c' },
     true,
-  ).label,
-  'Sin respuesta',
+  ).emailClicked,
+  undefined,
 );
 assert.strictEqual(H.scoreCell(null, null, true).kind, 'clock');
 assert.strictEqual(H.scoreCell(null, null, true).emailClicked, true);
+
+// Numeric / S1 / S2 keep glyph with click
+assert.strictEqual(H.scoreCell(15, null, true).emailClicked, true);
+assert.strictEqual(
+  H.scoreCell(null, { step1_sent_at: 't1' }, true).emailClicked,
+  true,
+);
+assert.strictEqual(
+  H.scoreCell(null, { step1_sent_at: 'a', step2_sent_at: 'b' }, true)
+    .emailClicked,
+  true,
+);
 
 // 6. multiple raw clicks → single boolean glyph (set has one CI)
 {

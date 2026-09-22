@@ -119,7 +119,8 @@
    * No "Encuestar".
    * Optional third arg: survey_email_clicked (CI-lifetime email click signal).
    * When true, descriptor includes emailClicked for a discrete ✉ glyph —
-   * independent of score/sequence state (not causal attribution).
+   * independent of score/sequence state (not causal attribution), except
+   * the "Sin respuesta" badge which never shows the glyph.
    *
    * @param {unknown} score
    * @param {{
@@ -152,11 +153,12 @@
       ? surveySequence
       : {};
     if (seq.step3_sent_at) {
-      return withEmailClick({
+      // "Sin respuesta" never shows the email-click glyph (UI exception).
+      return {
         kind: 'badge',
         label: 'Sin respuesta',
         badgeClass: 'is-survey-no-reply',
-      });
+      };
     }
     if (seq.step2_sent_at) {
       return withEmailClick({
