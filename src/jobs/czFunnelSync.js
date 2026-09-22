@@ -423,24 +423,68 @@ async function upsertSolicitudes(items) {
   return rows.length;
 }
 
+/**
+ * Map one CZ /encuestas item to a cz_funnel_encuestas row.
+ * id → cz_id (encuesta id, not solicitud id).
+ * @param {object} item
+ * @param {string} nowIso
+ * @returns {object|null}
+ */
+function mapEncuestaRow(item, nowIso) {
+  if (!item || item.id == null) return null;
+  const czId = Number(item.id);
+  if (!Number.isFinite(czId)) return null;
+  return {
+    cz_id: czId,
+    ci: item.ci != null && item.ci !== '' ? Number(item.ci) : null,
+    email: item.email != null ? String(item.email) : null,
+    tipo: nullableTrimmedText(item.tipo),
+    estado: nullableTrimmedText(item.estado),
+    p1: nullableTrimmedText(item.p1),
+    p2: nullableTrimmedText(item.p2),
+    p3: nullableTrimmedText(item.p3),
+    p4: nullableTrimmedText(item.p4),
+    p5: nullableTrimmedText(item.p5),
+    p6: nullableTrimmedText(item.p6),
+    p7: nullableTrimmedText(item.p7),
+    p8: nullableTrimmedText(item.p8),
+    p9: nullableTrimmedText(item.p9),
+    p10: nullableTrimmedText(item.p10),
+    bloque_1_score_v2:
+      item.bloque_1_score_v2 != null && item.bloque_1_score_v2 !== ''
+        ? Number(item.bloque_1_score_v2)
+        : null,
+    bloque_2_score_v2:
+      item.bloque_2_score_v2 != null && item.bloque_2_score_v2 !== ''
+        ? Number(item.bloque_2_score_v2)
+        : null,
+    bloque_3_score_v2:
+      item.bloque_3_score_v2 != null && item.bloque_3_score_v2 !== ''
+        ? Number(item.bloque_3_score_v2)
+        : null,
+    bloque_4_score_v2:
+      item.bloque_4_score_v2 != null && item.bloque_4_score_v2 !== ''
+        ? Number(item.bloque_4_score_v2)
+        : null,
+    segmentacion_base: nullableTrimmedText(item.segmentacion_base),
+    b_plus: nullableInteger(item.b_plus),
+    version_cuestionario: nullableInteger(item.version_cuestionario),
+    canal_origen: nullableTrimmedText(item.canal_origen),
+    score_v2:
+      item.score_v2 != null && item.score_v2 !== ''
+        ? Number(item.score_v2)
+        : null,
+    completed_at: parseCzDateTime(item.completed_at),
+    synced_at: nowIso,
+  };
+}
+
 async function upsertEncuestas(items) {
   const now = new Date().toISOString();
   const rows = [];
   for (const item of items) {
-    if (!item || item.id == null) continue;
-    const czId = Number(item.id);
-    if (!Number.isFinite(czId)) continue;
-    rows.push({
-      cz_id: czId,
-      ci: item.ci != null && item.ci !== '' ? Number(item.ci) : null,
-      email: item.email != null ? String(item.email) : null,
-      score_v2:
-        item.score_v2 != null && item.score_v2 !== ''
-          ? Number(item.score_v2)
-          : null,
-      completed_at: parseCzDateTime(item.completed_at),
-      synced_at: now,
-    });
+    const row = mapEncuestaRow(item, now);
+    if (row) rows.push(row);
   }
   if (!rows.length) return 0;
   const { error } = await supabase.from(SOURCE_ENCUESTAS).upsert(rows, {
@@ -654,6 +698,8 @@ module.exports = {
   upsertSolicitudes,
   upsertGrantedLoans,
   upsertSolicitudEstados,
+  mapEncuestaRow,
+  upsertEncuestas,
   syncSource,
   setCdvSheetSyncForTests,
   runCdvSheetSyncFailOpen,
