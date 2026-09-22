@@ -5310,6 +5310,19 @@
   align-items: center;
   width: 100%;
 }
+#mie-dashboard-app .rechazados-score-with-email-click {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+#mie-dashboard-app .rechazados-survey-email-click {
+  display: inline-block;
+  font-size: 0.78rem;
+  line-height: 1;
+  opacity: 0.72;
+  font-weight: var(--font-weight-regular, 400);
+  user-select: none;
+}
 #mie-dashboard-app .rechazados-score {
   display: inline-block;
   font-weight: var(--font-weight-medium);

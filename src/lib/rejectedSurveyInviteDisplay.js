@@ -250,10 +250,152 @@ async function attachSurveySequenceToListRows(supabase, rows, opts) {
   });
 }
 
+const CLICK_QUERY_CHUNK = 200;
+
+/**
+ * Pure: map CI keys that have ≥1 survey-invite email click.
+ * CI-lifetime (not episode-scoped). Raw clicks only — no bot filter.
+ *
+ * @param {{ ci: unknown, marketing_impact_id: unknown }[]} recipients
+ * @param {{ id: unknown, channel?: unknown }[]} impacts
+ * @param {{ impact_id: unknown, event_name?: unknown }[]} events
+ * @returns {Set<string>}
+ */
+function buildSurveyEmailClickedCiSet(recipients, impacts, events) {
+  const emailImpactIds = new Set();
+  for (let i = 0; i < (impacts || []).length; i += 1) {
+    const imp = impacts[i];
+    if (!imp || imp.id == null) continue;
+    if (String(imp.channel || '') !== 'email') continue;
+    emailImpactIds.add(String(imp.id));
+  }
+
+  const clickedImpactIds = new Set();
+  for (let i = 0; i < (events || []).length; i += 1) {
+    const ev = events[i];
+    if (!ev || ev.impact_id == null) continue;
+    if (String(ev.event_name || '') !== 'click') continue;
+    const id = String(ev.impact_id);
+    if (!emailImpactIds.has(id)) continue;
+    clickedImpactIds.add(id);
+  }
+
+  const clickedCis = new Set();
+  for (let i = 0; i < (recipients || []).length; i += 1) {
+    const r = recipients[i];
+    if (!r || r.marketing_impact_id == null || r.ci == null) continue;
+    if (!clickedImpactIds.has(String(r.marketing_impact_id))) continue;
+    clickedCis.add(String(r.ci));
+  }
+  return clickedCis;
+}
+
+/**
+ * Batch-attach survey_email_clicked (CI lifetime) to list rows.
+ * purpose=rechazados_survey_invite → marketing_impacts(channel=email) →
+ * marketing_impact_events(event_name=click). No N+1 per row.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {object[]} rows
+ */
+async function attachSurveyEmailClickedToListRows(supabase, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return list;
+
+  const cis = [];
+  const seenCi = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const ciKey = list[i].ci != null ? String(list[i].ci) : '';
+    if (!ciKey || seenCi.has(ciKey)) continue;
+    seenCi.add(ciKey);
+    cis.push(ciKey);
+  }
+
+  /** @type {Set<string>} */
+  const clickedCis = new Set();
+
+  for (let i = 0; i < cis.length; i += CLICK_QUERY_CHUNK) {
+    const ciSlice = cis.slice(i, i + CLICK_QUERY_CHUNK);
+    const { data: recipients, error: rErr } = await supabase
+      .from('email_campaign_recipients')
+      .select('ci, marketing_impact_id')
+      .eq('purpose', PURPOSE)
+      .in('ci', ciSlice)
+      .not('marketing_impact_id', 'is', null);
+    if (rErr) {
+      throw new Error('list survey_email_clicked recipients: ' + rErr.message);
+    }
+
+    const impactIds = [];
+    const seenImpact = new Set();
+    for (let j = 0; j < (recipients || []).length; j += 1) {
+      const mid = recipients[j].marketing_impact_id;
+      if (mid == null) continue;
+      const id = String(mid);
+      if (seenImpact.has(id)) continue;
+      seenImpact.add(id);
+      impactIds.push(id);
+    }
+    if (!impactIds.length) continue;
+
+    /** @type {object[]} */
+    const impacts = [];
+    for (let j = 0; j < impactIds.length; j += CLICK_QUERY_CHUNK) {
+      const slice = impactIds.slice(j, j + CLICK_QUERY_CHUNK);
+      const { data, error } = await supabase
+        .from('marketing_impacts')
+        .select('id, channel')
+        .in('id', slice);
+      if (error) {
+        throw new Error('list survey_email_clicked impacts: ' + error.message);
+      }
+      for (let k = 0; k < (data || []).length; k += 1) impacts.push(data[k]);
+    }
+
+    const emailImpactIds = [];
+    for (let j = 0; j < impacts.length; j += 1) {
+      if (String(impacts[j].channel || '') !== 'email') continue;
+      emailImpactIds.push(String(impacts[j].id));
+    }
+    if (!emailImpactIds.length) continue;
+
+    /** @type {object[]} */
+    const events = [];
+    for (let j = 0; j < emailImpactIds.length; j += CLICK_QUERY_CHUNK) {
+      const slice = emailImpactIds.slice(j, j + CLICK_QUERY_CHUNK);
+      const { data, error } = await supabase
+        .from('marketing_impact_events')
+        .select('impact_id, event_name')
+        .in('impact_id', slice)
+        .eq('event_name', 'click');
+      if (error) {
+        throw new Error('list survey_email_clicked events: ' + error.message);
+      }
+      for (let k = 0; k < (data || []).length; k += 1) events.push(data[k]);
+    }
+
+    const chunkClicked = buildSurveyEmailClickedCiSet(
+      recipients || [],
+      impacts,
+      events,
+    );
+    for (const ci of chunkClicked) clickedCis.add(ci);
+  }
+
+  return list.map(function (row) {
+    const ciKey = row.ci != null ? String(row.ci) : '';
+    return Object.assign({}, row, {
+      survey_email_clicked: ciKey ? clickedCis.has(ciKey) : false,
+    });
+  });
+}
+
 module.exports = {
   PURPOSE,
   getHistoricalSurveyInviteStepCampaignIds,
   resolveDisplaySurveyInviteStepCampaigns,
   buildSurveySequenceForCi,
   attachSurveySequenceToListRows,
+  buildSurveyEmailClickedCiSet,
+  attachSurveyEmailClickedToListRows,
 };

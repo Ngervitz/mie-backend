@@ -116,7 +116,10 @@
   /**
    * SCORE column: numeric score OR survey email sequence state.
    * Precedence: valid score (incl. 0) > STEP3 sent > STEP2 > STEP1 > clock.
-   * No "Encuestar". No email attribution glyph.
+   * No "Encuestar".
+   * Optional third arg: survey_email_clicked (CI-lifetime email click signal).
+   * When true, descriptor includes emailClicked for a discrete ✉ glyph —
+   * independent of score/sequence state (not causal attribution).
    *
    * @param {unknown} score
    * @param {{
@@ -124,46 +127,55 @@
    *   step2_sent_at?: string|null,
    *   step3_sent_at?: string|null,
    * }=} [surveySequence]
+   * @param {boolean=} [surveyEmailClicked]
    */
-  function scoreCell(score, surveySequence) {
+  function scoreCell(score, surveySequence, surveyEmailClicked) {
+    var clicked = surveyEmailClicked === true;
+    function withEmailClick(cell) {
+      if (!clicked) return cell;
+      return Object.assign({}, cell, {
+        emailClicked: true,
+        emailClickedTitle: 'Hubo un clic desde un email de encuesta',
+      });
+    }
     if (score != null && score !== '') {
       var n = Number(score);
       if (Number.isFinite(n)) {
-        return {
+        return withEmailClick({
           kind: 'text',
           label: String(n),
           tone: scoreTone(n),
-        };
+        });
       }
     }
     var seq = surveySequence && typeof surveySequence === 'object'
       ? surveySequence
       : {};
     if (seq.step3_sent_at) {
-      return {
+      return withEmailClick({
         kind: 'badge',
         label: 'Sin respuesta',
         badgeClass: 'is-survey-no-reply',
-      };
+      });
     }
     if (seq.step2_sent_at) {
-      return {
+      return withEmailClick({
         kind: 'badge',
         label: 'S2',
         badgeClass: 'is-survey-step',
-      };
+      });
     }
     if (seq.step1_sent_at) {
-      return {
+      return withEmailClick({
         kind: 'badge',
         label: 'S1',
         badgeClass: 'is-survey-step',
-      };
+      });
     }
-    return {
+    return withEmailClick({
       kind: 'clock',
       title: 'Encuesta programada',
-    };
+    });
   }
 
   function miPlanCell(status) {

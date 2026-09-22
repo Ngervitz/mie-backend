@@ -14775,20 +14775,39 @@ init();
     );
   }
 
+  function appendSurveyEmailClickGlyph(html, cell) {
+    if (!cell || cell.emailClicked !== true) return html;
+    const tip =
+      cell.emailClickedTitle != null
+        ? String(cell.emailClickedTitle)
+        : 'Hubo un clic desde un email de encuesta';
+    return (
+      '<span class="rechazados-score-with-email-click">' +
+      html +
+      '<span class="rechazados-survey-email-click" title="' +
+      escapeHtml(tip) +
+      '" aria-label="' +
+      escapeHtml(tip) +
+      '">✉</span>' +
+      '</span>'
+    );
+  }
+
   function renderCellDescriptor(cell, ci) {
     if (!cell) return '—';
     if (cell.kind === 'clock') {
-      return (
+      return appendSurveyEmailClickGlyph(
         '<span class="rechazados-survey-clock" title="' +
-        escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
-        '" aria-label="' +
-        escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
-        '">' +
-        '<svg class="rechazados-survey-clock-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
-        '<circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
-        '<path d="M8 4.5v3.75L10.25 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-        '</svg>' +
-        '</span>'
+          escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
+          '" aria-label="' +
+          escapeHtml(cell.title != null ? String(cell.title) : 'Encuesta programada') +
+          '">' +
+          '<svg class="rechazados-survey-clock-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+          '<circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+          '<path d="M8 4.5v3.75L10.25 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>' +
+          '</span>',
+        cell,
       );
     }
     if (cell.kind === 'badge') {
@@ -14800,65 +14819,62 @@ init();
         badgeClass.indexOf('is-survey-') === 0
           ? 'rechazados-survey-badge'
           : 'rechazados-bcu-badge';
-      return (
+      return appendSurveyEmailClickGlyph(
         '<span class="' +
-        surveyBadge +
-        ' ' +
-        escapeHtml(badgeClass) +
-        '">' +
-        escapeHtml(cell.label != null ? cell.label : '—') +
-        '</span>'
+          surveyBadge +
+          ' ' +
+          escapeHtml(badgeClass) +
+          '">' +
+          escapeHtml(cell.label != null ? cell.label : '—') +
+          '</span>',
+        cell,
       );
     }
     if (cell.kind === 'text' || cell.kind == null) {
       const label = cell.label != null ? cell.label : '—';
+      let textHtml;
       if (cell.overdue) {
-        return (
+        textHtml =
           '<span class="rechazados-next-review is-overdue">' +
           escapeHtml(label) +
-          '</span>'
-        );
-      }
-      if (cell.tone) {
-        return (
+          '</span>';
+      } else if (cell.tone) {
+        textHtml =
           '<span class="rechazados-score is-' +
           escapeHtml(String(cell.tone)) +
           '">' +
           escapeHtml(label) +
-          '</span>'
-        );
+          '</span>';
+      } else {
+        const tone = H.outreachStatusTone(label);
+        if (tone) {
+          textHtml =
+            '<span class="rechazados-status is-' +
+            escapeHtml(tone) +
+            '">' +
+            escapeHtml(label) +
+            '</span>';
+        } else if (cell.muted) {
+          textHtml =
+            '<span class="rechazados-muted"' +
+            (cell.title
+              ? ' title="' + escapeHtml(String(cell.title)) + '"'
+              : '') +
+            '>' +
+            escapeHtml(label) +
+            '</span>';
+        } else if (cell.title) {
+          textHtml =
+            '<span title="' +
+            escapeHtml(String(cell.title)) +
+            '">' +
+            escapeHtml(label) +
+            '</span>';
+        } else {
+          textHtml = escapeHtml(label);
+        }
       }
-      const tone = H.outreachStatusTone(label);
-      if (tone) {
-        return (
-          '<span class="rechazados-status is-' +
-          escapeHtml(tone) +
-          '">' +
-          escapeHtml(label) +
-          '</span>'
-        );
-      }
-      if (cell.muted) {
-        return (
-          '<span class="rechazados-muted"' +
-          (cell.title
-            ? ' title="' + escapeHtml(String(cell.title)) + '"'
-            : '') +
-          '>' +
-          escapeHtml(label) +
-          '</span>'
-        );
-      }
-      if (cell.title) {
-        return (
-          '<span title="' +
-          escapeHtml(String(cell.title)) +
-          '">' +
-          escapeHtml(label) +
-          '</span>'
-        );
-      }
-      return escapeHtml(label);
+      return appendSurveyEmailClickGlyph(textHtml, cell);
     }
     const enabled = cell.enabled === true;
     const action = cell.action ? String(cell.action) : '';
@@ -14931,7 +14947,11 @@ init();
       .map(function (row) {
         const name = H.formatPersonName(row.nombre, row.apellido);
         const dateCell = H.formatRejectedAtDateCell(row.rejected_at);
-        const score = H.scoreCell(row.score_v2, row.survey_sequence);
+        const score = H.scoreCell(
+          row.score_v2,
+          row.survey_sequence,
+          row.survey_email_clicked === true,
+        );
         const plan = H.miPlanCell(row.mi_plan_status);
         const deuda = H.miDeudaCell(
           row.mi_deuda_status,
