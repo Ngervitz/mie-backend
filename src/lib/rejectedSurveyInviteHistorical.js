@@ -32,6 +32,8 @@ const HISTORICAL_RESULTS = Object.freeze({
   MATERIALIZE: 'materialize',
   NOT_DUE: 'not_due',
   WAITING_STEP1_SEND: 'waiting_step1_send',
+  /** Catch-up cohorts that do not auto-materialize STEP1 (one-time external). */
+  S1_NOT_STARTED: 's1_not_started',
   SEQUENCE_STOPPED_SURVEY: 'sequence_stopped_survey',
   SEQUENCE_STOPPED_SUPPRESSION: 'sequence_stopped_suppression',
   SEQUENCE_COMPLETE: 'sequence_complete',
@@ -96,12 +98,17 @@ function historicalStepAlreadyPresent(recipient) {
  *   hasEncuesta: boolean,
  *   isSuppressed: boolean,
  *   attemptsByStep: { 1?: object|null, 2?: object|null, 3?: object|null },
+ *   allowStep1Materialize?: boolean,
  * }} input
+ *   allowStep1Materialize — default true (historical pilot). When false
+ *   (pre-cutoff catch-up), missing STEP1 yields S1_NOT_STARTED (no auto S1).
  */
 function decideHistoricalSurveyInviteAction(input) {
   const nowMs =
     input.now instanceof Date ? input.now.getTime() : tsMs(input.now);
   const attempts = input.attemptsByStep || { 1: null, 2: null, 3: null };
+  const allowStep1 =
+    input.allowStep1Materialize !== false;
   const base = {
     action: 'skip',
     result: HISTORICAL_RESULTS.NOT_DUE,
@@ -134,6 +141,11 @@ function decideHistoricalSurveyInviteAction(input) {
   const step3 = attempts[3] || null;
 
   if (!step1) {
+    if (!allowStep1) {
+      return Object.assign({}, base, {
+        result: HISTORICAL_RESULTS.S1_NOT_STARTED,
+      });
+    }
     if (!input.dataEligible) {
       return Object.assign({}, base, {
         result: HISTORICAL_RESULTS.DATA_INELIGIBLE,

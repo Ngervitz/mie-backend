@@ -42,6 +42,9 @@ const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
 const {
   runRechazadosSurveyInviteDue,
 } = require('../jobs/rechazadosSurveyInviteDue');
+const {
+  runPreCutoffCatchupSurveyInvite,
+} = require('../lib/rejectedSurveyInvitePreCutoffCatchup');
 const { getCzApiBearerTokenDiagnostic } = require('../clients/czApiClient');
 const env = require('../config/env');
 const logger = require('../lib/logger');
@@ -1375,6 +1378,43 @@ router.post('/run-sms-notifyme-poll', async (req, res) => {
  * Auth: session cookie (dashboard rechazados) or X-Cron-Key.
  * Cadence: cron-job.org → POST /jobs/run-rechazados-survey-invite-due
  */
+/**
+ * Pre-cutoff catch-up S2/S3 materialize (frozen 112 CZ cohort).
+ * Does NOT materialize STEP1. Does NOT call processQueue / provider.
+ * Default dry-run unless ?execute=1 or body.execute=true.
+ * Cadence (recommended): cron-job.org → same as due or offset +7m.
+ */
+router.post('/run-pre-cutoff-catchup-survey-invite', async (req, res) => {
+  logger.info('POST /jobs/run-pre-cutoff-catchup-survey-invite — started');
+  const execute =
+    req.query && String(req.query.execute || '') === '1'
+      ? true
+      : req.body && req.body.execute === true;
+  const dryRun = !execute;
+  try {
+    const result = await runPreCutoffCatchupSurveyInvite(supabase, {
+      dryRun: dryRun,
+      stopOnError: true,
+    });
+    logger.info('pre_cutoff_catchup_survey_invite finished', {
+      dry_run: dryRun,
+      ok: result && result.ok,
+      materialized: result && result.materialized
+        ? result.materialized.length
+        : 0,
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('pre_cutoff_catchup_survey_invite failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
 router.post('/run-rechazados-survey-invite-due', async (req, res) => {
   logger.info('POST /jobs/run-rechazados-survey-invite-due — started');
   try {

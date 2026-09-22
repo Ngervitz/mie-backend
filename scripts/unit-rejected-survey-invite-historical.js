@@ -67,6 +67,21 @@ assert.strictEqual(STEP3_OFFSET_MS - STEP2_OFFSET_MS, 48 * MS_HOUR);
   assert.strictEqual(d.campaign_id, 6);
 }
 
+// Pre-cutoff catch-up: no auto STEP1 materialize
+{
+  const d = decideHistoricalSurveyInviteAction({
+    now: new Date('2026-09-01T12:00:00Z'),
+    inCohort: true,
+    dataEligible: true,
+    hasEncuesta: false,
+    isSuppressed: false,
+    attemptsByStep: { 1: null, 2: null, 3: null },
+    allowStep1Materialize: false,
+  });
+  assert.strictEqual(d.action, 'skip');
+  assert.strictEqual(d.result, HISTORICAL_RESULTS.S1_NOT_STARTED);
+}
+
 // Waiting for send — created_at must NOT unlock clock
 {
   const d = decideHistoricalSurveyInviteAction({
