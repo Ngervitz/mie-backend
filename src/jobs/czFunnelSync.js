@@ -20,6 +20,13 @@ const {
   applyJtFirstValidWins,
 } = require('../lib/sanitizeCzTrackingData');
 const {
+  mapSolicitudProfileFields,
+  nullableCelular,
+  nullableSalario,
+  parseCzDateOnly,
+  resolveLatestCelularByCi,
+} = require('../lib/czFunnelSolicitudProfile');
+const {
   syncCdvSheetAfterHistoricoPersist: defaultCdvSheetSync,
 } = require('../lib/cdvSheetSync');
 
@@ -357,6 +364,7 @@ async function upsertSolicitudes(items) {
       item.updated != null ? String(item.updated) : null;
     const fechaRaw =
       item.fechaReg != null ? String(item.fechaReg) : null;
+    const profile = mapSolicitudProfileFields(item);
     rows.push({
       cz_id: czId,
       solicitudes_estados_id:
@@ -370,6 +378,10 @@ async function upsertSolicitudes(items) {
       apellido: nullablePersonName(item.apellido),
       email: nullableTrimmedText(item.email),
       lrw_id: nullableTrimmedText(item.lrw_id),
+      celular: profile.celular,
+      salario: profile.salario,
+      fecha_nacimiento: profile.fecha_nacimiento,
+      relacion_laboral: profile.relacion_laboral,
       fecha_reg: parseCzDateTime(fechaRaw),
       updated_at_src: parseCzDateTime(updatedRaw),
       updated_raw: updatedRaw,
@@ -691,8 +703,13 @@ module.exports = {
   loadExistingJtByCzId,
   isCzApiAuthFailure,
   parseCzDateTime,
+  parseCzDateOnly,
   nullableTrimmedText,
   nullablePersonName,
+  nullableCelular,
+  nullableSalario,
+  mapSolicitudProfileFields,
+  resolveLatestCelularByCi,
   normalizeExtraData,
   mapHistoricoRows,
   upsertSolicitudes,
