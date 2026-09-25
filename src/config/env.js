@@ -52,6 +52,16 @@ module.exports = {
   cronSecret: process.env.CRON_SECRET || null,
   // Optional at boot. Required for POST /tracking/events HMAC from Credizona.
   czTrackingHmacSecret: optionalTrimmedEnv('CZ_TRACKING_HMAC_SECRET'),
+  // Optional at boot. Dedicated HMAC for Credizona → JANUS miplan handoff emit.
+  // MUST NOT reuse CZ_TRACKING_HMAC_SECRET.
+  czMiplanHandoffHmacSecret: optionalTrimmedEnv(
+    'CZ_MIPLAN_HANDOFF_HMAC_SECRET',
+  ),
+  // Optional at boot. Bearer secret for Mi Plan BE → JANUS handoff redeem.
+  // MUST NOT reuse dashboard session / tracking secrets.
+  miplanHandoffRedeemSecret: optionalTrimmedEnv(
+    'MIPLAN_HANDOFF_REDEEM_SECRET',
+  ),
   // Optional at boot. Required to sign/verify email unsubscribe tokens.
   // No fallback to SESSION_SECRET.
   emailUnsubscribeHmacSecret: optionalTrimmedEnv(

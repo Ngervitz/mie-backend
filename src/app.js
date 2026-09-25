@@ -23,6 +23,7 @@ const adminUsersRouter = require('./routes/admin-users');
 const logger = require('./lib/logger');
 const smsShortLinksRouter = require('./routes/sms-short-links');
 const trackingEventsRouter = require('./routes/tracking-events');
+const miplanHandoffRouter = require('./routes/miplan-handoff');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 const emailClickRouter = require('./routes/email-click');
 
@@ -40,6 +41,16 @@ app.use(
   }),
   trackingEventsRouter,
   trackingEventsRouter.jsonErrorHandler,
+);
+// Credizona → JANUS handoff emit + Mi Plan → JANUS redeem (dedicated secrets).
+app.use(
+  '/internal/miplan',
+  express.json({
+    limit: '8kb',
+    verify: miplanHandoffRouter.attachRawBody,
+  }),
+  miplanHandoffRouter,
+  miplanHandoffRouter.jsonErrorHandler,
 );
 app.use(express.json());
 // Public SMS short-link redirects — must run before requireAuth.
