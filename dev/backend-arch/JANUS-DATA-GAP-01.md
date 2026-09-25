@@ -351,6 +351,86 @@ Fuera de alcance aquí (journey_id, entry token, etc.).
 
 ---
 
+## PRODUCTION DEPLOYMENT
+
+**Fecha:** 2026-09-25  
+**Estado:** COMPLETE  
+
+### Targets (CONFIRMED)
+
+| Recurso | Identidad |
+|---------|-----------|
+| Git branch | `main` |
+| Commit | `012562a` (`012562a34d3adc24c012eefece4f83623f44ece6`) |
+| Supabase | project `mie-backend` (`usezztlmwfgjcidcrrde`) — **not** CZMiplan / janus-paraguay |
+| Railway | project `bountiful-energy` / service `mie-backend` — **not** divine-warmth / CZMiplan |
+| Deployment | `762ce332-5b1c-41fd-9976-bfea7a3b0b27` SUCCESS |
+
+### Sequence executed
+
+1. Pre-flight + unit tests PASS  
+2. Migration review PASS (ADD COLUMN nullable + indexes only; no DROP/TRUNCATE)  
+3. Migration applied via Supabase MCP (`cz_funnel_solicitudes_profile_fields`)  
+4. Schema verified: `celular text`, `salario numeric`, `fecha_nacimiento date`, `relacion_laboral text` + indexes  
+5. Commit + push `main` (no force)  
+6. Railway auto-deploy SUCCESS on `012562a`  
+7. Full sync: existing `POST /jobs/run-cz-data-sync` (X-Cron-Key)  
+8. Smoke RO aggregates (no PII in logs/report)
+
+### Full sync result
+
+| Source | status | itemsFetched | itemsUpserted | error |
+|--------|--------|--------------|---------------|-------|
+| solicitudes | success | 301 | 301 | null |
+| encuestas | success | 0 | 0 | null (incremental; no new pages) |
+| granted | success | 0 | 0 | null |
+
+### Smoke aggregates (no PII)
+
+| Metric | Value |
+|--------|-------|
+| total solicitudes | 301 |
+| with celular | 301 |
+| with salario | 301 |
+| with fecha_nacimiento | 295 |
+| with relacion_laboral | 294 |
+| with all profile + lrw + ci | 288 |
+| distinct CI | 212 |
+| distinct LRW | 293 |
+| CI with >1 episode | 26 (max episodes/CI 30; max LRW/CI 27) |
+| encuestas rows | 69 (p1=69, p10=69) |
+
+Lookups verified (boolean):
+
+- LRW → episode with celular/salario/DOB/laboral/synced_at: **OK**
+- CI → multiple distinct LRW preserved: **OK**
+- latest-celular-by-CI rule returns a row: **OK**
+- CI with encuesta + profile (excluding fixture CI): episodes>0, p1–p10 present: **OK**
+
+### Regressions
+
+| Area | Result |
+|------|--------|
+| P1–P10 | NONE (69 rows intact; sync did not clear answers) |
+| BCU | NONE (untouched) |
+| JT | NONE (untouched; unit jt PASS) |
+| Email STEP1/2/3 | NONE (untouched) |
+
+### Incidencias
+
+- Local `.env` lacks `CRON_SECRET`; sync used Railway `CRON_SECRET` / `X-Cron-Key` via CLI (not printed).  
+- Encuestas `itemsFetched=0` expected under incremental cursor; integrity verified by row counts.  
+- DOB/laboral slightly below 100% non-null — mirrors nullable source data, not mapping failure.
+
+### Post-deploy security
+
+- No new public endpoints  
+- No PII added to URLs  
+- No Mi Plan transport  
+- Temp Railway variable dump files deleted after sync  
+
+---
+
 ## Referencias
 
 - `src/jobs/czFunnelSync.js` — `upsertSolicitudes`
