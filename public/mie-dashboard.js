@@ -14387,6 +14387,11 @@ init();
     const scoreNum = Number(scoreRaw);
     const score =
       scoreRaw == null || !Number.isFinite(scoreNum) ? '—' : String(scoreRaw);
+    const hasV2 = encRow ? numOrZero(encRow.total_encuestas_v2) > 0 : false;
+    const scoreV2Raw = encRow && encRow.score_promedio_v2;
+    const scoreV2Num = Number(scoreV2Raw);
+    const scoreV2 =
+      scoreV2Raw == null || !Number.isFinite(scoreV2Num) ? '—' : String(scoreV2Raw);
     return (
       '<section class="cz-funnel-kpi-section">' +
       '<div class="cz-funnel-calidad-header">' +
@@ -14397,7 +14402,12 @@ init();
       '</div>' +
       '<div class="kpi-grid sms-monthly-kpi-grid">' +
       renderKpiCard(String(count), '📋 Encuestas del mes', 'neutral') +
-      renderKpiCard(score, '⭐ Score promedio', 'accent') +
+      renderKpiCard(
+        score,
+        hasV2 ? '⭐ Score promedio (V1, 0–30)' : '⭐ Score promedio',
+        'accent',
+      ) +
+      (hasV2 ? renderKpiCard(scoreV2, '⭐ Score promedio V2 (0–27)', 'accent') : '') +
       '</div></section>'
     );
   }
@@ -14486,12 +14496,23 @@ init();
       const grantRows = (data.grantedByMonth || []).map(function (r) {
         return [r.month, r.total_granted, formatMoney(r.monto_total_otorgado)];
       });
+      const encHasV2 = (data.encuestasByMonth || []).some(function (r) {
+        return numOrZero(r.total_encuestas_v2) > 0;
+      });
+      const encHeaders = encHasV2
+        ? ['Mes', 'Total', 'Score promedio V1 (0–30)', 'Encuestas V2', 'Score promedio V2 (0–27)']
+        : ['Mes', 'Total', 'Score promedio'];
       const encRows = (data.encuestasByMonth || []).map(function (r) {
-        return [
+        const cells = [
           r.month,
           r.total_encuestas,
           r.score_promedio == null ? '—' : r.score_promedio,
         ];
+        if (encHasV2) {
+          cells.push(numOrZero(r.total_encuestas_v2));
+          cells.push(r.score_promedio_v2 == null ? '—' : r.score_promedio_v2);
+        }
+        return cells;
       });
       const utilTitle =
         'Utilidad por canal — Fecha aproximada (creación de solicitud, no otorgamiento real) — pendiente de corrección';
@@ -14572,7 +14593,7 @@ init();
         ) +
         renderTable(
           'Encuestas por mes (score_v2)',
-          ['Mes', 'Total', 'Score promedio'],
+          encHeaders,
           encRows,
         ) +
         utilBlock;
@@ -14842,7 +14863,9 @@ init();
         textHtml =
           '<span class="rechazados-score is-' +
           escapeHtml(String(cell.tone)) +
-          '">' +
+          '"' +
+          (cell.title ? ' title="' + escapeHtml(String(cell.title)) + '"' : '') +
+          '>' +
           escapeHtml(label) +
           '</span>';
       } else {
@@ -14951,6 +14974,10 @@ init();
           row.score_v2,
           row.survey_sequence,
           row.survey_email_clicked === true,
+          {
+            survey_version: row.survey_version,
+            segmentacion_base: row.segmentacion_base,
+          },
         );
         const plan = H.miPlanCell(row.mi_plan_status);
         const deuda = H.miDeudaCell(
@@ -16071,12 +16098,22 @@ init();
           escapeHtml(r.estado || '—'),
         ];
       });
+      const showLoanPurpose = (d.encuestas || []).some(function (e) {
+        return e.loan_purpose != null;
+      });
+      const encHeaders = showLoanPurpose
+        ? ['Fecha', 'Score', 'Email', 'Destino del préstamo (V2)']
+        : ['Fecha', 'Score', 'Email'];
       const encRows = (d.encuestas || []).map(function (e) {
-        return [
+        const cells = [
           escapeHtml(H.formatTsUy(e.completed_at)),
-          escapeHtml(H.formatScore(e.score_v2)),
+          escapeHtml(H.formatScore(e.score_v2, e.survey_version)),
           escapeHtml(e.email || '—'),
         ];
+        if (showLoanPurpose) {
+          cells.push(escapeHtml(H.loanPurposeLabel(e.loan_purpose)));
+        }
+        return cells;
       });
       content =
         '<div class="rechazados-detail-summary">' +
@@ -16090,7 +16127,7 @@ init();
         escapeHtml(H.formatTsUy(d.rejected_at)) +
         '</div></div>' +
         '<div><div class="ad-modal-label">Score</div><div>' +
-        escapeHtml(H.formatScore(d.score_v2)) +
+        escapeHtml(H.formatScore(d.score_v2, d.survey_version)) +
         '</div></div>' +
         '<div><div class="ad-modal-label">Mi Plan</div><div>' +
         escapeHtml(
@@ -16145,7 +16182,7 @@ init();
         renderSimpleTable(['Fecha', 'Solicitud', 'Estado'], rejRows) +
         '</div>' +
         '<div class="ad-modal-block"><div class="ad-modal-label">Encuestas</div>' +
-        renderSimpleTable(['Fecha', 'Score', 'Email'], encRows) +
+        renderSimpleTable(encHeaders, encRows) +
         '</div>' +
         '<div class="ad-modal-block"><div class="ad-modal-label">Historial BCU</div>' +
         renderSnapshots(d.snapshots) +

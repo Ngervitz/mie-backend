@@ -21,8 +21,22 @@ const {
   OUTREACH_SELECT,
   formatOutreach,
 } = require('./rejectedOutreach');
+const { surveyVersionOf, loanPurposeOf } = require('./czSurveyVersion');
 
 const REJECTED_ESTADO_ID = 3;
+const ENCUESTA_SELECT =
+  'cz_id, ci, score_v2, completed_at, email, version_cuestionario, segmentacion_base, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10';
+
+/** Score context so consumers never read a V2 (0–27) score with V1 (0–30) cuts. */
+function encuestaScoreMeta(encuesta) {
+  return {
+    survey_version: encuesta ? surveyVersionOf(encuesta) : null,
+    segmentacion_base:
+      encuesta && encuesta.segmentacion_base != null
+        ? String(encuesta.segmentacion_base)
+        : null,
+  };
+}
 const PAGE_SIZE = 1000;
 const IN_CHUNK = 200;
 
@@ -372,6 +386,9 @@ function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
       rejected_at: lastRejection.fechahora_src || null,
       score_v2: encuesta ? toNum(encuesta.score_v2) : null,
       encuesta_completed_at: encuesta ? encuesta.completed_at || null : null,
+    },
+    encuestaScoreMeta(encuesta),
+    {
       worst_bcu: ops.worst_bcu,
       ops_status: ops.ops_status,
       next_review_on: ops.next_review_on,
@@ -463,6 +480,7 @@ function assembleRejectedDetail(input) {
       return toNum(r && r.ci) === ci;
     }) || null;
 
+  const latestMeta = encuestaScoreMeta(latestEncuesta);
   return {
     ci: ci,
     nombre: name.nombre,
@@ -472,6 +490,8 @@ function assembleRejectedDetail(input) {
     encuesta_completed_at: latestEncuesta
       ? latestEncuesta.completed_at || null
       : null,
+    survey_version: latestMeta.survey_version,
+    segmentacion_base: latestMeta.segmentacion_base,
     worst_bcu: ops.worst_bcu,
     ops_status: ops.ops_status,
     next_review_on: ops.next_review_on,
@@ -486,11 +506,15 @@ function assembleRejectedDetail(input) {
       };
     }),
     encuestas: encuestas.map(function (e) {
+      const meta = encuestaScoreMeta(e);
       return {
         cz_id: e.cz_id,
         score_v2: toNum(e.score_v2),
         completed_at: e.completed_at || null,
         email: e.email != null ? e.email : null,
+        survey_version: meta.survey_version,
+        segmentacion_base: meta.segmentacion_base,
+        loan_purpose: loanPurposeOf(e),
       };
     }),
     snapshots: snaps.map(function (s) {
@@ -632,7 +656,7 @@ async function fetchRejectedListBundle(supabase) {
     ? await fetchInChunks(
         supabase,
         'cz_funnel_encuestas',
-        'cz_id, ci, score_v2, completed_at, email',
+        ENCUESTA_SELECT,
         'ci',
         cis,
       )
@@ -694,7 +718,7 @@ async function fetchRejectedDetailBundle(supabase, ci) {
   const encuestaRows = await fetchAllPages(function (from, to) {
     return supabase
       .from('cz_funnel_encuestas')
-      .select('cz_id, ci, score_v2, completed_at, email')
+      .select(ENCUESTA_SELECT)
       .eq('ci', ci)
       .range(from, to);
   });

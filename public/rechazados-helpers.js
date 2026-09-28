@@ -67,11 +67,34 @@
     return parts.length ? parts.join(' ') : '—';
   }
 
-  function formatScore(score) {
+  /**
+   * @param {unknown} score raw score_v2 as received from Credizona
+   * @param {unknown=} surveyVersion version_cuestionario; V2 is labelled on its own 0–27 scale
+   */
+  function formatScore(score, surveyVersion) {
     if (score == null || score === '') return '—';
     var n = Number(score);
     if (!Number.isFinite(n)) return '—';
+    if (surveyVersion === 2) return String(score) + '/27';
     return String(score);
+  }
+
+  var LOAN_PURPOSE_LABELS = {
+    purchase_or_home_improvement: 'Compra o mejora del hogar',
+    unexpected_one_off_expense: 'Gasto imprevisto puntual',
+    debt_management: 'Manejo de deudas',
+    recurring_expense_shortfall: 'Faltante para gastos recurrentes',
+    work_or_business_investment: 'Inversión en trabajo o negocio',
+    other: 'Otro',
+  };
+
+  /** V2 P7 (loan purpose). Not a score and not debt horizon. */
+  function loanPurposeLabel(loanPurpose) {
+    if (loanPurpose == null || loanPurpose === '') return '—';
+    var key = String(loanPurpose);
+    return Object.prototype.hasOwnProperty.call(LOAN_PURPOSE_LABELS, key)
+      ? LOAN_PURPOSE_LABELS[key]
+      : '—';
   }
 
   function formatWorstBcu(cat) {
@@ -96,14 +119,31 @@
     return 'is-bcu-pending';
   }
 
+  function segmentTone(segmentacionBase) {
+    var s = segmentacionBase != null ? String(segmentacionBase).trim().toUpperCase() : '';
+    if (s === 'A') return 'success';
+    if (s === 'B') return 'warn';
+    if (s === 'C') return 'danger';
+    return null;
+  }
+
   /**
-   * Visual tone for raw score_v2 only (not segment A/B/C).
+   * Visual tone for raw score_v2. The 20/10 cuts are V1-only (0–30).
+   * When surveyMeta is given: V1 → 20/10; V2 (0–27) → tone of the received
+   * segmentacion_base (no V1 cuts); unknown version → null.
+   * @param {unknown} score
+   * @param {{ survey_version?: unknown, segmentacion_base?: unknown }=} surveyMeta
    * @returns {'success'|'warn'|'danger'|null}
    */
-  function scoreTone(score) {
+  function scoreTone(score, surveyMeta) {
     if (score == null || score === '') return null;
     var n = Number(score);
     if (!Number.isFinite(n)) return null;
+    if (surveyMeta !== undefined) {
+      var version = surveyMeta ? surveyMeta.survey_version : null;
+      if (version === 2) return segmentTone(surveyMeta.segmentacion_base);
+      if (version !== 1) return null;
+    }
     if (n >= 20 && n <= 30) return 'success';
     if (n >= 10 && n <= 19) return 'warn';
     if (n >= 0 && n <= 9) return 'danger';
@@ -129,8 +169,9 @@
    *   step3_sent_at?: string|null,
    * }=} [surveySequence]
    * @param {boolean=} [surveyEmailClicked]
+   * @param {{ survey_version?: unknown, segmentacion_base?: unknown }=} [surveyMeta]
    */
-  function scoreCell(score, surveySequence, surveyEmailClicked) {
+  function scoreCell(score, surveySequence, surveyEmailClicked, surveyMeta) {
     var clicked = surveyEmailClicked === true;
     function withEmailClick(cell) {
       if (!clicked) return cell;
@@ -142,10 +183,18 @@
     if (score != null && score !== '') {
       var n = Number(score);
       if (Number.isFinite(n)) {
+        if (surveyMeta && surveyMeta.survey_version === 2) {
+          return withEmailClick({
+            kind: 'text',
+            label: String(n) + '/27',
+            tone: scoreTone(n, surveyMeta),
+            title: 'Encuesta V2 (score 0–27)',
+          });
+        }
         return withEmailClick({
           kind: 'text',
           label: String(n),
-          tone: scoreTone(n),
+          tone: scoreTone(n, surveyMeta),
         });
       }
     }
@@ -1111,6 +1160,7 @@
     opsStatusLabel: opsStatusLabel,
     formatPersonName: formatPersonName,
     formatScore: formatScore,
+    loanPurposeLabel: loanPurposeLabel,
     formatWorstBcu: formatWorstBcu,
     bcuCategoryBadgeClass: bcuCategoryBadgeClass,
     scoreCell: scoreCell,

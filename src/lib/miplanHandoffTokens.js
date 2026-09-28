@@ -7,6 +7,7 @@
 
 const crypto = require('crypto');
 const { PURPOSE } = require('./czMiplanHandoffHmac');
+const { interpretSurveyRow, surveyVersionOf } = require('./czSurveyVersion');
 
 const TTL_SECONDS = 15 * 60;
 const REJECTED_ESTADO_IDS = new Set([2, 3]); // fallida, negada (Credizona Constantes)
@@ -107,6 +108,10 @@ async function resolveRejectedEpisodeByLrw(supabase, lrw) {
  * Sync lag: may be absent immediately after Credizona write — emit still allowed
  * when HMAC-authenticated CZ calls; survey attached at redeem if present.
  *
+ * Incomplete V1 rows are skipped (pre-V2 behavior). Any non-V1 row (V2 or
+ * unknown version) stops the search so it is never bypassed in favor of an
+ * older V1 survey; buildAllowlistedContext decides whether it is delivered.
+ *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {number|null} ci
  */
@@ -116,7 +121,9 @@ async function selectLifetimeSurveyByCi(supabase, ci) {
   }
   const { data: rows, error } = await supabase
     .from('cz_funnel_encuestas')
-    .select('cz_id, ci, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, completed_at')
+    .select(
+      'cz_id, ci, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, version_cuestionario, completed_at',
+    )
     .eq('ci', Number(ci))
     .order('completed_at', { ascending: false, nullsFirst: false })
     .order('cz_id', { ascending: false })
@@ -126,6 +133,9 @@ async function selectLifetimeSurveyByCi(supabase, ci) {
 
   for (let i = 0; i < rows.length; i += 1) {
     const r = rows[i];
+    if (surveyVersionOf(r) !== 1) {
+      return r;
+    }
     if (
       r.p1 &&
       r.p2 &&
@@ -223,14 +233,78 @@ async function emitHandoffToken(supabase, resolved) {
 }
 
 /**
+ * Version-aware survey block. Invalid/inconsistent rows and V2 while the flag
+ * is off are withheld explicitly (no V1 fallback, no E–J → A–D conversion,
+ * no partial survey).
+ *
+ * @param {object|null} survey
+ * @param {{ surveyV2Enabled?: boolean }} options
+ * @returns {{ block: object|null, withheld: object|null }}
+ */
+function buildSurveyBlock(survey, options) {
+  if (!survey) return { block: null, withheld: null };
+
+  const interpreted = interpretSurveyRow(survey);
+  if (!interpreted.ok) {
+    return {
+      block: null,
+      withheld: {
+        status: 'withheld',
+        reason: interpreted.reason,
+        source_survey_version: interpreted.source_survey_version,
+      },
+    };
+  }
+
+  if (interpreted.source_survey_version === 1) {
+    return {
+      block: {
+        selection_rule: 'lifetime_ci',
+        completed_at: survey.completed_at || null,
+        source_survey_version: 1,
+        respuestas: interpreted.respuestas,
+      },
+      withheld: null,
+    };
+  }
+
+  if (!(options && options.surveyV2Enabled === true)) {
+    return {
+      block: null,
+      withheld: {
+        status: 'withheld',
+        reason: 'survey_v2_handoff_disabled',
+        source_survey_version: 2,
+      },
+    };
+  }
+
+  return {
+    block: {
+      selection_rule: 'lifetime_ci',
+      completed_at: survey.completed_at || null,
+      source_survey_version: 2,
+      respuestas: interpreted.respuestas,
+      loan_purpose: interpreted.loan_purpose,
+      provenance: {
+        source_system: 'credizona',
+        source_survey_version: 2,
+      },
+    },
+    withheld: null,
+  };
+}
+
+/**
  * Build allowlisted CONTRACT-01 context. Never includes monto_solicitado / motivo_rechazo.
  * person.ci omitted from response (minimize).
  *
  * @param {object} episode
  * @param {object|null} survey
  * @param {string} issuedAtIso
+ * @param {{ surveyV2Enabled?: boolean }=} options
  */
-function buildAllowlistedContext(episode, survey, issuedAtIso) {
+function buildAllowlistedContext(episode, survey, issuedAtIso, options) {
   const laboral = mapLaboral(episode.relacion_laboral);
   const person = omitNulls({
     nombre: nullableTrimmedText(episode.nombre),
@@ -252,25 +326,7 @@ function buildAllowlistedContext(episode, survey, issuedAtIso) {
     laboral_source_raw: laboral.laboral_source_raw,
   });
 
-  let surveyBlock = null;
-  if (survey && survey.p1) {
-    surveyBlock = {
-      selection_rule: 'lifetime_ci',
-      completed_at: survey.completed_at || null,
-      respuestas: omitNulls({
-        p1: survey.p1,
-        p2: survey.p2,
-        p3: survey.p3,
-        p4: survey.p4,
-        p5: survey.p5,
-        p6: survey.p6,
-        p7: survey.p7,
-        p8: survey.p8,
-        p9: survey.p9,
-        p10: survey.p10,
-      }),
-    };
-  }
+  const surveyOutcome = buildSurveyBlock(survey, options || {});
 
   const context = {
     contract_version: 1,
@@ -290,7 +346,8 @@ function buildAllowlistedContext(episode, survey, issuedAtIso) {
   if (financial && Object.keys(financial).length) {
     context.financial_prefill = financial;
   }
-  if (surveyBlock) context.survey = surveyBlock;
+  if (surveyOutcome.block) context.survey = surveyOutcome.block;
+  if (surveyOutcome.withheld) context.survey_handoff = surveyOutcome.withheld;
 
   return context;
 }
@@ -300,8 +357,9 @@ function buildAllowlistedContext(episode, survey, issuedAtIso) {
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} rawCode
+ * @param {{ surveyV2Enabled?: boolean }=} options
  */
-async function redeemHandoffToken(supabase, rawCode) {
+async function redeemHandoffToken(supabase, rawCode, options) {
   const raw = nullableTrimmedText(rawCode);
   if (!raw) {
     return { ok: false, reason: 'missing_code', status: 400 };
@@ -376,6 +434,7 @@ async function redeemHandoffToken(supabase, rawCode) {
     resolved.episode,
     survey,
     consumed.issued_at || new Date().toISOString(),
+    options,
   );
 
   return {

@@ -62,6 +62,12 @@ module.exports = {
   miplanHandoffRedeemSecret: optionalTrimmedEnv(
     'MIPLAN_HANDOFF_REDEEM_SECRET',
   ),
+  // Deliver Credizona V2 surveys (P7 = loan purpose) in the Mi Plan handoff.
+  // Default false; only the string "true" (case-insensitive) enables.
+  // While false, V2 surveys are withheld from the handoff (never downgraded to V1).
+  miplanHandoffSurveyV2Enabled:
+    String(optionalTrimmedEnv('MIPLAN_HANDOFF_SURVEY_V2_ENABLED') || '')
+      .toLowerCase() === 'true',
   // Optional at boot. Required to sign/verify email unsubscribe tokens.
   // No fallback to SESSION_SECRET.
   emailUnsubscribeHmacSecret: optionalTrimmedEnv(

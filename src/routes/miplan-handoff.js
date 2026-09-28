@@ -225,7 +225,9 @@ router.post('/v1/handoff/redeem', async function (req, res) {
   // Never log code
   try {
     const supabase = require('../clients/supabase');
-    const result = await redeemHandoffToken(supabase, code);
+    const result = await redeemHandoffToken(supabase, code, {
+      surveyV2Enabled: env.miplanHandoffSurveyV2Enabled === true,
+    });
     if (!result.ok) {
       logger.warn('Mi Plan handoff redeem denied', {
         kind: 'miplan_handoff_redeem',
@@ -235,10 +237,17 @@ router.post('/v1/handoff/redeem', async function (req, res) {
       return res.status(result.status || 401).json({ error: result.reason });
     }
 
+    const ctx = result.context || {};
     logger.info('Mi Plan handoff redeemed', {
       kind: 'miplan_handoff_redeem',
       request_id: requestId,
       token_id: result.token_id,
+      survey_source_version: ctx.survey
+        ? ctx.survey.source_survey_version
+        : ctx.survey_handoff
+          ? ctx.survey_handoff.source_survey_version
+          : null,
+      survey_withheld_reason: ctx.survey_handoff ? ctx.survey_handoff.reason : null,
     });
 
     return res.status(200).json({

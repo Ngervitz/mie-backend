@@ -42,6 +42,7 @@ const {
   enrichNewlyCreatedSerpQuery,
 } = require('../steps/serpQueryOnCreateEnrichment');
 const { computeAuctionPressure } = require('../services/auction-pressure');
+const { summarizeSurveyScoresByMonth } = require('../lib/czSurveyVersion');
 const {
   getPropertyId,
   buildGa4Client,
@@ -2973,7 +2974,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
         .select('cz_id, fecha_reg'),
       supabase
         .from('cz_funnel_encuestas')
-        .select('cz_id, score_v2, completed_at'),
+        .select('cz_id, score_v2, version_cuestionario, completed_at'),
     ]);
 
     if (loansRes.error) throw new Error(loansRes.error.message);
@@ -3014,24 +3015,6 @@ router.get('/cz-funnel-summary', async (req, res) => {
       grantedByMonth.set(key, bucket);
     }
 
-    const encuestasByMonth = new Map();
-    for (const row of encRes.data || []) {
-      const key = monthKey(row.completed_at);
-      if (!key) continue;
-      const bucket = encuestasByMonth.get(key) || {
-        month: key,
-        total_encuestas: 0,
-        score_sum: 0,
-        score_n: 0,
-      };
-      bucket.total_encuestas += 1;
-      if (row.score_v2 != null && Number.isFinite(Number(row.score_v2))) {
-        bucket.score_sum += Number(row.score_v2);
-        bucket.score_n += 1;
-      }
-      encuestasByMonth.set(key, bucket);
-    }
-
     const sortMonthAsc = (a, b) => String(a.month).localeCompare(String(b.month));
 
     return res.status(200).json({
@@ -3039,6 +3022,8 @@ router.get('/cz-funnel-summary', async (req, res) => {
         grantedTemporalField:
           'updated_at_src from API field updated — approximation, not exact GRANTED transition',
         encuestaScoreField: 'score_v2',
+        encuestaScoreByVersion:
+          'score_promedio = V1 only (0–30); score_promedio_v2 = V2 only (0–27); unknown version excluded from averages',
       },
       totals: {
         solicitudes: (solRes.data || []).length,
@@ -3053,14 +3038,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
           monto_total_otorgado: b.monto_total_otorgado,
         }))
         .sort(sortMonthAsc),
-      encuestasByMonth: [...encuestasByMonth.values()]
-        .map((b) => ({
-          month: b.month,
-          total_encuestas: b.total_encuestas,
-          score_promedio:
-            b.score_n > 0 ? Math.round((b.score_sum / b.score_n) * 100) / 100 : null,
-        }))
-        .sort(sortMonthAsc),
+      encuestasByMonth: summarizeSurveyScoresByMonth(encRes.data || [], monthKey),
     });
   } catch (err) {
     logger.error('Reports cz-funnel-summary failed', {

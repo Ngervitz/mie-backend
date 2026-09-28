@@ -269,6 +269,7 @@ store.encuestas.push({
   p8: 'A',
   p9: 'A',
   p10: 'B',
+  version_cuestionario: 1,
   completed_at: '2026-09-25T11:00:00.000Z',
 });
 
