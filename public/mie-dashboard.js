@@ -10323,7 +10323,7 @@ init();
         : formatCost(body.estimated_cost);
       const costNote = costNull
         ? '<div class="sms-monthly-cost-note">Costo pendiente de configurar</div>'
-        : '<div class="sms-monthly-cost-note">IVA incluido</div>';
+        : '<div class="sms-monthly-cost-note">Sin IVA</div>';
 
       let sessionsValue = '—';
       let sessionsNote =

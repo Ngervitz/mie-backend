@@ -700,13 +700,13 @@ function buildCostMetrics({ totalMessages, statusCounts, costConfig }) {
   const messages_sent = totalMessages;
   let messages_delivered = null;
   let estimated_cost = null;
-  let cost_per_sms_with_vat = null;
+  let cost_per_sms_ex_vat = null;
 
+  // JANUS expresses SMS costs ex-VAT only; vat_rate is never applied.
   if (costConfig) {
     const ex = Number(costConfig.cost_per_sms_ex_vat);
-    const vat = Number(costConfig.vat_rate);
-    if (Number.isFinite(ex) && Number.isFinite(vat)) {
-      cost_per_sms_with_vat = ex * (1 + vat);
+    if (Number.isFinite(ex)) {
+      cost_per_sms_ex_vat = ex;
     }
   }
 
@@ -717,17 +717,15 @@ function buildCostMetrics({ totalMessages, statusCounts, costConfig }) {
         messages_delivered += count;
       }
     }
-    if (cost_per_sms_with_vat != null) {
-      estimated_cost = cost_per_sms_with_vat * messages_delivered;
+    if (cost_per_sms_ex_vat != null) {
+      estimated_cost = cost_per_sms_ex_vat * messages_delivered;
     }
   }
 
   return {
     messages_sent,
     messages_delivered,
-    cost_per_sms_ex_vat: costConfig ? Number(costConfig.cost_per_sms_ex_vat) : null,
-    vat_rate: costConfig ? Number(costConfig.vat_rate) : null,
-    cost_per_sms_with_vat,
+    cost_per_sms_ex_vat,
     estimated_cost,
     delivered_status_mapping_configured: Boolean(
       DELIVERED_STATUS_VALUES && DELIVERED_STATUS_VALUES.size > 0,
