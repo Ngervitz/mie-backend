@@ -589,6 +589,31 @@ async function syncSource({ sourceName, apiPath, upsertPage, fullRefresh }) {
   return result;
 }
 
+/**
+ * On-demand /encuestas pull (Mi Plan handoff redeem). Uses the cron cursor only
+ * as a read floor: never writes cz_funnel_sync_cursors and never takes the job
+ * lock, so the scheduled sync is unaffected. Same idempotent upsert by cz_id.
+ * Throws on API/DB failure; callers decide fail-open behavior.
+ *
+ * @param {{ maxPages?: number, timeoutMs?: number }} [opts]
+ * @returns {Promise<{ itemsFetched: number, itemsUpserted: number, incomplete: boolean }>}
+ */
+async function pullEncuestasOnDemand(opts = {}) {
+  const cursor = await readCursor(SOURCE_ENCUESTAS);
+  const since =
+    cursor && cursor.last_since ? String(cursor.last_since) : INITIAL_SINCE;
+  const pageBundle = await fetchAllCzPages('/encuestas', since, {
+    maxPages: opts.maxPages != null ? opts.maxPages : 1,
+    timeoutMs: opts.timeoutMs,
+  });
+  const itemsUpserted = await upsertEncuestas(pageBundle.items || []);
+  return {
+    itemsFetched: pageBundle.itemsFetched,
+    itemsUpserted,
+    incomplete: Boolean(pageBundle.incomplete),
+  };
+}
+
 async function runCzFunnelSync() {
   const lockedBy = randomUUID();
   const acquired = await acquireJobLock(lockedBy);
@@ -718,6 +743,7 @@ module.exports = {
   mapEncuestaRow,
   upsertEncuestas,
   syncSource,
+  pullEncuestasOnDemand,
   setCdvSheetSyncForTests,
   runCdvSheetSyncFailOpen,
 };

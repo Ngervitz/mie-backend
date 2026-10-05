@@ -103,9 +103,10 @@ async function fetchWithTimeout(url, init, timeoutMs = DEFAULT_TIMEOUT_MS) {
  * GET one page for a CZ funnel endpoint.
  * @param {string} path  e.g. '/cdv_granted_loans'
  * @param {string} since opaque cursor / ISO since
+ * @param {{ timeoutMs?: number }} [opts]
  * @returns {Promise<{ items: object[], hasMore: boolean, nextSince: string|null }>}
  */
-async function fetchCzPage(path, since) {
+async function fetchCzPage(path, since, opts = {}) {
   const token = resolveBearerToken();
   const sinceParam = since || INITIAL_SINCE;
   const url = new URL(
@@ -115,13 +116,17 @@ async function fetchCzPage(path, since) {
 
   let response;
   try {
-    response = await fetchWithTimeout(url.toString(), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
+    response = await fetchWithTimeout(
+      url.toString(),
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
       },
-    });
+      opts.timeoutMs != null ? opts.timeoutMs : DEFAULT_TIMEOUT_MS,
+    );
   } catch (err) {
     const aborted =
       err &&
@@ -170,7 +175,7 @@ async function fetchCzPage(path, since) {
  * Paginate until hasMore=false or safety limits.
  * @param {string} path
  * @param {string|null} initialSince
- * @param {{ maxPages?: number }} [opts]
+ * @param {{ maxPages?: number, timeoutMs?: number }} [opts] timeoutMs applies per page
  */
 async function fetchAllCzPages(path, initialSince, opts = {}) {
   const maxPages = opts.maxPages != null ? opts.maxPages : MAX_PAGES_PER_RUN;
@@ -194,7 +199,7 @@ async function fetchAllCzPages(path, initialSince, opts = {}) {
       };
     }
 
-    const page = await fetchCzPage(path, since);
+    const page = await fetchCzPage(path, since, { timeoutMs: opts.timeoutMs });
     pages += 1;
     itemsFetched += page.items.length;
     for (const item of page.items) allItems.push(item);

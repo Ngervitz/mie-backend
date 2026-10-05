@@ -12,6 +12,8 @@ const { interpretSurveyRow, surveyVersionOf } = require('./czSurveyVersion');
 const TTL_SECONDS = 15 * 60;
 const REJECTED_ESTADO_IDS = new Set([2, 3]); // fallida, negada (Credizona Constantes)
 const TOKEN_BYTES = 32;
+// Must stay well below the Mi Plan → JANUS redeem client timeout (10s).
+const SURVEY_PULL_TIMEOUT_MS = 3000;
 
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken), 'utf8').digest('hex');
@@ -352,12 +354,76 @@ function buildAllowlistedContext(episode, survey, issuedAtIso, options) {
   return context;
 }
 
+function defaultPullSurveys(pullOpts) {
+  return require('../jobs/czFunnelSync').pullEncuestasOnDemand(pullOpts);
+}
+
+/**
+ * Survey for redeem. The handoff usually lands seconds after the Credizona
+ * survey, before the scheduled /encuestas sync: when absent, pull once
+ * (bounded, best-effort) and re-select. Any failure keeps survey ABSENT.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {number|null} ci
+ * @param {{ pullSurveys?: Function|null, surveyPullTimeoutMs?: number }} options
+ * @returns {Promise<{ survey: object|null, pull: { outcome: string, error?: string } }>}
+ */
+async function selectSurveyForRedeem(supabase, ci, options) {
+  const existing = await selectLifetimeSurveyByCi(supabase, ci);
+  if (existing) return { survey: existing, pull: { outcome: 'not_needed' } };
+
+  const pull =
+    options.pullSurveys === undefined ? defaultPullSurveys : options.pullSurveys;
+  if (typeof pull !== 'function' || ci == null || !Number.isFinite(Number(ci))) {
+    return { survey: null, pull: { outcome: 'skipped' } };
+  }
+
+  const timeoutMs =
+    options.surveyPullTimeoutMs != null
+      ? options.surveyPullTimeoutMs
+      : SURVEY_PULL_TIMEOUT_MS;
+  let timer = null;
+  try {
+    const raced = await Promise.race([
+      Promise.resolve()
+        .then(function () {
+          return pull({ timeoutMs: timeoutMs });
+        })
+        .then(function () {
+          return 'pulled';
+        }),
+      new Promise(function (resolve) {
+        timer = setTimeout(function () {
+          resolve('timeout');
+        }, timeoutMs);
+      }),
+    ]);
+    if (raced !== 'pulled') {
+      return { survey: null, pull: { outcome: 'timeout' } };
+    }
+  } catch (err) {
+    return {
+      survey: null,
+      pull: {
+        outcome: 'error',
+        error: err && err.message ? String(err.message).slice(0, 120) : 'unknown',
+      },
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  const survey = await selectLifetimeSurveyByCi(supabase, ci);
+  return { survey: survey, pull: { outcome: survey ? 'found' : 'not_found' } };
+}
+
 /**
  * Atomic redeem via SQL function. Second concurrent call gets empty set.
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} rawCode
- * @param {{ surveyV2Enabled?: boolean }=} options
+ * @param {{ surveyV2Enabled?: boolean, pullSurveys?: Function|null, surveyPullTimeoutMs?: number }=} options
+ *   pullSurveys: on-demand /encuestas pull (default czFunnelSync); null disables.
  */
 async function redeemHandoffToken(supabase, rawCode, options) {
   const raw = nullableTrimmedText(rawCode);
@@ -429,10 +495,14 @@ async function redeemHandoffToken(supabase, rawCode, options) {
     };
   }
 
-  const survey = await selectLifetimeSurveyByCi(supabase, resolved.episode.ci);
+  const selected = await selectSurveyForRedeem(
+    supabase,
+    resolved.episode.ci,
+    options || {},
+  );
   const payload = buildAllowlistedContext(
     resolved.episode,
-    survey,
+    selected.survey,
     consumed.issued_at || new Date().toISOString(),
     options,
   );
@@ -441,6 +511,7 @@ async function redeemHandoffToken(supabase, rawCode, options) {
     ok: true,
     context: payload,
     token_id: consumed.id,
+    survey_pull: selected.pull,
   };
 }
 
@@ -448,10 +519,12 @@ module.exports = {
   PURPOSE,
   TTL_SECONDS,
   REJECTED_ESTADO_IDS,
+  SURVEY_PULL_TIMEOUT_MS,
   hashToken,
   generateRawToken,
   resolveRejectedEpisodeByLrw,
   selectLifetimeSurveyByCi,
+  selectSurveyForRedeem,
   emitHandoffToken,
   redeemHandoffToken,
   buildAllowlistedContext,

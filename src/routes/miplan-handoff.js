@@ -248,6 +248,8 @@ router.post('/v1/handoff/redeem', async function (req, res) {
           ? ctx.survey_handoff.source_survey_version
           : null,
       survey_withheld_reason: ctx.survey_handoff ? ctx.survey_handoff.reason : null,
+      survey_pull_outcome: result.survey_pull ? result.survey_pull.outcome : null,
+      survey_pull_error: result.survey_pull ? result.survey_pull.error || null : null,
     });
 
     return res.status(200).json({
