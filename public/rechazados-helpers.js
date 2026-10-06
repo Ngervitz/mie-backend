@@ -69,13 +69,12 @@
 
   /**
    * @param {unknown} score raw score_v2 as received from Credizona
-   * @param {unknown=} surveyVersion version_cuestionario; V2 is labelled on its own 0–27 scale
+   * @param {unknown=} surveyVersion version_cuestionario (label is the bare score for V1 and V2)
    */
   function formatScore(score, surveyVersion) {
     if (score == null || score === '') return '—';
     var n = Number(score);
     if (!Number.isFinite(n)) return '—';
-    if (surveyVersion === 2) return String(score) + '/27';
     return String(score);
   }
 
@@ -186,7 +185,7 @@
         if (surveyMeta && surveyMeta.survey_version === 2) {
           return withEmailClick({
             kind: 'text',
-            label: String(n) + '/27',
+            label: String(n),
             tone: scoreTone(n, surveyMeta),
             title: 'Encuesta V2 (score 0–27)',
           });

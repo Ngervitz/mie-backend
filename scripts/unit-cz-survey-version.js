@@ -354,11 +354,14 @@ async function main() {
     assert.strictEqual(H.scoreTone(25, null), null);
     assert.deepStrictEqual(H.scoreCell(18, null, false, { survey_version: 2, segmentacion_base: 'A' }), {
       kind: 'text',
-      label: '18/27',
+      label: '18',
       tone: 'success',
       title: 'Encuesta V2 (score 0–27)',
     });
-    assert.strictEqual(H.formatScore(18, 2), '18/27');
+    assert.strictEqual(H.formatScore(18, 2), '18');
+    assert.strictEqual(H.formatScore(27, 2), '27');
+    assert.strictEqual(H.scoreCell(10, null, false, { survey_version: 2, segmentacion_base: 'C' }).label, '10');
+    assert.strictEqual(H.scoreCell(10, null, false, { survey_version: 2, segmentacion_base: 'C' }).tone, 'danger');
     assert.strictEqual(H.loanPurposeLabel('debt_management'), 'Manejo de deudas');
     assert.strictEqual(H.loanPurposeLabel('B'), '—', 'raw P7 letters never labelled');
     assert.strictEqual(H.loanPurposeLabel(null), '—');
