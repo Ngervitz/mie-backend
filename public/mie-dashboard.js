@@ -14845,7 +14845,9 @@ init();
           surveyBadge +
           ' ' +
           escapeHtml(badgeClass) +
-          '">' +
+          '"' +
+          (cell.title ? ' title="' + escapeHtml(String(cell.title)) + '"' : '') +
+          '>' +
           escapeHtml(cell.label != null ? cell.label : '—') +
           '</span>',
         cell,
@@ -14979,7 +14981,7 @@ init();
             segmentacion_base: row.segmentacion_base,
           },
         );
-        const plan = H.miPlanCell(row.mi_plan_status);
+        const plan = H.miPlanCell(row.mi_plan_status, row.mi_plan_interest_at);
         const deuda = H.miDeudaCell(
           row.mi_deuda_status,
           row.mi_deuda_invite_expired,
@@ -15008,6 +15010,11 @@ init();
           '</span></td>' +
           '<td class="rechazados-col-plan">' +
           renderCellDescriptor(plan, row.ci) +
+          (plan.dateText
+            ? '<div class="rechazados-miplan-date rechazados-muted">' +
+              escapeHtml(plan.dateText) +
+              '</div>'
+            : '') +
           '</td>' +
           '<td class="rechazados-col-deuda">' +
           renderCellDescriptor(deuda, row.ci) +
@@ -16135,7 +16142,13 @@ init();
             d.outreach && d.outreach.mi_plan_status
               ? d.outreach.mi_plan_status
               : 'not_invited',
+            d.outreach ? d.outreach.mi_plan_interest_at : null,
           ),
+        ) +
+        '</div></div>' +
+        '<div><div class="ad-modal-label">Interés Mi Plan</div><div>' +
+        escapeHtml(
+          H.formatTsUy(d.outreach ? d.outreach.mi_plan_interest_at : null),
         ) +
         '</div></div>' +
         '<div><div class="ad-modal-label">Mi Deuda</div><div>' +

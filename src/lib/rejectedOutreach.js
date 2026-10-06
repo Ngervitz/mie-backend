@@ -21,7 +21,7 @@ const MI_DEUDA_STATUS = Object.freeze({
 const MI_DEUDA_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const OUTREACH_SELECT =
-  'ci, mi_plan_status, mi_plan_updated_at, mi_deuda_status, mi_deuda_updated_at, mi_deuda_invited_at, mi_deuda_responded_at, created_at, updated_at';
+  'ci, mi_plan_status, mi_plan_updated_at, mi_plan_interest_at, mi_deuda_status, mi_deuda_updated_at, mi_deuda_invited_at, mi_deuda_responded_at, created_at, updated_at';
 
 /**
  * @param {unknown} status
@@ -49,6 +49,7 @@ function formatOutreach(row, nowMs) {
     return {
       mi_plan_status: MI_PLAN_STATUS.NOT_INVITED,
       mi_plan_updated_at: null,
+      mi_plan_interest_at: null,
       mi_deuda_status: MI_DEUDA_STATUS.NOT_INVITED,
       mi_deuda_updated_at: null,
       mi_deuda_invited_at: null,
@@ -72,6 +73,8 @@ function formatOutreach(row, nowMs) {
     mi_plan_status: miPlanStatus,
     mi_plan_updated_at:
       row.mi_plan_updated_at != null ? row.mi_plan_updated_at : null,
+    mi_plan_interest_at:
+      row.mi_plan_interest_at != null ? row.mi_plan_interest_at : null,
     mi_deuda_status: miDeudaStatus,
     mi_deuda_updated_at:
       row.mi_deuda_updated_at != null ? row.mi_deuda_updated_at : null,

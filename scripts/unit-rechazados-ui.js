@@ -114,6 +114,43 @@ assert.deepStrictEqual(H.miPlanCell('active'), {
   label: 'Activo',
 });
 assert.strictEqual(H.miPlanLabel('active'), 'Activo');
+
+// Mi Plan column + waitlist interest (mi_plan_interest_at): active > invited > interest > not_invited.
+const INTEREST_AT = '2026-10-06T14:05:00.000Z';
+[null, undefined, ''].forEach(function (noInterest) {
+  ['not_invited', null, undefined, 'invited', 'active'].forEach(function (st) {
+    assert.deepStrictEqual(
+      H.miPlanCell(st, noInterest),
+      H.miPlanCell(st),
+      'no interest must keep the previous Mi Plan cell for ' + st,
+    );
+  });
+});
+const interestedCell = H.miPlanCell('not_invited', INTEREST_AT);
+assert.deepStrictEqual(interestedCell, {
+  kind: 'badge',
+  label: 'Interesado',
+  badgeClass: 'is-miplan-interest',
+  title: 'Interesado en Mi Plan · ' + H.formatTsUy(INTEREST_AT),
+  dateText: '06/10 11:05',
+});
+assert.deepStrictEqual(H.miPlanCell(null, INTEREST_AT), interestedCell);
+assert.deepStrictEqual(H.miPlanCell(undefined, INTEREST_AT), interestedCell);
+assert.deepStrictEqual(H.miPlanCell('invited', INTEREST_AT), { kind: 'text', label: 'Invitado' });
+assert.deepStrictEqual(H.miPlanCell('active', INTEREST_AT), { kind: 'text', label: 'Activo' });
+assert.strictEqual(H.miPlanLabel('not_invited', INTEREST_AT), 'Interesado');
+assert.strictEqual(H.miPlanLabel('invited', INTEREST_AT), 'Invitado');
+assert.strictEqual(H.miPlanLabel('active', INTEREST_AT), 'Activo');
+assert.strictEqual(H.miPlanLabel('not_invited', null), 'Invitar');
+assert.strictEqual(H.formatDayMonthTimeUy('2026-01-02T03:04:00.000Z'), '02/01 00:04');
+assert.strictEqual(H.formatDayMonthTimeUy(null), '—');
+assert.strictEqual(H.miPlanInterestCell, undefined, 'no separate "Interés Mi Plan" badge helper');
+assert.deepStrictEqual(H.miDeudaCell('not_invited'), {
+  kind: 'cta',
+  label: 'Invitar',
+  enabled: false,
+  action: null,
+});
 assert.deepStrictEqual(H.miDeudaCell('not_invited'), {
   kind: 'cta',
   label: 'Invitar',
@@ -197,6 +234,26 @@ assert.ok(js.indexOf('rechazados-col-score') !== -1);
 assert.ok(js.indexOf('rechazados-score') !== -1);
 assert.ok(js.indexOf('rechazados-muted') !== -1);
 assert.ok(js.indexOf('outreach.mi_plan') !== -1 || js.indexOf('outreach.mi_plan_status') !== -1);
+assert.ok(
+  js.indexOf('H.miPlanCell(row.mi_plan_status, row.mi_plan_interest_at)') !== -1,
+  'Mi Plan column must take the waitlist interest into account',
+);
+assert.strictEqual((js.match(/>Mi Plan<\/th>/g) || []).length, 1, 'exactly one Mi Plan column');
+assert.ok(js.indexOf('Interés Mi Plan</th>') === -1, 'no extra Interés Mi Plan column');
+assert.ok(js.indexOf('miPlanInterestCell') === -1, 'no extra Interés Mi Plan badge in the list');
+assert.ok(js.indexOf('rechazados-miplan-interest') === -1);
+assert.ok(
+  /H\.miDeudaCell\(\s*row\.mi_deuda_status,\s*row\.mi_deuda_invite_expired,?\s*\)/.test(js),
+  'Mi Deuda cell must not depend on the Mi Plan interest',
+);
+assert.ok(
+  /ad-modal-label">Interés Mi Plan<\/div>[\s\S]{0,200}H\.formatTsUy\(d\.outreach \? d\.outreach\.mi_plan_interest_at : null\)/.test(js),
+  'detail keeps the interest date/time',
+);
+assert.ok(
+  /H\.miPlanLabel\([\s\S]{0,200}d\.outreach \? d\.outreach\.mi_plan_interest_at : null,?\s*\)/.test(js),
+  'detail Mi Plan state uses the same precedence as the column',
+);
 
 const css = fs.readFileSync(
   path.join(__dirname, '../public/mie-dashboard.css'),
@@ -772,5 +829,9 @@ assert.ok(JSON.stringify(obs).indexOf('BROU') === -1);
 assert.ok(js.indexOf('data-action="extract-confirm"') !== -1);
 assert.ok(js.indexOf('buildConfirmPayload') !== -1);
 assert.ok(js.indexOf("state.extractEditDetailsOpen = true") !== -1);
+
+assert.ok(css.indexOf('.rechazados-bcu-badge.is-miplan-interest') !== -1);
+assert.ok(css.indexOf('.rechazados-miplan-date') !== -1);
+assert.ok(css.indexOf('.rechazados-miplan-interest') === -1);
 
 console.log('OK unit-rechazados-ui');

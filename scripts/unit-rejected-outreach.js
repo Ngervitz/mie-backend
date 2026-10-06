@@ -53,6 +53,7 @@ const defaults = formatOutreach(null);
 assert.deepStrictEqual(defaults, {
   mi_plan_status: MI_PLAN_STATUS.NOT_INVITED,
   mi_plan_updated_at: null,
+  mi_plan_interest_at: null,
   mi_deuda_status: MI_DEUDA_STATUS.NOT_INVITED,
   mi_deuda_updated_at: null,
   mi_deuda_invited_at: null,
@@ -86,5 +87,15 @@ const expired = formatOutreach(
   invitedMs + 7 * DAY_MS,
 );
 assert.strictEqual(expired.mi_deuda_invite_expired, true);
+
+const interested = formatOutreach({
+  mi_plan_status: MI_PLAN_STATUS.NOT_INVITED,
+  mi_plan_interest_at: '2026-10-06T13:40:00.000Z',
+  mi_deuda_status: MI_DEUDA_STATUS.NOT_INVITED,
+});
+assert.strictEqual(interested.mi_plan_interest_at, '2026-10-06T13:40:00.000Z');
+assert.strictEqual(interested.mi_plan_status, 'not_invited');
+assert.strictEqual(interested.mi_deuda_status, 'not_invited');
+assert.strictEqual(live.mi_plan_interest_at, null);
 
 console.log('OK unit-rejected-outreach');

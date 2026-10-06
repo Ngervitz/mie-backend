@@ -229,10 +229,24 @@
     });
   }
 
-  function miPlanCell(status) {
+  /**
+   * Precedence: active > invited > waitlist interest > not_invited.
+   * interestAt (mi_plan_interest_at) only means the person tapped "Me interesa, avísenme" on the
+   * Credizona thank-you page and JANUS persisted it; it never overrides invited / active.
+   */
+  function miPlanCell(status, interestAt) {
     var s = status != null ? String(status) : 'not_invited';
     if (s === 'invited') return { kind: 'text', label: 'Invitado' };
     if (s === 'active') return { kind: 'text', label: 'Activo' };
+    if (interestAt != null && interestAt !== '') {
+      return {
+        kind: 'badge',
+        label: 'Interesado',
+        badgeClass: 'is-miplan-interest',
+        title: 'Interesado en Mi Plan · ' + formatTsUy(interestAt),
+        dateText: formatDayMonthTimeUy(interestAt),
+      };
+    }
     return {
       kind: 'cta',
       label: 'Invitar',
@@ -350,8 +364,8 @@
     return { kind: 'text', label: '—' };
   }
 
-  function miPlanLabel(status) {
-    return miPlanCell(status).label;
+  function miPlanLabel(status, interestAt) {
+    return miPlanCell(status, interestAt).label;
   }
 
   function miDeudaLabel(status, inviteExpired) {
@@ -422,6 +436,27 @@
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  /** DD/MM HH:mm in Montevideo time (compact, for table cells). */
+  function formatDayMonthTimeUy(raw) {
+    if (raw == null || raw === '') return '—';
+    var t = Date.parse(String(raw));
+    if (!Number.isFinite(t)) return String(raw);
+    var p = {};
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Montevideo',
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date(t))
+      .forEach(function (x) {
+        p[x.type] = x.value;
+      });
+    return p.day + '/' + p.month + ' ' + p.hour + ':' + p.minute;
   }
 
   function buildListUrl(base, status) {
@@ -1178,6 +1213,7 @@
     outreachStatusTone: outreachStatusTone,
     formatNextReviewOn: formatNextReviewOn,
     formatTsUy: formatTsUy,
+    formatDayMonthTimeUy: formatDayMonthTimeUy,
     buildListUrl: buildListUrl,
     emptyInstitution: emptyInstitution,
     serializeInstitutions: serializeInstitutions,

@@ -68,6 +68,9 @@ module.exports = {
   miplanHandoffSurveyV2Enabled:
     String(optionalTrimmedEnv('MIPLAN_HANDOFF_SURVEY_V2_ENABLED') || '')
       .toLowerCase() === 'true',
+  // Optional at boot. Comma-separated browser origins allowed to POST /miplan/v1/interest.
+  // Unset → https://www.credizona.com.uy, https://credizona.com.uy.
+  miplanInterestAllowedOrigins: optionalTrimmedEnv('MIPLAN_INTEREST_ALLOWED_ORIGINS'),
   // Optional at boot. Required to sign/verify email unsubscribe tokens.
   // No fallback to SESSION_SECRET.
   emailUnsubscribeHmacSecret: optionalTrimmedEnv(

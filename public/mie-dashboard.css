@@ -5247,6 +5247,15 @@
   background: var(--surface-2);
   color: var(--text-muted);
 }
+#mie-dashboard-app .rechazados-bcu-badge.is-miplan-interest {
+  background: rgba(98, 60, 200, 0.18);
+  color: #8b6ee0;
+}
+#mie-dashboard-app .rechazados-miplan-date {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
 #mie-dashboard-app .rechazados-next-review.is-overdue {
   color: var(--accent-danger);
   font-weight: var(--font-weight-medium);
