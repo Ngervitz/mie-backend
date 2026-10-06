@@ -35,8 +35,16 @@ require.cache[supabasePath] = {
 
 const {
   MAP_STATUS,
-  buildMiDeudaBagModel,
+  buildMiDeudaBagModel: buildMiDeudaBagModelRaw,
 } = require('../src/lib/miDeudaBags');
+const { buildCreditorResolver } = require('../src/lib/creditorCatalog');
+const { seedCatalogRows } = require('../src/lib/creditorCatalogBcuSeed');
+
+const SEED = seedCatalogRows();
+const SEED_RESOLVER = buildCreditorResolver(SEED);
+function buildMiDeudaBagModel(input) {
+  return buildMiDeudaBagModelRaw(Object.assign({ resolver: SEED_RESOLVER }, input));
+}
 const {
   formatMiDeudaBagsResponse,
   loadMiDeudaBags,
@@ -53,14 +61,28 @@ function hasMnMeTotals(obj) {
   );
 }
 
-function makeRangeClient(pages) {
+function makeRangeClient(pages, opts) {
+  const o = opts || {};
+  const calls = [];
+  const withCatalog = Object.assign(
+    { creditors: SEED.creditors, creditor_aliases: SEED.aliases },
+    pages,
+  );
   return {
+    calls: calls,
     from: function (table) {
+      calls.push(table);
       return {
         select: function () {
           return {
             range: async function (from, to) {
-              const all = pages[table] || [];
+              if (o.failTables && o.failTables.indexOf(table) >= 0) {
+                return {
+                  data: null,
+                  error: { message: 'relation "public.' + table + '" does not exist', code: '42P01' },
+                };
+              }
+              const all = withCatalog[table] || [];
               return { data: all.slice(from, to + 1), error: null };
             },
           };
@@ -69,6 +91,32 @@ function makeRangeClient(pages) {
     },
   };
 }
+
+const LEGACY_MAPPED_BUNDLE = {
+  rejected_bcu_snapshots: [
+    {
+      id: 's1',
+      ci: 1,
+      consulted_on: '2026-09-01',
+      created_at: '2026-09-01T00:00:00Z',
+      source: 'html_import',
+    },
+  ],
+  rejected_bcu_institutions: [
+    {
+      id: 'i1',
+      snapshot_id: 's1',
+      institution_name: 'SOCUR S.A.',
+      category: '5',
+      moroso_mn: 20,
+      moroso_me: 0,
+      castigado_mn: null,
+      castigado_me: null,
+      creditos_reestructurados_mn: null,
+      creditos_reestructurados_me: null,
+    },
+  ],
+};
 
 function installSupabase(client) {
   require.cache[supabasePath] = {
@@ -294,59 +342,111 @@ async function getJson(base, path) {
   );
   assert.strictEqual(loaded.bags[0].castigado_mn, 10);
   assert.strictEqual(loaded.bags[0].castigado_me, 5);
+  assert.strictEqual(loaded.bags[0].creditor_id, '6a126a47-8b2a-5872-9a2c-527d0891b855');
+  assert.deepStrictEqual(loaded.creditor_catalog, {
+    key_version: 'creditor_key_v1',
+    creditors: 16,
+    active_aliases: 16,
+  });
+
+  // 15. no N+1: one query per table regardless of BCU row count.
+  {
+    const manyInst = [];
+    const manySnaps = [];
+    for (let i = 0; i < 300; i += 1) {
+      manySnaps.push({ id: 's' + i, ci: 1000 + i, consulted_on: '2026-09-01', created_at: '2026-09-01T00:00:00Z' });
+      manyInst.push({ id: 'i' + i, snapshot_id: 's' + i, institution_name: i % 2 ? 'OCA S.A.' : 'cash s.a.', category: '5', moroso_mn: 1 });
+    }
+    const client = makeRangeClient({ rejected_bcu_snapshots: manySnaps, rejected_bcu_institutions: manyInst });
+    const big = await loadMiDeudaBags(client);
+    assert.deepStrictEqual(client.calls, [
+      'creditors',
+      'creditor_aliases',
+      'rejected_bcu_snapshots',
+      'rejected_bcu_institutions',
+    ]);
+    assert.strictEqual(big.counts.bag_members_after_exclusions, 300);
+  }
+
+  // 16 (load level). Empty catalog loads → 200-shaped data with every row UNMAPPED (visible).
+  {
+    const empty = await loadMiDeudaBags(
+      makeRangeClient(Object.assign({ creditors: [], creditor_aliases: [] }, LEGACY_MAPPED_BUNDLE)),
+    );
+    assert.strictEqual(empty.bags.length, 0);
+    assert.strictEqual(empty.counts.unmapped, 1);
+    assert.strictEqual(empty.creditor_catalog.creditors, 0);
+  }
+
+  // 16/17 (load level). Catalog read failure → CreditorCatalogLoadError; BCU not even read;
+  // rows that the legacy map would resolve are NOT turned into bags.
+  for (const failTable of ['creditors', 'creditor_aliases']) {
+    const client = makeRangeClient(LEGACY_MAPPED_BUNDLE, { failTables: [failTable] });
+    let caught = null;
+    try {
+      await loadMiDeudaBags(client);
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught, 'expected catalog load failure for ' + failTable);
+    assert.strictEqual(caught.code, 'CREDITOR_CATALOG_UNAVAILABLE');
+    assert.strictEqual(caught.details.table, failTable);
+    assert.ok(client.calls.indexOf('rejected_bcu_institutions') < 0);
+  }
+
+  // Integrity failure (chained merge) → same fail-closed path.
+  {
+    const bad = seedCatalogRows();
+    bad.creditors[0] = Object.assign({}, bad.creditors[0], {
+      status: 'merged',
+      merged_into_creditor_id: bad.creditors[1].creditor_id,
+    });
+    bad.creditors[1] = Object.assign({}, bad.creditors[1], {
+      status: 'merged',
+      merged_into_creditor_id: bad.creditors[0].creditor_id,
+    });
+    let caught = null;
+    try {
+      await loadMiDeudaBags(
+        makeRangeClient(Object.assign({ creditors: bad.creditors, creditor_aliases: bad.aliases }, LEGACY_MAPPED_BUNDLE)),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught);
+    assert.strictEqual(caught.code, 'CREDITOR_CATALOG_UNAVAILABLE');
+    assert.strictEqual(caught.details.cause_code, 'CREDITOR_CATALOG_INTEGRITY');
+  }
 
   // HTTP 200
-  const okRouter = installSupabase(
-    makeRangeClient({
-      rejected_bcu_snapshots: [
-        {
-          id: 's1',
-          ci: 1,
-          consulted_on: '2026-09-01',
-          created_at: '2026-09-01T00:00:00Z',
-          source: 'html_import',
-        },
-      ],
-      rejected_bcu_institutions: [
-        {
-          id: 'i1',
-          snapshot_id: 's1',
-          institution_name: 'SOCUR S.A.',
-          category: '5',
-          moroso_mn: 20,
-          moroso_me: 0,
-          castigado_mn: null,
-          castigado_me: null,
-          creditos_reestructurados_mn: null,
-          creditos_reestructurados_me: null,
-        },
-      ],
-    }),
-  );
+  const okRouter = installSupabase(makeRangeClient(LEGACY_MAPPED_BUNDLE));
   const okSrv = await listen(okRouter);
   const ok = await getJson(okSrv.base, '/rechazados/mi-deuda/bags');
   assert.strictEqual(ok.status, 200);
   assert.strictEqual(ok.json.ok, true);
   assert.strictEqual(ok.json.data.bags[0].institution_canonical, 'SOCUR S.A.');
+  assert.strictEqual(ok.json.data.bags[0].creditor_id, 'c541d904-9aae-5da3-b199-c2107d1dddb8');
   assert.strictEqual(ok.json.data.bags[0].moroso_mn, 20);
   assert.strictEqual(ok.json.data.bags[0].moroso_me, 0);
   assert.strictEqual(hasMnMeTotals(ok.json), false);
   okSrv.server.close();
 
-  // HTTP 500 controlled
-  const failRouter = installSupabase({
-    from: function () {
-      return {
-        select: function () {
-          return {
-            range: async function () {
-              return { data: null, error: { message: 'boom', code: 'XX' } };
-            },
-          };
-        },
-      };
-    },
-  });
+  // HTTP 503 explicit when catalog missing (e.g. code deployed before migration).
+  const noCatRouter = installSupabase(
+    makeRangeClient(LEGACY_MAPPED_BUNDLE, { failTables: ['creditors'] }),
+  );
+  const noCatSrv = await listen(noCatRouter);
+  const noCat = await getJson(noCatSrv.base, '/rechazados/mi-deuda/bags');
+  assert.strictEqual(noCat.status, 503);
+  assert.strictEqual(noCat.json.code, 'CREDITOR_CATALOG_UNAVAILABLE');
+  assert.strictEqual(noCat.json.error, 'Catálogo de acreedores no disponible');
+  assert.ok(!('data' in noCat.json), 'no bags payload on catalog failure');
+  noCatSrv.server.close();
+
+  // HTTP 500 controlled (catalog OK, BCU read fails)
+  const failRouter = installSupabase(
+    makeRangeClient(LEGACY_MAPPED_BUNDLE, { failTables: ['rejected_bcu_snapshots'] }),
+  );
   const failSrv = await listen(failRouter);
   const fail = await getJson(failSrv.base, '/rechazados/mi-deuda/bags');
   assert.strictEqual(fail.status, 500);

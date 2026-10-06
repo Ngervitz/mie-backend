@@ -6,6 +6,7 @@
  */
 
 const { buildMiDeudaBagModel } = require('./miDeudaBags');
+const { loadCreditorCatalog } = require('./creditorCatalogRead');
 
 const PAGE_SIZE = 1000;
 
@@ -57,6 +58,7 @@ async function fetchMiDeudaBagBundle(supabase) {
 function formatMiDeudaBagsResponse(model) {
   const bags = (model.bags || []).map(function (b) {
     return {
+      creditor_id: b.creditor_id,
       institution_canonical: b.institution_canonical,
       people_count: b.people_count,
       moroso_mn: b.moroso_mn,
@@ -82,13 +84,25 @@ function formatMiDeudaBagsResponse(model) {
 }
 
 /**
- * End-to-end read helper for the route.
+ * End-to-end read helper for the route. Catalog first: if it cannot load, throws
+ * CreditorCatalogLoadError before any bag is built (never empty bags as a valid result).
  * @param {object} supabase
  */
 async function loadMiDeudaBags(supabase) {
+  const resolver = await loadCreditorCatalog(supabase);
   const bundle = await fetchMiDeudaBagBundle(supabase);
-  const model = buildMiDeudaBagModel(bundle);
-  return formatMiDeudaBagsResponse(model);
+  const model = buildMiDeudaBagModel({
+    snapshots: bundle.snapshots,
+    institutions: bundle.institutions,
+    resolver: resolver,
+  });
+  const data = formatMiDeudaBagsResponse(model);
+  data.creditor_catalog = {
+    key_version: resolver.key_version,
+    creditors: resolver.creditor_count,
+    active_aliases: resolver.active_alias_count,
+  };
+  return data;
 }
 
 module.exports = {

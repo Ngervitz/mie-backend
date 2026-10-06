@@ -7,6 +7,9 @@
  */
 
 const assert = require('assert');
+const path = require('path');
+const Module = require('module');
+const { execFileSync } = require('child_process');
 const {
   MAP_STATUS,
   canonicalizeInstitutionName,
@@ -15,6 +18,53 @@ const {
   buildMiDeudaBagModel,
   APPROVED_RAW_TO_CANONICAL,
 } = require('../src/lib/miDeudaBags');
+const { RESOLUTION, buildCreditorResolver } = require('../src/lib/creditorCatalog');
+const { seedCatalogRows } = require('../src/lib/creditorCatalogBcuSeed');
+
+const SEED_RESOLVER = buildCreditorResolver(seedCatalogRows());
+const CASH_ID = '163e0226-599e-5bc2-8553-151379f66537';
+const SOCUR_ID = 'c541d904-9aae-5da3-b199-c2107d1dddb8';
+const FIXTURES = [];
+
+function build(input) {
+  FIXTURES.push(input);
+  return buildMiDeudaBagModel(Object.assign({ resolver: SEED_RESOLVER }, input));
+}
+
+/** Pre-catalog builder (exact APPROVED_RAW_TO_CANONICAL), pinned so it survives future commits. */
+function loadLegacyBagModule() {
+  const root = path.join(__dirname, '..');
+  const code = execFileSync('git', ['show', 'd176eba:src/lib/miDeudaBags.js'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const filename = path.join(root, 'src', 'lib', '__legacy_miDeudaBags_d176eba.js');
+  const m = new Module(filename, module);
+  m.filename = filename;
+  m.paths = Module._nodeModulePaths(path.dirname(filename));
+  m._compile(code, filename);
+  return m.exports;
+}
+
+const ADDITIVE_FIELDS = new Set(['creditor_id', 'creditor_resolution', 'normalized_key']);
+function stripAdditive(value) {
+  if (Array.isArray(value)) return value.map(stripAdditive);
+  if (value instanceof Map) {
+    const m = new Map();
+    value.forEach(function (v, k) {
+      m.set(k, stripAdditive(v));
+    });
+    return m;
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach(function (k) {
+      if (!ADDITIVE_FIELDS.has(k)) out[k] = stripAdditive(value[k]);
+    });
+    return out;
+  }
+  return value;
+}
 
 function pass(name) {
   // counted at end
@@ -94,7 +144,7 @@ function row(over) {
 
 // --- no mixing snapshots ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 'snap-old',
@@ -189,12 +239,12 @@ function row(over) {
 }
 
 {
-  // New case-only variant NOT in approved map
+  // Legacy oracle stays exact; runtime semantics changed deliberately (see catalog block).
   const unk = canonicalizeInstitutionName('cash s.a.');
   assert.strictEqual(unk.status, MAP_STATUS.UNMAPPED);
   assert.strictEqual(unk.reason, 'REVIEW_NEEDED');
   assert.strictEqual(unk.canonical_name, null);
-  pass('new case-only variant → UNMAPPED/REVIEW_NEEDED');
+  pass('legacy oracle: case-only variant → UNMAPPED/REVIEW_NEEDED');
 }
 
 {
@@ -371,7 +421,7 @@ pass('castigado both 0 → no enter');
 
 // --- AMBIGUOUS_CONSOLIDATION ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 's1',
@@ -411,7 +461,7 @@ pass('castigado both 0 → no enter');
 
 // --- unmapped excluded from bags even if member ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 's1',
@@ -440,7 +490,7 @@ pass('castigado both 0 → no enter');
 
 // --- bag amounts keep MN/ME separate ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 's1',
@@ -470,7 +520,7 @@ pass('castigado both 0 → no enter');
 
 // --- colocacion_vencida aggregates + people_count ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 's1',
@@ -545,7 +595,7 @@ pass('castigado both 0 → no enter');
 
 // --- reestructurado universe ---
 {
-  const model = buildMiDeudaBagModel({
+  const model = build({
     snapshots: [
       {
         id: 's1',
@@ -589,6 +639,194 @@ pass('castigado both 0 → no enter');
   assert.strictEqual(outside.length, 1);
   assert.strictEqual(inside.length, 1);
   pass('reestructurado universe inside/outside bag');
+}
+
+// --- creditor catalog runtime ---
+function oneSnap(ci, id) {
+  return { id: id || 's-' + ci, ci: ci, consulted_on: '2026-09-01', created_at: '2026-09-01T00:00:00Z' };
+}
+
+{
+  // 12. before/after: every fixture above gives the same model as the pre-catalog builder.
+  const legacy = loadLegacyBagModule();
+  assert.ok(FIXTURES.length >= 6);
+  FIXTURES.forEach(function (input, i) {
+    const oldModel = legacy.buildMiDeudaBagModel(input);
+    const newModel = buildMiDeudaBagModel(Object.assign({ resolver: SEED_RESOLVER }, input));
+    assert.deepStrictEqual(stripAdditive(newModel), stripAdditive(oldModel), 'fixture ' + i);
+  });
+  pass('bag model parity vs legacy builder (d176eba) on all fixtures');
+}
+
+{
+  const model = build({
+    snapshots: [oneSnap(1), oneSnap(2)],
+    institutions: [
+      { snapshot_id: 's-1', institution_name: 'SOCUR S.A.', category: '5', moroso_mn: 10 },
+      { snapshot_id: 's-2', institution_name: 'SOCUR S.A.', category: '5', moroso_mn: 5 },
+    ],
+  });
+  assert.strictEqual(model.bags.length, 1);
+  assert.strictEqual(model.bags[0].creditor_id, SOCUR_ID);
+  assert.strictEqual(model.bags[0].institution_canonical, 'SOCUR S.A.');
+  assert.strictEqual(model.bags[0].people_count, 2);
+  assert.strictEqual(model.persona_institution_rows[0].creditor_resolution, RESOLUTION.RESOLVED);
+  assert.strictEqual(model.persona_institution_rows[0].normalized_key, 'socur sa');
+  pass('bags grouped by creditor_id (additive output)');
+}
+
+{
+  // 14. "cash s.a." now joins the CASH bag; raw is preserved on the member.
+  const model = build({
+    snapshots: [oneSnap(1), oneSnap(2)],
+    institutions: [
+      { snapshot_id: 's-1', institution_name: 'CASH S.A.', category: '5', moroso_mn: 10 },
+      { snapshot_id: 's-2', institution_name: 'cash s.a.', category: '5', castigado_me: 3 },
+    ],
+  });
+  assert.strictEqual(model.counts.unmapped, 0);
+  assert.strictEqual(model.bags.length, 1);
+  assert.strictEqual(model.bags[0].creditor_id, CASH_ID);
+  assert.strictEqual(model.bags[0].people_count, 2);
+  assert.deepStrictEqual(
+    model.bags[0].members.map(function (m) {
+      return m.raw_name;
+    }),
+    ['CASH S.A.', 'cash s.a.'],
+  );
+  pass('"cash s.a." resolves into CASH bag (intentional creditor_key_v1 semantics)');
+}
+
+{
+  // 13. ambiguity guard now keys on creditor_id: two raws, same CI, same creditor.
+  const model = build({
+    snapshots: [oneSnap(7)],
+    institutions: [
+      { snapshot_id: 's-7', institution_name: 'CASH S.A.', category: '5', moroso_mn: 10 },
+      { snapshot_id: 's-7', institution_name: 'Cash S.A', category: '5', castigado_mn: 4 },
+    ],
+  });
+  assert.strictEqual(model.counts.ambiguous_consolidation, 1);
+  assert.strictEqual(model.ambiguous_cases[0].creditor_id, CASH_ID);
+  assert.strictEqual(model.bags.length, 0);
+  pass('ambiguity guard on creditor_id (same CI, two raws, one creditor)');
+}
+
+{
+  // Merged creditor: aliases of both creditors land in one bag; same CI via both → guard.
+  const OLD = '44444444-4444-4444-8444-444444444444';
+  const NEW = '55555555-5555-4555-8555-555555555555';
+  const resolver = buildCreditorResolver({
+    creditors: [
+      { creditor_id: OLD, slug: 'old', display_name: 'Old Fin', status: 'merged', merged_into_creditor_id: NEW },
+      { creditor_id: NEW, slug: 'new', display_name: 'New Fin', status: 'active', merged_into_creditor_id: null },
+    ],
+    aliases: [
+      { id: 'a', source: 'bcu', normalized_key: 'old fin', creditor_id: OLD, status: 'approved' },
+      { id: 'b', source: 'bcu', normalized_key: 'new fin', creditor_id: NEW, status: 'approved' },
+    ],
+  });
+  const model = buildMiDeudaBagModel({
+    resolver: resolver,
+    snapshots: [oneSnap(1), oneSnap(2), oneSnap(3)],
+    institutions: [
+      { snapshot_id: 's-1', institution_name: 'OLD FIN', category: '5', moroso_mn: 1 },
+      { snapshot_id: 's-2', institution_name: 'New Fin', category: '5', moroso_mn: 2 },
+      { snapshot_id: 's-3', institution_name: 'Old Fin', category: '5', moroso_mn: 3 },
+      { snapshot_id: 's-3', institution_name: 'New Fin', category: '5', moroso_mn: 4 },
+    ],
+  });
+  assert.strictEqual(model.bags.length, 1);
+  assert.strictEqual(model.bags[0].creditor_id, NEW);
+  assert.strictEqual(model.bags[0].institution_canonical, 'New Fin');
+  assert.strictEqual(model.bags[0].people_count, 2);
+  assert.strictEqual(model.counts.ambiguous_consolidation, 1);
+  pass('merged creditor → one bag; cross-alias same CI hits ambiguity guard');
+}
+
+{
+  // 24. display rename: same creditor_id grouping, new label.
+  const rows = seedCatalogRows();
+  rows.creditors = rows.creditors.map(function (c) {
+    return c.creditor_id === SOCUR_ID ? Object.assign({}, c, { display_name: 'Socur (renamed)' }) : c;
+  });
+  const model = buildMiDeudaBagModel({
+    resolver: buildCreditorResolver(rows),
+    snapshots: [oneSnap(1)],
+    institutions: [{ snapshot_id: 's-1', institution_name: 'SOCUR S.A.', category: '5', moroso_mn: 10 }],
+  });
+  assert.strictEqual(model.bags[0].creditor_id, SOCUR_ID);
+  assert.strictEqual(model.bags[0].institution_canonical, 'Socur (renamed)');
+  pass('display_name rename keeps creditor_id grouping');
+}
+
+{
+  // UNKNOWN / UNKNOWN_REVIEWED / EMPTY: excluded fail-closed, raw kept, rest of model continues.
+  const rows = seedCatalogRows();
+  rows.aliases = rows.aliases.concat([
+    { id: 'amb', source: 'bcu', normalized_key: 'credito amigo', creditor_id: null, status: 'ambiguous' },
+  ]);
+  const model = buildMiDeudaBagModel({
+    resolver: buildCreditorResolver(rows),
+    snapshots: [oneSnap(1)],
+    institutions: [
+      { snapshot_id: 's-1', institution_name: 'Banco Fantasma S.A.', category: '5', moroso_mn: 1 },
+      { snapshot_id: 's-1', institution_name: 'Crédito Amigo', category: '5', moroso_mn: 1 },
+      { snapshot_id: 's-1', institution_name: '...', category: '5', moroso_mn: 1 },
+      { snapshot_id: 's-1', institution_name: 'OCA S.A.', category: '5', moroso_mn: 9 },
+    ],
+  });
+  assert.strictEqual(model.counts.unmapped, 3);
+  assert.deepStrictEqual(
+    model.unmapped_rows.map(function (r) {
+      return [r.raw_name, r.map_status, r.map_reason, r.creditor_resolution];
+    }),
+    [
+      ['Banco Fantasma S.A.', 'UNMAPPED', 'REVIEW_NEEDED', 'UNKNOWN'],
+      ['Crédito Amigo', 'UNMAPPED', 'REVIEWED_AMBIGUOUS', 'UNKNOWN_REVIEWED'],
+      ['...', 'UNMAPPED', 'EMPTY_RAW', 'EMPTY'],
+    ],
+  );
+  assert.strictEqual(model.bags.length, 1);
+  assert.strictEqual(model.bags[0].institution_canonical, 'OCA S.A.');
+  pass('UNKNOWN / UNKNOWN_REVIEWED / EMPTY excluded fail-closed, raw kept');
+}
+
+{
+  // 16 (model level). Empty-but-loaded catalog is a valid state: everything UNMAPPED, no throw.
+  const model = buildMiDeudaBagModel({
+    resolver: buildCreditorResolver({ creditors: [], aliases: [] }),
+    snapshots: [oneSnap(1)],
+    institutions: [{ snapshot_id: 's-1', institution_name: 'OCA S.A.', category: '5', moroso_mn: 9 }],
+  });
+  assert.strictEqual(model.bags.length, 0);
+  assert.strictEqual(model.counts.unmapped, 1);
+  pass('empty catalog → all UNMAPPED (visible), not an error');
+}
+
+{
+  // 17. No silent fallback to APPROVED_RAW_TO_CANONICAL: no resolver → throws.
+  [undefined, null, {}].forEach(function (resolver) {
+    assert.throws(
+      function () {
+        buildMiDeudaBagModel({
+          resolver: resolver,
+          snapshots: [oneSnap(1)],
+          institutions: [{ snapshot_id: 's-1', institution_name: 'OCA S.A.', category: '5', moroso_mn: 9 }],
+        });
+      },
+      function (err) {
+        return err && err.code === 'CREDITOR_CATALOG_INTEGRITY';
+      },
+    );
+  });
+  assert.throws(function () {
+    buildMiDeudaBagModel({ snapshots: [], institutions: [] });
+  });
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'lib', 'miDeudaBags.js'), 'utf8');
+  const body = src.slice(src.indexOf('function makeBcuRowResolver'), src.indexOf('module.exports'));
+  assert.ok(!/canonicalizeInstitutionName|APPROVED_RAW_TO_CANONICAL/.test(body), 'builder must not read legacy map');
+  pass('no silent legacy fallback (resolver required; builder never reads legacy map)');
 }
 
 console.log('unit-mi-deuda-bags: PASS (' + pass.n + ' assertions groups)');

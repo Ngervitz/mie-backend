@@ -1,13 +1,20 @@
 'use strict';
 
 /**
- * Mi Deuda — Stage 1C read-only bag model (no I/O, no persistence).
+ * Mi Deuda — read-only bag model (no I/O, no persistence).
  *
  * Reuses Rechazados snapshot ordering via sortSnapshotsDesc from rejectedOpsRead.
- * Canonicalization is an explicit approved map only — unknown raw → UNMAPPED.
+ * Creditor identity comes from the canonical catalog resolver (creditorCatalog.js):
+ * exact (bcu, creditor_key_v1) lookup, grouped by creditor_id. Unresolved raw → UNMAPPED.
  */
 
 const { sortSnapshotsDesc } = require('./rejectedOpsRead');
+const {
+  CREDITOR_SOURCES,
+  RESOLUTION,
+  CreditorCatalogIntegrityError,
+  resolveCreditor,
+} = require('./creditorCatalog');
 
 const MAP_STATUS = Object.freeze({
   MAPPED: 'MAPPED',
@@ -23,8 +30,9 @@ const BAG_EXCLUSION = Object.freeze({
 });
 
 /**
- * Approved raw → canonical mappings (Stage 1B + closed decisions).
- * No fuzzy rules. No general SA→S.A. Unknown raw stays UNMAPPED.
+ * LEGACY — no longer the operational authority (the creditor catalog is).
+ * Kept as parity oracle for the catalog seed and for code rollback; the bag model
+ * never reads it. Approved raw → canonical mappings (Stage 1B + closed decisions).
  */
 const APPROVED_RAW_TO_CANONICAL = Object.freeze({
   'CASH S.A.': 'CASH S.A.',
@@ -56,6 +64,7 @@ const APPROVED_RAW_TO_CANONICAL = Object.freeze({
   'Banco Itaú Uruguay SA': 'Banco Itaú Uruguay S.A.',
 });
 
+/** LEGACY exact-raw lookup over APPROVED_RAW_TO_CANONICAL (parity oracle only). */
 function canonicalizeInstitutionName(rawName) {
   if (rawName == null || String(rawName).trim() === '') {
     return {
@@ -163,14 +172,37 @@ function sumNonNull(acc, v) {
   return acc + n;
 }
 
+const MAP_REASON_BY_RESOLUTION = Object.freeze({
+  [RESOLUTION.RESOLVED]: 'APPROVED_MAP',
+  [RESOLUTION.EMPTY]: 'EMPTY_RAW',
+  [RESOLUTION.UNKNOWN]: 'REVIEW_NEEDED',
+  [RESOLUTION.UNKNOWN_REVIEWED]: 'REVIEWED_AMBIGUOUS',
+});
+
+function makeBcuRowResolver(resolver) {
+  const cache = new Map();
+  return function resolveRaw(raw) {
+    const cacheKey = raw == null ? '\u0000null' : String(raw);
+    if (!cache.has(cacheKey)) {
+      cache.set(cacheKey, resolveCreditor(resolver, CREDITOR_SOURCES.BCU, raw));
+    }
+    return cache.get(cacheKey);
+  };
+}
+
 /**
  * Build read-only Mi Deuda bag model from snapshots + institutions.
+ * `resolver` (buildCreditorResolver output) is required: there is no legacy fallback.
  *
- * @param {{ snapshots: object[], institutions: object[] }} input
+ * @param {{ snapshots: object[], institutions: object[], resolver: object }} input
  */
 function buildMiDeudaBagModel(input) {
-  const snapshots = (input && input.snapshots) || [];
-  const institutions = (input && input.institutions) || [];
+  if (!input || !input.resolver) {
+    throw new CreditorCatalogIntegrityError('creditor resolver required for Mi Deuda bags');
+  }
+  const resolveRaw = makeBcuRowResolver(input.resolver);
+  const snapshots = input.snapshots || [];
+  const institutions = input.institutions || [];
   const currentByCi = selectCurrentSnapshotsByCi(snapshots);
   const instBySnap = indexInstitutionsBySnapshotId(institutions);
 
@@ -185,7 +217,8 @@ function buildMiDeudaBagModel(input) {
     const rows = instBySnap.get(snap.id) || [];
     rows.forEach(function (row) {
       if (!currentSnapshotIds.has(row.snapshot_id)) return;
-      const mapped = canonicalizeInstitutionName(row.institution_name);
+      const resolved = resolveRaw(row.institution_name);
+      const isResolved = resolved.resolution === RESOLUTION.RESOLVED;
       const member = isBagMember(row);
       const reest = reestructuradoSides(row);
       personaInstitutionRows.push({
@@ -193,9 +226,12 @@ function buildMiDeudaBagModel(input) {
         snapshot_id: snap.id,
         raw_name: row.institution_name,
         category: row.category != null ? String(row.category) : null,
-        map_status: mapped.status,
-        map_reason: mapped.reason,
-        canonical_name: mapped.canonical_name,
+        map_status: isResolved ? MAP_STATUS.MAPPED : MAP_STATUS.UNMAPPED,
+        map_reason: MAP_REASON_BY_RESOLUTION[resolved.resolution],
+        canonical_name: isResolved ? resolved.display_name : null,
+        creditor_id: isResolved ? resolved.creditor_id : null,
+        creditor_resolution: resolved.resolution,
+        normalized_key: resolved.normalized_key,
         is_member: member,
         moroso_mn: row.moroso_mn != null ? Number(row.moroso_mn) : null,
         moroso_me: row.moroso_me != null ? Number(row.moroso_me) : null,
@@ -216,11 +252,11 @@ function buildMiDeudaBagModel(input) {
     });
   });
 
-  // Detect ambiguous consolidations: same CI + same canonical from >1 mapped raw rows
+  // Detect ambiguous consolidations: same CI + same creditor_id from >1 mapped raw rows
   const groupKeyCounts = new Map();
   personaInstitutionRows.forEach(function (r) {
-    if (r.map_status !== MAP_STATUS.MAPPED || !r.canonical_name) return;
-    const k = r.ci + '\0' + r.canonical_name;
+    if (r.map_status !== MAP_STATUS.MAPPED || !r.creditor_id) return;
+    const k = r.ci + '\0' + r.creditor_id;
     if (!groupKeyCounts.has(k)) groupKeyCounts.set(k, []);
     groupKeyCounts.get(k).push(r);
   });
@@ -234,6 +270,7 @@ function buildMiDeudaBagModel(input) {
         flag: BAG_EXCLUSION.AMBIGUOUS_CONSOLIDATION,
         ci: rows[0].ci,
         canonical_name: rows[0].canonical_name,
+        creditor_id: rows[0].creditor_id,
         raw_rows: rows.map(function (r) {
           return {
             raw_name: r.raw_name,
@@ -260,16 +297,17 @@ function buildMiDeudaBagModel(input) {
   const bagMemberRows = [];
   personaInstitutionRows.forEach(function (r) {
     if (!r.is_member) return;
-    if (r.map_status !== MAP_STATUS.MAPPED) return;
-    const k = r.ci + '\0' + r.canonical_name;
+    if (r.map_status !== MAP_STATUS.MAPPED || !r.creditor_id) return;
+    const k = r.ci + '\0' + r.creditor_id;
     if (ambiguousKeys.has(k)) return;
     bagMemberRows.push(r);
   });
 
   const bagsMap = new Map();
   bagMemberRows.forEach(function (r) {
-    if (!bagsMap.has(r.canonical_name)) {
-      bagsMap.set(r.canonical_name, {
+    if (!bagsMap.has(r.creditor_id)) {
+      bagsMap.set(r.creditor_id, {
+        creditor_id: r.creditor_id,
         institution_canonical: r.canonical_name,
         people: new Set(),
         moroso_mn: 0,
@@ -283,7 +321,7 @@ function buildMiDeudaBagModel(input) {
         members: [],
       });
     }
-    const b = bagsMap.get(r.canonical_name);
+    const b = bagsMap.get(r.creditor_id);
     b.people.add(r.ci);
     b.moroso_mn = sumNonNull(b.moroso_mn, r.moroso_mn);
     b.moroso_me = sumNonNull(b.moroso_me, r.moroso_me);
@@ -317,6 +355,7 @@ function buildMiDeudaBagModel(input) {
   const bags = Array.from(bagsMap.values())
     .map(function (b) {
       return {
+        creditor_id: b.creditor_id,
         institution_canonical: b.institution_canonical,
         people_count: b.people.size,
         moroso_mn: b.moroso_mn,
@@ -333,7 +372,8 @@ function buildMiDeudaBagModel(input) {
     .sort(function (a, b) {
       return (
         b.people_count - a.people_count ||
-        a.institution_canonical.localeCompare(b.institution_canonical)
+        a.institution_canonical.localeCompare(b.institution_canonical) ||
+        (a.creditor_id < b.creditor_id ? -1 : a.creditor_id > b.creditor_id ? 1 : 0)
       );
     });
 
@@ -342,12 +382,13 @@ function buildMiDeudaBagModel(input) {
       return r.has_reestructurado;
     })
     .map(function (r) {
-      const k = r.ci + '\0' + (r.canonical_name || '');
+      const k = r.ci + '\0' + (r.creditor_id || '');
       const ambiguous = r.map_status === MAP_STATUS.MAPPED && ambiguousKeys.has(k);
       return {
         ci: r.ci,
         raw_name: r.raw_name,
         canonical_name: r.canonical_name,
+        creditor_id: r.creditor_id,
         map_status: r.map_status,
         category: r.category,
         reestructurado_mn: r.reestructurado_mn,

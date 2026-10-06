@@ -165,7 +165,14 @@ router.get('/mi-deuda/bags', async function getMiDeudaBags(req, res) {
     logger.error('GET /rechazados/mi-deuda/bags failed', {
       error: err && err.message ? err.message : 'unknown',
       code: err && err.code ? err.code : null,
+      details: err && err.details ? err.details : null,
     });
+    if (err && err.code === 'CREDITOR_CATALOG_UNAVAILABLE') {
+      return res.status(503).json({
+        error: 'Catálogo de acreedores no disponible',
+        code: 'CREDITOR_CATALOG_UNAVAILABLE',
+      });
+    }
     return res.status(500).json({ error: 'Error interno' });
   }
 });
