@@ -70,6 +70,33 @@ const CODES = Object.freeze({
   PERSIST_FAILED: 'elm_persist_failed',
   LATE_RESULT_DISCARDED: 'elm_late_result_discarded',
   LEASE_EXPIRED: 'elm_in_flight_lease_expired',
+  POSTBACK_AUTH_NOT_CONFIGURED: 'elm_postback_auth_not_configured',
+  POSTBACK_BODY_INVALID: 'elm_postback_body_invalid',
+  POSTBACK_STATUS_MISSING: 'elm_postback_status_missing',
+  POSTBACK_STATUS_UNKNOWN: 'elm_postback_status_unknown',
+  POSTBACK_CZ_ID_INVALID: 'elm_postback_cz_id_invalid',
+  POSTBACK_CI_INVALID: 'elm_postback_ci_invalid',
+  POSTBACK_EVENT_AT_INVALID: 'elm_postback_event_at_invalid',
+  POSTBACK_CZ_ID_MISSING: 'elm_postback_cz_id_missing',
+  POSTBACK_CZ_ID_NOT_FOUND: 'elm_postback_cz_id_not_found',
+  POSTBACK_CI_MISMATCH: 'elm_postback_ci_mismatch',
+  POSTBACK_PROCESS_NOT_COMPATIBLE: 'elm_postback_process_not_compatible',
+  POSTBACK_PERSIST_FAILED: 'elm_postback_persist_failed',
+});
+
+/** Mirrors elm_postback_events.processing_status (migrations/20261007_elm_postback_events.sql). */
+const POSTBACK_PROCESSING = Object.freeze({
+  RECEIVED: 'received',
+  APPLIED: 'applied',
+  STALE: 'stale',
+  IGNORED_GRANTED: 'ignored_granted',
+  UNMATCHED: 'unmatched',
+  INVALID: 'invalid',
+});
+
+/** Only exact cz_solicitud_id matches. CI is an audit control, never a matching method. */
+const MATCH_METHODS = Object.freeze({
+  CZ_SOLICITUD_ID: 'cz_solicitud_id',
 });
 
 module.exports = {
@@ -79,4 +106,6 @@ module.exports = {
   ENABLED_TRIGGER_ORIGINS,
   OUTCOME,
   CODES,
+  POSTBACK_PROCESSING,
+  MATCH_METHODS,
 };

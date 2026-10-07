@@ -30,6 +30,7 @@ const {
   evaluateElmReferEligibility,
 } = require('./eligibility');
 const { redactSecrets, redactSecretText } = require('./redact');
+const { computeElmCell } = require('./listView');
 const defaultLogger = require('../../lib/logger');
 
 function parseCzId(raw) {
@@ -179,6 +180,8 @@ function toProcessView(p, nowMs) {
     provider_status_at: p.provider_status_at || null,
     disbursed_at: p.disbursed_at || null,
     disbursed_amount: p.disbursed_amount != null ? Number(p.disbursed_amount) : null,
+    granted_elm: Boolean(p.disbursed_at),
+    last_postback_at: p.last_postback_at || null,
   };
 }
 
@@ -398,6 +401,15 @@ function createElmOrchestrator(deps) {
       sourceBrand: sourceBrand,
       config: config,
     });
+    let lastPostbackMatchMethod = null;
+    if (process && process.last_postback_event_id && repo.getPostbackEvent) {
+      try {
+        const ev = await repo.getPostbackEvent(process.last_postback_event_id);
+        lastPostbackMatchMethod = (ev && ev.match_method) || null;
+      } catch (_) {
+        lastPostbackMatchMethod = null;
+      }
+    }
     return {
       ok: true,
       data: {
@@ -409,6 +421,13 @@ function createElmOrchestrator(deps) {
             : client.disabledReason || CODES.TRANSPORT_NOT_IMPLEMENTED,
         process: toProcessView(process, now()),
         eligibility: elig,
+        cell: computeElmCell({
+          process: process,
+          eligibility: elig,
+          sourceBrand: sourceBrand,
+          nowMs: now(),
+        }),
+        last_postback_match_method: lastPostbackMatchMethod,
       },
     };
   }

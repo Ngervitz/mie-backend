@@ -19,8 +19,18 @@ const {
   fetchPreaprobadosDetailBundle,
 } = require('../lib/preaprobadosRead');
 const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
+const { createElmRepository } = require('../services/elm/repository');
+const { createElmListView, attachElmCells } = require('../services/elm/listView');
 
 const router = express.Router();
+
+let elmListView = null;
+function getElmListView() {
+  if (!elmListView) {
+    elmListView = createElmListView({ repository: createElmRepository(supabase) });
+  }
+  return elmListView;
+}
 
 router.use(createPreaprobadosElmRouter());
 
@@ -70,6 +80,7 @@ router.get('/', async function getPreaprobadosList(req, res) {
       limit: pageP.limit,
       offset: pageP.offset,
     });
+    await attachElmCells(assembled.rows, getElmListView(), logger);
     return res.json({
       ok: true,
       data: {
