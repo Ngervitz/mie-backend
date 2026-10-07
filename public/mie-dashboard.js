@@ -17742,7 +17742,7 @@ init();
     ];
     const resultados = [
       { id: 'all', label: 'Todos' },
-      { id: 'granted', label: 'GRANTED' },
+      { id: 'granted', label: 'GRANTED CDV' },
       { id: 'sin_resultado', label: 'Sin resultado' },
     ];
     let html =
@@ -17833,7 +17833,7 @@ init();
     kpisEl.innerHTML =
       '<div class="preaprobados-kpi-grid">' +
       kpiCard('Preaprobados', String(k.preaprobados)) +
-      kpiCard('GRANTED', String(k.granted)) +
+      kpiCard('GRANTED CDV', String(k.granted)) +
       kpiCard('Sin resultado', String(k.sin_resultado)) +
       kpiCard('$ otorgado', fmtMoney(k.monto_otorgado)) +
       kpiCard('Conversión', fmtPct(k.conversion)) +
@@ -17855,9 +17855,14 @@ init();
 
   function resultadoBadge(resultado) {
     if (resultado === 'granted') {
-      return '<span class="preaprobados-result is-granted">GRANTED</span>';
+      return '<span class="preaprobados-result is-granted">GRANTED CDV</span>';
     }
     return '<span class="preaprobados-result is-sin">Sin resultado</span>';
+  }
+
+  function elmCell(row) {
+    const H = window.ElmUiHelpers;
+    return H ? H.elmCellHtml(row.elm) : '—';
   }
 
   function estadoCell(row) {
@@ -17909,6 +17914,9 @@ init();
           '<td class="num">' +
           escapeHtml(fmtMoney(row.monto_otorgado)) +
           '</td>' +
+          '<td>' +
+          elmCell(row) +
+          '</td>' +
           '<td><button type="button" class="btn preaprobados-cell-btn" data-action="view" data-cz-id="' +
           escapeHtml(String(row.cz_id)) +
           '">Ver</button></td>' +
@@ -17925,7 +17933,7 @@ init();
       '<div class="table-wrap"><table class="ga4-table preaprobados-table">' +
       '<thead><tr>' +
       '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th>' +
-      '<th>Estado actual</th><th>Resultado</th><th>Monto otorgado</th><th></th>' +
+      '<th>Estado actual</th><th>Resultado</th><th>Monto otorgado</th><th>ELM</th><th></th>' +
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>' +
@@ -17993,12 +18001,24 @@ init();
       const e = state.elm;
       const p = e.process;
       let rows = dlRow('Estado ELM', elmStatusLabel(p));
+      const H = window.ElmUiHelpers;
+      if (e.cell && H) rows += dlRow('Columna ELM', H.cellLabel(e.cell));
       if (p) {
+        if (p.s1) rows += dlRow('S1', p.s1.effective_status || '—');
         if (p.s1 && p.s1.result_message) rows += dlRow('Respuesta S1', p.s1.result_message);
         if (p.s1 && p.s1.started_at) rows += dlRow('S1 iniciado', fmtDate(p.s1.started_at));
+        if (p.s2) rows += dlRow('S2', p.s2.effective_status || '—');
         if (p.s2 && p.s2.result_message) rows += dlRow('Respuesta S2', p.s2.result_message);
         if (p.referred_at) rows += dlRow('Derivado a ventas', fmtDate(p.referred_at));
-        if (p.provider_status) rows += dlRow('Estado proveedor', p.provider_status);
+        rows += dlRow('Último estado ELM', p.provider_status || '—');
+        rows += dlRow('Último postback', p.last_postback_at ? fmtDate(p.last_postback_at) : '—');
+        rows += dlRow(
+          'GRANTED ELM',
+          p.granted_elm ? 'Sí · ' + fmtDate(p.disbursed_at) : 'No',
+        );
+        if (e.last_postback_match_method) {
+          rows += dlRow('Match postback', e.last_postback_match_method);
+        }
       }
       const blockers =
         e.eligibility && Array.isArray(e.eligibility.blockers) ? e.eligibility.blockers : [];
@@ -18123,7 +18143,7 @@ init();
       '<section><h3>Resultado</h3><dl class="preaprobados-dl">' +
       dlRow(
         'Resultado',
-        d.resultado === 'granted' ? 'GRANTED' : 'Sin resultado',
+        d.resultado === 'granted' ? 'GRANTED CDV' : 'Sin resultado',
       ) +
       dlRow(
         'Estado actual',
