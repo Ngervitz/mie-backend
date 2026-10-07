@@ -147,6 +147,67 @@
     return n;
   }
 
+  /**
+   * Stage 2 — rows for the separate DECLARED bags table (people with an active Mi Plan opt-in).
+   * "También en BCU" = same CI + same creditor_id; never the same obligation.
+   */
+  function buildDeclaredBagTableRows(declaredLayer) {
+    if (!declaredLayer || declaredLayer.available !== true) return [];
+    var list = Array.isArray(declaredLayer.bags) ? declaredLayer.bags.slice() : [];
+    return list
+      .map(function (bag) {
+        var src = bag && typeof bag === 'object' ? bag : {};
+        return {
+          creditor_id: src.creditor_id != null ? String(src.creditor_id) : '',
+          display_name: src.display_name != null ? String(src.display_name) : '—',
+          people_declared: Number(src.people_declared) || 0,
+          people_both: Number(src.people_both) || 0,
+          declared_debts_count: Number(src.declared_debts_count) || 0,
+        };
+      })
+      .sort(function (a, b) {
+        return (
+          b.people_declared - a.people_declared ||
+          a.display_name.localeCompare(b.display_name, 'es') ||
+          (a.creditor_id < b.creditor_id ? -1 : a.creditor_id > b.creditor_id ? 1 : 0)
+        );
+      });
+  }
+
+  function declaredLayerNotice(declaredLayer) {
+    if (!declaredLayer) return '';
+    if (declaredLayer.available !== true) return 'Deudas declaradas en Mi Plan: no disponible.';
+    var parts = [];
+    var n = Number(declaredLayer.unbagged_active_debts_count) || 0;
+    if (n > 0) parts.push('Deudas declaradas sin acreedor resuelto (no entran en bolsas): ' + String(n) + '.');
+    var rec = declaredLayer.ci_reconciliation || {};
+    var pending = Number(rec.pending) || 0;
+    var terminal = Number(rec.terminal_unresolvable) || 0;
+    if (pending > 0) parts.push('Opt-ins de Mi Plan sin CI, en reconciliación (no entran en bolsas): ' + String(pending) + '.');
+    if (terminal > 0) parts.push('Opt-ins de Mi Plan sin CI, irresolubles (no entran en bolsas): ' + String(terminal) + '.');
+    return parts.join(' ');
+  }
+
+  /** Rows for the Rechazados detail block (latest authorized Mi Plan snapshot). */
+  function declaredDebtDetailRows(snapshot) {
+    var debts = snapshot && Array.isArray(snapshot.debts) ? snapshot.debts : [];
+    return debts.map(function (d) {
+      var unknown = !d || d.unknown === true || !d.effective_creditor_name;
+      var raw = d && d.creditor_raw != null ? String(d.creditor_raw) : '';
+      return {
+        position: d && d.position != null ? Number(d.position) : null,
+        creditor_label: unknown
+          ? 'Sin resolver' + (raw ? ': ' + raw : '')
+          : String(d.effective_creditor_name),
+        unknown: unknown,
+        tipo: d && d.tipo != null ? String(d.tipo) : '—',
+        monto: d ? (d.monto != null ? d.monto : null) : null,
+        monto_raw: d && d.monto == null && d.monto_raw != null ? String(d.monto_raw) : null,
+        situacion: d && d.situacion_ui != null ? String(d.situacion_ui) : '—',
+      };
+    });
+  }
+
   return {
     PROBLEM_KEYS: PROBLEM_KEYS,
     knownProblematicAmount: knownProblematicAmount,
@@ -156,5 +217,8 @@
     formatMoneyUy: formatMoneyUy,
     buildBagTableRows: buildBagTableRows,
     countReestructuradoOutside: countReestructuradoOutside,
+    buildDeclaredBagTableRows: buildDeclaredBagTableRows,
+    declaredLayerNotice: declaredLayerNotice,
+    declaredDebtDetailRows: declaredDebtDetailRows,
   };
 });

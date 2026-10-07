@@ -62,6 +62,11 @@ module.exports = {
   miplanHandoffRedeemSecret: optionalTrimmedEnv(
     'MIPLAN_HANDOFF_REDEEM_SECRET',
   ),
+  // Optional at boot. Mi Deuda Stage 2 pull (POST /jobs/run-miplan-debt-optin-sync):
+  // Mi Plan backend base URL + dedicated Bearer for its S2S opt-in export.
+  // MUST NOT reuse MIPLAN_HANDOFF_REDEEM_SECRET. Either missing → job reports not_configured.
+  miplanExportBaseUrl: optionalTrimmedEnv('MIPLAN_EXPORT_BASE_URL'),
+  miplanJanusExportSecret: optionalTrimmedEnv('MIPLAN_JANUS_EXPORT_SECRET'),
   // Deliver Credizona V2 surveys (P7 = loan purpose) in the Mi Plan handoff.
   // Default false; only the string "true" (case-insensitive) enables.
   // While false, V2 surveys are withheld from the handoff (never downgraded to V1).

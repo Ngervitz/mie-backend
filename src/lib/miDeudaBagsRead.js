@@ -7,6 +7,7 @@
 
 const { buildMiDeudaBagModel } = require('./miDeudaBags');
 const { loadCreditorCatalog } = require('./creditorCatalogRead');
+const { addDeclaredLayerToBags } = require('./miplanDebtOptinRead');
 
 const PAGE_SIZE = 1000;
 
@@ -88,7 +89,7 @@ function formatMiDeudaBagsResponse(model) {
  * CreditorCatalogLoadError before any bag is built (never empty bags as a valid result).
  * @param {object} supabase
  */
-async function loadMiDeudaBags(supabase) {
+async function loadBcuBagsWithResolver(supabase) {
   const resolver = await loadCreditorCatalog(supabase);
   const bundle = await fetchMiDeudaBagBundle(supabase);
   const model = buildMiDeudaBagModel({
@@ -102,7 +103,21 @@ async function loadMiDeudaBags(supabase) {
     creditors: resolver.creditor_count,
     active_aliases: resolver.active_alias_count,
   };
-  return data;
+  return { data: data, resolver: resolver };
+}
+
+async function loadMiDeudaBags(supabase) {
+  return (await loadBcuBagsWithResolver(supabase)).data;
+}
+
+/**
+ * Stage 2: BCU bags exactly as loadMiDeudaBags + additive DECLARED layer (same catalog load).
+ * Declared-layer failures never affect the BCU payload (declared_layer.available=false).
+ * @param {object} supabase
+ */
+async function loadMiDeudaBagsWithDeclared(supabase) {
+  const loaded = await loadBcuBagsWithResolver(supabase);
+  return addDeclaredLayerToBags(supabase, loaded.data, loaded.resolver);
 }
 
 module.exports = {
@@ -111,4 +126,5 @@ module.exports = {
   fetchMiDeudaBagBundle,
   formatMiDeudaBagsResponse,
   loadMiDeudaBags,
+  loadMiDeudaBagsWithDeclared,
 };

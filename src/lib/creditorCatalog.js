@@ -249,6 +249,31 @@ function resolveCreditor(resolver, source, raw) {
   };
 }
 
+/**
+ * Effective creditor for an already-stored creditor_id (single merge hop, as built by the
+ * resolver). A stored id missing from the catalog is an integrity failure (fail closed).
+ * @param {ReturnType<typeof buildCreditorResolver>} resolver
+ * @param {string} creditorId
+ * @returns {{ creditor_id: string, display_name: string, slug: string|null, status: string }}
+ */
+function effectiveCreditorById(resolver, creditorId) {
+  if (!resolver || !resolver._effective) {
+    throw new CreditorCatalogIntegrityError('resolver required');
+  }
+  const effective = creditorId == null ? null : resolver._effective.get(String(creditorId));
+  if (!effective) {
+    throw new CreditorCatalogIntegrityError('stored creditor_id not in catalog', {
+      creditor_id: creditorId == null ? null : String(creditorId),
+    });
+  }
+  return {
+    creditor_id: effective.creditor_id,
+    display_name: effective.display_name,
+    slug: effective.slug,
+    status: effective.status,
+  };
+}
+
 module.exports = {
   CREDITOR_KEY_VERSION,
   CREDITOR_SOURCES,
@@ -260,4 +285,5 @@ module.exports = {
   creditorKeyV1,
   buildCreditorResolver,
   resolveCreditor,
+  effectiveCreditorById,
 };

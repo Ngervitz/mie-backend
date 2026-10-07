@@ -47,7 +47,12 @@ const {
   assertSnapshotId,
   loadSnapshotSourceFileBytes,
 } = require('../lib/rejectedBcuSnapshotSourceRead');
-const { loadMiDeudaBags } = require('../lib/miDeudaBagsRead');
+const { loadMiDeudaBagsWithDeclared } = require('../lib/miDeudaBagsRead');
+const { loadCreditorCatalog } = require('../lib/creditorCatalogRead');
+const {
+  attachMiDeudaOptinToListRows,
+  loadMiDeudaOptinDetail,
+} = require('../lib/miplanDebtOptinRead');
 const {
   attachSurveyInviteToListRows,
 } = require('../lib/rejectedSurveyInviteEligibility');
@@ -141,7 +146,14 @@ router.get('/', async function getRechazadosList(req, res) {
       supabase,
       withSequence,
     );
-    return res.json({ ok: true, data: { rows: withEmailClick } });
+    const optin = await attachMiDeudaOptinToListRows(supabase, withEmailClick);
+    if (!optin.available) {
+      logger.warn('GET /rechazados mi_deuda_optin unavailable', { code: optin.error_code });
+    }
+    return res.json({
+      ok: true,
+      data: { rows: optin.rows, mi_deuda_optin_available: optin.available },
+    });
   } catch (err) {
     logger.error('GET /rechazados failed', {
       error: err && err.message ? err.message : 'unknown',
@@ -159,7 +171,12 @@ router.get('/', async function getRechazadosList(req, res) {
  */
 router.get('/mi-deuda/bags', async function getMiDeudaBags(req, res) {
   try {
-    const data = await loadMiDeudaBags(supabase);
+    const data = await loadMiDeudaBagsWithDeclared(supabase);
+    if (data.declared_layer && !data.declared_layer.available) {
+      logger.warn('GET /rechazados/mi-deuda/bags declared layer unavailable', {
+        code: data.declared_layer.error_code,
+      });
+    }
     return res.status(200).json({ ok: true, data: data });
   } catch (err) {
     logger.error('GET /rechazados/mi-deuda/bags failed', {
@@ -630,6 +647,14 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
       email_masked: surveyDecision.email_masked,
       due_step: surveyDecision.due_step,
     };
+    detail.mi_deuda_optin = await loadMiDeudaOptinDetail(supabase, ci, {
+      loadCatalog: loadCreditorCatalog,
+    });
+    if (!detail.mi_deuda_optin.available) {
+      logger.warn('GET /rechazados/:ci mi_deuda_optin unavailable', {
+        code: detail.mi_deuda_optin.error_code,
+      });
+    }
     return res.json({ ok: true, data: detail });
   } catch (err) {
     logger.error('GET /rechazados/:ci failed', {

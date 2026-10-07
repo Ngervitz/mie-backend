@@ -14814,6 +14814,44 @@ init();
     );
   }
 
+  /** Stage 2 — latest authorized Mi Plan snapshot (declared debts) in the Rechazados detail. */
+  function miDeudaDeclaredDetailHtml(optin) {
+    const MDH = window.MiDeudaHelpers;
+    if (!optin || optin.available !== true || !optin.snapshot || !MDH) return '';
+    const snap = optin.snapshot;
+    const rows = MDH.declaredDebtDetailRows(snap);
+    const body = rows.length
+      ? rows
+          .map(function (r) {
+            return (
+              '<tr>' +
+              '<td' + (r.unknown ? ' class="rechazados-muted"' : '') + '>' +
+              escapeHtml(r.creditor_label) +
+              '</td>' +
+              '<td>' + escapeHtml(r.tipo) + '</td>' +
+              '<td class="ga4-num">' +
+              escapeHtml(r.monto != null ? MDH.formatMoneyUy(r.monto) : r.monto_raw != null ? r.monto_raw : '—') +
+              '</td>' +
+              '<td>' + escapeHtml(r.situacion) + '</td>' +
+              '</tr>'
+            );
+          })
+          .join('')
+      : '<tr><td colspan="4" class="rechazados-muted">Sin deudas en el snapshot autorizado</td></tr>';
+    return (
+      '<div class="mi-deuda-declared-detail">' +
+      '<div class="ad-modal-label">Deudas declaradas en Mi Plan (' +
+      escapeHtml(snap.feeds_bags ? 'snapshot vigente' : 'snapshot no vigente') +
+      ' · ' +
+      escapeHtml(H.formatTsUy(snap.at)) +
+      ')</div>' +
+      '<div class="table-wrap"><table class="ga4-table">' +
+      '<thead><tr><th>Acreedor</th><th>Tipo</th><th class="ga4-num">Monto</th><th>Situación</th></tr></thead>' +
+      '<tbody>' + body + '</tbody></table></div>' +
+      '</div>'
+    );
+  }
+
   function renderCellDescriptor(cell, ci) {
     if (!cell) return '—';
     if (cell.kind === 'clock') {
@@ -14982,10 +15020,16 @@ init();
           },
         );
         const plan = H.miPlanCell(row.mi_plan_status, row.mi_plan_interest_at);
-        const deuda = H.miDeudaCell(
-          row.mi_deuda_status,
-          row.mi_deuda_invite_expired,
-        );
+        const deuda = row.mi_deuda_optin
+          ? H.miDeudaOptinCell(
+              row.mi_deuda_optin,
+              row.mi_deuda_status,
+              row.mi_deuda_invite_expired,
+            )
+          : H.miDeudaCell(
+              row.mi_deuda_status,
+              row.mi_deuda_invite_expired,
+            );
         const bcu = H.worstBcuCell(row.worst_bcu);
         const retry = H.retryReviewCell(row.ops_status, row.next_review_on);
         return (
@@ -16153,7 +16197,8 @@ init();
         '</div></div>' +
         '<div><div class="ad-modal-label">Mi Deuda</div><div>' +
         escapeHtml(
-          H.miDeudaLabel(
+          H.miDeudaOptinLabel(
+            d.mi_deuda_optin ? d.mi_deuda_optin.current : null,
             d.outreach && d.outreach.mi_deuda_status
               ? d.outreach.mi_deuda_status
               : 'not_invited',
@@ -16179,6 +16224,7 @@ init();
         nextReviewHtml(d.next_review_on) +
         '</div></div>' +
         '</div>' +
+        miDeudaDeclaredDetailHtml(d.mi_deuda_optin) +
         (state.formSuccess
           ? '<div class="rechazados-success">' +
             escapeHtml(state.formSuccess) +
@@ -17365,7 +17411,8 @@ init();
     const rows = MD.buildBagTableRows(data.bags || []);
     if (!rows.length) {
       resultsEl.innerHTML =
-        '<div class="mcl-empty">Sin bolsas canónicas</div>';
+        '<div class="mcl-empty">Sin bolsas canónicas</div>' +
+        declaredBagsHtml(data.declared_layer);
       return;
     }
 
@@ -17410,7 +17457,44 @@ init();
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>' +
-      secondary;
+      secondary +
+      declaredBagsHtml(data.declared_layer);
+  }
+
+  /** Stage 2 — separate DECLARED bags table (active Mi Plan opt-in only). */
+  function declaredBagsHtml(declaredLayer) {
+    if (!declaredLayer) return '';
+    const notice = MD.declaredLayerNotice(declaredLayer);
+    const rows = MD.buildDeclaredBagTableRows(declaredLayer);
+    const noticeHtml = notice
+      ? '<p class="mi-deuda-secondary text-muted">' + escapeHtml(notice) + '</p>'
+      : '';
+    if (!rows.length) return noticeHtml;
+    const body = rows
+      .map(function (row) {
+        return (
+          '<tr>' +
+          '<td class="mi-deuda-col-inst">' + escapeHtml(row.display_name) + '</td>' +
+          '<td class="ga4-num">' + escapeHtml(String(row.people_declared)) + '</td>' +
+          '<td class="ga4-num">' + escapeHtml(String(row.people_both)) + '</td>' +
+          '<td class="ga4-num">' + escapeHtml(String(row.declared_debts_count)) + '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<h4 class="mi-deuda-declared-title">Declaradas en Mi Plan (opt-in vigente)</h4>' +
+      '<div class="table-wrap"><table class="ga4-table mi-deuda-declared-table">' +
+      '<thead><tr>' +
+      '<th class="mi-deuda-col-inst">Acreedor</th>' +
+      '<th class="ga4-num">Personas</th>' +
+      '<th class="ga4-num" title="Misma CI y mismo acreedor en BCU; no implica la misma obligación">También en BCU</th>' +
+      '<th class="ga4-num">Deudas declaradas</th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>' +
+      noticeHtml
+    );
   }
 
   async function loadBags() {

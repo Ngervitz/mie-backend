@@ -38,6 +38,7 @@ const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
 const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
+const { runMiplanDebtOptinSync } = require('../jobs/miplanDebtOptinSync');
 const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
 const {
   runRechazadosSurveyInviteDue,
@@ -1336,6 +1337,31 @@ router.post('/run-bcu-usd-rate-sync', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+/**
+ * Mi Deuda Stage 2 — pull Mi Plan debt-management opt-in events into JANUS.
+ * Auth: session cookie (dashboard rechazados) or X-Cron-Key. No cron registered.
+ * 503 when MIPLAN_EXPORT_BASE_URL / MIPLAN_JANUS_EXPORT_SECRET are not configured.
+ */
+router.post('/run-miplan-debt-optin-sync', async (req, res) => {
+  logger.info('POST /jobs/run-miplan-debt-optin-sync — started');
+  try {
+    const result = await runMiplanDebtOptinSync();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    if (result && result.reason === 'not_configured') {
+      return res.status(503).json(result);
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err && err.code ? err.code : 'unknown',
+      stage: err && err.stage ? err.stage : null,
     });
   }
 });

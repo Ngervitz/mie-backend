@@ -371,6 +371,28 @@
     return miDeudaCell(status, inviteExpired).label;
   }
 
+  /**
+   * Stage 2 — Mi Plan debt-management opt-in (derived from the latest ingested event) wins over
+   * the legacy mi_deuda_status; without an event the legacy cell is shown unchanged.
+   * No event never means "rejected".
+   */
+  function miDeudaOptinCell(optin, legacyStatus, inviteExpired) {
+    if (optin && (optin.state === 'opted_in' || optin.state === 'withdrawn')) {
+      var accepted = optin.state === 'opted_in';
+      var at = optin.at ? formatTsUy(optin.at) : '';
+      return {
+        kind: 'text',
+        label: accepted ? 'Aceptó' : 'Retiró',
+        title: (accepted ? 'Aceptó gestión en Mi Plan' : 'Retiró la gestión en Mi Plan') + (at ? ' · ' + at : ''),
+      };
+    }
+    return miDeudaCell(legacyStatus, inviteExpired);
+  }
+
+  function miDeudaOptinLabel(optin, legacyStatus, inviteExpired) {
+    return miDeudaOptinCell(optin, legacyStatus, inviteExpired).label;
+  }
+
   function todayYmdMontevideo(nowMs) {
     var d = nowMs != null ? new Date(nowMs) : new Date();
     return d.toLocaleDateString('en-CA', { timeZone: 'America/Montevideo' });
@@ -1206,6 +1228,8 @@
     retryReviewCell: retryReviewCell,
     miPlanLabel: miPlanLabel,
     miDeudaLabel: miDeudaLabel,
+    miDeudaOptinCell: miDeudaOptinCell,
+    miDeudaOptinLabel: miDeudaOptinLabel,
     todayYmdMontevideo: todayYmdMontevideo,
     formatCalendarDateUy: formatCalendarDateUy,
     formatRejectedAtDateCell: formatRejectedAtDateCell,
