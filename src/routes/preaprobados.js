@@ -18,8 +18,11 @@ const {
   fetchPreaprobadosListBundle,
   fetchPreaprobadosDetailBundle,
 } = require('../lib/preaprobadosRead');
+const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
 
 const router = express.Router();
+
+router.use(createPreaprobadosElmRouter());
 
 router.get('/', async function getPreaprobadosList(req, res) {
   const fromP = parseIsoQuery(req.query && req.query.from);
