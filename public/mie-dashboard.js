@@ -17634,6 +17634,10 @@ init();
     detail: null,
     detailLoading: false,
     detailError: null,
+    elm: null,
+    elmLoading: false,
+    elmError: null,
+    elmCzId: null,
   };
 
   function setStatus(msg, isError) {
@@ -17946,7 +17950,115 @@ init();
     state.detail = null;
     state.detailError = null;
     state.detailLoading = false;
+    state.elm = null;
+    state.elmError = null;
+    state.elmLoading = false;
+    state.elmCzId = null;
     modalRoot.innerHTML = '';
+  }
+
+  const ELM_BLOCKER_LABELS = {
+    elm_solicitud_not_found: 'Solicitud no encontrada en JANUS',
+    elm_cdv_granted: 'Solicitud GRANTED en CDV (según espejo JANUS)',
+    elm_process_exists: 'Ya existe un proceso ELM para esta solicitud',
+    elm_missing_required_fields: 'Faltan datos obligatorios',
+    elm_activity_type_mapping_missing: 'Falta mapping confirmado de actividad laboral (activityType)',
+    elm_source_brand_indeterminate: 'Marca de origen (source) no determinable',
+  };
+
+  function elmStatusLabel(p) {
+    if (!p) return 'No consultado';
+    const s2 = p.s2 ? p.s2.effective_status : 'not_started';
+    const s1 = p.s1 ? p.s1.effective_status : 'not_started';
+    if (s2 === 'referred') return 'S2 · Derivado a ventas ELM (no implica otorgado ni desembolsado)';
+    if (s2 === 'in_flight') return 'S2 · En curso';
+    if (s2 === 'rejected') return 'S2 · Rechazado por ELM';
+    if (s2 === 'unknown') return 'S2 · Resultado desconocido';
+    if (s2 === 'technical_error') return 'S2 · Error técnico';
+    if (s1 === 'in_flight') return 'S1 · En curso';
+    if (s1 === 'eligible') return 'S1 · Apto para S2 (todavía no derivado)';
+    if (s1 === 'rejected') return 'S1 · Rechazado por ELM';
+    if (s1 === 'unknown') return 'S1 · Resultado desconocido';
+    if (s1 === 'technical_error') return 'S1 · Error técnico';
+    return 'No consultado';
+  }
+
+  function renderElmSection() {
+    let body;
+    if (state.elmLoading) {
+      body = '<p class="preaprobados-muted">Cargando estado ELM…</p>';
+    } else if (state.elmError) {
+      body = '<p class="mcl-error">' + escapeHtml(state.elmError) + '</p>';
+    } else if (state.elm) {
+      const e = state.elm;
+      const p = e.process;
+      let rows = dlRow('Estado ELM', elmStatusLabel(p));
+      if (p) {
+        if (p.s1 && p.s1.result_message) rows += dlRow('Respuesta S1', p.s1.result_message);
+        if (p.s1 && p.s1.started_at) rows += dlRow('S1 iniciado', fmtDate(p.s1.started_at));
+        if (p.s2 && p.s2.result_message) rows += dlRow('Respuesta S2', p.s2.result_message);
+        if (p.referred_at) rows += dlRow('Derivado a ventas', fmtDate(p.referred_at));
+        if (p.provider_status) rows += dlRow('Estado proveedor', p.provider_status);
+      }
+      const blockers =
+        e.eligibility && Array.isArray(e.eligibility.blockers) ? e.eligibility.blockers : [];
+      const blockerList = blockers.length
+        ? '<ul class="preaprobados-muted">' +
+          blockers
+            .map(function (b) {
+              const label = ELM_BLOCKER_LABELS[b.code] || b.code;
+              const fields =
+                Array.isArray(b.fields) && b.fields.length ? ' (' + b.fields.join(', ') + ')' : '';
+              return '<li>' + escapeHtml(label + fields) + '</li>';
+            })
+            .join('') +
+          '</ul>'
+        : '';
+      body = '<dl class="preaprobados-dl">' + rows + '</dl>' + blockerList;
+    } else {
+      body = '';
+    }
+    return (
+      '<section><h3>ELM</h3>' +
+      body +
+      '<button type="button" class="btn" disabled aria-disabled="true">CONSULTAR ELM</button>' +
+      '<p class="preaprobados-muted">La integración ELM todavía no está habilitada/configurada. No se envía nada a ELM.</p>' +
+      '</section>'
+    );
+  }
+
+  async function loadElmStatus(czId) {
+    state.elmCzId = czId;
+    state.elm = null;
+    state.elmError = null;
+    state.elmLoading = true;
+    renderDetailModal();
+    try {
+      const res = await fetch(
+        API + '/preaprobados/' + encodeURIComponent(czId) + '/elm',
+        {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (state.elmCzId !== czId) return;
+      if (!res.ok || !data.ok) {
+        state.elmError = (data && data.error) || 'No se pudo cargar el estado ELM';
+      } else {
+        state.elm = data.data;
+      }
+    } catch (_err) {
+      if (state.elmCzId !== czId) return;
+      state.elmError = 'No se pudo cargar el estado ELM';
+    } finally {
+      if (state.elmCzId === czId) {
+        state.elmLoading = false;
+        renderDetailModal();
+      }
+    }
   }
 
   function renderDetailModal() {
@@ -18020,6 +18132,7 @@ init();
       ) +
       dlRow('Monto otorgado', fmtMoney(d.monto_otorgado)) +
       '</dl></section>' +
+      renderElmSection() +
       '<section><h3>Sincronización</h3><dl class="preaprobados-dl">' +
       dlRow('synced_at', fmtDate(d.synced_at)) +
       dlRow('updated_at_src', fmtDate(d.updated_at_src)) +
@@ -18102,6 +18215,10 @@ init();
     state.detailLoading = true;
     state.detailError = null;
     state.detail = null;
+    state.elm = null;
+    state.elmError = null;
+    state.elmLoading = false;
+    state.elmCzId = czId;
     renderDetailModal();
     try {
       const res = await fetch(
@@ -18127,6 +18244,7 @@ init();
       state.detailLoading = false;
       renderDetailModal();
     }
+    if (state.detail) loadElmStatus(czId);
   }
 
   filtersEl.addEventListener('click', function (ev) {
