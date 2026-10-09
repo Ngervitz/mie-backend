@@ -34,6 +34,12 @@
     elm_trigger_origin_not_enabled: 'Envío manual a ELM no habilitado.',
     elm_persist_failed: 'No se pudo guardar el resultado ELM; queda para revisión.',
     elm_solicitud_not_found: 'Solicitud no encontrada en el funnel CZ.',
+    elm_process_not_found: 'La solicitud no tiene proceso ELM para reintentar.',
+    elm_retry_stale: 'El proceso ELM cambió desde que se cargó la pantalla: actualizá e intentá de nuevo.',
+    elm_retry_not_pre_reception:
+      'No se puede reintentar: no está probado que ELM no haya recibido la solicitud.',
+    elm_retry_attempts_exhausted: 'Se agotaron los intentos técnicos de esta solicitud.',
+    elm_retry_not_allowed: 'Reintento ELM no permitido para este proceso.',
   };
   var CI_HOLD_REASONS = [
     'elm_ci_active',
@@ -126,6 +132,14 @@
     var until = shortDate(h.until);
     switch (reason) {
       case 'elm_ci_active':
+        if (h.retry_pending === true) {
+          return (
+            'La solicitud' +
+            (rel ? ' ' + Number(h.related_cz_solicitud_id) : '') +
+            ' tuvo un error técnico antes de que ELM la recibiera: corresponde «Reintentar ELM», no un envío nuevo. ' +
+            'Mientras tanto no se puede enviar otra solicitud de esta CI.'
+          );
+        }
         return 'Hay un proceso ELM vigente para esta CI' + rel + '.';
       case 'elm_ci_send_in_progress':
         return 'Hay un envío ELM en curso para esta CI' + rel + '.';
@@ -191,7 +205,7 @@
       return disabledSendButtonHtml(sendBlockedHint(action));
     }
     var kind = /^[a-z0-9_]+$/.test(String(cell.kind || '')) ? String(cell.kind) : 'unknown';
-    return (
+    var label =
       '<span class="preaprobados-elm is-' +
       kind +
       (cell.granted_elm === true ? ' is-granted' : '') +
@@ -199,8 +213,13 @@
       cellTitle(cell) +
       '>' +
       esc(cellLabel(cell)) +
-      '</span>'
-    );
+      '</span>';
+    var o = opts || {};
+    if (cell.retry && cell.retry.show === true && o.retryCi != null) {
+      var retry = Object.assign({ cz_solicitud_id: cell.cz_solicitud_id }, cell.retry);
+      return '<div class="rechazados-elm-stack">' + label + retryButtonHtml(retry, o.retryCi) + '</div>';
+    }
+    return label;
   }
 
   /**
@@ -277,6 +296,53 @@
     );
   }
 
+  /**
+   * "Reintentar ELM" for a solicitud whose S1 failed before ELM received the lead. Clickable
+   * (data-action="elm-retry") only when the server enabled it.
+   */
+  function retryButtonHtml(candidate, ci) {
+    var c = candidate || {};
+    var czId = Number(c.cz_solicitud_id);
+    var expected = Number(c.expected_attempts);
+    if (c.enabled === true && czId > 0 && expected > 0 && ci != null) {
+      return (
+        '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send rechazados-elm-retry"' +
+        ' data-action="elm-retry" data-ci="' +
+        esc(ci) +
+        '" data-cz-id="' +
+        esc(czId) +
+        '" data-expected-attempts="' +
+        esc(expected) +
+        '" title="' +
+        esc('Reintentar el envío a ELM de la solicitud ' + czId + ' (intento ' + (expected + 1) + ')') +
+        '">Reintentar ELM</button>'
+      );
+    }
+    return (
+      '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send rechazados-elm-retry"' +
+      ' disabled aria-disabled="true" title="' +
+      esc(sendBlockedHint({ reasons: c.reasons, reason: c.reason, hint: c.hint, hold: c.hold })) +
+      '">Reintentar ELM</button>'
+    );
+  }
+
+  /** Rechazados: "Reintentar ELM" controls (`elm.send.retry_candidates`), '' when none. */
+  function rejectedRetryHtml(ci, send) {
+    var list = send && send.available === true && Array.isArray(send.retry_candidates) ? send.retry_candidates : [];
+    if (!list.length) return '';
+    return list
+      .map(function (c) {
+        return (
+          '<div class="rechazados-elm-action">' +
+          retryButtonHtml(c, ci) +
+          '<span class="rechazados-elm-target">Sol. ' +
+          esc(Number(c.cz_solicitud_id)) +
+          '</span></div>'
+        );
+      })
+      .join('');
+  }
+
   function historyHtml(elm) {
     if (elm.cell) return elmCellHtml(elm.cell);
     var other = elm.other_processes && elm.other_processes[0];
@@ -304,9 +370,19 @@
     var history = historyHtml(elm);
     var send = elm.send;
     var offered = send && send.available === true && Array.isArray(send.candidates) && send.candidates.length > 0;
+    var retry = ci != null ? rejectedRetryHtml(ci, send) : '';
     if (history) {
-      if (!offered || ci == null) return history;
-      return '<div class="rechazados-elm-stack">' + history + rejectedSendHtml(ci, send) + '</div>';
+      if ((!offered || ci == null) && !retry) return history;
+      return (
+        '<div class="rechazados-elm-stack">' +
+        history +
+        retry +
+        (offered && ci != null ? rejectedSendHtml(ci, send) : '') +
+        '</div>'
+      );
+    }
+    if (retry) {
+      return '<div class="rechazados-elm-stack">' + retry + (offered ? rejectedSendHtml(ci, send) : '') + '</div>';
     }
     if (send && ci != null) return rejectedSendHtml(ci, send);
     return '<span class="preaprobados-elm is-none">—</span>';
@@ -382,6 +458,8 @@
     shortDate: shortDate,
     elmCellHtml: elmCellHtml,
     rejectedSendHtml: rejectedSendHtml,
+    retryButtonHtml: retryButtonHtml,
+    rejectedRetryHtml: rejectedRetryHtml,
     rejectedRowElmHtml: rejectedRowElmHtml,
     sendResultMessage: sendResultMessage,
   };

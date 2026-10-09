@@ -21,6 +21,7 @@ const { HOLD, evaluateCiResendHold, readElmSendRowsByCis } = require('./rejected
 
 const CI_ACTIVE_REASON = HOLD.ACTIVE;
 const CI_ACTIVE_HINT = 'Hay un proceso ELM vigente para esta CI';
+const CI_RETRY_PENDING_HINT = 'Hay un reintento ELM pendiente para esta CI';
 
 function processSummary(p, cell) {
   return {
@@ -136,7 +137,12 @@ function holdSend(cell, hold) {
           return r !== hold.reason;
         }),
       ),
-      hint: hold.reason === CI_ACTIVE_REASON ? CI_ACTIVE_HINT : cell.action.hint,
+      hint:
+        hold.reason === CI_ACTIVE_REASON
+          ? hold.retry_pending === true
+            ? CI_RETRY_PENDING_HINT
+            : CI_ACTIVE_HINT
+          : cell.action.hint,
       hold: hold,
     }),
   });
@@ -153,17 +159,35 @@ function holdSendForActiveCi(cell, ciActive) {
  * solicitudes without their own ELM process can be candidates. The target is set only when
  * exactly one solicitud can be sent; with several, `needs_selection` asks the operator to pick
  * one explicitly (the send endpoint always receives an explicit cz_solicitud_id).
+ * "Reintentar ELM" candidates are the rejected solicitudes whose own process failed before ELM
+ * received the lead (`cell.retry`); their CI hold excludes that own process (`retryHold`).
  * @param {{ rejected: Array<{ cz_solicitud_id: number, rejected_at?: string|null }>,
- *   cells: Map<number, object>, hold: object|null }} input
+ *   cells: Map<number, object>, hold: object|null,
+ *   retryHold?: (czId: number) => object|null }} input
  */
 function resolveRejectedSend(input) {
   const cells = (input && input.cells) || new Map();
-  const ciHold = (input && input.hold) || null;
+  const ciHold = markRetryPending((input && input.hold) || null, cells);
+  const retryHold = (input && input.retryHold) || null;
   const solicitudes = [];
   const candidates = [];
+  const retryCandidates = [];
   let notSendable = null;
   for (const r of uniqueRejected(input && input.rejected)) {
-    const cell = holdSend(cells.get(r.cz_solicitud_id) || null, ciHold);
+    let cell = holdSend(cells.get(r.cz_solicitud_id) || null, ciHold);
+    if (cell && cell.retry && cell.retry.show === true) {
+      cell = holdRetry(cell, retryHold ? retryHold(r.cz_solicitud_id) : null);
+      retryCandidates.push({
+        cz_solicitud_id: r.cz_solicitud_id,
+        rejected_at: r.rejected_at,
+        enabled: cell.retry.enabled === true,
+        expected_attempts: cell.retry.expected_attempts,
+        reason: cell.retry.reason || null,
+        reasons: cell.retry.reasons || [],
+        hint: cell.retry.hint || null,
+        hold: cell.retry.hold || null,
+      });
+    }
     solicitudes.push({ cz_solicitud_id: r.cz_solicitud_id, rejected_at: r.rejected_at, cell: cell });
     if (!cell) continue;
     if (cell.kind === 'not_sent' && cell.action && cell.action.show === true) {
@@ -198,7 +222,54 @@ function resolveRejectedSend(input) {
       needs_selection: enabled.length > 1,
       not_sendable: candidates.length ? null : notSendable,
       hold: ciHold,
+      retry_candidates: retryCandidates,
     },
+  };
+}
+
+/**
+ * The CI is held for new sends by a process that failed before ELM received the lead and is
+ * offered "Reintentar ELM": same hold (new sends stay blocked), flagged so the UI says a retry is
+ * pending instead of "proceso vigente".
+ */
+function markRetryPending(hold, cells) {
+  if (!hold || hold.reason !== CI_ACTIVE_REASON || hold.related_cz_solicitud_id == null) return hold;
+  const related = cells.get(Number(hold.related_cz_solicitud_id));
+  if (!related || !related.retry || related.retry.show !== true) return hold;
+  return Object.assign({}, hold, { retry_pending: true });
+}
+
+/** "Reintentar ELM" held by the CI's other solicitudes: shown, never enabled. */
+function holdRetry(cell, hold) {
+  if (!hold) return cell;
+  const previous = Array.isArray(cell.retry.reasons) ? cell.retry.reasons : [];
+  return Object.assign({}, cell, {
+    retry: Object.assign({}, cell.retry, {
+      enabled: false,
+      reason: hold.reason,
+      reasons: [hold.reason].concat(
+        previous.filter(function (r) {
+          return r !== hold.reason;
+        }),
+      ),
+      hold: hold,
+    }),
+  });
+}
+
+function retryHoldOf(ci, rows, nowMs, postReferral) {
+  return function (czId) {
+    return evaluateCiResendHold({
+      ci: ci,
+      czSolicitudId: czId,
+      retryOwnProcess: true,
+      processes: rows.processes,
+      states: rows.states,
+      openRequests: rows.openRequests,
+      locks: rows.locks,
+      nowMs: nowMs,
+      postReferralRejectionStatuses: postReferral,
+    });
   };
 }
 
@@ -305,6 +376,7 @@ async function attachElmToRejectedRows(rows, deps) {
             rejected: rejectedByRow[i],
             cells: cells,
             hold: ciHoldOf(ci, own, nowMs, postReferral),
+            retryHold: retryHoldOf(ci, own, nowMs, postReferral),
           }).send
         : { available: false },
     };
@@ -346,6 +418,7 @@ async function loadRejectedDetailElm(supabase, detail, deps) {
       rejected: rejected,
       cells: cells,
       hold: ciHoldOf(ci, rows, nowMs, postReferral),
+      retryHold: retryHoldOf(ci, rows, nowMs, postReferral),
     });
     return {
       available: true,

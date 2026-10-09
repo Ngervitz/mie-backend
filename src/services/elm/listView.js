@@ -11,9 +11,19 @@
  * Without a process: "Enviar a ELM" is offered only where the caller allows it (Rechazados);
  * it is enabled only when the send readiness (transport + confirmed config) is complete and
  * the solicitud passes eligibility. Otherwise it is shown disabled or not offered.
+ *
+ * With a process whose S1 failed before ELM received the lead (pre-reception error, S2 never
+ * started, not resolved, not a CZ fallback process): `retry` offers "Reintentar ELM" where the
+ * caller allows sends. The DB (elm_manual_retry_s1) re-checks everything on click.
  */
 
-const { CODES } = require('./constants');
+const {
+  CODES,
+  S1,
+  S2,
+  PRE_RECEPTION_ERROR_CODES,
+  PRE_RECEPTION_HTTP_STATUSES,
+} = require('./constants');
 const { readElmConfig } = require('./config');
 const { evaluateElmEligibility } = require('./eligibility');
 const { classifyElmProcess, readPostReferralRejectionStatuses } = require('./classification');
@@ -39,6 +49,47 @@ function noAction() {
   return { show: false, enabled: false, reason: null, blockers: [], hint: null };
 }
 
+/** S1 failed before ELM received the lead and nothing else happened on the process. */
+function isPreReceptionFailure(p) {
+  return (
+    p.s1_status === S1.TECHNICAL_ERROR &&
+    PRE_RECEPTION_ERROR_CODES.includes(p.s1_error_code) &&
+    PRE_RECEPTION_HTTP_STATUSES.includes(Number(p.s1_http_status)) &&
+    p.s2_status === S2.NOT_STARTED &&
+    !p.ops_resolved_at &&
+    p.trigger_origin !== 'cz_automatic'
+  );
+}
+
+/**
+ * "Reintentar ELM" for a process cell, or null. Enabled only with send readiness and attempts
+ * left; the CI hold of the screen is applied by the caller.
+ * @param {object} p process row
+ * @param {{ allowSend?: boolean, sendReadiness?: { ready: boolean, reasons: string[] }|null,
+ *   maxRetryAttempts?: number }} input
+ */
+function retryActionFor(p, input) {
+  if (input.allowSend !== true || !isPreReceptionFailure(p)) return null;
+  const attempts = Number(p.s1_attempts);
+  if (!Number.isInteger(attempts) || attempts < 1) return null;
+  const max = Number(input.maxRetryAttempts);
+  const reasons = [];
+  const readiness = input.sendReadiness || null;
+  if (!readiness || readiness.ready !== true) {
+    const notReady = readiness && readiness.reasons && readiness.reasons.length ? readiness.reasons : [CODES.SEND_DISABLED];
+    reasons.push(...notReady);
+  }
+  if (Number.isInteger(max) && attempts >= max) reasons.push(CODES.RETRY_ATTEMPTS_EXHAUSTED);
+  return {
+    show: true,
+    enabled: reasons.length === 0,
+    expected_attempts: attempts,
+    reason: reasons[0] || null,
+    reasons: reasons,
+    hint: reasons.length ? SEND_PENDING_HINT : null,
+  };
+}
+
 /**
  * @param {{
  *   process: object|null,
@@ -49,6 +100,7 @@ function noAction() {
  *   projectedEstado?: number|null,
  *   allowSend?: boolean,
  *   sendReadiness?: { ready: boolean, reasons: string[] }|null,
+ *   maxRetryAttempts?: number,
  * }} input
  */
 function computeElmCell(input) {
@@ -80,6 +132,7 @@ function computeElmCell(input) {
       s1_status: effective(p.s1_status, p.s1_lease_expires_at, nowMs),
       s2_status: effective(p.s2_status, p.s2_lease_expires_at, nowMs),
       action: noAction(),
+      retry: retryActionFor(p, input),
     };
   }
 
@@ -244,6 +297,9 @@ function createElmListView(deps) {
             nowMs: nowMs,
             postReferralRejectionStatuses: postReferral,
             projectedEstado: projected.has(id) ? projected.get(id) : null,
+            allowSend: allowSend,
+            sendReadiness: readiness,
+            maxRetryAttempts: config.technicalRetryMaxAttempts,
           }),
         );
         continue;
@@ -310,6 +366,7 @@ module.exports = {
   computeElmCell,
   unavailableCell,
   isConfigPendingBlocker,
+  isPreReceptionFailure,
   createElmListView,
   attachElmCells,
 };

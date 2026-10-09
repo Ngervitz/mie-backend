@@ -16230,6 +16230,53 @@ init();
     }
   }
 
+  /**
+   * "Reintentar ELM": only for a solicitud whose S1 failed before ELM received the lead. Sends
+   * the attempt count the screen showed; the server refuses if the process changed since.
+   */
+  async function postElmRetry(ci, btn) {
+    const ElmUi = window.ElmUiHelpers;
+    const czId = btn ? btn.getAttribute('data-cz-id') : null;
+    const expected = btn ? Number(btn.getAttribute('data-expected-attempts')) : NaN;
+    if (!ElmUi || !ci || !czId || !(expected > 0)) return;
+    const ok = window.confirm(
+      '¿Reintentar el envío a ELM de la solicitud ' +
+        czId +
+        ' (CI ' +
+        ci +
+        ')?\n\nEl intento anterior falló antes de que ELM recibiera la solicitud. Se repite la evaluación inicial (S1) con los mismos datos (intento ' +
+        (expected + 1) +
+        ') y, si es favorable, la derivación a ventas de ELM (S2).',
+    );
+    if (!ok) return;
+    btn.disabled = true;
+    let message;
+    try {
+      const res = await fetch(
+        API + '/rechazados/' + encodeURIComponent(ci) + '/elm/retry',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ cz_solicitud_id: Number(czId), expected_attempts: expected }),
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      message = data && data.outcome
+        ? ElmUi.sendResultMessage(data)
+        : { tone: 'error', text: 'No se reintentó el envío a ELM. ' + ((data && data.error) || 'Error ' + res.status) };
+    } catch (_err) {
+      message = { tone: 'error', text: 'No se reintentó el envío a ELM: no se pudo conectar.' };
+    }
+    state.elmSendMessage = { ci: ci, czId: czId, tone: message.tone, text: message.text };
+    await loadList();
+    if (state.detailCi && String(state.detailCi) === String(ci)) {
+      await openDetail(ci);
+    }
+  }
+
   function isElmSendAction(action) {
     return action === 'elm-send';
   }
@@ -16304,6 +16351,7 @@ init();
             d.elm.available
               ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null, {
                   rejectedAt: r.fechahora_src,
+                  retryCi: d.ci,
                 })
               : '—',
           );
@@ -17311,6 +17359,10 @@ init();
       onElmSendClick(btn, ci);
       return;
     }
+    if (action === 'elm-retry') {
+      postElmRetry(ci, btn);
+      return;
+    }
     if (action === 'survey-invite') {
       postSurveyInvite(ci, btn);
       return;
@@ -17385,6 +17437,11 @@ init();
     if (isElmSendAction(action)) {
       if (actionEl.disabled) return;
       onElmSendClick(actionEl, state.detailCi);
+      return;
+    }
+    if (action === 'elm-retry') {
+      if (actionEl.disabled) return;
+      postElmRetry(actionEl.getAttribute('data-ci') || state.detailCi, actionEl);
       return;
     }
     if (action === 'open-form') {

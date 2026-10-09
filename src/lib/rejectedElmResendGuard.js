@@ -106,6 +106,8 @@ function hold(reason, relatedCzId, until) {
  *   locks: object[]|undefined,
  *   nowMs: number,
  *   postReferralRejectionStatuses?: readonly string[],
+ *   retryOwnProcess?: boolean,     manual retry of the target's own process: the target is
+ *                                  still excluded, the CI's other solicitudes are evaluated
  * }} input
  * @returns {{ reason: string, related_cz_solicitud_id: number|null, until: string|null }|null}
  */
@@ -120,7 +122,13 @@ function evaluateCiResendHold(input) {
     return Number(r.ci) === ci;
   };
   const processes = input.processes.filter(ofCi);
-  if (target != null && processes.some((p) => Number(p.cz_solicitud_id) === target)) return null;
+  if (
+    target != null &&
+    input.retryOwnProcess !== true &&
+    processes.some((p) => Number(p.cz_solicitud_id) === target)
+  ) {
+    return null;
+  }
   const others = processes.filter((p) => Number(p.cz_solicitud_id) !== target);
   const locks = input.locks.filter(ofCi).filter((l) => Number(l.cz_solicitud_id) !== target);
   const states = (input.states || []).filter(ofCi);
@@ -214,7 +222,12 @@ async function readElmSendRowsByCis(supabase, cis) {
  * @param {object} supabase
  * @param {number} ci
  * @param {number} czSolicitudId
- * @param {{ now?: () => number, postReferralRejectionStatuses?: string[], readRows?: Function }} [opts]
+ * @param {{
+ *   now?: () => number,
+ *   postReferralRejectionStatuses?: string[],
+ *   readRows?: Function,
+ *   retryOwnProcess?: boolean,
+ * }} [opts]
  */
 async function loadCiResendHold(supabase, ci, czSolicitudId, opts) {
   const o = opts || {};
@@ -229,6 +242,7 @@ async function loadCiResendHold(supabase, ci, czSolicitudId, opts) {
     nowMs: (o.now || Date.now)(),
     postReferralRejectionStatuses:
       o.postReferralRejectionStatuses || readPostReferralRejectionStatuses(),
+    retryOwnProcess: o.retryOwnProcess === true,
   });
 }
 

@@ -68,7 +68,7 @@ const {
   attachElmToRejectedRows,
   loadRejectedDetailElm,
 } = require('../lib/rejectedElmRead');
-const { sendRejectedToElm } = require('../lib/rejectedElmSend');
+const { sendRejectedToElm, retryRejectedElm } = require('../lib/rejectedElmSend');
 const { loadCiResendHold } = require('../lib/rejectedElmResendGuard');
 const { requireElmAction } = require('../middleware/requireElmAction');
 
@@ -700,6 +700,41 @@ router.post('/:ci/elm/send', requireElmAction, async function postElmSend(req, r
     return res.status(out.status).json(out.body);
   } catch (err) {
     logger.error('POST /rechazados/:ci/elm/send failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+/**
+ * "Reintentar ELM" (admin): resend the same frozen S1 of a rejected solicitud whose S1 failed
+ * before ELM received the lead. Body: { cz_solicitud_id, expected_attempts }.
+ */
+router.post('/:ci/elm/retry', requireElmAction, async function postElmRetry(req, res) {
+  const ci = normalizeCi(req.params && req.params.ci);
+  if (ci == null) {
+    return res.status(400).json({ error: 'CI inválida' });
+  }
+  try {
+    const out = await retryRejectedElm(
+      {
+        orchestrator: getElmOrchestrator(),
+        listView: getElmListView(),
+        loadRejectedCzIds: loadRejectedCzIds,
+        loadCiResendHold: function (holdCi, czId, opts) {
+          return loadCiResendHold(supabase, holdCi, czId, opts);
+        },
+      },
+      {
+        ci: ci,
+        czSolicitudId: req.body && req.body.cz_solicitud_id,
+        expectedAttempts: req.body && req.body.expected_attempts,
+        actorUserId: req.elmActorUserId,
+      },
+    );
+    return res.status(out.status).json(out.body);
+  } catch (err) {
+    logger.error('POST /rechazados/:ci/elm/retry failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({ error: 'Error interno' });

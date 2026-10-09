@@ -11,6 +11,9 @@
  *   retryElmStep(czSolicitudId, context, opts) → resend the SAME frozen request of a step in
  *                                                technical_error (DB-checked retry-safe code,
  *                                                attempt limit, expected attempt count)
+ *   retrySendElm(czSolicitudId, context, opts) → operator "Reintentar ELM": resend the SAME
+ *                                                frozen S1 that ELM provably never received
+ *                                                (pre-reception error), then S2 like sendElm
  *   getElmStatus(czSolicitudId)                → read-only view + eligibility preview
  *
  * One process per solicitud. A lost/uncertain answer ends as unknown (in_flight lease expiry),
@@ -47,6 +50,15 @@ function parseCzId(raw) {
 function blocked(code, extra) {
   return Object.assign({ ok: false, code: code }, extra || {});
 }
+
+/** elm_manual_retry_s1 refusals → result codes. */
+const MANUAL_RETRY_CODES = Object.freeze({
+  not_found: CODES.PROCESS_NOT_FOUND,
+  stale: CODES.RETRY_STALE,
+  not_pre_reception: CODES.RETRY_NOT_PRE_RECEPTION,
+  attempts_exhausted: CODES.RETRY_ATTEMPTS_EXHAUSTED,
+  not_allowed: CODES.RETRY_NOT_ALLOWED,
+});
 
 function blockerOf(failure) {
   return failure.fields ? { code: failure.code, fields: failure.fields } : { code: failure.code };
@@ -481,6 +493,75 @@ function createElmOrchestrator(deps) {
   }
 
   /**
+   * Operator "Reintentar ELM" (janus_manual only). elm_manual_retry_s1 re-checks in one
+   * transaction that ELM never received the lead, the expected attempt count, the attempt limit
+   * and the CI lock (same rules as a first send), archives the failed attempt and puts the SAME
+   * process back in S1 in_flight. Then the frozen S1 request is sent once and, when favorable,
+   * S2 follows as in sendElm. Never used by the automatic path.
+   *
+   * @param {{ expectedAttempts: number }} opts s1_attempts the operator saw
+   */
+  async function retrySendElm(czSolicitudId, context, opts) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId == null) return blocked(CODES.INVALID_CZ_ID, { stage: 's1' });
+    const ctx = validateContext(context, enabledTriggerOrigins);
+    if (!ctx.ok) return Object.assign({ stage: 's1' }, ctx);
+    if (ctx.triggerOrigin !== 'janus_manual') return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+    const expected = Number(opts && opts.expectedAttempts);
+    if (!Number.isInteger(expected) || expected < 1) return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+
+    const gate = sendGate();
+    if (gate) return Object.assign({ stage: 's1' }, gate);
+
+    const process = await repo.getProcessByCzId(czId);
+    if (!process) return blocked(CODES.PROCESS_NOT_FOUND, { stage: 's1' });
+    const { solicitud, grantedRow } = await loadContext(czId, ctx, context);
+    const elig = evaluateElmReferEligibility({
+      czId: czId,
+      solicitud: solicitud,
+      grantedRow: grantedRow,
+      process: process,
+    });
+    if (!elig.eligible) {
+      return blocked(elig.blockers[0].code, { stage: 's1', blockers: elig.blockers });
+    }
+
+    const out = await repo.manualRetryS1({
+      czSolicitudId: czId,
+      expectedAttempts: expected,
+      maxAttempts: config.technicalRetryMaxAttempts,
+      leaseSeconds: config.inFlightLeaseSeconds,
+      actorUserId: ctx.triggeredByUserId,
+    });
+    if (out.status === 'blocked') {
+      return blocked(CODES.CI_LOCK_BLOCKED, { stage: 's1', lock: out.lock || null });
+    }
+    if (out.status !== 'retried' || !out.process) {
+      return blocked(MANUAL_RETRY_CODES[out.status] || CODES.RETRY_NOT_ALLOWED, {
+        stage: 's1',
+        reason: out.reason || null,
+      });
+    }
+    logger.info('elm manual retry started', {
+      cz_solicitud_id: czId,
+      step: 's1',
+      attempt: out.process.s1_attempts,
+      lock_status: out.lock ? out.lock.status : null,
+      trigger_origin: ctx.triggerOrigin,
+    });
+
+    const s1 = await runStep('s1', out.process.id, czId, out.process.s1_request, ctx);
+    if (!s1.ok) return Object.assign({ stage: 's1' }, s1);
+    const view = s1.process;
+    if (view.s1.effective_status !== S1.ELIGIBLE || view.s2.effective_status !== S2.NOT_STARTED) {
+      return { ok: true, stage: 's1', process: view };
+    }
+    const s2 = await referElm(czId, context);
+    if (s2.ok) return { ok: true, stage: 's2', process: s2.process };
+    return { ok: true, stage: 's1', process: view, s2_blocked: { code: s2.code } };
+  }
+
+  /**
    * Whether a real send could run now: transport enabled and every ELM format/mapping the
    * payload needs confirmed in config. Per-solicitud blockers are checked by eligibility.
    * @returns {{ ready: boolean, reasons: string[] }}
@@ -586,7 +667,7 @@ function createElmOrchestrator(deps) {
     };
   }
 
-  return { evaluateElm, referElm, sendElm, retryElmStep, getElmStatus, getSendReadiness };
+  return { evaluateElm, referElm, sendElm, retryElmStep, retrySendElm, getElmStatus, getSendReadiness };
 }
 
 module.exports = {

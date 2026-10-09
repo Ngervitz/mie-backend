@@ -24,7 +24,7 @@ const GRANTED_SELECT = 'cz_id, ci, monto_otorgado, updated_at_src, synced_at';
  * documented answers (needed to tell a definitive rejection from an ambiguous one).
  */
 const PROCESS_LIST_SELECT =
-  'id, cz_solicitud_id, ci, trigger_origin, created_at, updated_at, s1_status, s1_started_at, s1_completed_at, s1_lease_expires_at, s1_result_message, s2_status, s2_started_at, s2_completed_at, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount, ops_resolution_code, ops_resolved_at';
+  'id, cz_solicitud_id, ci, trigger_origin, created_at, updated_at, s1_status, s1_attempts, s1_http_status, s1_error_code, s1_started_at, s1_completed_at, s1_lease_expires_at, s1_result_message, s2_status, s2_started_at, s2_completed_at, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount, ops_resolution_code, ops_resolved_at';
 
 const CZ_STATE_TABLE = 'provider_cz_state';
 
@@ -179,6 +179,25 @@ function createElmRepository(supabaseOverride) {
     });
     if (error) throw rpcError('elm_retry_step', error);
     return firstRow(data);
+  }
+
+  /**
+   * Operator retry of an S1 that ELM provably never received (20261011 migration). One
+   * transaction: new CI reservation + archived attempt + process back to in_flight + audit.
+   * @returns {Promise<{ status: string, reason?: string, process?: object, lock?: object }>}
+   */
+  async function manualRetryS1(args) {
+    const { data, error } = await db().rpc('elm_manual_retry_s1', {
+      p_cz_solicitud_id: args.czSolicitudId,
+      p_expected_attempts: args.expectedAttempts,
+      p_max_attempts: args.maxAttempts,
+      p_lease_seconds: args.leaseSeconds,
+      p_actor_user_id: args.actorUserId,
+    });
+    if (error) throw rpcError('elm_manual_retry_s1', error);
+    const out = firstRow(data);
+    if (!out || typeof out.status !== 'string') throw new Error('elm_manual_retry_s1 returned no status');
+    return out;
   }
 
   async function expireStaleInFlight(czId) {
@@ -343,6 +362,7 @@ function createElmRepository(supabaseOverride) {
     beginS2,
     finishS2,
     retryStep,
+    manualRetryS1,
     expireStaleInFlight,
     recordLateResult,
     loadSolicitudContexts,
