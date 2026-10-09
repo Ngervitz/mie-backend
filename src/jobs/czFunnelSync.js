@@ -507,12 +507,32 @@ async function upsertEncuestas(items) {
 }
 
 /**
+ * Prefix of last_sync_error marking a full-refresh pass split across runs.
+ * Only while present is last_since used as the read floor of a fullRefresh source.
+ */
+const FULL_REFRESH_RESUME_MARKER = 'full_refresh_resume';
+
+function resolveFullRefreshSince(cursor) {
+  if (
+    cursor &&
+    cursor.last_since &&
+    String(cursor.last_sync_error || '').startsWith(FULL_REFRESH_RESUME_MARKER)
+  ) {
+    return { since: String(cursor.last_since), resumed: true };
+  }
+  return { since: INITIAL_SINCE, resumed: false };
+}
+
+/**
  * Sync one funnel source. On failure: do not advance cursor; record error.
  *
- * fullRefresh=true: always read from INITIAL_SINCE (ignore stored last_since).
- * Used for /solicitudes so historico/estado updates on older rows are re-upserted.
- * Cursor last_since may still be written for observability on complete runs;
- * the next fullRefresh run does not use it as a read floor.
+ * fullRefresh=true: a pass reads every row from INITIAL_SINCE (stored last_since
+ * is not a read floor), so historico/estado updates on older rows are re-upserted
+ * even though CZ `updated` does not move on estado changes. Pages overlap one
+ * second at boundaries (dedupe by id). If a run hits the page limit, the pass
+ * resumes from last_since on the next run (FULL_REFRESH_RESUME_MARKER) instead of
+ * restarting, so rows beyond the per-run limit are still reached. A complete
+ * pass writes last_since = tip for observability and the next run starts over.
  */
 async function syncSource({ sourceName, apiPath, upsertPage, fullRefresh }) {
   const result = {
@@ -525,28 +545,59 @@ async function syncSource({ sourceName, apiPath, upsertPage, fullRefresh }) {
     error: null,
     hitPageLimit: false,
     fullRefresh: Boolean(fullRefresh),
+    resumed: false,
+    // true only when every row up to the CZ tip was read in this run (or the resumed pass ended).
+    passComplete: false,
+    boundaryStalls: 0,
   };
 
   try {
     const cursor = await readCursor(sourceName);
-    const initialSince = fullRefresh
-      ? INITIAL_SINCE
-      : cursor && cursor.last_since
-        ? String(cursor.last_since)
-        : INITIAL_SINCE;
+    let initialSince;
+    if (fullRefresh) {
+      const resolved = resolveFullRefreshSince(cursor);
+      initialSince = resolved.since;
+      result.resumed = resolved.resumed;
+    } else {
+      initialSince =
+        cursor && cursor.last_since ? String(cursor.last_since) : INITIAL_SINCE;
+    }
     result.initialSince = initialSince;
 
-    const pageBundle = await fetchAllCzPages(apiPath, initialSince);
+    const pageBundle = await fetchAllCzPages(
+      apiPath,
+      initialSince,
+      fullRefresh ? { boundaryOverlap: true } : undefined,
+    );
     result.pagesFetched = pageBundle.pagesFetched;
     result.itemsFetched = pageBundle.itemsFetched;
     result.hitPageLimit = Boolean(pageBundle.hitPageLimit);
+    result.boundaryStalls = Number(pageBundle.boundaryStalls) || 0;
+    if (result.boundaryStalls > 0) {
+      logger.warn('CZ funnel page boundary could not overlap', {
+        sourceName,
+        boundaryStalls: result.boundaryStalls,
+      });
+    }
 
     const upserted = await upsertPage(pageBundle.items || []);
     result.itemsUpserted = upserted;
 
+    if (pageBundle.incomplete && fullRefresh && pageBundle.resumeSince) {
+      result.status = 'success';
+      result.nextSince = String(pageBundle.resumeSince);
+      result.error = `${FULL_REFRESH_RESUME_MARKER} — hit_page_limit; next run resumes from last_since`;
+      await writeCursor(sourceName, {
+        last_since: result.nextSince,
+        last_synced_at: new Date().toISOString(),
+        last_sync_status: 'success',
+        last_sync_error: result.error,
+      });
+      return result;
+    }
+
     if (pageBundle.incomplete) {
       // Partial run: do not advance cursor / do not claim a complete sync.
-      // fullRefresh will re-read from INITIAL_SINCE on the next run.
       result.status = 'success';
       result.nextSince = initialSince;
       result.error =
@@ -568,6 +619,7 @@ async function syncSource({ sourceName, apiPath, upsertPage, fullRefresh }) {
       last_sync_status: 'success',
       last_sync_error: null,
     });
+    result.passComplete = true;
   } catch (err) {
     const message = err && err.message ? String(err.message) : 'unknown';
     result.status = 'error';
@@ -646,8 +698,8 @@ async function runCzFunnelSync() {
       sourceName: SOURCE_SOLICITUDES,
       apiPath: '/solicitudes',
       upsertPage: upsertSolicitudes,
-      // Volume is one API page today: full refresh so estado/historico
-      // changes on older solicitudes are never skipped by last_since.
+      // Full refresh: CZ `updated` does not move on estado changes, so
+      // last_since alone would skip historico changes on older solicitudes.
       fullRefresh: true,
     });
 
@@ -697,6 +749,9 @@ async function runCzFunnelSync() {
         itemsFetched: summary.solicitudes.itemsFetched,
         itemsUpserted: summary.solicitudes.itemsUpserted,
         error: summary.solicitudes.error,
+        resumed: summary.solicitudes.resumed,
+        hitPageLimit: summary.solicitudes.hitPageLimit,
+        passComplete: summary.solicitudes.passComplete,
       },
       encuestas: {
         status: summary.encuestas.status,
@@ -743,6 +798,8 @@ module.exports = {
   mapEncuestaRow,
   upsertEncuestas,
   syncSource,
+  FULL_REFRESH_RESUME_MARKER,
+  resolveFullRefreshSince,
   pullEncuestasOnDemand,
   setCdvSheetSyncForTests,
   runCdvSheetSyncFailOpen,
