@@ -15071,7 +15071,7 @@ init();
           '</td>' +
           '<td class="rechazados-col-elm">' +
           (window.ElmUiHelpers
-            ? window.ElmUiHelpers.rejectedRowElmHtml(row.elm)
+            ? window.ElmUiHelpers.rejectedRowElmHtml(row.elm, row.ci)
             : '—') +
           '</td>' +
           '<td class="rechazados-col-ver"><button type="button" class="btn rechazados-cell-btn" data-action="view-ci" data-ci="' +
@@ -15081,7 +15081,19 @@ init();
         );
       })
       .join('');
+    const elmMsg = state.elmSendMessage;
     resultsEl.innerHTML =
+      (elmMsg
+        ? '<div class="rechazados-elm-msg is-' +
+          escapeHtml(elmMsg.tone) +
+          '">CI ' +
+          escapeHtml(String(elmMsg.ci)) +
+          ' · solicitud ' +
+          escapeHtml(String(elmMsg.czId)) +
+          ': ' +
+          escapeHtml(elmMsg.text) +
+          '</div>'
+        : '') +
       '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
       '<thead><tr>' +
       '<th class="rechazados-col-ci">CI</th>' +
@@ -16152,18 +16164,15 @@ init();
     }
     if (elm.send_readiness && elm.send_readiness.ready !== true) {
       parts.push(
-        '<div class="rechazados-muted">Envío a ELM no habilitado' +
-          (elm.send_readiness.reasons && elm.send_readiness.reasons.length
-            ? ': ' + escapeHtml(elm.send_readiness.reasons.join(', '))
-            : '') +
-          '.</div>',
+        '<div class="rechazados-muted">' +
+          escapeHtml(ElmUi.sendBlockedHint({ reasons: elm.send_readiness.reasons || [] })) +
+          '</div>',
       );
     }
-    if (elm.ci_active) {
+    const hold = elm.send && elm.send.hold;
+    if (hold) {
       parts.push(
-        '<div class="rechazados-muted">Proceso ELM vigente para esta CI (solicitud ' +
-          escapeHtml(String(elm.ci_active.cz_solicitud_id)) +
-          ').</div>',
+        '<div class="rechazados-muted">' + escapeHtml(ElmUi.ciHoldText(hold.reason, hold)) + '</div>',
       );
     }
     (elm.other_processes || []).forEach(function (p) {
@@ -16183,11 +16192,13 @@ init();
   async function postElmSend(ci, czId, btn) {
     const ElmUi = window.ElmUiHelpers;
     if (!ElmUi || !ci || !czId) return;
+    const rejectedAt = btn ? btn.getAttribute('data-rejected-at') : null;
     const ok = window.confirm(
       '¿Enviar la solicitud ' +
         czId +
         ' (CI ' +
         ci +
+        (rejectedAt ? ', rechazada ' + rejectedAt : '') +
         ') a ELM?\n\nSe ejecuta la evaluación inicial (S1) y, si es favorable, la derivación a ventas de ELM (S2).',
     );
     if (!ok) return;
@@ -16212,10 +16223,49 @@ init();
     } catch (_err) {
       message = { tone: 'error', text: 'No se envió a ELM: no se pudo conectar.' };
     }
-    state.elmSendMessage = { ci: ci, tone: message.tone, text: message.text };
+    state.elmSendMessage = { ci: ci, czId: czId, tone: message.tone, text: message.text };
     await loadList();
     if (state.detailCi && String(state.detailCi) === String(ci)) {
       await openDetail(ci);
+    }
+  }
+
+  function isElmSendAction(action) {
+    return action === 'elm-send';
+  }
+
+  /** List and detail "Enviar a ELM": the solicitud always comes from the button's data-cz-id. */
+  function onElmSendClick(el, ciFallback) {
+    const ci = el.getAttribute('data-ci') || ciFallback;
+    const czId = el.getAttribute('data-cz-id');
+    if (!czId) {
+      setStatus('Elegí la solicitud a enviar a ELM.', true);
+      return;
+    }
+    postElmSend(ci, czId, el);
+  }
+
+  /** Binds the picked solicitud to the row's send button; unpicked keeps it disabled. */
+  function onElmPickChange(select) {
+    const cell = select.closest('.rechazados-elm-action');
+    const btn = cell ? cell.querySelector('[data-action="elm-send"]') : null;
+    if (!btn) return;
+    const opt = select.options[select.selectedIndex];
+    const czId = select.value;
+    if (czId) {
+      const date = opt ? opt.getAttribute('data-rejected-at') : '';
+      btn.setAttribute('data-cz-id', czId);
+      if (date) btn.setAttribute('data-rejected-at', date);
+      else btn.removeAttribute('data-rejected-at');
+      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
+      btn.title = 'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM';
+    } else {
+      btn.removeAttribute('data-cz-id');
+      btn.removeAttribute('data-rejected-at');
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = 'Elegí primero la solicitud a enviar';
     }
   }
 
@@ -16252,7 +16302,9 @@ init();
         if (showElm) {
           cells.push(
             d.elm.available
-              ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null)
+              ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null, {
+                  rejectedAt: r.fechahora_src,
+                })
               : '—',
           );
         }
@@ -17234,7 +17286,13 @@ init();
     if (!btn) return;
     const raw = btn.getAttribute('data-status-filter');
     state.statusFilter = raw ? raw : null;
+    state.elmSendMessage = null;
     loadList();
+  });
+
+  resultsEl.addEventListener('change', function (ev) {
+    const select = ev.target && ev.target.closest ? ev.target.closest('[data-elm-pick]') : null;
+    if (select) onElmPickChange(select);
   });
 
   resultsEl.addEventListener('click', function (ev) {
@@ -17247,6 +17305,10 @@ init();
     if (!ci) return;
     if (action === 'view-ci') {
       openDetail(ci);
+      return;
+    }
+    if (isElmSendAction(action)) {
+      onElmSendClick(btn, ci);
       return;
     }
     if (action === 'survey-invite') {
@@ -17320,8 +17382,9 @@ init();
       if (ciInvite) postSurveyInvite(ciInvite, actionEl);
       return;
     }
-    if (action === 'elm-send') {
-      postElmSend(state.detailCi, actionEl.getAttribute('data-cz-id'), actionEl);
+    if (isElmSendAction(action)) {
+      if (actionEl.disabled) return;
+      onElmSendClick(actionEl, state.detailCi);
       return;
     }
     if (action === 'open-form') {

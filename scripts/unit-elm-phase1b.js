@@ -832,7 +832,7 @@ async function main() {
     const html = ElmUi.elmCellHtml(pending);
     assert.ok(html.includes('Enviar a ELM'));
     assert.ok(/ disabled /.test(html));
-    assert.ok(html.includes('title="Integración ELM pendiente de habilitación"'));
+    assert.ok(html.includes('title="Configuración ELM pendiente: mapeo de actividad."'));
     assert.ok(!/data-action/.test(html), 'disabled button has no click wiring');
 
     const allOkNotReady = computeElmCell({

@@ -5285,7 +5285,7 @@
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-name {
-  width: 25%;
+  width: 22%;
   text-align: left;
   overflow: hidden;
 }
@@ -5296,7 +5296,7 @@
   white-space: nowrap;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-date {
-  width: 11%;
+  width: 10%;
   text-align: left;
   white-space: nowrap;
   padding-right: 16px;
@@ -5404,10 +5404,47 @@
   line-height: 1.2;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-elm {
-  width: 9%;
+  width: 12%;
   text-align: center;
   white-space: normal;
   line-height: 1.25;
+}
+#mie-dashboard-app .rechazados-elm-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-elm-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-elm-send {
+  white-space: nowrap;
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  max-width: 100%;
+}
+#mie-dashboard-app .rechazados-elm-target {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#mie-dashboard-app .rechazados-elm-pick {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
 }
 #mie-dashboard-app .rechazados-elm-block {
   margin-top: 8px;
@@ -5471,6 +5508,10 @@
   #mie-dashboard-app .ga4-table.rechazados-table {
     min-width: 720px;
     table-layout: fixed;
+  }
+  #mie-dashboard-app .rechazados-elm-send {
+    white-space: normal;
+    line-height: 1.15;
   }
 }
 

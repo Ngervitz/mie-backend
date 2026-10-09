@@ -69,6 +69,7 @@ const {
   loadRejectedDetailElm,
 } = require('../lib/rejectedElmRead');
 const { sendRejectedToElm } = require('../lib/rejectedElmSend');
+const { loadCiResendHold } = require('../lib/rejectedElmResendGuard');
 const { requireElmAction } = require('../middleware/requireElmAction');
 
 const router = express.Router();
@@ -187,7 +188,11 @@ router.get('/', async function getRechazadosList(req, res) {
     if (!optin.available) {
       logger.warn('GET /rechazados mi_deuda_optin unavailable', { code: optin.error_code });
     }
-    const elmAvailable = await attachElmToRejectedRows(optin.rows, { logger: logger });
+    const elmAvailable = await attachElmToRejectedRows(optin.rows, {
+      supabase: supabase,
+      listView: getElmListView(),
+      logger: logger,
+    });
     return res.json({
       ok: true,
       data: {
@@ -682,6 +687,9 @@ router.post('/:ci/elm/send', requireElmAction, async function postElmSend(req, r
         orchestrator: getElmOrchestrator(),
         listView: getElmListView(),
         loadRejectedCzIds: loadRejectedCzIds,
+        loadCiResendHold: function (holdCi, czId) {
+          return loadCiResendHold(supabase, holdCi, czId);
+        },
       },
       {
         ci: ci,

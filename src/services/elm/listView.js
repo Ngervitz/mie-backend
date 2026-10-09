@@ -127,12 +127,17 @@ function computeElmCell(input) {
   const readiness = input.sendReadiness || null;
   const ready = Boolean(readiness && readiness.ready === true);
   const enabled = allowSend && ready && input.eligibility.eligible === true && !codes.length;
-  let reason = null;
+  let reasons = [];
   if (!enabled) {
-    reason = !ready
-      ? (readiness && readiness.reasons && readiness.reasons[0]) || CODES.SEND_DISABLED
-      : codes[0] || CODES.SEND_DISABLED;
+    const notReady = !ready
+      ? (readiness && readiness.reasons && readiness.reasons.length
+        ? readiness.reasons
+        : [CODES.SEND_DISABLED])
+      : [];
+    reasons = Array.from(new Set(notReady.concat(codes)));
+    if (!reasons.length) reasons = [CODES.SEND_DISABLED];
   }
+  const reason = enabled ? null : reasons[0];
   return Object.assign(
     {
       kind: 'not_sent',
@@ -141,6 +146,7 @@ function computeElmCell(input) {
         show: allowSend,
         enabled: enabled,
         reason: reason,
+        reasons: reasons,
         blockers: codes,
         hint: enabled ? null : SEND_PENDING_HINT,
       },

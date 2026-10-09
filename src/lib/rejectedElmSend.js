@@ -3,7 +3,11 @@
 /**
  * "Enviar a ELM" from Rechazados: one action, S1 then S2 automatically when S1 is favorable
  * (orchestrator.sendElm). Validation, authorization (requireElmAction), idempotency
- * (one process per solicitud) and the CI lock are the existing ones.
+ * (one process per solicitud) and the CI lock are the existing ones. Before them, the CI's other
+ * solicitudes are checked with rejectedElmResendGuard (the same rule the list and detail show):
+ * vigente process, send in progress, monthly quota and ELM's 30-day duplicate window; an
+ * unreadable history blocks. A solicitud with its own process skips that check and reaches the
+ * orchestrator as before (elm_process_exists or S2 resume).
  *
  * The outcome is read back from the persisted process (refreshed cell), so the UI shows what is
  * stored: S1 rejected, S2 referred ("Preaprobado ELM", never a granted loan), pending, technical
@@ -27,6 +31,7 @@ const OUTCOMES = Object.freeze({
 
 const NOT_IN_REJECTIONS = 'elm_solicitud_not_in_rejections';
 const SEND_NOT_READY = 'elm_send_not_ready';
+const HISTORY_UNVERIFIABLE = 'elm_ci_history_unverifiable';
 
 function outcomeOf(cell) {
   if (!cell || !cell.state) return OUTCOMES.BLOCKED;
@@ -58,6 +63,7 @@ function parseCzId(raw) {
  *   orchestrator: { sendElm: Function, getSendReadiness: Function },
  *   listView: { cellsForCzIds: Function },
  *   loadRejectedCzIds: (ci: number) => Promise<number[]|null>,
+ *   loadCiResendHold: (ci: number, czId: number) => Promise<object|null>,
  * }} deps
  * @param {{ ci: number, czSolicitudId: unknown, actorUserId: string }} input
  * @returns {Promise<{ status: number, body: object }>}
@@ -77,6 +83,25 @@ async function sendRejectedToElm(deps, input) {
     return {
       status: 503,
       body: { ok: false, code: SEND_NOT_READY, reasons: readiness.reasons, outcome: OUTCOMES.BLOCKED },
+    };
+  }
+  let hold;
+  try {
+    hold = await deps.loadCiResendHold(input.ci, czId);
+  } catch (_) {
+    hold = { reason: HISTORY_UNVERIFIABLE, related_cz_solicitud_id: null, until: null };
+  }
+  if (hold) {
+    return {
+      status: hold.reason === HISTORY_UNVERIFIABLE ? 503 : 409,
+      body: {
+        ok: false,
+        code: hold.reason,
+        related_cz_solicitud_id: hold.related_cz_solicitud_id,
+        until: hold.until,
+        outcome: OUTCOMES.BLOCKED,
+        cz_solicitud_id: czId,
+      },
     };
   }
 
@@ -105,6 +130,7 @@ module.exports = {
   OUTCOMES,
   NOT_IN_REJECTIONS,
   SEND_NOT_READY,
+  HISTORY_UNVERIFIABLE,
   outcomeOf,
   sendRejectedToElm,
 };

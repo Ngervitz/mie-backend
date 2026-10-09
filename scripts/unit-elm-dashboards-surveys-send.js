@@ -96,8 +96,20 @@ const { REASONS } = require('../src/lib/rejectedSurveyInvite');
 const { decideSurveyInviteSequenceAction } = require('../src/lib/rejectedSurveyInviteEvaluate');
 const { getRejectedSurveyInviteEligibility } = require('../src/lib/rejectedSurveyInviteEligibility');
 const { computeElmSurveyBlocks } = require('../src/lib/rejectedSurveyInviteElmGate');
-const { summarizeCiElm, loadRejectedDetailElm, CI_ACTIVE_REASON } = require('../src/lib/rejectedElmRead');
+const {
+  summarizeCiElm,
+  loadRejectedDetailElm,
+  attachElmToRejectedRows,
+  resolveRejectedSend,
+  CI_ACTIVE_REASON,
+} = require('../src/lib/rejectedElmRead');
 const { sendRejectedToElm, OUTCOMES } = require('../src/lib/rejectedElmSend');
+const {
+  evaluateCiResendHold,
+  readElmSendRowsByCis,
+  loadCiResendHold,
+  montevideoMonthKey,
+} = require('../src/lib/rejectedElmResendGuard');
 const ElmUi = require('../public/elm-ui-helpers');
 
 const NOW = Date.parse('2026-10-09T12:00:00Z');
@@ -292,14 +304,22 @@ function sendHarness(steps, opts) {
     postReferralRejectionStatuses: [],
     sendReadiness: () => orch.getSendReadiness(),
   });
+  const readRows = async () => ({
+    processes: [...repo.rows.values()],
+    states: [],
+    openRequests: [],
+    locks: o.locks === undefined ? [] : o.locks,
+  });
   const deps = {
     orchestrator: orch,
     listView: listView,
     loadRejectedCzIds: async () => o.rejectedCzIds || [1001],
+    loadCiResendHold: (holdCi, czId) =>
+      loadCiResendHold(null, holdCi, czId, { now: () => NOW, postReferralRejectionStatuses: [], readRows: readRows }),
   };
   const send = (czId) =>
     sendRejectedToElm(deps, { ci: ci, czSolicitudId: czId, actorUserId: 'user-admin-1' });
-  return { orch, repo, fetchImpl, listView, send };
+  return { orch, repo, fetchImpl, listView, send, readRows, deps };
 }
 
 // --- CDV fixture (unchanged cohort rules) -----------------------------------------------
@@ -579,7 +599,7 @@ test('9 CI with several solicitudes: per-solicitud exclusivity, CI-level holds',
   const detail = await loadRejectedDetailElm(null, { ci: ci, rejections: [{ cz_solicitud_id: 8002 }] }, {
     listView: createElmListView({ repository: repo, config: readElmConfig(ENV), now: () => NOW, postReferralRejectionStatuses: [], sendReadiness: () => ({ ready: true, reasons: [] }) }),
     sendReadiness: () => ({ ready: true, reasons: [] }),
-    readRows: async () => ({ processes: [referredA], states: [], openRequests: [] }),
+    readRows: async () => ({ processes: [referredA], states: [], openRequests: [], locks: [] }),
     now: () => NOW,
     postReferralRejectionStatuses: [],
   });
@@ -594,7 +614,7 @@ test('9 CI with several solicitudes: per-solicitud exclusivity, CI-level holds',
   const free = await loadRejectedDetailElm(null, { ci: ci, rejections: [{ cz_solicitud_id: 8002 }] }, {
     listView: createElmListView({ repository: repo, config: readElmConfig(ENV), now: () => NOW, postReferralRejectionStatuses: [], sendReadiness: () => ({ ready: true, reasons: [] }) }),
     sendReadiness: () => ({ ready: true, reasons: [] }),
-    readRows: async () => ({ processes: [], states: [], openRequests: [] }),
+    readRows: async () => ({ processes: [], states: [], openRequests: [], locks: [] }),
     now: () => NOW,
   });
   assert.strictEqual(free.solicitudes[0].cell.action.enabled, true);
@@ -725,6 +745,379 @@ test('14 no solicitud is in Preaprobados and Rechazados at the same time', async
   assert.deepStrictEqual(Array.from(cohort.keys()).sort(), [10, 11]);
   assert.deepStrictEqual(Array.from(rejected).sort(), [12, 13]);
   assert.ok(!cohort.has(14) && !rejected.has(14), 'in evaluation → seguimiento only');
+});
+
+// --- Rechazados list: "Enviar a ELM" in the ELM column (same send path as the detail) ------
+
+/** List row as GET /rechazados builds it, then ELM attached with the harness deps. */
+async function listRow(h, ci, rejected, extra) {
+  const row = {
+    ci: ci,
+    cz_solicitud_id: rejected[0].cz_solicitud_id,
+    rejected_solicitudes: rejected,
+  };
+  const e = extra || {};
+  await attachElmToRejectedRows([row], {
+    supabase: null,
+    listView: e.listView || h.listView,
+    readRows:
+      e.readRows ||
+      (async () => {
+        const base = await h.readRows();
+        return Object.assign(base, { processes: base.processes.concat(e.processes || []) });
+      }),
+    now: () => NOW,
+    postReferralRejectionStatuses: [],
+  });
+  return row;
+}
+
+test('15 list row carries every rejected solicitud of the CI (newest first, one per solicitud)', async () => {
+  const ci = 44444444;
+  const estado3 = [
+    { cz_historico_id: 1, cz_solicitud_id: 9001, solicitudes_estados_id: 3, fechahora_src: iso(NOW - 10 * DAY) },
+    { cz_historico_id: 2, cz_solicitud_id: 9002, solicitudes_estados_id: 3, fechahora_src: iso(NOW - 2 * DAY) },
+    { cz_historico_id: 3, cz_solicitud_id: 9001, solicitudes_estados_id: 3, fechahora_src: iso(NOW - 9 * DAY) },
+  ];
+  const row = rejectedList(estado3, [cdvSol(9001, ci, 3), cdvSol(9002, ci, 3)]).find((r) => r.ci === ci);
+  assert.strictEqual(row.cz_solicitud_id, 9002);
+  assert.deepStrictEqual(row.rejected_solicitudes, [
+    { cz_solicitud_id: 9002, rejected_at: iso(NOW - 2 * DAY) },
+    { cz_solicitud_id: 9001, rejected_at: iso(NOW - 9 * DAY) },
+  ]);
+});
+
+test('16 list: one sendable solicitud → button bound to it; same S1→S2 send; then commercial state', async () => {
+  const ci = 45454545;
+  const h = sendHarness(
+    [okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')],
+    { ci: ci, czIds: [9002], rejectedCzIds: [9002, 9001] },
+  );
+  const rejected = [
+    { cz_solicitud_id: 9002, rejected_at: '2026-10-07T10:00:00.000Z' },
+    { cz_solicitud_id: 9001, rejected_at: '2026-09-01T10:00:00.000Z' },
+  ];
+  const row = await listRow(h, ci, rejected);
+  assert.strictEqual(row.elm.available, true);
+  assert.strictEqual(row.elm.cell, null);
+  assert.strictEqual(row.elm.send.target_cz_id, 9002, '9001 has no CZ solicitud → not sendable');
+  assert.strictEqual(row.elm.send.needs_selection, false);
+  assert.deepStrictEqual(row.elm.send.selectable_cz_ids, [9002]);
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('data-action="elm-send"'));
+  assert.ok(html.includes('data-cz-id="9002"'));
+  assert.ok(html.includes('data-ci="' + ci + '"'));
+  assert.ok(html.includes('data-rejected-at="07/10/2026"'));
+  assert.ok(html.includes('Sol. 9002'), 'the solicitud is visible next to the button');
+  assert.ok(!html.includes('<select'));
+  assert.ok(!/ disabled /.test(html));
+
+  const detail = await loadRejectedDetailElm(null, { ci: ci, rejections: rejected.map((r) => ({ cz_solicitud_id: r.cz_solicitud_id, fechahora_src: r.rejected_at })) }, {
+    listView: h.listView,
+    sendReadiness: () => h.orch.getSendReadiness(),
+    readRows: h.readRows,
+    now: () => NOW,
+    postReferralRejectionStatuses: [],
+  });
+  assert.deepStrictEqual(detail.send, row.elm.send, 'list and detail resolve the target identically');
+  assert.strictEqual(h.fetchImpl.calls.length, 0, 'rendering never calls ELM');
+
+  const out = await h.send(9002);
+  assert.strictEqual(out.status, 200);
+  assert.strictEqual(out.body.outcome, OUTCOMES.REFERRED);
+  assert.strictEqual(h.fetchImpl.calls.length, 2, 'S1 then S2');
+  const again = await h.send(9002);
+  assert.strictEqual(again.body.code, 'elm_process_exists', 'idempotent');
+  assert.strictEqual(h.fetchImpl.calls.length, 2);
+
+  const after = await listRow(h, ci, rejected);
+  assert.strictEqual(after.elm.cell.label, 'Preaprobado ELM');
+  const afterHtml = ElmUi.rejectedRowElmHtml(after.elm, after.ci);
+  assert.ok(afterHtml.includes('Preaprobado ELM'));
+  assert.ok(!afterHtml.includes('<button'), 'state replaces the button');
+});
+
+test('17 list: several sendable solicitudes → explicit selection, never an implicit target', async () => {
+  const ci = 46464646;
+  const h = sendHarness([okResult('SCORE BAJO')], { ci: ci, czIds: [9101, 9102], rejectedCzIds: [9102, 9101] });
+  const rejected = [
+    { cz_solicitud_id: 9102, rejected_at: '2026-10-05T10:00:00.000Z' },
+    { cz_solicitud_id: 9101, rejected_at: '2026-08-20T10:00:00.000Z' },
+  ];
+  const row = await listRow(h, ci, rejected);
+  assert.strictEqual(row.elm.send.target_cz_id, null);
+  assert.strictEqual(row.elm.send.needs_selection, true);
+  assert.deepStrictEqual(row.elm.send.selectable_cz_ids, [9102, 9101]);
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('<select') && html.includes('data-elm-pick="1"'));
+  assert.ok(html.includes('<option value="">Elegir sol. (2)</option>'), 'nothing preselected');
+  assert.ok(html.includes('<option value="9102" data-rejected-at="05/10/2026">Sol. 9102 · 05/10/2026</option>'));
+  assert.ok(html.includes('<option value="9101" data-rejected-at="20/08/2026">Sol. 9101 · 20/08/2026</option>'));
+  const button = html.slice(html.indexOf('<button'));
+  assert.ok(/ disabled /.test(button), 'button disabled until a solicitud is chosen');
+  assert.ok(!button.includes('data-cz-id'), 'no solicitud bound before the choice');
+
+  const missing = await h.send(undefined);
+  assert.strictEqual(missing.status, 400, 'the endpoint never guesses the solicitud');
+  const foreign = await h.send(9999);
+  assert.strictEqual(foreign.status, 404);
+  assert.strictEqual(foreign.body.code, 'elm_solicitud_not_in_rejections');
+  assert.strictEqual(h.fetchImpl.calls.length, 0);
+
+  const chosen = await h.send(9101);
+  assert.strictEqual(chosen.body.outcome, OUTCOMES.S1_REJECTED);
+  assert.strictEqual(h.fetchImpl.calls.length, 1);
+  assert.ok(h.repo.rows.has(9101) && !h.repo.rows.has(9102), 'only the chosen solicitud was sent');
+});
+
+test('18 list: ELM disabled or config missing → disabled button with a short reason', async () => {
+  const cases = [
+    { env: { ELM_CLIENT_ENABLED: 'false' }, title: 'Envío a ELM deshabilitado: la integración no está activada.' },
+    { env: { ELM_CONSUMER_KEY: undefined }, title: 'Configuración ELM incompleta: faltan credenciales o URLs.' },
+    {
+      env: { ELM_DATE_OF_BIRTH_FORMAT: undefined, ELM_MOBILE_PHONE_FORMAT: undefined },
+      title: 'Configuración ELM pendiente: formato de fecha de nacimiento, formato de celular.',
+    },
+    { env: { ELM_ACTIVITY_TYPE_MAP_JSON: undefined }, title: 'Configuración ELM pendiente: mapeo de actividad.' },
+  ];
+  for (const c of cases) {
+    const ci = 47474747;
+    const h = sendHarness([], { ci: ci, czIds: [9201, 9202], rejectedCzIds: [9202, 9201], env: c.env });
+    const row = await listRow(h, ci, [{ cz_solicitud_id: 9202 }, { cz_solicitud_id: 9201 }]);
+    assert.strictEqual(row.elm.send.candidates.length, 2);
+    assert.strictEqual(row.elm.send.target_cz_id, null);
+    assert.strictEqual(row.elm.send.needs_selection, false, 'nothing to choose while disabled');
+    const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+    assert.ok(/ disabled /.test(html), JSON.stringify(c.env));
+    assert.ok(html.includes('title="' + c.title + '"'), html);
+    assert.ok(!html.includes('data-action'), 'disabled: no click wiring');
+    assert.ok(!html.includes('<select'));
+    const out = await h.send(9202);
+    assert.strictEqual(out.status, 503, 'endpoint keeps the readiness guard');
+    assert.strictEqual(h.fetchImpl.calls.length, 0);
+  }
+});
+
+test('19 vigente process of another solicitud (evaluation / referred / review) blocks new sends', async () => {
+  const ci = 48484848;
+  const h = sendHarness([], { ci: ci, czIds: [9301, 9302], rejectedCzIds: [9302, 9301] });
+  const referredOther = proc({ cz_solicitud_id: 9301, ci: ci });
+  const pending = proc({ cz_solicitud_id: 9301, ci: ci, s1_status: S1.IN_FLIGHT, s1_lease_expires_at: iso(NOW + 60000), s1_completed_at: null, s1_result_message: null, s2_status: S2.NOT_STARTED, s2_started_at: null, s2_completed_at: null, s2_result_message: null, referred_at: null });
+  const review = proc({ cz_solicitud_id: 9301, ci: ci, s1_status: S1.UNKNOWN, s1_result_message: null, s2_status: S2.NOT_STARTED, s2_started_at: null, s2_completed_at: null, s2_result_message: null, referred_at: null });
+  for (const active of [referredOther, pending, review]) {
+    h.repo.rows.clear();
+    h.repo.rows.set(9301, active);
+    const row = await listRow(h, ci, [{ cz_solicitud_id: 9302 }, { cz_solicitud_id: 9301 }]);
+    const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+    assert.ok(html.includes('(otra sol.)'), 'history stays visible');
+    assert.ok(html.includes('title="Hay un proceso ELM vigente para esta CI (sol. 9301)."'), html);
+    assert.ok(!html.includes('data-action'), 'button shown disabled, never clickable');
+    assert.strictEqual(row.elm.send.hold.reason, CI_ACTIVE_REASON);
+    assert.deepStrictEqual(row.elm.send.candidates.map((c) => c.cz_solicitud_id), [9302], 'own-process solicitud is never a candidate');
+    const out = await h.send(9302);
+    assert.strictEqual(out.status, 409);
+    assert.strictEqual(out.body.code, CI_ACTIVE_REASON);
+    assert.ok(/proceso ELM vigente/.test(ElmUi.sendResultMessage(out.body).text));
+  }
+  assert.strictEqual(h.fetchImpl.calls.length, 0);
+});
+
+/** Process of another solicitud closed by a definitive S1 rejection `daysAgo` days ago. */
+function closedS1(czId, ci, daysAgo) {
+  const t = iso(NOW - daysAgo * DAY);
+  return proc({
+    cz_solicitud_id: czId, ci: ci, created_at: t, updated_at: t,
+    s1_status: S1.REJECTED, s1_started_at: t, s1_completed_at: t, s1_result_message: 'SCORE BAJO',
+    s2_status: S2.NOT_STARTED, s2_started_at: null, s2_completed_at: null, s2_result_message: null, referred_at: null,
+  });
+}
+
+test('20 closed process of another solicitud (>30 days, other month): history + send of the new one', async () => {
+  const ci = 48585858;
+  const h = sendHarness(
+    [okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')],
+    { ci: ci, czIds: [9301, 9302], rejectedCzIds: [9302, 9301] },
+  );
+  h.repo.rows.set(9301, closedS1(9301, ci, 40));
+  const row = await listRow(h, ci, [{ cz_solicitud_id: 9302, rejected_at: '2026-10-06T10:00:00.000Z' }, { cz_solicitud_id: 9301 }]);
+  assert.strictEqual(row.elm.send.hold, null);
+  assert.strictEqual(row.elm.send.target_cz_id, 9302);
+  assert.deepStrictEqual(row.elm.send.candidates.map((c) => c.cz_solicitud_id), [9302]);
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('Rechazado ELM (S1) (otra sol.)'), 'historical ELM state shown');
+  assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="9302"'), 'button not hidden');
+  assert.ok(html.indexOf('(otra sol.)') < html.indexOf('<button'), 'history above the button');
+
+  const resend = await h.send(9301);
+  assert.strictEqual(resend.body.code, 'elm_process_exists', 'a solicitud with its own process is never sent as new');
+  assert.strictEqual(h.fetchImpl.calls.length, 0);
+  const out = await h.send(9302);
+  assert.strictEqual(out.body.outcome, OUTCOMES.REFERRED);
+  assert.strictEqual(h.fetchImpl.calls.length, 2, 'unchanged S1 → S2');
+});
+
+test('21 ELM 30-day duplicate window: closed in JANUS does not mean ELM accepts a new referral', async () => {
+  const ci = 48686868;
+  const t10 = iso(NOW - 10 * DAY);
+  const histories = [
+    { name: 'S1 rejected 10 days ago (previous month)', p: closedS1(9301, ci, 10) },
+    { name: 'granted 10 days ago', p: proc({ cz_solicitud_id: 9301, ci: ci, created_at: t10, s1_started_at: t10, s2_started_at: t10, referred_at: t10, disbursed_at: t10 }) },
+    { name: 'ops: ELM confirmed not received', p: Object.assign(closedS1(9301, ci, 10), { ops_resolved_at: t10, ops_resolution_code: 'provider_confirmed_not_received' }) },
+  ];
+  for (const c of histories) {
+    const h = sendHarness([], { ci: ci, czIds: [9302], rejectedCzIds: [9302, 9301] });
+    h.repo.rows.set(9301, c.p);
+    const row = await listRow(h, ci, [{ cz_solicitud_id: 9302 }, { cz_solicitud_id: 9301 }]);
+    assert.strictEqual(row.elm.send.hold.reason, 'elm_ci_recent_send', c.name);
+    assert.strictEqual(row.elm.send.hold.until, iso(NOW + 20 * DAY));
+    const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+    assert.ok(html.includes('dentro de los 30 días del anterior (sol. 9301); disponible desde el 29/10/2026.'), html);
+    assert.ok(!html.includes('data-action'), c.name);
+    const out = await h.send(9302);
+    assert.strictEqual(out.status, 409, c.name);
+    assert.strictEqual(out.body.code, 'elm_ci_recent_send');
+    assert.strictEqual(out.body.until, iso(NOW + 20 * DAY));
+    assert.strictEqual(h.fetchImpl.calls.length, 0, 'ELM never called');
+  }
+  const exactly30 = evaluateCiResendHold({ ci: ci, processes: [closedS1(9301, ci, 30)], locks: [], nowMs: NOW });
+  assert.strictEqual(exactly30, null, '30 full days elapsed (and another month) → allowed');
+  const almost = evaluateCiResendHold({ ci: ci, processes: [closedS1(9301, ci, 29.9)], locks: [], nowMs: NOW });
+  assert.strictEqual(almost.reason, 'elm_ci_recent_send');
+});
+
+test('22 database CI lock mirrored: monthly quota, send in progress, blocking referral', async () => {
+  const ci = 48787878;
+  assert.strictEqual(montevideoMonthKey(NOW), '2026-10-01');
+  assert.strictEqual(montevideoMonthKey(Date.parse('2026-10-01T02:30:00Z')), '2026-09-01', 'Uruguay calendar month');
+  const lock = (over) => Object.assign({ ci: ci, cz_solicitud_id: 9301, state: 'consumed', month_key: '2026-10-01', blocks_future: false, block_reason: null, reserved_at: iso(NOW - 8 * DAY), consumed_at: iso(NOW - 8 * DAY) }, over);
+  const cases = [
+    { name: 'consumed this month', locks: [lock()], reason: 'elm_ci_monthly_quota_used', text: 'La CI ya tuvo un envío ELM este mes (sol. 9301); disponible desde el 01/11/2026.' },
+    { name: 'reserved', locks: [lock({ state: 'reserved', consumed_at: null })], reason: 'elm_ci_send_in_progress', text: 'Hay un envío ELM en curso para esta CI (sol. 9301).' },
+    { name: 'blocking referral', locks: [lock({ blocks_future: true, block_reason: 'active_referral', month_key: '2026-07-01', reserved_at: iso(NOW - 90 * DAY), consumed_at: iso(NOW - 90 * DAY) })], reason: 'elm_ci_active', text: 'Hay un proceso ELM vigente para esta CI (sol. 9301).' },
+  ];
+  for (const c of cases) {
+    const h = sendHarness([], { ci: ci, czIds: [9302], rejectedCzIds: [9302], locks: c.locks });
+    h.repo.rows.set(9301, closedS1(9301, ci, c.name === 'blocking referral' ? 90 : 8));
+    const row = await listRow(h, ci, [{ cz_solicitud_id: 9302 }]);
+    assert.strictEqual(row.elm.send.hold.reason, c.reason, c.name);
+    assert.ok(ElmUi.rejectedRowElmHtml(row.elm, row.ci).includes('title="' + c.text + '"'), c.name);
+    const out = await h.send(9302);
+    assert.strictEqual(out.body.code, c.reason, c.name);
+    assert.strictEqual(h.fetchImpl.calls.length, 0);
+  }
+  const released = evaluateCiResendHold({ ci: ci, processes: [], locks: [lock({ state: 'released', consumed_at: null, month_key: '2026-10-01' })], nowMs: NOW });
+  assert.strictEqual(released, null, 'a released lock (no ELM contact) does not hold');
+});
+
+test('23 eligibility that cannot be determined safely → blocked with the reason', async () => {
+  const ci = 48888888;
+  const h = sendHarness([], { ci: ci, czIds: [9302], rejectedCzIds: [9302], locks: null });
+  const row = await listRow(h, ci, [{ cz_solicitud_id: 9302 }]);
+  assert.strictEqual(row.elm.send.hold.reason, 'elm_ci_history_unverifiable');
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('title="No se pudo verificar el historial ELM de la CI: envío bloqueado."'));
+  assert.ok(!html.includes('data-action'));
+  const out = await h.send(9302);
+  assert.strictEqual(out.status, 503);
+  assert.strictEqual(out.body.code, 'elm_ci_history_unverifiable');
+
+  const throwing = await sendRejectedToElm(
+    Object.assign({}, h.deps, { loadCiResendHold: async () => { throw new Error('db down'); } }),
+    { ci: ci, czSolicitudId: 9302, actorUserId: 'user-admin-1' },
+  );
+  assert.strictEqual(throwing.status, 503);
+  assert.strictEqual(throwing.body.code, 'elm_ci_history_unverifiable');
+  const noGuard = await sendRejectedToElm(
+    Object.assign({}, h.deps, { loadCiResendHold: undefined }),
+    { ci: ci, czSolicitudId: 9302, actorUserId: 'user-admin-1' },
+  );
+  assert.strictEqual(noGuard.body.code, 'elm_ci_history_unverifiable', 'missing guard fails closed');
+
+  const undated = Object.assign(closedS1(9301, ci, 60), { created_at: null, s1_started_at: null, s1_completed_at: null });
+  assert.strictEqual(evaluateCiResendHold({ ci: ci, processes: [undated], locks: [], nowMs: NOW }).reason, 'elm_ci_history_unverifiable');
+
+  const fakeSb = {
+    from(table) {
+      const q = {
+        select() { return q; },
+        in() { return q; },
+        is() { return q; },
+        then(resolve, reject) {
+          const out = table === 'elm_ci_send_locks'
+            ? { data: null, error: { message: 'permission denied' } }
+            : { data: table === 'elm_lead_processes' ? [closedS1(9301, ci, 60)] : [], error: null };
+          return Promise.resolve(out).then(resolve, reject);
+        },
+      };
+      return q;
+    },
+  };
+  const rows = await readElmSendRowsByCis(fakeSb, [ci]);
+  assert.strictEqual(rows.locks, null, 'lock read failure is reported, not hidden');
+  assert.strictEqual(rows.processes.length, 1, 'history still readable');
+  assert.strictEqual(evaluateCiResendHold({ ci: ci, processes: rows.processes, locks: rows.locks, nowMs: NOW }).reason, 'elm_ci_history_unverifiable');
+  assert.strictEqual(h.fetchImpl.calls.length, 0);
+});
+
+test('24 history + several eligible new solicitudes → explicit selection', async () => {
+  const ci = 48989898;
+  const h = sendHarness([okResult('SCORE BAJO')], { ci: ci, czIds: [9502, 9503], rejectedCzIds: [9503, 9502, 9501] });
+  h.repo.rows.set(9501, closedS1(9501, ci, 45));
+  const row = await listRow(h, ci, [{ cz_solicitud_id: 9503 }, { cz_solicitud_id: 9502 }, { cz_solicitud_id: 9501 }]);
+  assert.strictEqual(row.elm.send.needs_selection, true);
+  assert.strictEqual(row.elm.send.target_cz_id, null);
+  assert.deepStrictEqual(row.elm.send.selectable_cz_ids, [9503, 9502]);
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('Rechazado ELM (S1) (otra sol.)'));
+  assert.ok(html.includes('data-elm-pick="1"') && !html.includes('value="9501"'), 'own-process solicitud not offered');
+  const button = html.slice(html.indexOf('<button'));
+  assert.ok(/ disabled /.test(button) && !button.includes('data-cz-id'));
+  const out = await h.send(9502);
+  assert.strictEqual(out.body.outcome, OUTCOMES.S1_REJECTED);
+  const after = await listRow(h, ci, [{ cz_solicitud_id: 9503 }, { cz_solicitud_id: 9502 }, { cz_solicitud_id: 9501 }]);
+  assert.strictEqual(after.elm.send.hold.reason, 'elm_ci_recent_send', 'the other new solicitud waits 30 days after this send');
+  assert.strictEqual(after.elm.send.needs_selection, false);
+
+  const pure = resolveRejectedSend({
+    rejected: [{ cz_solicitud_id: 1 }, { cz_solicitud_id: 1 }],
+    cells: new Map([[1, { kind: 'not_sent', cz_solicitud_id: 1, action: { show: true, enabled: true, reason: null } }]]),
+    hold: null,
+  });
+  assert.strictEqual(pure.solicitudes.length, 1, 'duplicate rejections of one solicitud are one candidate');
+  assert.strictEqual(pure.send.target_cz_id, 1);
+});
+
+test('25 list: fail-soft (state without send view; whole column unavailable only if ELM rows fail)', async () => {
+  const ci = 49494949;
+  const h = sendHarness([], { ci: ci, czIds: [9401] });
+  const broken = { cellsForCzIds: async () => { throw new Error('boom'); } };
+  const row = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { listView: broken, processes: [proc({ cz_solicitud_id: 9401, ci: ci })] });
+  assert.strictEqual(row.elm.available, true);
+  assert.deepStrictEqual(row.elm.send, { available: false });
+  assert.ok(ElmUi.rejectedRowElmHtml(row.elm, row.ci).includes('Preaprobado ELM'));
+  const noSend = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { listView: broken });
+  assert.ok(!ElmUi.rejectedRowElmHtml(noSend.elm, noSend.ci).includes('<button'));
+  const down = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { readRows: async () => { throw new Error('down'); } });
+  assert.deepStrictEqual(down.elm, { available: false });
+});
+
+test('26 list and detail share one send path (dashboard + route wiring)', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dash = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.js'), 'utf8');
+  const route = fs.readFileSync(path.join(__dirname, '../src/routes/rechazados.js'), 'utf8');
+  assert.strictEqual((dash.match(/action === 'elm-send'/g) || []).length, 1, 'single send action check');
+  assert.strictEqual((dash.match(/\/elm\/send'/g) || []).length, 1, 'single POST to the send endpoint');
+  assert.strictEqual((dash.match(/onElmSendClick\(/g) || []).length, 3, 'definition + list + detail');
+  assert.ok(/isElmSendAction\(action\)\) \{\s*onElmSendClick\(btn, ci\)/.test(dash), 'list click');
+  assert.ok(/onElmSendClick\(actionEl, state\.detailCi\)/.test(dash), 'detail click');
+  assert.ok(dash.includes("closest('[data-elm-pick]')"), 'picker binds the chosen solicitud');
+  assert.ok(dash.includes("window.confirm("), 'confirmation kept');
+  assert.ok(dash.includes('rejectedRowElmHtml(row.elm, row.ci)'));
+  assert.ok(/attachElmToRejectedRows\(optin\.rows, \{\s*supabase: supabase,\s*listView: getElmListView\(\)/.test(route));
+  assert.strictEqual((route.match(/sendRejectedToElm\(/g) || []).length, 1, 'one send route');
+  assert.ok(/loadCiResendHold: function \(holdCi, czId\) \{\s*return loadCiResendHold\(supabase, holdCi, czId\);/.test(route), 'endpoint uses the same guard');
+  assert.ok(!dash.includes('elm.ci_active'), 'detail shows the send hold, not the survey-gate meaning');
 });
 
 test('zero external network attempts', async () => {
