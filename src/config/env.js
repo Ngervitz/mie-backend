@@ -57,6 +57,11 @@ module.exports = {
   czMiplanHandoffHmacSecret: optionalTrimmedEnv(
     'CZ_MIPLAN_HANDOFF_HMAC_SECRET',
   ),
+  // Optional at boot. Dedicated HMAC for Credizona → JANUS provider fallback
+  // (/internal/providers/v1/fallback/*). MUST NOT reuse any other secret (reuse → 503).
+  czProviderFallbackHmacSecret: optionalTrimmedEnv(
+    'CZ_PROVIDER_FALLBACK_HMAC_SECRET',
+  ),
   // Optional at boot. Bearer secret for Mi Plan BE → JANUS handoff redeem.
   // MUST NOT reuse dashboard session / tracking secrets.
   miplanHandoffRedeemSecret: optionalTrimmedEnv(

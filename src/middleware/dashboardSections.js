@@ -112,7 +112,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/jobs/run-bcu-usd-rate-sync',
   ]),
   rechazados: Object.freeze(['/rechazados', '/jobs/run-miplan-debt-optin-sync']),
-  preaprobados: Object.freeze(['/preaprobados']),
+  preaprobados: Object.freeze(['/preaprobados', '/jobs/run-provider-fallback-worker']),
 });
 
 /**

@@ -4,7 +4,8 @@
  * ELM persistence + JANUS reads (Supabase, service role, backend only).
  *
  * Idempotency authority is the DB: every state change goes through the RPCs in
- * migrations/20261007_elm_lead_processes.sql and 20261007_elm_postback_events.sql. There is no
+ * migrations/20261007_elm_lead_processes.sql, 20261007_elm_postback_events.sql and
+ * 20261009_elm_phase3b_operations.sql. There is no
  * direct insert/update on elm_lead_processes / elm_postback_events from Node.
  */
 
@@ -79,11 +80,14 @@ function createElmRepository(supabaseOverride) {
     return { solicitud: solicitud, grantedRow: grantedRow || null };
   }
 
-  /** Provenance base label for the solicitud ('' when none). Same resolver as Sheet BASE. */
-  async function resolveBaseLabel(czId) {
-    const out = await resolveBasesForCandidates(db(), [
-      { cz_solicitud_id: String(czId) },
-    ]);
+  /**
+   * Provenance base label for the solicitud ('' when none). Same resolver as Sheet BASE.
+   * `jt` (from the CZ start snapshot) is used when the mirror has not synced the solicitud yet.
+   */
+  async function resolveBaseLabel(czId, jt) {
+    const candidate = { cz_solicitud_id: String(czId) };
+    if (jt) candidate.jt = jt;
+    const out = await resolveBasesForCandidates(db(), [candidate]);
     return out.get(String(czId)) || '';
   }
 
@@ -97,7 +101,11 @@ function createElmRepository(supabaseOverride) {
     return data || null;
   }
 
-  /** @returns {Promise<{ claimed: boolean, process: object }>} */
+  /**
+   * Takes the CI lock and inserts the process in one transaction (C1). Blocked by the lock →
+   * { claimed: false, process: null, blocked: { block, related_cz_solicitud_id, month_key } }.
+   * @returns {Promise<{ claimed: boolean, process: object|null, blocked?: object }>}
+   */
   async function claimProcess(args) {
     const { data, error } = await db().rpc('elm_claim_process', {
       p_cz_solicitud_id: args.czSolicitudId,
@@ -109,9 +117,13 @@ function createElmRepository(supabaseOverride) {
       p_lrw_id_at_start: args.lrwIdAtStart,
       p_s1_request: args.s1Request,
       p_lease_seconds: args.leaseSeconds,
+      p_commercial_origin: args.commercialOrigin || null,
     });
     if (error) throw rpcError('elm_claim_process', error);
     const out = firstRow(data);
+    if (out && out.claimed !== true && out.blocked) {
+      return { claimed: false, process: null, blocked: out.blocked };
+    }
     if (!out || !out.process) throw new Error('elm_claim_process returned no process');
     return { claimed: out.claimed === true, process: out.process };
   }
@@ -149,11 +161,44 @@ function createElmRepository(supabaseOverride) {
     return firstRow(data);
   }
 
+  /** @returns {Promise<object|null>} the row back in in_flight, or null when not allowed */
+  async function retryStep(args) {
+    const { data, error } = await db().rpc('elm_retry_step', {
+      p_cz_solicitud_id: args.czSolicitudId,
+      p_step: args.step,
+      p_expected_attempts: args.expectedAttempts,
+      p_max_attempts: args.maxAttempts,
+      p_retry_safe_error_codes: Array.from(args.retrySafeErrorCodes || []),
+      p_lease_seconds: args.leaseSeconds,
+    });
+    if (error) throw rpcError('elm_retry_step', error);
+    return firstRow(data);
+  }
+
   async function expireStaleInFlight(czId) {
     const { data, error } = await db().rpc('elm_expire_stale_in_flight', {
       p_cz_solicitud_id: czId,
     });
     if (error) throw rpcError('elm_expire_stale_in_flight', error);
+    return firstRow(data);
+  }
+
+  /** Append-only record of a result that arrived after the step left in_flight. */
+  async function recordLateResult(args) {
+    const r = args.result || {};
+    const { data, error } = await db().rpc('elm_record_late_result', {
+      p_process_id: args.processId,
+      p_cz_solicitud_id: args.czSolicitudId,
+      p_step: args.step,
+      p_late_status: r.status,
+      p_http_status: r.httpStatus != null ? r.httpStatus : null,
+      p_result_message: r.resultMessage != null ? r.resultMessage : null,
+      p_error_code: r.errorCode != null ? r.errorCode : null,
+      p_response: r.response != null ? r.response : null,
+      p_latency_ms: r.latencyMs != null ? r.latencyMs : null,
+      p_trigger_origin: args.triggerOrigin || null,
+    });
+    if (error) throw rpcError('elm_record_late_result', error);
     return firstRow(data);
   }
 
@@ -259,7 +304,9 @@ function createElmRepository(supabaseOverride) {
     finishS1,
     beginS2,
     finishS2,
+    retryStep,
     expireStaleInFlight,
+    recordLateResult,
     loadSolicitudContexts,
     resolveBaseLabels,
     getProcessesByCzIds,

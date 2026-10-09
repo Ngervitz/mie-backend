@@ -14,7 +14,7 @@
 
 const { S1, S2, CODES } = require('./constants');
 const { readElmConfig } = require('./config');
-const { resolveSourceBrand, evaluateElmEligibility } = require('./eligibility');
+const { evaluateElmEligibility } = require('./eligibility');
 
 const SEND_PENDING_HINT = 'Integración ELM pendiente de habilitación';
 
@@ -29,12 +29,8 @@ function effective(status, leaseIso, nowMs) {
 }
 
 /** Blockers that only mean "ELM configuration not loaded yet". */
-function isConfigPendingBlocker(code, sourceBrand) {
-  if (code === CODES.ACTIVITY_TYPE_MAPPING_MISSING) return true;
-  if (code === CODES.SOURCE_BRAND_INDETERMINATE) {
-    return Boolean(sourceBrand && sourceBrand.reason === 'base_not_mapped');
-  }
-  return false;
+function isConfigPendingBlocker(code) {
+  return code === CODES.ACTIVITY_TYPE_MAPPING_MISSING;
 }
 
 const TECHNICAL_LABELS = Object.freeze({
@@ -66,7 +62,6 @@ function noAction() {
  * @param {{
  *   process: object|null,
  *   eligibility?: { eligible: boolean, blockers: Array<{ code: string }> }|null,
- *   sourceBrand?: { ok: boolean, reason?: string }|null,
  *   nowMs: number,
  * }} input
  */
@@ -100,7 +95,7 @@ function computeElmCell(input) {
     return b.code;
   });
   const hard = codes.filter(function (c) {
-    return !isConfigPendingBlocker(c, input && input.sourceBrand);
+    return !isConfigPendingBlocker(c);
   });
   const common = {
     granted_elm: false,
@@ -157,8 +152,8 @@ function unavailableCell() {
 }
 
 /**
- * Batched: a constant number of queries per page (processes, then solicitud context and
- * provenance only for ids without process), never one query per row.
+ * Batched: a constant number of queries per page (processes, then solicitud context only for
+ * ids without process), never one query per row.
  * @param {{ repository?: object, config?: object, now?: () => number }} [deps]
  */
 function createElmListView(deps) {
@@ -187,10 +182,8 @@ function createElmListView(deps) {
       return !processes.has(id);
     });
     let contexts = new Map();
-    let bases = new Map();
     if (missing.length) {
       contexts = await repo.loadSolicitudContexts(missing);
-      bases = await repo.resolveBaseLabels(missing);
     }
 
     for (const id of ids) {
@@ -200,14 +193,10 @@ function createElmListView(deps) {
         continue;
       }
       const ctx = contexts.get(id) || { solicitud: null, grantedRow: null };
-      const sourceBrand = ctx.solicitud
-        ? resolveSourceBrand(bases.get(String(id)) || '', config)
-        : { ok: false, code: CODES.SOURCE_BRAND_INDETERMINATE };
       const eligibility = evaluateElmEligibility({
         czId: id,
         solicitud: ctx.solicitud,
         grantedRow: ctx.grantedRow,
-        sourceBrand: sourceBrand,
         config: config,
       });
       out.set(
@@ -215,7 +204,6 @@ function createElmListView(deps) {
         computeElmCell({
           process: null,
           eligibility: eligibility,
-          sourceBrand: sourceBrand,
           nowMs: nowMs,
         }),
       );

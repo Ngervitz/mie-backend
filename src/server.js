@@ -7,7 +7,6 @@ const emailRouter = require('./routes/email');
 const aiVisibilityRouter = require('./routes/ai-visibility');
 const rechazadosRouter = require('./routes/rechazados');
 const preaprobadosRouter = require('./routes/preaprobados');
-const { createElmPostbackRouter } = require('./routes/elmPostback');
 const {
   requireDashboardPermission,
 } = require('./middleware/requireDashboardPermission');
@@ -34,9 +33,6 @@ app.use(
   requireDashboardPermission('preaprobados'),
   preaprobadosRouter,
 );
-// ELM postback receiver — fail-closed (503) until ELM postback auth is confirmed.
-app.use('/elm/postback', createElmPostbackRouter());
-
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });
 });

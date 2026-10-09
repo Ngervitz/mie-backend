@@ -24,6 +24,8 @@ const logger = require('./lib/logger');
 const smsShortLinksRouter = require('./routes/sms-short-links');
 const trackingEventsRouter = require('./routes/tracking-events');
 const miplanHandoffRouter = require('./routes/miplan-handoff');
+const { createProviderFallbackRouter } = require('./routes/providerFallback');
+const { createElmPostbackRouter } = require('./routes/elmPostback');
 const miplanInterestRouter = require('./routes/miplan-interest');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 const emailClickRouter = require('./routes/email-click');
@@ -53,6 +55,16 @@ app.use(
   miplanHandoffRouter,
   miplanHandoffRouter.jsonErrorHandler,
 );
+// Credizona → JANUS provider fallback (dedicated HMAC; disabled by flags by default).
+app.use(
+  '/internal/providers',
+  express.json({
+    limit: '8kb',
+    verify: miplanHandoffRouter.attachRawBody,
+  }),
+  createProviderFallbackRouter(),
+  miplanHandoffRouter.jsonErrorHandler,
+);
 // Credizona thank-you page (browser) → Mi Plan waitlist interest; handoff_code is the capability.
 app.use(
   '/miplan',
@@ -60,6 +72,9 @@ app.use(
   miplanInterestRouter,
   miplanInterestRouter.jsonErrorHandler,
 );
+// ELM → JANUS status postback (X-Credizona-Postback-Token). Before the global JSON parser and
+// requireAuth: authenticates before parsing the body; 503 while no valid token is configured.
+app.use('/elm/postback', createElmPostbackRouter());
 app.use(express.json());
 // Public SMS short-link redirects — must run before requireAuth.
 app.use(smsShortLinksRouter);

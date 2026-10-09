@@ -8,9 +8,9 @@
  * Does NOT assume CZ estado 8 means a CDV pre-approval (in CZ it means the CDV offer link was
  * opened, and it can be re-entered from 9/10/11). Estado is only snapshotted, never required.
  *
- * GRANTED consistency: JANUS reads a mirror synced from CZ MySQL (cz_funnel_*). A GRANTED that
- * CZ already has may not be visible here yet. That is a known risk to resolve BEFORE enabling
- * real sends; it does not block Fase 1A because ELM send is OFF.
+ * GRANTED source: cz_automatic evaluates the snapshot CZ sent at start (its estado), never the
+ * mirror. Manual JANUS operations read the mirror synced from CZ MySQL (cz_funnel_*), which may
+ * lag behind CZ.
  *
  * CDV "still working this lead" has no reliable signal yet (depends on observing the CDV
  * webhook with real traffic). Not automated here.
@@ -24,37 +24,15 @@ const { CODES } = require('./constants');
 const { missingRequiredFields } = require('./payload');
 
 /**
- * Provenance base → brand. Base comes from the SMS touch that generated the solicitud
- * (jt → marketing_impacts → sms_messages/sms_contacts.source_system, same resolver as the CDV
- * Sheet BASE column). No base (organic) or unmapped base → indeterminate (fail closed).
- *
+ * Commercial origin for tracking only (never sent, never blocks). Base comes from the SMS touch
+ * that generated the solicitud (jt → marketing_impacts → sms source_system, same resolver as the
+ * CDV Sheet BASE column). No base = organic or not resolved → null.
  * @param {string|null|undefined} baseLabel
- * @param {{ sourceBrandByBase?: Record<string,string> }} config
- * @returns {{ ok: true, brand: string, base: string } | { ok: false, code: string, base: string|null, reason: string }}
+ * @returns {string|null}
  */
-function resolveSourceBrand(baseLabel, config) {
+function normalizeCommercialOrigin(baseLabel) {
   const base = baseLabel == null ? '' : String(baseLabel).trim();
-  if (!base) {
-    return {
-      ok: false,
-      code: CODES.SOURCE_BRAND_INDETERMINATE,
-      base: null,
-      reason: 'no_provenance_base',
-    };
-  }
-  const map = (config && config.sourceBrandByBase) || {};
-  const brand = Object.prototype.hasOwnProperty.call(map, base)
-    ? String(map[base]).trim()
-    : '';
-  if (!brand) {
-    return {
-      ok: false,
-      code: CODES.SOURCE_BRAND_INDETERMINATE,
-      base: base,
-      reason: 'base_not_mapped',
-    };
-  }
-  return { ok: true, brand: brand, base: base };
+  return base ? base.slice(0, 200) : null;
 }
 
 /**
@@ -66,7 +44,6 @@ function resolveSourceBrand(baseLabel, config) {
  *   solicitud: object|null,
  *   grantedRow: object|null,
  *   existingProcess?: object|null,
- *   sourceBrand: { ok: boolean, code?: string },
  *   config: { activityTypeMap?: Record<string,string> },
  * }} input
  * @returns {{ eligible: boolean, blockers: Array<{ code: string, fields?: string[] }> }}
@@ -104,10 +81,6 @@ function evaluateElmEligibility(input) {
     blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
   }
 
-  if (!input.sourceBrand || input.sourceBrand.ok !== true) {
-    blockers.push({ code: CODES.SOURCE_BRAND_INDETERMINATE });
-  }
-
   return { eligible: blockers.length === 0, blockers: blockers };
 }
 
@@ -131,7 +104,7 @@ function evaluateElmReferEligibility(input) {
 }
 
 module.exports = {
-  resolveSourceBrand,
+  normalizeCommercialOrigin,
   evaluateElmEligibility,
   evaluateElmReferEligibility,
 };

@@ -8,9 +8,12 @@
  * data, not a per-solicitud snapshot). The built payload is what gets frozen in the process row.
  *
  * Fail closed when ELM has not confirmed a mapping/format (see config.js).
+ * `source` is always ELM_SOURCE; the lead's commercial origin is never sent.
+ * Confirmed by ELM: S1 carries NO TrackingId; S2 carries TrackingId = cz_solicitud_id (the id
+ * ELM returns as postback internal_id).
  */
 
-const { CODES } = require('./constants');
+const { CODES, ELM_SOURCE } = require('./constants');
 
 const SERVICE1_KEYS = Object.freeze([
   'activityType',
@@ -27,6 +30,7 @@ const SERVICE2_KEYS = Object.freeze([
   'mobilephone',
   'email',
   'source',
+  'TrackingId',
 ]);
 
 function text(raw) {
@@ -104,7 +108,7 @@ function missingRequiredFields(solicitud) {
 }
 
 /**
- * @param {{ solicitud: object, sourceBrand: string, config: object }} input
+ * @param {{ czId: number, solicitud: object, config: object }} input
  * @returns {{ ok: true, payload: object } | { ok: false, code: string }}
  */
 function buildService1Payload(input) {
@@ -113,8 +117,8 @@ function buildService1Payload(input) {
   const missing = missingRequiredFields(s);
   if (missing.length) return fail(CODES.MISSING_REQUIRED_FIELDS, { fields: missing });
 
-  const source = text(input && input.sourceBrand);
-  if (!source) return fail(CODES.SOURCE_BRAND_INDETERMINATE);
+  const czId = positiveSafeInt(input && input.czId);
+  if (czId == null) return fail(CODES.INVALID_CZ_ID);
 
   const relacion = text(s.relacion_laboral);
   const map = config.activityTypeMap || {};
@@ -138,27 +142,26 @@ function buildService1Payload(input) {
       firstName: text(s.nombre),
       lastName: text(s.apellido),
       salary: String(salaryNum),
-      source: source,
+      source: ELM_SOURCE,
     },
   };
 }
 
 /**
- * docNumber/source come from the frozen process (same as S1), contact from the solicitud row.
- * @param {{ ci: unknown, solicitud: object, sourceBrand: string, config: object }} input
+ * docNumber comes from the frozen process (same as S1), contact from the solicitud row.
+ * @param {{ ci: unknown, czId: unknown, solicitud: object, config: object }} input
  */
 function buildService2Payload(input) {
   const s = (input && input.solicitud) || {};
   const config = (input && input.config) || {};
+  const czId = positiveSafeInt(input && input.czId);
+  if (czId == null) return fail(CODES.INVALID_CZ_ID);
   const ci = positiveSafeInt(input && input.ci);
   const missing = [];
   if (ci == null) missing.push('ci');
   if (!text(s.celular)) missing.push('celular');
   if (!text(s.email)) missing.push('email');
   if (missing.length) return fail(CODES.MISSING_REQUIRED_FIELDS, { fields: missing });
-
-  const source = text(input && input.sourceBrand);
-  if (!source) return fail(CODES.SOURCE_BRAND_INDETERMINATE);
 
   const phone = formatMobilePhone(s.celular, config.mobilePhoneFormat || null);
   if (!phone.ok) return phone;
@@ -169,7 +172,8 @@ function buildService2Payload(input) {
       docNumber: String(ci),
       mobilephone: phone.value,
       email: text(s.email),
-      source: source,
+      source: ELM_SOURCE,
+      TrackingId: String(czId),
     },
   };
 }

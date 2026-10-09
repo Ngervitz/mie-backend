@@ -157,14 +157,16 @@ const {
   formatMobilePhone,
 } = require('../src/services/elm/payload');
 const {
-  resolveSourceBrand,
+  normalizeCommercialOrigin,
   evaluateElmEligibility,
 } = require('../src/services/elm/eligibility');
 const {
   createElmClient,
   classifyService1Result,
+  classifyService1Response,
   classifyService2Result,
 } = require('../src/services/elm/client');
+const { ELM_SOURCE } = require('../src/services/elm/constants');
 const { redactSecrets, redactSecretText } = require('../src/services/elm/redact');
 const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
 const { createPreaprobadosElmRouter } = require('../src/routes/preaprobadosElm');
@@ -181,7 +183,6 @@ function readSrc(rel) {
 // Test-only mapping values (clearly fake; production defaults stay empty).
 const TEST_CONFIG = readElmConfig({
   ELM_ACTIVITY_TYPE_MAP_JSON: '{"EPR":"TEST_ACTIVITY_EPR"}',
-  ELM_SOURCE_BRAND_BY_BASE_JSON: '{"BASE_TEST":"TestBrand"}',
   ELM_DATE_OF_BIRTH_FORMAT: 'D/M/YYYY',
   ELM_MOBILE_PHONE_FORMAT: 'uy_local_0',
 });
@@ -253,6 +254,7 @@ function createFakeRepo(opts) {
         cz_solicitud_id: a.czSolicitudId,
         ci: a.ci,
         source_brand: a.sourceBrand,
+        commercial_origin: a.commercialOrigin || null,
         trigger_origin: a.triggerOrigin,
         triggered_by_user_id: a.triggeredByUserId,
         cz_estado_id_at_start: a.czEstadoIdAtStart,
@@ -342,7 +344,7 @@ function createFakeRepo(opts) {
   };
 }
 
-/** Enabled test double (in-memory only; production createElmClient() is always disabled). */
+/** Enabled test double (in-memory only; production createElmClient() is disabled by default). */
 function createScriptedClient(s1Result, s2Result) {
   const c = {
     enabled: true,
@@ -431,7 +433,9 @@ async function runAll() {
   await test('config: business mappings empty by default; lease default + clamp', async () => {
     const c = readElmConfig({});
     assert.deepStrictEqual(c.activityTypeMap, {});
-    assert.deepStrictEqual(c.sourceBrandByBase, {});
+    assert.strictEqual(c.sourceBrandByBase, undefined);
+    assert.strictEqual(c.s1InternalIdField, undefined);
+    assert.deepStrictEqual(c.retrySafeErrorCodes, []);
     assert.strictEqual(c.dateOfBirthFormat, null);
     assert.strictEqual(c.mobilePhoneFormat, null);
     assert.strictEqual(c.inFlightLeaseSeconds, DEFAULT_IN_FLIGHT_LEASE_SECONDS);
@@ -445,17 +449,28 @@ async function runAll() {
     }
   });
 
-  await test('payload: S1/S2 exact key sets; formats fail closed', async () => {
-    const s1 = buildService1Payload({ solicitud: solicitudFixture(), sourceBrand: 'TestBrand', config: TEST_CONFIG });
+  await test('payload: S1/S2 exact key sets; source copanel; TrackingId only in S2; formats fail closed', async () => {
+    const s1 = buildService1Payload({ czId: 1001, solicitud: solicitudFixture(), config: TEST_CONFIG });
     assert.ok(s1.ok);
     assert.deepStrictEqual(Object.keys(s1.payload).sort(), SERVICE1_KEYS.slice().sort());
+    assert.ok(!('TrackingId' in s1.payload));
+    assert.ok(!JSON.stringify(s1.payload).includes('1001'), 'S1 carries no cz id');
+    assert.strictEqual(s1.payload.source, 'copanel');
+    assert.strictEqual(ELM_SOURCE, 'copanel');
     assert.strictEqual(s1.payload.dateOfBirth, '10/7/1991');
     assert.strictEqual(s1.payload.docNumber, '12345678');
     assert.strictEqual(s1.payload.salary, '30000');
-    const s2 = buildService2Payload({ ci: 12345678, solicitud: solicitudFixture(), sourceBrand: 'TestBrand', config: TEST_CONFIG });
+    const s2 = buildService2Payload({ ci: 12345678, czId: 1001, solicitud: solicitudFixture(), config: TEST_CONFIG });
     assert.ok(s2.ok);
     assert.deepStrictEqual(Object.keys(s2.payload).sort(), SERVICE2_KEYS.slice().sort());
+    assert.strictEqual(s2.payload.source, 'copanel');
+    assert.strictEqual(s2.payload.TrackingId, '1001');
     assert.strictEqual(s2.payload.mobilephone, '099123456');
+    assert.strictEqual(
+      buildService2Payload({ ci: 12345678, solicitud: solicitudFixture(), config: TEST_CONFIG }).code,
+      CODES.INVALID_CZ_ID,
+      'S2 never built without TrackingId',
+    );
     assert.strictEqual(formatDateOfBirth('1991-07-10', null).code, CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
     assert.strictEqual(formatMobilePhone('59899123456', null).code, CODES.MOBILEPHONE_FORMAT_UNCONFIRMED);
     assert.strictEqual(formatMobilePhone('59821234567', 'uy_598').code, CODES.MOBILEPHONE_INVALID);
@@ -464,6 +479,13 @@ async function runAll() {
   await test('classification: exact documented texts only; anything else unknown', async () => {
     assert.strictEqual(classifyService1Result('Listo para recibir datos en servicio 2'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService1Result('Repetido. rechazado'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('BCU'), OUTCOME.NEGATIVE);
+    // "BCU error" is an explicit non-credit answer: technical_error, never a rejection.
+    assert.strictEqual(classifyService1Result('BCU error'), OUTCOME.TECHNICAL_ERROR);
+    assert.deepStrictEqual(classifyService1Response('BCU error'), {
+      outcome: OUTCOME.TECHNICAL_ERROR,
+      errorCode: CODES.PROVIDER_BCU_ERROR,
+    });
     assert.strictEqual(classifyService1Result('OK'), OUTCOME.UNKNOWN);
     assert.strictEqual(classifyService2Result('Lead Aprobado correctamente'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService2Result('Aprobado sin canal'), OUTCOME.NEGATIVE);
@@ -476,25 +498,43 @@ async function runAll() {
       czId: 1001,
       solicitud: solicitudFixture({ relacion_laboral: 'JUB' }),
       grantedRow: null,
-      sourceBrand: { ok: true, brand: 'TestBrand' },
       config: TEST_CONFIG,
     });
     assert.strictEqual(r.eligible, false);
     assert.ok(r.blockers.some((b) => b.code === CODES.ACTIVITY_TYPE_MAPPING_MISSING));
-    const p = buildService1Payload({ solicitud: solicitudFixture(), sourceBrand: 'X', config: readElmConfig({}) });
+    const p = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture(),
+      config: readElmConfig({}),
+    });
     assert.strictEqual(p.code, CODES.ACTIVITY_TYPE_MAPPING_MISSING);
   });
 
-  await test('indeterminate source_brand → fail closed (organic and unmapped base)', async () => {
-    assert.strictEqual(resolveSourceBrand('', TEST_CONFIG).code, CODES.SOURCE_BRAND_INDETERMINATE);
-    assert.strictEqual(resolveSourceBrand('OTHER_BASE', TEST_CONFIG).reason, 'base_not_mapped');
-    assert.strictEqual(resolveSourceBrand('BASE_TEST', TEST_CONFIG).brand, 'TestBrand');
-    const { orch, client, repo } = setup({ mutate: (m) => m.bases.delete(1001) });
-    const out = await orch.evaluateElm(1001, MANUAL);
-    assert.strictEqual(out.ok, false);
-    assert.ok(out.blockers.some((b) => b.code === CODES.SOURCE_BRAND_INDETERMINATE));
-    assert.strictEqual(client.s1Calls, 0);
-    assert.strictEqual(repo.rows.size, 0);
+  await test('organic lead (no base) is not blocked; commercial origin tracked apart from source', async () => {
+    assert.strictEqual(normalizeCommercialOrigin(''), null);
+    assert.strictEqual(normalizeCommercialOrigin('  BASE_TEST '), 'BASE_TEST');
+    const organic = setup({ mutate: (m) => m.bases.delete(1001) });
+    const out = await organic.orch.evaluateElm(1001, MANUAL);
+    assert.strictEqual(out.ok, true);
+    assert.strictEqual(organic.client.s1Calls, 1);
+    const row = organic.repo.rows.get(1001);
+    assert.strictEqual(row.source_brand, 'copanel');
+    assert.strictEqual(row.commercial_origin, null);
+    assert.strictEqual(row.s1_request.source, 'copanel');
+
+    const sms = setup();
+    assert.strictEqual((await sms.orch.evaluateElm(1001, MANUAL)).ok, true);
+    const smsRow = sms.repo.rows.get(1001);
+    assert.strictEqual(smsRow.source_brand, 'copanel');
+    assert.strictEqual(smsRow.commercial_origin, 'BASE_TEST');
+    assert.ok(!JSON.stringify(smsRow.s1_request).includes('BASE_TEST'), 'commercial origin never sent');
+
+    const failing = setup();
+    failing.repo.resolveBaseLabel = async () => {
+      throw new Error('provenance down');
+    };
+    assert.strictEqual((await failing.orch.evaluateElm(1001, MANUAL)).ok, true, 'tracking failure never blocks');
+    assert.strictEqual(failing.repo.rows.get(1001).commercial_origin, null);
   });
 
   await test('known GRANTED (granted row or estado 11) → not eligible', async () => {
@@ -553,7 +593,7 @@ async function runAll() {
     const orch = createElmOrchestrator({ repository: repo, client: createElmClient(), config: TEST_CONFIG });
     const e = await orch.evaluateElm(1001, MANUAL);
     assert.strictEqual(e.code, CODES.SEND_DISABLED);
-    assert.strictEqual(e.reason, CODES.TRANSPORT_NOT_IMPLEMENTED);
+    assert.strictEqual(e.reason, CODES.CLIENT_DISABLED);
     const r = await orch.referElm(1001, MANUAL);
     assert.strictEqual(r.code, CODES.SEND_DISABLED);
     assert.deepStrictEqual(repo.calls, []);
@@ -566,7 +606,6 @@ async function runAll() {
     assert.strictEqual(externalNet.length, before);
     const clientSrc = readSrc('src/services/elm/client.js');
     assert.ok(!/require\(['"](https?|net|tls|axios|node-fetch|undici)['"]\)/.test(clientSrc));
-    assert.ok(!/\bfetch\(/.test(clientSrc));
     assert.ok(!/https?:\/\//.test(clientSrc), 'no URLs in client');
   });
 

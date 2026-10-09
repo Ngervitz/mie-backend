@@ -19,6 +19,7 @@ const {
   fetchPreaprobadosDetailBundle,
 } = require('../lib/preaprobadosRead');
 const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
+const { createElmOpsRouter } = require('./elmOps');
 const { createElmRepository } = require('../services/elm/repository');
 const { createElmListView, attachElmCells } = require('../services/elm/listView');
 
@@ -32,6 +33,7 @@ function getElmListView() {
   return elmListView;
 }
 
+router.use('/elm-ops', createElmOpsRouter());
 router.use(createPreaprobadosElmRouter());
 
 router.get('/', async function getPreaprobadosList(req, res) {
