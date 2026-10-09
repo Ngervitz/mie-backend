@@ -4,6 +4,7 @@
  * Regression: ELM S1 answered {"success":false,"result":"Repetido. Rechazado"} for the documented
  * "Repetido. rechazado". S1 rejection texts compare ignoring letter case only; every other list
  * (S1 favorable, BCU error, all of S2) stays exact, and undocumented texts stay unknown.
+ * "Mocasist" ({"success":false,"result":"Mocasist"}, solicitud 1421) is a documented S1 rejection.
  * Pure functions only: no network, no database.
  *
  * Run: node scripts/unit-elm-response-case.js
@@ -236,6 +237,70 @@ const UNDOCUMENTED_S1 = [
       { nowMs: NOW },
     );
     assert.strictEqual(s2rej.state, COMMERCIAL.REVIEW, 'S2 rejection texts stay exact');
+  });
+
+  const MOCASIST_VARIANTS = ['Mocasist', 'MOCASIST', 'mocasist', 'mOcAsIsT', '  Mocasist  ', '\tMocasist\n'];
+  const NOT_MOCASIST = ['Mocasist.', 'Moca sist', 'Mocasist rechazado', 'Mocásist', 'Mocasis', 'Mocasist - Rechazado'];
+
+  await test('11 Mocasist is a documented S1 rejection in any letter case, surrounding spaces ignored', () => {
+    assert.ok(SERVICE1_NEGATIVE.includes('Mocasist'));
+    for (const text of MOCASIST_VARIANTS) {
+      assert.deepStrictEqual(classifyService1Response(text), { outcome: OUTCOME.NEGATIVE, errorCode: null }, JSON.stringify(text));
+      assert.strictEqual(isService1Negative(text), true, JSON.stringify(text));
+    }
+    for (const text of NOT_MOCASIST) {
+      assert.deepStrictEqual(classifyService1Response(text), { outcome: OUTCOME.UNKNOWN, errorCode: null }, JSON.stringify(text));
+      assert.strictEqual(isService1Negative(text), false, JSON.stringify(text));
+    }
+    assert.strictEqual(classifyService2Response('Mocasist').outcome, OUTCOME.UNKNOWN, 'S1 texts are not S2 answers');
+  });
+
+  await test('12 transport: Mocasist is a rejection and keeps the received text and body', async () => {
+    const body = { result: 'Mocasist', success: false, docNumber: '46816299' };
+    const r = await createNetSuiteElmClient({
+      transport: {
+        realm: 'TEST',
+        service1Url: 'https://example.invalid/s1',
+        service2Url: 'https://example.invalid/s2',
+        credentials: { consumerKey: 'ck', consumerSecret: 'cs', tokenId: 'ti', tokenSecret: 'ts' },
+      },
+      timeoutMs: 1000,
+      fetchImpl: async () => ({ status: 200, text: async () => JSON.stringify(body) }),
+      now: () => NOW,
+      nonce: () => 'n',
+    }).service1({ docNumber: '46816299' });
+    assert.strictEqual(r.outcome, OUTCOME.NEGATIVE);
+    assert.strictEqual(r.errorCode, null);
+    assert.strictEqual(r.resultMessage, 'Mocasist');
+    assert.deepStrictEqual(r.responseBody, body);
+  });
+
+  await test('13 persisted Mocasist rejection: "Rechazado ELM (S1)" in the dashboard, elm_s1_rejected in fallback', () => {
+    for (const text of MOCASIST_VARIANTS) {
+      const p = proc({ cz_solicitud_id: 1421, ci: 46816299, s1_attempts: 1, s1_result_message: text });
+      const c = classifyElmProcess(p, { nowMs: NOW });
+      assert.strictEqual(c.state, COMMERCIAL.REJECTED, JSON.stringify(text));
+      assert.strictEqual(c.detail, 's1_negative', JSON.stringify(text));
+      const d = deriveFromProcess(p, NOW, null);
+      assert.strictEqual(d.outcome, FB_OUTCOME.REJECTED, JSON.stringify(text));
+      assert.strictEqual(d.reasonCode, REASONS.ELM_S1_REJECTED, JSON.stringify(text));
+    }
+    for (const text of NOT_MOCASIST) {
+      const p = proc({ s1_result_message: text });
+      assert.strictEqual(classifyElmProcess(p, { nowMs: NOW }).detail, 's1_rejection_not_definitive', JSON.stringify(text));
+      assert.strictEqual(deriveFromProcess(p, NOW, null).reasonCode, REASONS.ELM_S1_REJECTION_NOT_DEFINITIVE, JSON.stringify(text));
+    }
+  });
+
+  await test('14 rows already persisted as unknown are not reclassified (1421 Mocasist, 1430 stay in review)', () => {
+    const p1421 = proc({ cz_solicitud_id: 1421, ci: 46816299, s1_status: S1.UNKNOWN, s1_attempts: 1, s1_error_code: CODES.RESPONSE_UNDOCUMENTED, s1_result_message: 'Mocasist' });
+    const p1430 = proc({ s1_status: S1.UNKNOWN, s1_error_code: CODES.RESPONSE_UNDOCUMENTED, s1_result_message: 'Repetido. Rechazado' });
+    for (const p of [p1421, p1430]) {
+      const c = classifyElmProcess(p, { nowMs: NOW });
+      assert.strictEqual(c.state, COMMERCIAL.REVIEW, p.cz_solicitud_id);
+      assert.strictEqual(c.detail, 's1_unknown', p.cz_solicitud_id);
+      assert.strictEqual(deriveFromProcess(p, NOW, null).reasonCode, REASONS.ELM_S1_UNKNOWN, p.cz_solicitud_id);
+    }
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

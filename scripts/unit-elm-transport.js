@@ -451,6 +451,10 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
     ['service1', ok('BCU ERROR'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service2', ok('aprobado sin canal'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service1', ok('No hay oferta'), OUTCOME.NEGATIVE, null],
+    ['service1', { status: 200, body: { success: false, result: 'Mocasist', docNumber: '1' } }, OUTCOME.NEGATIVE, null],
+    ['service1', ok('MOCASIST'), OUTCOME.NEGATIVE, null],
+    ['service1', ok('Mocasist.'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service2', ok('Mocasist'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service1', ok('BCU error'), OUTCOME.TECHNICAL_ERROR, CODES.PROVIDER_BCU_ERROR],
     ['service2', ok('Lead Aprobado correctamente'), OUTCOME.POSITIVE, null],
     ['service2', ok('Aprobado sin canal'), OUTCOME.NEGATIVE, null],
@@ -484,6 +488,12 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   await dup.orch.evaluateElm(1001, MANUAL);
   assert.strictEqual(dup.repo.rows.get(1001).s1_status, S1.REJECTED);
   assert.strictEqual(dup.repo.rows.get(1001).s1_result_message, 'Repetido. Rechazado', 'original text kept');
+  const moca = orchestratorWith(fakeFetch([{ status: 200, body: { success: false, result: 'Mocasist' } }]));
+  await moca.orch.evaluateElm(1001, MANUAL);
+  assert.strictEqual(moca.repo.rows.get(1001).s1_status, S1.REJECTED);
+  assert.strictEqual(moca.repo.rows.get(1001).s1_error_code, null);
+  assert.strictEqual(moca.repo.rows.get(1001).s1_result_message, 'Mocasist', 'original text kept');
+  assert.strictEqual(moca.repo.rows.get(1001).s2_status, S2.NOT_STARTED, 'no S2 after a rejection');
   const tech = orchestratorWith(fakeFetch([ok('BCU error')]));
   await tech.orch.evaluateElm(1001, MANUAL);
   assert.strictEqual(tech.repo.rows.get(1001).s1_status, S1.TECHNICAL_ERROR);

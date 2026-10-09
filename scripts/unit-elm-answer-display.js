@@ -350,5 +350,21 @@ test('22 CI detail and Preaprobados render exactly as before (no compact)', () =
   }
 });
 
+test('23 Mocasist: red "Rechazado · Mocasist" in the list, full reason in the CI detail', () => {
+  for (const text of ['Mocasist', 'MOCASIST', '  mocasist  ']) {
+    const c = cellOf(proc({ cz_solicitud_id: 1421, ci: 46816299, s1_status: S1.REJECTED, s1_http_status: 200, s1_result_message: text }));
+    assert.strictEqual(c.state, 'rejected', text);
+    assert.strictEqual(c.label, 'Rechazado ELM (S1)', text);
+    const html = rowOf(c);
+    assert.strictEqual(visible(html), 'Rechazado · ' + text.trim(), html);
+    assert.ok(html.includes('class="preaprobados-elm is-rejected is-compact"'), 'red: ' + html);
+    assert.ok(ElmUi.elmCellHtml(c, { answer: 'full' }).includes('>Motivo ELM (S1): ' + text.trim() + '</span>'), text);
+  }
+  const p1421 = proc({ cz_solicitud_id: 1421, ci: 46816299, s1_status: S1.UNKNOWN, s1_http_status: 200, s1_error_code: 'elm_response_undocumented', s1_result_message: 'Mocasist' });
+  const historical = rowOf(cellOf(p1421));
+  assert.strictEqual(visible(historical), 'Incierto · Mocasist', 'persisted unknown row is not reclassified');
+  assert.ok(historical.includes('is-review is-compact'), historical);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

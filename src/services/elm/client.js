@@ -53,6 +53,7 @@ const SERVICE1_NEGATIVE = Object.freeze([
   'BCU',
   'Repetido. rechazado',
   'No hay oferta',
+  'Mocasist',
 ]);
 /** Explicit non-credit answers: result text → errorCode stored with technical_error. */
 const SERVICE1_TECHNICAL = Object.freeze({
