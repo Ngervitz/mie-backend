@@ -118,31 +118,92 @@
     );
   }
 
-  /**
-   * 'short' (Rechazados list): ELM's answer under an open rejected / review state only.
-   * 'full' (CI detail): ELM's answer with its step, then the ELM Ops resolution if any.
-   */
+  /** 'full' (CI detail): ELM's answer with its step, then the ELM Ops resolution if any. */
   function elmAnswerHtml(item, mode) {
-    if (mode !== 'short' && mode !== 'full') return '';
-    if (mode === 'short' && item && item.ops_resolution) return '';
+    if (mode !== 'full') return '';
     var parts = [];
-    var text = elmAnswerText(item, mode === 'full');
-    if (text) {
-      parts.push('<span class="elm-answer" title="' + esc(elmAnswerText(item, true)) + '">' + esc(text) + '</span>');
-    }
-    var resolution = mode === 'full' ? opsResolutionText(item) : '';
+    var text = elmAnswerText(item, true);
+    if (text) parts.push('<span class="elm-answer" title="' + esc(text) + '">' + esc(text) + '</span>');
+    var resolution = opsResolutionText(item);
     if (resolution) parts.push('<span class="elm-answer elm-ops-resolution">' + esc(resolution) + '</span>');
     return parts.join('');
   }
 
-  function cellTitle(cell) {
+  var COMPACT_STATE_LABELS = {
+    in_evaluation: 'En evaluación',
+    referred: 'Aceptado',
+    granted: 'Otorgado',
+    rejected: 'Rechazado',
+    review: 'En revisión',
+    closed: 'Cerrado',
+  };
+  var COMPACT_DETAIL_LABELS = {
+    s1_unknown: 'Incierto',
+    s2_unknown: 'Incierto',
+    s1_rejection_not_definitive: 'Incierto',
+    s2_rejection_not_definitive: 'Incierto',
+    s1_technical_error: 'Error técnico',
+    s2_technical_error: 'Error técnico',
+    cz_already_referred: 'Derivado en otra sol.',
+    post_referral_status: 'Rechazado · Tras derivación',
+    ops_closed_no_loan: 'Rechazado · Sin préstamo',
+    ops_customer_withdrew: 'Cerrado · Desistió',
+    ops_provider_confirmed_not_received: 'Cerrado · No recibido',
+    ops_provider_confirmed_no_referral: 'Cerrado · Sin derivación',
+    ops_other: 'Cerrado · Ver nota',
+  };
+
+  /**
+   * Visible reason only: first sentence of ELM's answer, without a bare "Rechazado" the state
+   * already says ("Repetido. Rechazado" → "Repetido"). The original text stays in the data,
+   * the tooltip and the CI detail.
+   */
+  function compactReason(message) {
+    var parts = String(message || '')
+      .split(/[.;]+/)
+      .map(function (s) {
+        return s.trim();
+      })
+      .filter(function (s) {
+        return s && !/^rechazad[oa]$/i.test(s);
+      });
+    return parts.length ? parts[0] : '';
+  }
+
+  /**
+   * One-line Rechazados label: "Rechazado · Repetido", "Incierto · Repetido", "Aceptado".
+   * Cells without an ELM process keep their label ("Sin enviar", "No enviable", …).
+   */
+  function compactCellText(item) {
+    if (!item) return '—';
+    if (item.granted_elm === true) return COMPACT_STATE_LABELS.granted;
+    var base = COMPACT_DETAIL_LABELS[item.detail] || COMPACT_STATE_LABELS[item.state];
+    if (!base) return cellLabel(item);
+    var reason =
+      item.ops_resolution || base.indexOf(' · ') >= 0 ? '' : compactReason(item.elm_answer && item.elm_answer.message);
+    return reason ? base + ' · ' + reason : base;
+  }
+
+  function cellTitleParts(cell) {
     var parts = [];
     if (cell.provider_status) parts.push('Estado ELM: ' + cell.provider_status);
     if (cell.trigger_origin) parts.push('Origen: ' + originLabel(cell.trigger_origin));
     if (cell.kind === 'not_sendable' && cell.action && cell.action.reason) {
       parts.push(BLOCKED_MESSAGES[cell.action.reason] || cell.action.reason);
     }
+    return parts;
+  }
+
+  function titleAttr(parts) {
     return parts.length ? ' title="' + esc(parts.join(' · ')) + '"' : '';
+  }
+
+  /** Tooltip of a compact label: full ELM label and original answer, then the usual details. */
+  function compactTitleParts(item) {
+    var parts = [cellLabel(item)];
+    var answer = elmAnswerText(item, true);
+    if (answer) parts.push(answer);
+    return parts;
   }
 
   /**
@@ -264,18 +325,20 @@
       }
       return disabledSendButtonHtml(sendBlockedHint(action));
     }
+    var o = opts || {};
+    var compact = o.compact === true;
     var kind = /^[a-z0-9_]+$/.test(String(cell.kind || '')) ? String(cell.kind) : 'unknown';
     var label =
       '<span class="preaprobados-elm is-' +
       kind +
       (cell.granted_elm === true ? ' is-granted' : '') +
+      (compact ? ' is-compact' : '') +
       '"' +
-      cellTitle(cell) +
+      titleAttr(compact ? compactTitleParts(cell).concat(cellTitleParts(cell)) : cellTitleParts(cell)) +
       '>' +
-      esc(cellLabel(cell)) +
+      esc(compact ? compactCellText(cell) : cellLabel(cell)) +
       '</span>';
-    var o = opts || {};
-    var answer = elmAnswerHtml(cell, o.answer);
+    var answer = compact ? '' : elmAnswerHtml(cell, o.answer);
     if (cell.retry && cell.retry.show === true && o.retryCi != null) {
       var retry = Object.assign({ cz_solicitud_id: cell.cz_solicitud_id }, cell.retry);
       return '<div class="rechazados-elm-stack">' + label + answer + retryButtonHtml(retry, o.retryCi) + '</div>';
@@ -405,19 +468,20 @@
   }
 
   function historyHtml(elm) {
-    if (elm.cell) return elmCellHtml(elm.cell, { answer: 'short' });
+    if (elm.cell) return elmCellHtml(elm.cell, { compact: true });
     var other = elm.other_processes && elm.other_processes[0];
     if (!other) return '';
-    var label =
+    return (
       '<span class="preaprobados-elm is-' +
       esc(/^[a-z0-9_]+$/.test(String(other.state || '')) ? other.state : 'unknown') +
-      ' is-other" title="' +
-      esc('Solicitud ' + other.cz_solicitud_id + ' · ' + originLabel(other.trigger_origin)) +
-      '">' +
-      esc(other.label || '—') +
-      ' (otra sol.)</span>';
-    var answer = elmAnswerHtml(other, 'short');
-    return answer ? '<div class="rechazados-elm-stack">' + label + answer + '</div>' : label;
+      ' is-other is-compact"' +
+      titleAttr(
+        ['Solicitud ' + other.cz_solicitud_id, originLabel(other.trigger_origin)].concat(compactTitleParts(other)),
+      ) +
+      '>' +
+      esc(compactCellText(other)) +
+      ' (otra sol.)</span>'
+    );
   }
 
   /**
@@ -518,6 +582,8 @@
     elmAnswerText: elmAnswerText,
     opsResolutionText: opsResolutionText,
     elmAnswerHtml: elmAnswerHtml,
+    compactReason: compactReason,
+    compactCellText: compactCellText,
     sendBlockedHint: sendBlockedHint,
     ciHoldText: ciHoldText,
     shortDate: shortDate,

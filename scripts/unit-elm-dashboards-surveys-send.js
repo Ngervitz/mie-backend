@@ -944,7 +944,7 @@ test('20 closed process of another solicitud (>30 days, other month): history + 
   assert.strictEqual(row.elm.send.target_cz_id, 9302);
   assert.deepStrictEqual(row.elm.send.candidates.map((c) => c.cz_solicitud_id), [9302]);
   const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
-  assert.ok(html.includes('Rechazado ELM (S1) (otra sol.)'), 'historical ELM state shown');
+  assert.ok(html.includes('Rechazado · SCORE BAJO (otra sol.)'), 'historical ELM state shown');
   assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="9302"'), 'button not hidden');
   assert.ok(html.indexOf('(otra sol.)') < html.indexOf('<button'), 'history above the button');
 
@@ -1068,7 +1068,7 @@ test('24 history + several eligible new solicitudes → explicit selection', asy
   assert.strictEqual(row.elm.send.target_cz_id, null);
   assert.deepStrictEqual(row.elm.send.selectable_cz_ids, [9503, 9502]);
   const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
-  assert.ok(html.includes('Rechazado ELM (S1) (otra sol.)'));
+  assert.ok(html.includes('Rechazado · SCORE BAJO (otra sol.)'));
   assert.ok(html.includes('data-elm-pick="1"') && !html.includes('value="9501"'), 'own-process solicitud not offered');
   const button = html.slice(html.indexOf('<button'));
   assert.ok(/ disabled /.test(button) && !button.includes('data-cz-id'));

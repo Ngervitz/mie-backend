@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * Rechazados shows ELM's original answer (persisted s1|s2_result_message) under a rejected /
- * review ELM state: list "Motivo ELM: …", CI detail "Motivo ELM (S1): …". Once ELM Ops closed
+ * Rechazados list: one compact line per ELM state ("Rechazado · Repetido", "Incierto · Repetido",
+ * "Aceptado"), same color classes, full label and original answer in the tooltip. CI detail:
+ * ELM's original answer (persisted s1|s2_result_message) "Motivo ELM (S1): …". Once ELM Ops closed
  * the process, the CI detail keeps three separate facts: current state (label), "Resultado
  * original ELM (S1): …" and "Resolución ELM Ops: …". Classification, actions, retry and holds
  * are unchanged; Preaprobados (no `answer` option) renders as before.
@@ -177,14 +178,17 @@ test('6 classification, action and retry are unchanged by the answer', () => {
   assert.strictEqual(cellOf(proc({ s1_status: S1.REJECTED, s1_result_message: 'Otro texto' })).detail, 's1_rejection_not_definitive');
 });
 
-test('7 Rechazados list: state with the reason underneath', () => {
-  const html = ElmUi.rejectedRowElmHtml({ available: true, cell: cellOf(P1423), other_processes: [], send: { available: true, candidates: [], retry_candidates: [] } }, 55597953);
-  assert.ok(html.includes('Rechazado ELM (S1)'), html);
-  assert.ok(html.includes('>Motivo ELM: Repetido. Rechazado</span>'), html);
-  assert.ok(html.indexOf('Rechazado ELM (S1)') < html.indexOf('Motivo ELM'), 'reason under the state');
-  const uncertain = ElmUi.rejectedRowElmHtml({ available: true, cell: cellOf(P1430), other_processes: [], send: { available: true, candidates: [], retry_candidates: [] } }, 51001152);
-  assert.ok(uncertain.includes('Resultado incierto ELM (S1)'));
-  assert.ok(uncertain.includes('>Respuesta ELM: Repetido. Rechazado</span>'), uncertain);
+const visible = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+const rowOf = (cell, send) => ElmUi.rejectedRowElmHtml({ available: true, cell: cell, other_processes: [], send: send || { available: true, candidates: [], retry_candidates: [] } }, 1);
+
+test('7 Rechazados list: one compact label with state and reason', () => {
+  const html = rowOf(cellOf(P1423));
+  assert.strictEqual(visible(html), 'Rechazado · Repetido', html);
+  assert.ok(html.includes('class="preaprobados-elm is-rejected is-compact"'), html);
+  assert.ok(html.includes('title="Rechazado ELM (S1) · Motivo ELM (S1): Repetido. Rechazado · Origen: Manual (JANUS)"'), 'full label and original answer in the tooltip');
+  const uncertain = rowOf(cellOf(P1430));
+  assert.strictEqual(visible(uncertain), 'Incierto · Repetido', uncertain);
+  assert.ok(uncertain.includes('is-review is-compact'), 'yellow');
 });
 
 test('8 CI detail: full reason with its step', () => {
@@ -201,7 +205,8 @@ test('9 other solicitud of the CI also shows its answer', () => {
   const s = summarizeCiElm({ ci: 55597953, focusCzIds: [9999], processes: [P1423], nowMs: NOW });
   assert.deepStrictEqual(s.other_processes[0].elm_answer, { step: 's1', message: 'Repetido. Rechazado' });
   const html = ElmUi.rejectedRowElmHtml({ available: true, cell: null, other_processes: s.other_processes, send: null }, 55597953);
-  assert.ok(html.includes('(otra sol.)') && html.includes('Motivo ELM: Repetido. Rechazado'), html);
+  assert.strictEqual(visible(html), 'Rechazado · Repetido (otra sol.)', html);
+  assert.ok(html.includes('title="Solicitud 1423 · Manual (JANUS) · Rechazado ELM (S1) · Motivo ELM (S1): Repetido. Rechazado"'), html);
   assert.strictEqual(ElmUi.elmAnswerText(s.other_processes[0], true), 'Motivo ELM (S1): Repetido. Rechazado');
 });
 
@@ -282,6 +287,67 @@ test('16 other solicitud summary carries original answer and resolution, without
 test('17 classification and action of an ops-closed process are unchanged by the answer', () => {
   const strip = (c) => Object.assign({}, c, { elm_answer: undefined });
   assert.deepStrictEqual(strip(cellOf(P1430_CLOSED)), strip(cellOf(Object.assign({}, P1430_CLOSED, { s1_result_message: null }))));
+});
+
+test('18 compact labels per reading keep the current color class', () => {
+  const cases = [
+    ['referred', proc({ s1_status: S1.ELIGIBLE, s2_status: S2.REFERRED, s2_result_message: 'Lead Aprobado correctamente', referred_at: iso(NOW) }), 'Aceptado', 'is-referred'],
+    ['granted', proc({ s1_status: S1.ELIGIBLE, s2_status: S2.REFERRED, referred_at: iso(NOW), disbursed_at: iso(NOW) }), 'Otorgado', 'is-granted'],
+    ['in flight', proc({ s1_status: S1.IN_FLIGHT, s1_lease_expires_at: iso(NOW + 60000) }), 'En evaluación', 'is-in_evaluation'],
+    ['S2 rejected', proc({ s1_status: S1.ELIGIBLE, s2_status: S2.REJECTED, s2_result_message: 'Telefono no válido' }), 'Rechazado · Telefono no válido', 'is-rejected'],
+    ['technical 403', proc({ s1_status: S1.TECHNICAL_ERROR, s1_http_status: 403, s1_error_code: 'elm_http_auth_rejected' }), 'Error técnico', 'is-review'],
+    ['BCU error', proc({ s1_status: S1.TECHNICAL_ERROR, s1_error_code: 'elm_provider_bcu_error', s1_result_message: 'BCU error' }), 'Error técnico · BCU error', 'is-review'],
+    ['ops closed', P1430_CLOSED, 'Cerrado · Sin derivación', 'is-closed'],
+    ['ops closed no loan', proc({ s1_status: S1.ELIGIBLE, s2_status: S2.REFERRED, s2_result_message: 'Lead Aprobado correctamente', referred_at: iso(NOW), ops_resolved_at: iso(NOW), ops_resolution_code: 'provider_closed_no_loan' }), 'Rechazado · Sin préstamo', 'is-rejected'],
+  ];
+  for (const [name, p, text, cls] of cases) {
+    const html = rowOf(cellOf(p));
+    assert.strictEqual(visible(html), text, name + ': ' + html);
+    assert.ok(html.includes(cls + ' ') || html.includes(cls + '"'), name + ' color: ' + html);
+  }
+});
+
+test('19 visible reason normalized; data and CI detail keep the original text', () => {
+  assert.strictEqual(ElmUi.compactReason('Repetido. Rechazado'), 'Repetido');
+  assert.strictEqual(ElmUi.compactReason('Repetido. rechazado'), 'Repetido');
+  assert.strictEqual(ElmUi.compactReason('Rechazado'), '');
+  assert.strictEqual(ElmUi.compactReason('Telefono no válido'), 'Telefono no válido');
+  assert.strictEqual(ElmUi.compactReason(null), '');
+  const c = cellOf(P1423);
+  rowOf(c);
+  assert.deepStrictEqual(c.elm_answer, { step: 's1', message: 'Repetido. Rechazado' }, 'cell data untouched');
+  assert.ok(ElmUi.elmCellHtml(c, { answer: 'full' }).includes('>Motivo ELM (S1): Repetido. Rechazado</span>'), 'detail unchanged');
+});
+
+test('20 list shows no redundant ELM / step / prefix text and no second line', () => {
+  for (const p of [P1423, P1430, P1430_CLOSED, proc({ s1_status: S1.TECHNICAL_ERROR, s1_http_status: 403, s1_error_code: 'elm_http_auth_rejected' })]) {
+    const html = rowOf(cellOf(p));
+    const text = visible(html);
+    for (const needle of ['ELM', 'S1', 'S2', 'Motivo', 'Respuesta', 'Resultado']) assert.ok(!text.includes(needle), needle + ' in ' + text);
+    assert.ok(!html.includes('elm-answer') && !html.includes('rechazados-elm-stack'), html);
+  }
+});
+
+test('21 send / retry buttons, permissions and tooltips unchanged', () => {
+  const enabledSend = { available: true, candidates: [{ cz_solicitud_id: 1500, enabled: true, rejected_at: '2026-10-01T10:00:00' }], target_cz_id: 1500, retry_candidates: [] };
+  const html = rowOf(cellOf(P1423), enabledSend);
+  assert.ok(html.includes(ElmUi.rejectedSendHtml(1, enabledSend)), 'same send control');
+  assert.ok(html.includes('data-action="elm-send"') && html.includes('Sol. 1500'), html);
+  const heldSend = { available: true, candidates: [{ cz_solicitud_id: 1500, enabled: false, reasons: ['elm_ci_recent_send'], until: '2026-11-08' }], retry_candidates: [] };
+  const held = rowOf(cellOf(P1423), heldSend);
+  assert.ok(held.includes(ElmUi.rejectedSendHtml(1, heldSend)) && held.includes('disabled aria-disabled="true"'), held);
+  const retry = { available: true, candidates: [], retry_candidates: [{ cz_solicitud_id: 1430, enabled: true, expected_attempts: 1 }] };
+  const rhtml = rowOf(cellOf(P1430), retry);
+  assert.ok(rhtml.includes(ElmUi.rejectedRetryHtml(1, retry)) && rhtml.includes('data-action="elm-retry"'), rhtml);
+});
+
+test('22 CI detail and Preaprobados render exactly as before (no compact)', () => {
+  for (const p of [P1423, P1430, P1430_CLOSED]) {
+    const c = cellOf(p);
+    assert.ok(!ElmUi.elmCellHtml(c).includes('is-compact'));
+    assert.ok(!ElmUi.elmCellHtml(c, { answer: 'full', retryCi: 1 }).includes('is-compact'));
+    assert.ok(ElmUi.elmCellHtml(c).includes('>' + c.label + '</span>'), 'full label kept');
+  }
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
