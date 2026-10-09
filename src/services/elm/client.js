@@ -68,12 +68,34 @@ const SERVICE2_NEGATIVE = Object.freeze([
 
 const NO_TECHNICAL = Object.freeze({});
 
+/**
+ * S1 rejection texts are compared ignoring letter case only (ELM answers "Repetido. Rechazado"
+ * for the documented "Repetido. rechazado"); spacing and punctuation must still match exactly.
+ * Every other list (S1 favorable, BCU error, all of S2) stays an exact match.
+ */
+function caseKey(text) {
+  return text.trim().toLowerCase();
+}
+const SERVICE1_NEGATIVE_KEYS = new Set(SERVICE1_NEGATIVE.map(caseKey));
+
+/** Persisted / received S1 text is a documented definitive rejection. */
+function isService1Negative(text) {
+  return typeof text === 'string' && SERVICE1_NEGATIVE_KEYS.has(caseKey(text));
+}
+
+function exactIn(list) {
+  return function (s) {
+    return list.includes(s);
+  };
+}
+const isService2Negative = exactIn(SERVICE2_NEGATIVE);
+
 /** @returns {{ outcome: string, errorCode: string|null }} */
-function classifyResponse(text, positives, negatives, technical) {
+function classifyResponse(text, positives, isNegative, technical) {
   if (typeof text !== 'string') return { outcome: OUTCOME.UNKNOWN, errorCode: null };
   const s = text.trim();
   if (positives.includes(s)) return { outcome: OUTCOME.POSITIVE, errorCode: null };
-  if (negatives.includes(s)) return { outcome: OUTCOME.NEGATIVE, errorCode: null };
+  if (isNegative(s)) return { outcome: OUTCOME.NEGATIVE, errorCode: null };
   if (Object.prototype.hasOwnProperty.call(technical, s)) {
     return { outcome: OUTCOME.TECHNICAL_ERROR, errorCode: technical[s] };
   }
@@ -82,11 +104,11 @@ function classifyResponse(text, positives, negatives, technical) {
 
 /** Undocumented text → unknown (never treated as success or rejection). */
 function classifyService1Response(text) {
-  return classifyResponse(text, SERVICE1_POSITIVE, SERVICE1_NEGATIVE, SERVICE1_TECHNICAL);
+  return classifyResponse(text, SERVICE1_POSITIVE, isService1Negative, SERVICE1_TECHNICAL);
 }
 
 function classifyService2Response(text) {
-  return classifyResponse(text, SERVICE2_POSITIVE, SERVICE2_NEGATIVE, NO_TECHNICAL);
+  return classifyResponse(text, SERVICE2_POSITIVE, isService2Negative, NO_TECHNICAL);
 }
 
 function classifyService1Result(text) {
@@ -310,6 +332,7 @@ module.exports = {
   SERVICE1_TECHNICAL,
   SERVICE2_POSITIVE,
   SERVICE2_NEGATIVE,
+  isService1Negative,
   classifyService1Response,
   classifyService2Response,
   classifyService1Result,

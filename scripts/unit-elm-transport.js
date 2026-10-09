@@ -445,6 +445,11 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
     ['service1', ok('Blacklist'), OUTCOME.NEGATIVE, null],
     ['service1', ok('BCU'), OUTCOME.NEGATIVE, null],
     ['service1', ok('Repetido. rechazado'), OUTCOME.NEGATIVE, null],
+    ['service1', { status: 200, body: { success: false, result: 'Repetido. Rechazado', docNumber: '1' } }, OUTCOME.NEGATIVE, null],
+    ['service1', ok('Repetido - Rechazado'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service1', ok('listo para recibir datos en servicio 2'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service1', ok('BCU ERROR'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service2', ok('aprobado sin canal'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service1', ok('No hay oferta'), OUTCOME.NEGATIVE, null],
     ['service1', ok('BCU error'), OUTCOME.TECHNICAL_ERROR, CODES.PROVIDER_BCU_ERROR],
     ['service2', ok('Lead Aprobado correctamente'), OUTCOME.POSITIVE, null],
@@ -475,6 +480,10 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   const rej = orchestratorWith(fakeFetch([ok('No hay oferta')]));
   await rej.orch.evaluateElm(1001, MANUAL);
   assert.strictEqual(rej.repo.rows.get(1001).s1_status, S1.REJECTED);
+  const dup = orchestratorWith(fakeFetch([{ status: 200, body: { success: false, result: 'Repetido. Rechazado' } }]));
+  await dup.orch.evaluateElm(1001, MANUAL);
+  assert.strictEqual(dup.repo.rows.get(1001).s1_status, S1.REJECTED);
+  assert.strictEqual(dup.repo.rows.get(1001).s1_result_message, 'Repetido. Rechazado', 'original text kept');
   const tech = orchestratorWith(fakeFetch([ok('BCU error')]));
   await tech.orch.evaluateElm(1001, MANUAL);
   assert.strictEqual(tech.repo.rows.get(1001).s1_status, S1.TECHNICAL_ERROR);

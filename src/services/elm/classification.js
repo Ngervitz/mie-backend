@@ -7,7 +7,8 @@
  * module only derives the label dashboards, KPIs and surveys use:
  *
  *   granted        disbursed_at (postback "Convertido" or audited provider_loan_disbursed)
- *   rejected       definitive evidence only: S1 answer in SERVICE1_NEGATIVE, S2 answer in
+ *   rejected       definitive evidence only: S1 answer in SERVICE1_NEGATIVE (letter case
+ *                  ignored, isService1Negative), S2 answer in
  *                  DEFINITIVE_S2_REJECTION_RESULTS, a post-referral postback status configured in
  *                  ELM_POST_REFERRAL_REJECTION_STATUSES, ops provider_closed_no_loan, or CZ 3
  *                  projected for an automatic process
@@ -20,7 +21,7 @@
  */
 
 const { S1, S2 } = require('./constants');
-const { SERVICE1_NEGATIVE } = require('./client');
+const { isService1Negative } = require('./client');
 const { normalizeProviderStatus } = require('./providerStatus');
 const { DEFINITIVE_S2_REJECTION_RESULTS } = require('../providerFallback/constants');
 
@@ -143,7 +144,7 @@ function fromProcess(p, opts) {
   if (s2 === S2.IN_FLIGHT) return result(COMMERCIAL.IN_EVALUATION, 's2_in_flight', 's2');
 
   if (s1 === S1.REJECTED) {
-    return textIn(SERVICE1_NEGATIVE, p.s1_result_message)
+    return isService1Negative(p.s1_result_message)
       ? result(COMMERCIAL.REJECTED, 's1_negative', 's1')
       : result(COMMERCIAL.REVIEW, 's1_rejection_not_definitive', 's1');
   }

@@ -18,7 +18,7 @@
 
 const { S1, S2, CODES } = require('../elm/constants');
 const { technicalRetryDelaySeconds } = require('../elm/config');
-const { SERVICE1_NEGATIVE } = require('../elm/client');
+const { isService1Negative } = require('../elm/client');
 const {
   OUTCOME,
   REASONS,
@@ -116,7 +116,7 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
   if (p.s1_status === S1.UNKNOWN) return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN);
   if (p.s1_status === S1.TECHNICAL_ERROR) return technicalDecision('s1', p, nowMs, retryPolicy);
   if (p.s1_status === S1.REJECTED) {
-    return SERVICE1_NEGATIVE.includes(p.s1_result_message)
+    return isService1Negative(p.s1_result_message)
       ? final(OUTCOME.REJECTED, REASONS.ELM_S1_REJECTED)
       : final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_REJECTION_NOT_DEFINITIVE, {
           result_message: p.s1_result_message || null,
