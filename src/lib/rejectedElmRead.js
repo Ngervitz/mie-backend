@@ -32,6 +32,8 @@ function processSummary(p, cell) {
     state: cell.state,
     label: cell.label,
     detail: cell.detail,
+    elm_answer: cell.elm_answer || null,
+    ops_resolution: cell.ops_resolution || null,
   };
 }
 

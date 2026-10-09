@@ -16183,6 +16183,8 @@ init();
           escapeHtml(ElmUi.originLabel(p.trigger_origin)) +
           ': ' +
           escapeHtml(p.label || '—') +
+          (p.elm_answer ? ' · ' + escapeHtml(ElmUi.elmAnswerText(p, true)) : '') +
+          (p.ops_resolution ? ' · ' + escapeHtml(ElmUi.opsResolutionText(p)) : '') +
           '</div>',
       );
     });
@@ -16352,6 +16354,7 @@ init();
               ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null, {
                   rejectedAt: r.fechahora_src,
                   retryCi: d.ci,
+                  answer: 'full',
                 })
               : '—',
           );

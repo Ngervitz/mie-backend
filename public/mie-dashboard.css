@@ -5435,6 +5435,14 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+#mie-dashboard-app .elm-answer {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 #mie-dashboard-app .rechazados-elm-pick {
   width: 100%;
   max-width: 100%;

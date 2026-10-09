@@ -75,6 +75,66 @@
     return ORIGIN_LABELS[origin] || (origin ? String(origin) : '—');
   }
 
+  var OPS_RESOLUTION_LABELS = {
+    provider_closed_no_loan: 'ELM cerró el caso sin préstamo',
+    provider_loan_disbursed: 'ELM otorgó el préstamo',
+    customer_withdrew: 'El cliente desistió',
+    provider_confirmed_not_received: 'ELM confirmó que no recibió el lead',
+    provider_confirmed_no_referral: 'ELM confirmó que no hubo derivación',
+    other: 'Otro (ver nota en ELM Ops)',
+  };
+
+  /**
+   * ELM's original answer (`elm_answer` of a cell or process summary). "Motivo ELM" for an open
+   * rejection, "Resultado original ELM" once ELM Ops closed the process, "Respuesta ELM" otherwise.
+   * `withStep` adds (S1)/(S2).
+   * @param {{ elm_answer?: { step?: string, message?: string }|null, state?: string|null,
+   *   ops_resolution?: object|null }|null|undefined} item
+   * @param {boolean} [withStep]
+   * @returns {string} plain text, '' when there is no answer
+   */
+  function elmAnswerText(item, withStep) {
+    var answer = item && item.elm_answer;
+    if (!answer || typeof answer.message !== 'string' || !answer.message) return '';
+    var step = answer.step === 's1' || answer.step === 's2' ? answer.step.toUpperCase() : '';
+    var prefix = item.ops_resolution
+      ? 'Resultado original ELM'
+      : item.state === 'rejected'
+        ? 'Motivo ELM'
+        : 'Respuesta ELM';
+    return prefix + (withStep && step ? ' (' + step + ')' : '') + ': ' + answer.message;
+  }
+
+  /** Administrative closure from ELM Ops (`ops_resolution`), '' when there is none. */
+  function opsResolutionText(item) {
+    var r = item && item.ops_resolution;
+    if (!r) return '';
+    var code = r.code ? String(r.code) : '';
+    var date = shortDate(r.resolved_at);
+    return (
+      'Resolución ELM Ops: ' +
+      (OPS_RESOLUTION_LABELS[code] || code || 'sin código') +
+      (date ? ' (' + date + ')' : '')
+    );
+  }
+
+  /**
+   * 'short' (Rechazados list): ELM's answer under an open rejected / review state only.
+   * 'full' (CI detail): ELM's answer with its step, then the ELM Ops resolution if any.
+   */
+  function elmAnswerHtml(item, mode) {
+    if (mode !== 'short' && mode !== 'full') return '';
+    if (mode === 'short' && item && item.ops_resolution) return '';
+    var parts = [];
+    var text = elmAnswerText(item, mode === 'full');
+    if (text) {
+      parts.push('<span class="elm-answer" title="' + esc(elmAnswerText(item, true)) + '">' + esc(text) + '</span>');
+    }
+    var resolution = mode === 'full' ? opsResolutionText(item) : '';
+    if (resolution) parts.push('<span class="elm-answer elm-ops-resolution">' + esc(resolution) + '</span>');
+    return parts.join('');
+  }
+
   function cellTitle(cell) {
     var parts = [];
     if (cell.provider_status) parts.push('Estado ELM: ' + cell.provider_status);
@@ -215,11 +275,12 @@
       esc(cellLabel(cell)) +
       '</span>';
     var o = opts || {};
+    var answer = elmAnswerHtml(cell, o.answer);
     if (cell.retry && cell.retry.show === true && o.retryCi != null) {
       var retry = Object.assign({ cz_solicitud_id: cell.cz_solicitud_id }, cell.retry);
-      return '<div class="rechazados-elm-stack">' + label + retryButtonHtml(retry, o.retryCi) + '</div>';
+      return '<div class="rechazados-elm-stack">' + label + answer + retryButtonHtml(retry, o.retryCi) + '</div>';
     }
-    return label;
+    return answer ? '<div class="rechazados-elm-stack">' + label + answer + '</div>' : label;
   }
 
   /**
@@ -344,18 +405,19 @@
   }
 
   function historyHtml(elm) {
-    if (elm.cell) return elmCellHtml(elm.cell);
+    if (elm.cell) return elmCellHtml(elm.cell, { answer: 'short' });
     var other = elm.other_processes && elm.other_processes[0];
     if (!other) return '';
-    return (
+    var label =
       '<span class="preaprobados-elm is-' +
       esc(/^[a-z0-9_]+$/.test(String(other.state || '')) ? other.state : 'unknown') +
       ' is-other" title="' +
       esc('Solicitud ' + other.cz_solicitud_id + ' · ' + originLabel(other.trigger_origin)) +
       '">' +
       esc(other.label || '—') +
-      ' (otra sol.)</span>'
-    );
+      ' (otra sol.)</span>';
+    var answer = elmAnswerHtml(other, 'short');
+    return answer ? '<div class="rechazados-elm-stack">' + label + answer + '</div>' : label;
   }
 
   /**
@@ -453,6 +515,9 @@
     ORIGIN_LABELS: ORIGIN_LABELS,
     cellLabel: cellLabel,
     originLabel: originLabel,
+    elmAnswerText: elmAnswerText,
+    opsResolutionText: opsResolutionText,
+    elmAnswerHtml: elmAnswerHtml,
     sendBlockedHint: sendBlockedHint,
     ciHoldText: ciHoldText,
     shortDate: shortDate,

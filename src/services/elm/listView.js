@@ -61,6 +61,36 @@ function isPreReceptionFailure(p) {
   );
 }
 
+const ELM_ANSWER_MAX = 200;
+
+function answerAt(p, step) {
+  const raw = step === 's1' ? p.s1_result_message : p.s2_result_message;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  return { step: step, message: raw.trim().slice(0, ELM_ANSWER_MAX) };
+}
+
+/**
+ * ELM's own answer text, as persisted (s1|s2_result_message, redacted at write time), with its
+ * step. Rejected / review readings: the step that decided the reading. Processes closed by ELM
+ * Ops: ELM's last answer (S2 once started, else S1), kept apart from the ops resolution. Null for
+ * every other reading and when ELM sent no text (timeouts, HTTP errors, rejected credentials).
+ * @returns {{ step: 's1'|'s2', message: string }|null}
+ */
+function elmAnswerOf(p, c) {
+  if (p.ops_resolved_at) {
+    return (p.s2_status && p.s2_status !== S2.NOT_STARTED ? answerAt(p, 's2') : null) || answerAt(p, 's1');
+  }
+  if (c.state !== 'rejected' && c.state !== 'review') return null;
+  if (c.stage !== 's1' && c.stage !== 's2') return null;
+  return answerAt(p, c.stage);
+}
+
+/** Administrative closure from ELM Ops (code and time only; the free-text note stays in Ops). */
+function opsResolutionOf(p) {
+  if (!p.ops_resolved_at) return null;
+  return { code: p.ops_resolution_code || null, resolved_at: p.ops_resolved_at };
+}
+
 /**
  * "Reintentar ELM" for a process cell, or null. Enabled only with send readiness and attempts
  * left; the CI hold of the screen is applied by the caller.
@@ -131,6 +161,8 @@ function computeElmCell(input) {
       disbursed_at: p.disbursed_at || null,
       s1_status: effective(p.s1_status, p.s1_lease_expires_at, nowMs),
       s2_status: effective(p.s2_status, p.s2_lease_expires_at, nowMs),
+      elm_answer: elmAnswerOf(p, c),
+      ops_resolution: opsResolutionOf(p),
       action: noAction(),
       retry: retryActionFor(p, input),
     };
