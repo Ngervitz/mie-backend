@@ -16,7 +16,8 @@
  * CI never selects a process. When received it is normalized (normalizeElmCi) and compared
  * against the matched process as an audit control; a mismatch → unmatched, no mutation.
  *
- * Body field names are PROVISIONAL until ELM confirms the postback contract.
+ * Identity/status fields documented by ELM (Fabián): internal_id (= cz_solicitud_id, sent in S2
+ * as TrackingId), cedula, estado. Only these are read.
  */
 
 const { CODES, POSTBACK_PROCESSING, MATCH_METHODS, S2 } = require('./constants');
@@ -25,11 +26,22 @@ const { redactSecrets } = require('./redact');
 const defaultLogger = require('../../lib/logger');
 
 const FIELD_KEYS = Object.freeze({
-  status: ['status', 'estado'],
-  ci: ['docNumber', 'ci'],
-  czSolicitudId: ['cz_solicitud_id', 'czSolicitudId'],
+  status: ['estado'],
+  ci: ['cedula'],
+  czSolicitudId: ['internal_id'],
   providerExternalId: ['provider_external_id', 'providerExternalId'],
   eventAt: ['event_at', 'eventAt'],
+});
+
+/**
+ * Undocumented keys that could carry the same value (e.g. TrackingId echoed back). Never read
+ * alone: present without the documented field → invalid (undocumented field); present with a
+ * different value → invalid (contradiction). Never resolved by precedence.
+ */
+const CROSS_CHECK_KEYS = Object.freeze({
+  status: ['status'],
+  ci: ['docNumber', 'ci'],
+  czSolicitudId: ['TrackingId', 'trackingId', 'tracking_id', 'cz_solicitud_id', 'czSolicitudId'],
 });
 
 const MAX_PAYLOAD_JSON_CHARS = 16000;
@@ -43,6 +55,28 @@ function pick(body, keys) {
     }
   }
   return undefined;
+}
+
+/**
+ * Every alias present must normalize to the same value; disagreeing aliases are never resolved
+ * by precedence. @returns {{ present: boolean, value: unknown, conflict: boolean }}
+ */
+function pickConsistent(body, keys, normalize) {
+  let present = false;
+  let value = null;
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(body, k) || body[k] == null || body[k] === '') {
+      continue;
+    }
+    const v = normalize(body[k]);
+    if (!present) {
+      present = true;
+      value = v;
+    } else if (v !== value) {
+      return { present: true, value: null, conflict: true };
+    }
+  }
+  return { present: present, value: value, conflict: false };
 }
 
 function positiveSafeInt(raw) {
@@ -122,10 +156,13 @@ function parseElmPostback(body, nowMs) {
   fields.grantedElm = status.grantedElm;
   fields.providerExternalId = shortText(pick(body, FIELD_KEYS.providerExternalId));
 
-  const rawCi = pick(body, FIELD_KEYS.ci);
-  fields.ci = rawCi === undefined ? null : normalizeElmCi(rawCi);
-  const rawCz = pick(body, FIELD_KEYS.czSolicitudId);
-  fields.czSolicitudId = rawCz === undefined ? null : positiveSafeInt(rawCz);
+  const ciPick = pickConsistent(body, FIELD_KEYS.ci, normalizeElmCi);
+  fields.ci = ciPick.value;
+  const czPick = pickConsistent(body, FIELD_KEYS.czSolicitudId, positiveSafeInt);
+  fields.czSolicitudId = czPick.value;
+  const statusCheck = crossCheck(body, CROSS_CHECK_KEYS.status, status.raw != null, status.normalized, normalizedStatusOf);
+  const ciCheck = crossCheck(body, CROSS_CHECK_KEYS.ci, ciPick.present, fields.ci, normalizeElmCi);
+  const czCheck = crossCheck(body, CROSS_CHECK_KEYS.czSolicitudId, czPick.present, fields.czSolicitudId, positiveSafeInt);
   const rawAt = pick(body, FIELD_KEYS.eventAt);
   let eventAtInvalid = false;
   if (rawAt !== undefined) {
@@ -138,12 +175,36 @@ function parseElmPostback(body, nowMs) {
   }
 
   let invalidCode = null;
-  if (!status.raw) invalidCode = CODES.POSTBACK_STATUS_MISSING;
+  if (statusCheck === 'undocumented' || ciCheck === 'undocumented' || czCheck === 'undocumented') {
+    invalidCode = CODES.POSTBACK_UNDOCUMENTED_FIELD;
+  } else if (!status.raw) invalidCode = CODES.POSTBACK_STATUS_MISSING;
   else if (!status.known) invalidCode = CODES.POSTBACK_STATUS_UNKNOWN;
-  else if (rawCz !== undefined && fields.czSolicitudId == null) invalidCode = CODES.POSTBACK_CZ_ID_INVALID;
-  else if (rawCi !== undefined && fields.ci == null) invalidCode = CODES.POSTBACK_CI_INVALID;
-  else if (eventAtInvalid) invalidCode = CODES.POSTBACK_EVENT_AT_INVALID;
+  else if (statusCheck === 'conflict') invalidCode = CODES.POSTBACK_STATUS_UNKNOWN;
+  else if ((czPick.present && fields.czSolicitudId == null) || czCheck === 'conflict') {
+    invalidCode = CODES.POSTBACK_CZ_ID_INVALID;
+  } else if ((ciPick.present && fields.ci == null) || ciCheck === 'conflict') {
+    invalidCode = CODES.POSTBACK_CI_INVALID;
+  } else if (eventAtInvalid) invalidCode = CODES.POSTBACK_EVENT_AT_INVALID;
   return { invalidCode: invalidCode, fields: fields };
+}
+
+function normalizedStatusOf(raw) {
+  return classifyProviderStatus(raw).normalized;
+}
+
+/**
+ * @returns {'absent'|'undocumented'|'conflict'|'consistent'}
+ */
+function crossCheck(body, keys, documentedPresent, documentedValue, normalize) {
+  let seen = false;
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(body, k) || body[k] == null || body[k] === '') continue;
+    seen = true;
+    if (!documentedPresent) return 'undocumented';
+    const v = normalize(body[k]);
+    if (v == null || documentedValue == null || v !== documentedValue) return 'conflict';
+  }
+  return seen ? 'consistent' : 'absent';
 }
 
 /**
@@ -262,6 +323,7 @@ function createElmPostbackProcessor(deps) {
 
 module.exports = {
   FIELD_KEYS,
+  CROSS_CHECK_KEYS,
   MAX_PAYLOAD_JSON_CHARS,
   parseElmPostback,
   sanitizePostbackPayload,

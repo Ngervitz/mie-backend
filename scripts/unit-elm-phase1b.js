@@ -326,7 +326,7 @@ async function main() {
 
   await test('#1 #2 Convertido → GRANTED ELM, disbursed_at set, amount NULL, provider=elm', async () => {
     const { repo, post } = setup([proc({ cz_solicitud_id: 501 })]);
-    const out = await post({ status: 'Convertido', cz_solicitud_id: 501, docNumber: '12345678' });
+    const out = await post({ estado: 'Convertido', internal_id: 501, cedula: '12345678' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.event.processing_status, POSTBACK_PROCESSING.APPLIED);
     assert.strictEqual(out.event.match_method, MATCH_METHODS.CZ_SOLICITUD_ID);
@@ -345,7 +345,7 @@ async function main() {
     for (const s of others) {
       assert.strictEqual(isGrantedElmStatus(s), false, s);
       const { repo, post } = setup([proc({ cz_solicitud_id: 502 })]);
-      const out = await post({ status: s, cz_solicitud_id: 502, docNumber: 12345678 });
+      const out = await post({ estado: s, internal_id: 502, cedula: 12345678 });
       assert.strictEqual(out.event.processing_status, 'applied', s);
       assert.strictEqual(repo.processes[0].disbursed_at, null, s);
       assert.strictEqual(repo.processes[0].provider_status, s);
@@ -373,7 +373,7 @@ async function main() {
       proc({ cz_solicitud_id: 700, s2_started_at: '2026-10-02T10:00:00.000Z' }),
     ]);
     const before = JSON.stringify(repo.processes);
-    const out = await post({ status: 'Convertido', ci: '1.234.567-8' });
+    const out = await post({ estado: 'Convertido', cedula: '1.234.567-8' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.event.processing_status, 'unmatched');
     assert.strictEqual(out.event.error_code, CODES.POSTBACK_CZ_ID_MISSING);
@@ -387,7 +387,7 @@ async function main() {
     assert.ok(!/\.eq\('ci'/.test(srcRepo), 'no process query by CI');
     assert.ok(!/latest_elm_process_by_ci/.test(readSrc('migrations/20261007_elm_postback_events.sql')));
 
-    const older = await post({ status: 'Aprobado', cz_solicitud_id: 900, docNumber: '12345678' });
+    const older = await post({ estado: 'Aprobado', internal_id: 900, cedula: '12345678' });
     assert.strictEqual(older.event.processing_status, 'applied');
     assert.strictEqual(repo.processes.find((p) => p.cz_solicitud_id === 900).provider_status, 'Aprobado');
     assert.strictEqual(repo.processes.find((p) => p.cz_solicitud_id === 700).provider_status, null);
@@ -403,19 +403,19 @@ async function main() {
     assert.strictEqual(isPostbackCompatible(proc({ cz_solicitud_id: 1, s2_status: 'referred' })), true);
 
     const never = setup([proc({ cz_solicitud_id: 601, s1_status: 'eligible', s2_status: 'not_started', s2_started_at: null })]);
-    const o1 = await never.post({ status: 'Convertido', cz_solicitud_id: 601, docNumber: '12345678' });
+    const o1 = await never.post({ estado: 'Convertido', internal_id: 601, cedula: '12345678' });
     assert.strictEqual(o1.event.processing_status, 'unmatched');
     assert.strictEqual(o1.event.error_code, CODES.POSTBACK_PROCESS_NOT_COMPATIBLE);
     assert.strictEqual(never.repo.processes[0].disbursed_at, null);
     for (const s2 of ['rejected', 'technical_error', 'in_flight']) {
       const x = setup([proc({ cz_solicitud_id: 603, s2_status: s2 })]);
-      const o = await x.post({ status: 'Convertido', cz_solicitud_id: 603 });
+      const o = await x.post({ estado: 'Convertido', internal_id: 603 });
       assert.strictEqual(o.event.error_code, CODES.POSTBACK_PROCESS_NOT_COMPATIBLE, s2);
       assert.strictEqual(x.repo.processes[0].disbursed_at, null, s2);
     }
 
     const unk = setup([proc({ cz_solicitud_id: 602, s2_status: 'unknown', referred_at: null })]);
-    const o2 = await unk.post({ status: 'Convertido', cz_solicitud_id: 602 });
+    const o2 = await unk.post({ estado: 'Convertido', internal_id: 602 });
     assert.strictEqual(o2.event.processing_status, 'applied');
     assert.ok(unk.repo.processes[0].disbursed_at);
   });
@@ -423,11 +423,11 @@ async function main() {
   await test('#8 #9 no process for the id / no id → unmatched, event kept, no process modified', async () => {
     const { repo, post } = setup([proc({ cz_solicitud_id: 801, ci: 11111111 })]);
     const before = JSON.stringify(repo.processes);
-    const out = await post({ status: 'Convertido', cz_solicitud_id: 802, docNumber: '11111111' });
+    const out = await post({ estado: 'Convertido', internal_id: 802, cedula: '11111111' });
     assert.strictEqual(out.ok, true);
     assert.strictEqual(out.event.processing_status, 'unmatched');
     assert.strictEqual(out.event.error_code, CODES.POSTBACK_CZ_ID_NOT_FOUND);
-    const noId = await post({ status: 'Convertido', docNumber: '11111111' });
+    const noId = await post({ estado: 'Convertido', cedula: '11111111' });
     assert.strictEqual(noId.event.error_code, CODES.POSTBACK_CZ_ID_MISSING);
     assert.strictEqual(JSON.stringify(repo.processes), before);
     assert.strictEqual(repo.events.length, 2);
@@ -439,20 +439,20 @@ async function main() {
 
   await test('#10 #11 #12 repeated / later / out-of-order events never revert GRANTED or move disbursed_at', async () => {
     const { repo, post } = setup([proc({ cz_solicitud_id: 1001 })]);
-    await post({ status: 'Pendiente de Doc', cz_solicitud_id: 1001, event_at: '2026-10-05T10:00:00Z' });
-    const conv = await post({ status: 'Convertido', cz_solicitud_id: 1001, event_at: '2026-10-06T10:00:00Z' });
+    await post({ estado: 'Pendiente de Doc', internal_id: 1001, event_at: '2026-10-05T10:00:00Z' });
+    const conv = await post({ estado: 'Convertido', internal_id: 1001, event_at: '2026-10-06T10:00:00Z' });
     assert.strictEqual(conv.event.processing_status, 'applied');
     const p = repo.processes[0];
     const snapshot = { d: p.disbursed_at, s: p.provider_status, a: p.provider_status_at, g: p.granted_event_id };
     assert.strictEqual(snapshot.d, '2026-10-06T10:00:00.000Z');
 
-    const dup = await post({ status: 'Convertido', cz_solicitud_id: 1001, event_at: '2026-10-06T10:00:00Z' });
+    const dup = await post({ estado: 'Convertido', internal_id: 1001, event_at: '2026-10-06T10:00:00Z' });
     assert.strictEqual(dup.event.processing_status, 'ignored_granted');
-    const earlierConv = await post({ status: 'Convertido', cz_solicitud_id: 1001, event_at: '2026-10-01T10:00:00Z' });
+    const earlierConv = await post({ estado: 'Convertido', internal_id: 1001, event_at: '2026-10-01T10:00:00Z' });
     assert.strictEqual(earlierConv.event.processing_status, 'ignored_granted');
-    const later = await post({ status: 'Desiste', cz_solicitud_id: 1001, event_at: '2026-10-07T10:00:00Z' });
+    const later = await post({ estado: 'Desiste', internal_id: 1001, event_at: '2026-10-07T10:00:00Z' });
     assert.strictEqual(later.event.processing_status, 'ignored_granted');
-    const noTs = await post({ status: 'Rechazado', cz_solicitud_id: 1001 });
+    const noTs = await post({ estado: 'Rechazado', internal_id: 1001 });
     assert.strictEqual(noTs.event.processing_status, 'ignored_granted');
 
     assert.deepStrictEqual(
@@ -464,33 +464,33 @@ async function main() {
 
   await test('Convertido out of order (before older statuses arrive) stays sticky; stale ordering otherwise', async () => {
     const a = setup([proc({ cz_solicitud_id: 1101 })]);
-    await a.post({ status: 'Latente', cz_solicitud_id: 1101, event_at: '2026-10-05T10:00:00Z' });
-    const stale = await a.post({ status: 'Inicial', cz_solicitud_id: 1101, event_at: '2026-10-04T10:00:00Z' });
+    await a.post({ estado: 'Latente', internal_id: 1101, event_at: '2026-10-05T10:00:00Z' });
+    const stale = await a.post({ estado: 'Inicial', internal_id: 1101, event_at: '2026-10-04T10:00:00Z' });
     assert.strictEqual(stale.event.processing_status, 'stale');
     assert.strictEqual(a.repo.processes[0].provider_status, 'Latente');
     assert.strictEqual(a.repo.events.length, 2, 'older event preserved');
-    const conv = await a.post({ status: 'Convertido', cz_solicitud_id: 1101, event_at: '2026-10-03T10:00:00Z' });
+    const conv = await a.post({ estado: 'Convertido', internal_id: 1101, event_at: '2026-10-03T10:00:00Z' });
     assert.strictEqual(conv.event.processing_status, 'applied');
     assert.strictEqual(a.repo.processes[0].provider_status, 'Convertido');
   });
 
   await test('#13 raw event kept (raw text, sanitized payload, invalid ones too)', async () => {
     const { repo, post } = setup([proc({ cz_solicitud_id: 1201 })]);
-    await post({ estado: '  Pendiente de   Evaluación ', czSolicitudId: '1201', docNumber: '12345678', extra: { a: 1 } });
+    await post({ estado: '  Pendiente de   Evaluación ', internal_id: '1201', cedula: '12345678', extra: { a: 1 } });
     const ev = repo.events[0];
     assert.strictEqual(ev.raw_status, 'Pendiente de   Evaluación');
     assert.strictEqual(ev.normalized_status, 'pendiente de evaluacion');
     assert.deepStrictEqual(ev.payload.extra, { a: 1 });
     assert.strictEqual(repo.processes[0].provider_status, 'Pendiente de   Evaluación');
 
-    const bad = await post({ status: 'Estado Nuevo Inventado', cz_solicitud_id: 1201 });
+    const bad = await post({ estado: 'Estado Nuevo Inventado', internal_id: 1201 });
     assert.strictEqual(bad.event.processing_status, 'invalid');
     assert.strictEqual(bad.event.error_code, CODES.POSTBACK_STATUS_UNKNOWN);
     assert.strictEqual(repo.events[1].raw_status, 'Estado Nuevo Inventado');
-    const noId = await post({ status: 'Aprobado' });
+    const noId = await post({ estado: 'Aprobado' });
     assert.strictEqual(noId.event.processing_status, 'unmatched');
     assert.strictEqual(noId.event.error_code, CODES.POSTBACK_CZ_ID_MISSING);
-    const fut = await post({ status: 'Aprobado', cz_solicitud_id: 1201, event_at: '2099-01-01T00:00:00Z' });
+    const fut = await post({ estado: 'Aprobado', internal_id: 1201, event_at: '2099-01-01T00:00:00Z' });
     assert.strictEqual(fut.event.error_code, CODES.POSTBACK_EVENT_AT_INVALID);
     const notObj = await post('Convertido');
     assert.strictEqual(notObj.event.error_code, CODES.POSTBACK_BODY_INVALID);
@@ -503,28 +503,28 @@ async function main() {
       proc({ cz_solicitud_id: 1301, s2_started_at: '2026-09-01T10:00:00.000Z' }),
       proc({ cz_solicitud_id: 1302, s2_started_at: '2026-10-01T10:00:00.000Z' }),
     ]);
-    const exact = await post({ status: 'Aprobado', docNumber: '1.234.567-8', cz_solicitud_id: '1301' });
+    const exact = await post({ estado: 'Aprobado', cedula: '1.234.567-8', internal_id: '1301' });
     assert.strictEqual(exact.event.processing_status, 'applied', 'CI equal after normalization');
     assert.strictEqual(exact.event.match_method, MATCH_METHODS.CZ_SOLICITUD_ID);
     assert.strictEqual(repo.events[0].matched_cz_solicitud_id, 1301);
     assert.strictEqual(repo.processes[1].provider_status, null);
 
     const before = JSON.stringify(repo.processes);
-    const missing = await post({ status: 'Convertido', docNumber: '12345678', cz_solicitud_id: 9999 });
+    const missing = await post({ estado: 'Convertido', cedula: '12345678', internal_id: 9999 });
     assert.strictEqual(missing.event.processing_status, 'unmatched');
     assert.strictEqual(missing.event.error_code, CODES.POSTBACK_CZ_ID_NOT_FOUND);
     assert.strictEqual(JSON.stringify(repo.processes), before);
 
-    const mismatch = await post({ status: 'Convertido', docNumber: '9.999.999-9', cz_solicitud_id: 1301 });
+    const mismatch = await post({ estado: 'Convertido', cedula: '9.999.999-9', internal_id: 1301 });
     assert.strictEqual(mismatch.event.processing_status, 'unmatched');
     assert.strictEqual(mismatch.event.error_code, CODES.POSTBACK_CI_MISMATCH);
     assert.strictEqual(JSON.stringify(repo.processes), before, 'CI mismatch → zero mutation');
     assert.strictEqual(repo.events[repo.events.length - 1].raw_status, 'Convertido', 'event kept');
 
-    const badCi = await post({ status: 'Convertido', docNumber: 'abc', cz_solicitud_id: 1301 });
+    const badCi = await post({ estado: 'Convertido', cedula: 'abc', internal_id: 1301 });
     assert.strictEqual(badCi.event.processing_status, 'invalid');
     assert.strictEqual(badCi.event.error_code, CODES.POSTBACK_CI_INVALID);
-    const badId = await post({ status: 'Aprobado', docNumber: '12345678', cz_solicitud_id: 'abc' });
+    const badId = await post({ estado: 'Aprobado', cedula: '12345678', internal_id: 'abc' });
     assert.strictEqual(badId.event.processing_status, 'invalid');
     assert.strictEqual(badId.event.error_code, CODES.POSTBACK_CZ_ID_INVALID);
     assert.strictEqual(JSON.stringify(repo.processes), before);
@@ -543,7 +543,7 @@ async function main() {
     assert.ok(!stored.includes('abc.def.ghi'));
     assert.ok(!stored.includes('tkn-123456'));
     assert.ok(!stored.includes('zzz'));
-    const huge = sanitizePostbackPayload({ status: 'Aprobado', blob: 'x'.repeat(20000) });
+    const huge = sanitizePostbackPayload({ estado: 'Aprobado', blob: 'x'.repeat(20000) });
     assert.strictEqual(huge._truncated, true);
     const src = readSrc('src/services/elm/postback.js') + readSrc('src/routes/elmPostback.js');
     assert.ok(!/req\.headers|req\.get\(|rawHeaders/.test(src), 'headers never read into storage');
@@ -552,7 +552,7 @@ async function main() {
   await test('persist failure → ok:false (route answers 500); resolve failure keeps event as received', async () => {
     const { repo, post } = setup([proc({ cz_solicitud_id: 1501 })]);
     repo.failRecord = true;
-    const out = await post({ status: 'Aprobado', cz_solicitud_id: 1501 });
+    const out = await post({ estado: 'Aprobado', internal_id: 1501 });
     assert.strictEqual(out.ok, false);
     assert.strictEqual(out.code, CODES.POSTBACK_PERSIST_FAILED);
     assert.strictEqual(repo.processes[0].provider_status, null);
@@ -560,7 +560,7 @@ async function main() {
     repo.resolvePostbackEvent = async () => {
       throw new Error('db down');
     };
-    const out2 = await post({ status: 'Aprobado', cz_solicitud_id: 1501 });
+    const out2 = await post({ estado: 'Aprobado', internal_id: 1501 });
     assert.strictEqual(out2.ok, false);
     assert.strictEqual(repo.events[repo.events.length - 1].processing_status, 'received');
     assert.strictEqual(repo.processes[0].provider_status, null);
@@ -570,10 +570,12 @@ async function main() {
     USERS.set('admin-1', { id: 'admin-1', is_admin: true, active: true });
     const processed = [];
     const spy = { async processElmPostback(b) { processed.push(b); return { ok: true, event: {} }; } };
+    // Same order as app.js: postback router (default token auth, no token configured) before
+    // the global JSON parser and requireAuth.
     const app = express();
+    app.use('/elm/postback', createElmPostbackRouter({ processor: spy, logger: silentLogger }));
     app.use(express.json());
     app.use(requireAuth);
-    app.use('/elm/postback', createElmPostbackRouter({ processor: spy }));
     const okApp = express();
     okApp.use(express.json());
     okApp.use('/elm/postback', createElmPostbackRouter({
@@ -651,17 +653,13 @@ async function main() {
     }
     try {
       const port = await listen(app);
-      const body = { status: 'Convertido', docNumber: '12345678' };
-      const anon = await call(port, {}, body);
-      assert.strictEqual(anon.status, 401);
-      const fakeAuth = await call(port, { Authorization: 'Bearer guessed' }, body);
-      assert.strictEqual(fakeAuth.status, 401);
-      const cron = await call(port, { 'X-Cron-Key': TEST_CRON_SECRET }, body);
-      assert.strictEqual(cron.status, 503);
-      assert.strictEqual(cron.body.error, CODES.POSTBACK_AUTH_NOT_CONFIGURED);
+      const body = { estado: 'Convertido', cedula: '12345678' };
       const cookie = COOKIE_NAME + '=' + encodeURIComponent(createSessionToken('admin-1'));
-      const session = await call(port, { Cookie: cookie }, body);
-      assert.strictEqual(session.status, 503);
+      for (const h of [{}, { Authorization: 'Bearer guessed' }, { 'X-Cron-Key': TEST_CRON_SECRET }, { Cookie: cookie }]) {
+        const r = await call(port, h, body);
+        assert.strictEqual(r.status, 503, 'no token configured → 503 whatever else is presented');
+        assert.strictEqual(r.body.error, CODES.POSTBACK_AUTH_NOT_CONFIGURED);
+      }
       assert.strictEqual(processed.length, 0, 'processor never reached');
 
       const okPort = await listen(okApp);
@@ -673,7 +671,7 @@ async function main() {
       assert.strictEqual(failed.status, 500);
 
       const before = JSON.stringify(guardedRepo.processes);
-      const matchable = { status: 'Convertido', cz_solicitud_id: 1601 };
+      const matchable = { estado: 'Convertido', internal_id: 1601 };
       const rejected = await call(await listen(rejectApp), {}, matchable);
       assert.strictEqual(rejected.status, 401);
       assert.strictEqual(rejected.body.error, 'elm_postback_unauthorized');
@@ -690,9 +688,12 @@ async function main() {
     }
     assert.ok(supabaseCalls.every((t) => t === 'dashboard_users'), 'no ELM DB access: ' + supabaseCalls.join(','));
     const server = readSrc('src/server.js');
-    assert.ok(/app\.use\('\/elm\/postback', createElmPostbackRouter\(\)\)/.test(server));
+    assert.ok(!/elm\/postback|createElmPostbackRouter/.test(server), 'not mounted after requireAuth');
     const appSrc = readSrc('src/app.js');
-    assert.ok(!/elmPostback|elm\/postback/.test(appSrc), 'not mounted before requireAuth');
+    const mountAt = appSrc.indexOf("app.use('/elm/postback', createElmPostbackRouter())");
+    assert.ok(mountAt > 0);
+    assert.ok(mountAt < appSrc.indexOf('app.use(express.json());'), 'before the global JSON parser');
+    assert.ok(mountAt < appSrc.indexOf('app.use(requireAuth);'), 'before requireAuth');
   });
 
   await test('#17 migration: RLS, no policies, anon/authenticated revoked, no DELETE/TRUNCATE', async () => {
@@ -755,7 +756,8 @@ async function main() {
     const ids = Array.from({ length: 50 }, (_, i) => i + 1);
     const cells = await view.cellsForCzIds(ids);
     assert.strictEqual(cells.size, 50);
-    assert.deepStrictEqual(calls, [['proc', 50], ['ctx', 49], ['base', 49]]);
+    // Fase 3B: source is the constant copanel, so the cell no longer resolves provenance bases.
+    assert.deepStrictEqual(calls, [['proc', 50], ['ctx', 49]]);
 
     // Real repository against a counting stub: queries grow with chunks (200), not rows.
     const queries = [];
@@ -790,8 +792,8 @@ async function main() {
     await realView.cellsForCzIds(Array.from({ length: 450 }, (_, i) => i + 1));
     const big = queries.length;
     assert.ok(!queries.some((q) => q.startsWith('EQ:')), 'no per-row eq lookups');
-    assert.strictEqual(small, 4);
-    assert.strictEqual(big, 12, 'ceil(450/200)=3 chunks × 4 lookups');
+    assert.strictEqual(small, 3);
+    assert.strictEqual(big, 9, 'ceil(450/200)=3 chunks × 3 lookups');
 
     const rows = [{ cz_id: 1, resultado: 'granted' }, { cz_id: 2, resultado: 'sin_resultado' }];
     await attachElmCells(rows, view, silentLogger);
@@ -808,8 +810,7 @@ async function main() {
   await test('#19 never sent → disabled "Enviar a ELM" (no handler); known not sendable → no button', async () => {
     const pending = computeElmCell({
       process: null,
-      eligibility: { eligible: false, blockers: [{ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING }, { code: CODES.SOURCE_BRAND_INDETERMINATE }] },
-      sourceBrand: { ok: false, reason: 'base_not_mapped' },
+      eligibility: { eligible: false, blockers: [{ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING }] },
       nowMs: Date.now(),
     });
     assert.strictEqual(pending.kind, 'not_sent');
@@ -822,23 +823,18 @@ async function main() {
     assert.ok(html.includes('title="Integración ELM pendiente de habilitación"'));
     assert.ok(!/data-action/.test(html), 'no click handler wiring');
 
-    const allOk = computeElmCell({ process: null, eligibility: { eligible: true, blockers: [] }, sourceBrand: { ok: true }, nowMs: 0 });
+    const allOk = computeElmCell({ process: null, eligibility: { eligible: true, blockers: [] }, nowMs: 0 });
     assert.strictEqual(allOk.action.show, true);
     assert.strictEqual(allOk.action.enabled, false);
 
     for (const blocker of [CODES.CDV_GRANTED, CODES.MISSING_REQUIRED_FIELDS, CODES.SOLICITUD_NOT_FOUND]) {
-      const c = computeElmCell({ process: null, eligibility: { eligible: false, blockers: [{ code: blocker }] }, sourceBrand: { ok: true }, nowMs: 0 });
+      const c = computeElmCell({ process: null, eligibility: { eligible: false, blockers: [{ code: blocker }] }, nowMs: 0 });
       assert.strictEqual(c.kind, 'not_sendable');
       assert.strictEqual(c.action.show, false);
       assert.ok(!ElmUi.elmCellHtml(c).includes('<button'));
     }
-    const organic = computeElmCell({
-      process: null,
-      eligibility: { eligible: false, blockers: [{ code: CODES.SOURCE_BRAND_INDETERMINATE }] },
-      sourceBrand: { ok: false, reason: 'no_provenance_base' },
-      nowMs: 0,
-    });
-    assert.strictEqual(organic.action.show, false);
+    // Fase 3B: organic leads are no longer blocked by provenance (source is always copanel).
+    assert.strictEqual(CODES.SOURCE_BRAND_INDETERMINATE, undefined);
 
     const dash = readSrc('public/mie-dashboard.js');
     assert.ok(!/preaprobados-elm-send['"]?\]?\s*[,)]|elm-send'\)|data-action="elm-send"|\/elm\/send/.test(dash));

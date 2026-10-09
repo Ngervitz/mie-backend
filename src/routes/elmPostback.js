@@ -3,15 +3,17 @@
 /**
  * POST /elm/postback — ELM status postback receiver.
  *
- * Mandatory order:
- *   request → authenticateElmPostback → parse/validate → persist elm_postback_event
+ * Mounted in app.js BEFORE the global JSON parser and requireAuth (ELM has no dashboard
+ * session). Mandatory order:
+ *   request → authenticateElmPostback → parse JSON → parse/validate → persist elm_postback_event
  *           → exact match by cz_solicitud_id → apply
- * A request that does not authenticate is NOT persisted, NOT matched and modifies nothing.
+ * A request that does not authenticate is not parsed, NOT persisted, NOT matched and modifies
+ * nothing.
  *
- * FAIL-CLOSED: ELM has not confirmed how postbacks authenticate. Until a real
- * authenticateElmPostback is wired, every request gets 503 elm_postback_auth_not_configured
- * before the body is processed, so no external request generates events. Do not replace with
- * a guessed scheme.
+ * Auth (src/lib/elmPostbackToken.js): header X-Credizona-Postback-Token against
+ * ELM_POSTBACK_TOKEN_CURRENT / ELM_POSTBACK_TOKEN_PREVIOUS.
+ *   - no valid token configured → 503 elm_postback_auth_not_configured (fail closed)
+ *   - token missing / malformed / wrong → 401 elm_postback_unauthorized (same body for all)
  *
  * Once authenticated, every stored outcome (applied / stale / ignored_granted / unmatched /
  * invalid) answers 200 with the processing status: the event is persisted, so a retry would
@@ -23,20 +25,22 @@
 
 const express = require('express');
 const { CODES } = require('../services/elm/constants');
+const { createElmPostbackAuthenticator } = require('../lib/elmPostbackToken');
+const defaultLogger = require('../lib/logger');
 
-async function rejectUntilConfigured() {
-  return { ok: false, status: 503, code: CODES.POSTBACK_AUTH_NOT_CONFIGURED };
-}
+const BODY_LIMIT = '64kb';
 
 /**
  * @param {{
- *   authenticateElmPostback?: (req: object) => Promise<{ ok: boolean, status?: number, code?: string }>,
+ *   authenticateElmPostback?: (req: object) => Promise<{ ok: boolean, status?: number, code?: string, reason?: string }>,
  *   processor?: { processElmPostback: (body: unknown) => Promise<object> },
+ *   logger?: { warn: Function },
  * }} [deps]
  */
 function createElmPostbackRouter(deps) {
   const d = deps || {};
-  const authenticateElmPostback = d.authenticateElmPostback || rejectUntilConfigured;
+  const authenticateElmPostback = d.authenticateElmPostback || createElmPostbackAuthenticator();
+  const logger = d.logger || defaultLogger;
   let processor = d.processor || null;
   function getProcessor() {
     if (!processor) {
@@ -47,33 +51,46 @@ function createElmPostbackRouter(deps) {
 
   const router = express.Router();
 
-  router.post('/', async function (req, res) {
+  async function authenticate(req, res, next) {
     let auth;
     try {
       auth = await authenticateElmPostback(req);
     } catch (_) {
       auth = null;
     }
-    if (!auth || auth.ok !== true) {
-      const status = auth && Number.isInteger(auth.status) ? auth.status : 503;
-      return res.status(status).json({
-        ok: false,
-        error: (auth && auth.code) || CODES.POSTBACK_AUTH_NOT_CONFIGURED,
-      });
-    }
-    try {
-      const out = await getProcessor().processElmPostback(req.body);
-      if (!out.ok) return res.status(500).json({ ok: false, error: out.code });
-      return res.status(200).json({ ok: true, data: out.event });
-    } catch (_) {
-      return res.status(500).json({ ok: false, error: CODES.POSTBACK_PERSIST_FAILED });
-    }
-  });
+    if (auth && auth.ok === true) return next();
+    const status = auth && (auth.status === 401 || auth.status === 503) ? auth.status : 503;
+    const code = status === 401 ? CODES.POSTBACK_UNAUTHORIZED : CODES.POSTBACK_AUTH_NOT_CONFIGURED;
+    logger.warn('elm postback auth rejected', { status: status, reason: (auth && auth.reason) || null });
+    return res.status(status).json({ ok: false, error: code });
+  }
+
+  router.post(
+    '/',
+    authenticate,
+    express.json({ limit: BODY_LIMIT }),
+    async function handlePostback(req, res) {
+      try {
+        const out = await getProcessor().processElmPostback(req.body);
+        if (!out.ok) return res.status(500).json({ ok: false, error: out.code });
+        return res.status(200).json({ ok: true, data: out.event });
+      } catch (_) {
+        return res.status(500).json({ ok: false, error: CODES.POSTBACK_PERSIST_FAILED });
+      }
+    },
+    // eslint-disable-next-line no-unused-vars
+    function postbackBodyError(err, req, res, next) {
+      if (err && err.type === 'entity.too.large') {
+        return res.status(413).json({ ok: false, error: CODES.POSTBACK_BODY_TOO_LARGE });
+      }
+      return res.status(400).json({ ok: false, error: CODES.POSTBACK_BODY_INVALID });
+    },
+  );
 
   return router;
 }
 
 module.exports = {
+  BODY_LIMIT,
   createElmPostbackRouter,
-  rejectUntilConfigured,
 };

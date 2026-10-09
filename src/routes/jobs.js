@@ -41,6 +41,10 @@ const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
 const { runMiplanDebtOptinSync } = require('../jobs/miplanDebtOptinSync');
 const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
 const {
+  getDefaultProviderFallbackWorker,
+} = require('../services/providerFallback/worker');
+const { requireAdmin } = require('../middleware/requireDashboardPermission');
+const {
   runRechazadosSurveyInviteDue,
 } = require('../jobs/rechazadosSurveyInviteDue');
 const {
@@ -1432,6 +1436,27 @@ router.post('/run-pre-cutoff-catchup-survey-invite', async (req, res) => {
     return res.status(200).json(result);
   } catch (err) {
     logger.error('pre_cutoff_catchup_survey_invite failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
+  }
+});
+
+/**
+ * Provider fallback worker (Fase 3A). Auth: X-Cron-Key or admin session (preaprobados section).
+ * Cadence: cron-job.org → POST /jobs/run-provider-fallback-worker (every minute).
+ * PROVIDER_FALLBACK_WORKER_ENABLED off → { skipped: 'worker_disabled' }.
+ */
+router.post('/run-provider-fallback-worker', requireAdmin, async (req, res) => {
+  try {
+    const result = await getDefaultProviderFallbackWorker().runOnce({ trigger: 'cron' });
+    if (!result.skipped) logger.info('provider_fallback_worker finished', result);
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('provider_fallback_worker failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({
