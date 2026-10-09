@@ -27,6 +27,7 @@ const {
   SEQUENCE_REASONS,
 } = require('../lib/rejectedSurveyInviteEvaluate');
 const eligibilityIo = require('../lib/rejectedSurveyInviteEligibility');
+const { loadElmSurveyBlocksByCi } = require('../lib/rejectedSurveyInviteElmGate');
 const {
   materializeRejectedSurveyInvite,
 } = require('../lib/rejectedSurveyInviteMaterialize');
@@ -90,6 +91,7 @@ function emptyCounters() {
     suppressed: 0,
     config_missing: 0,
     sequence_complete: 0,
+    elm_in_progress: 0,
     errors: 0,
   };
 }
@@ -127,6 +129,7 @@ function bumpAlreadyAttempted(counters, reason) {
  *   cutoffRaw?: unknown,
  *   cutoffMs?: number,
  *   env?: object,
+ *   loadElmBlocks?: Function,
  * }} [opts]
  */
 async function runRechazadosSurveyInviteDue(opts) {
@@ -225,6 +228,9 @@ async function runRechazadosSurveyInviteDue(opts) {
       .select('ci')
       .in('ci', candidateCis);
     if (encErr) throw new Error('job encuestas: ' + encErr.message);
+
+    const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
+    const elmBlocks = await loadElmBlocks(supabase, candidateCis);
     const encuestaCis = new Set(
       (encuestas || []).map(function (e) {
         return Number(e.ci);
@@ -342,8 +348,13 @@ async function runRechazadosSurveyInviteDue(opts) {
           attemptsByStep: attemptsByStep,
           publicBaseUrlConfigured: Boolean(publicBase),
           normalCutoff: normalCutoff,
+          elmBlocked: elmBlocks.has(ci),
         });
 
+        if (decision.result === REASONS.ELM_IN_PROGRESS) {
+          counters.elm_in_progress += 1;
+          continue;
+        }
         if (decision.result === SEQUENCE_REASONS.NOT_DUE) {
           counters.not_due += 1;
           continue;

@@ -19,11 +19,17 @@ const SOLICITUD_SELECT =
 
 const GRANTED_SELECT = 'cz_id, ci, monto_otorgado, updated_at_src, synced_at';
 
-/** List/cell projection: Fase 1A columns only (no request/response bodies). */
+/**
+ * List/cell/KPI projection: no request/response bodies. Result messages are ELM's short
+ * documented answers (needed to tell a definitive rejection from an ambiguous one).
+ */
 const PROCESS_LIST_SELECT =
-  'id, cz_solicitud_id, ci, created_at, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, s2_started_at, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount';
+  'id, cz_solicitud_id, ci, trigger_origin, created_at, updated_at, s1_status, s1_started_at, s1_completed_at, s1_lease_expires_at, s1_result_message, s2_status, s2_started_at, s2_completed_at, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount, ops_resolution_code, ops_resolved_at';
+
+const CZ_STATE_TABLE = 'provider_cz_state';
 
 const IN_CHUNK = 200;
+const PAGE_SIZE = 1000;
 
 function chunks(ids) {
   const out = [];
@@ -256,6 +262,38 @@ function createElmRepository(supabaseOverride) {
     return out;
   }
 
+  /** Every process (list projection), optionally only the given trigger origins. */
+  async function listAllProcesses(opts) {
+    const origins = opts && Array.isArray(opts.triggerOrigins) ? opts.triggerOrigins : null;
+    const all = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      let q = db().from(PROCESS_TABLE).select(PROCESS_LIST_SELECT);
+      if (origins) q = q.in('trigger_origin', origins);
+      const { data, error } = await q
+        .order('created_at', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) throw rpcError(PROCESS_TABLE + ' read', error);
+      const rows = data || [];
+      all.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+    }
+    return all;
+  }
+
+  /** C1 projected CZ estado per solicitud (automatic circuit only). @returns {Promise<Map<number, number>>} */
+  async function getProjectedEstadosByCzIds(czIds) {
+    const out = new Map();
+    for (const chunk of chunks(uniqueIds(czIds))) {
+      const { data, error } = await db()
+        .from(CZ_STATE_TABLE)
+        .select('cz_solicitud_id, projected_estado')
+        .in('cz_solicitud_id', chunk);
+      if (error) throw rpcError(CZ_STATE_TABLE + ' read', error);
+      for (const r of data || []) out.set(Number(r.cz_solicitud_id), Number(r.projected_estado));
+    }
+    return out;
+  }
+
   async function recordPostbackEvent(ev) {
     const { data, error } = await db().rpc('elm_postback_record_event', {
       p_raw_status: ev.rawStatus,
@@ -310,6 +348,8 @@ function createElmRepository(supabaseOverride) {
     loadSolicitudContexts,
     resolveBaseLabels,
     getProcessesByCzIds,
+    listAllProcesses,
+    getProjectedEstadosByCzIds,
     recordPostbackEvent,
     resolvePostbackEvent,
     getPostbackEvent,
@@ -321,5 +361,6 @@ module.exports = {
   POSTBACK_EVENTS_TABLE,
   SOLICITUD_SELECT,
   PROCESS_LIST_SELECT,
+  CZ_STATE_TABLE,
   createElmRepository,
 };

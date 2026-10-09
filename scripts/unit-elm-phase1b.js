@@ -798,7 +798,8 @@ async function main() {
     const rows = [{ cz_id: 1, resultado: 'granted' }, { cz_id: 2, resultado: 'sin_resultado' }];
     await attachElmCells(rows, view, silentLogger);
     assert.strictEqual(rows[0].resultado, 'granted');
-    assert.strictEqual(rows[1].elm.label, 'Latente');
+    assert.strictEqual(rows[1].elm.label, 'Preaprobado ELM');
+    assert.strictEqual(rows[1].elm.provider_status, 'Latente');
     const broken = [{ cz_id: 3, resultado: 'granted' }];
     await attachElmCells(broken, { async cellsForCzIds() { throw new Error('relation missing'); } }, silentLogger);
     assert.strictEqual(broken[0].elm.kind, 'unavailable');
@@ -807,25 +808,49 @@ async function main() {
     assert.ok(/await attachElmCells\(assembled\.rows, getElmListView\(\), logger\)/.test(route));
   });
 
-  await test('#19 never sent → disabled "Enviar a ELM" (no handler); known not sendable → no button', async () => {
+  await test('#19 "Enviar a ELM" only where allowed, enabled only when ready + eligible; not sendable → no button', async () => {
+    const notReady = { ready: false, reasons: [CODES.ACTIVITY_TYPE_MAPPING_MISSING] };
+    const ready = { ready: true, reasons: [] };
+
+    const preaprobadosCell = computeElmCell({ process: null, eligibility: { eligible: true, blockers: [] }, nowMs: 0 });
+    assert.strictEqual(preaprobadosCell.kind, 'not_sent');
+    assert.strictEqual(preaprobadosCell.action.show, false, 'no send outside Rechazados');
+    assert.ok(!ElmUi.elmCellHtml(preaprobadosCell).includes('<button'));
+
     const pending = computeElmCell({
       process: null,
       eligibility: { eligible: false, blockers: [{ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING }] },
       nowMs: Date.now(),
+      allowSend: true,
+      sendReadiness: notReady,
     });
     assert.strictEqual(pending.kind, 'not_sent');
     assert.strictEqual(pending.action.show, true);
     assert.strictEqual(pending.action.enabled, false);
+    assert.strictEqual(pending.action.reason, CODES.ACTIVITY_TYPE_MAPPING_MISSING);
     assert.strictEqual(pending.action.hint, SEND_PENDING_HINT);
     const html = ElmUi.elmCellHtml(pending);
     assert.ok(html.includes('Enviar a ELM'));
     assert.ok(/ disabled /.test(html));
     assert.ok(html.includes('title="Integración ELM pendiente de habilitación"'));
-    assert.ok(!/data-action/.test(html), 'no click handler wiring');
+    assert.ok(!/data-action/.test(html), 'disabled button has no click wiring');
 
-    const allOk = computeElmCell({ process: null, eligibility: { eligible: true, blockers: [] }, nowMs: 0 });
-    assert.strictEqual(allOk.action.show, true);
-    assert.strictEqual(allOk.action.enabled, false);
+    const allOkNotReady = computeElmCell({
+      process: null, eligibility: { eligible: true, blockers: [] }, nowMs: 0, allowSend: true, sendReadiness: notReady,
+    });
+    assert.strictEqual(allOkNotReady.action.show, true);
+    assert.strictEqual(allOkNotReady.action.enabled, false);
+
+    const enabled = computeElmCell({
+      process: null, czId: 77, eligibility: { eligible: true, blockers: [] }, nowMs: 0, allowSend: true, sendReadiness: ready,
+    });
+    assert.strictEqual(enabled.action.enabled, true);
+    assert.strictEqual(enabled.action.hint, null);
+    assert.strictEqual(enabled.cz_solicitud_id, 77);
+    const enabledHtml = ElmUi.elmCellHtml(enabled);
+    assert.ok(enabledHtml.includes('data-action="elm-send"'));
+    assert.ok(enabledHtml.includes('data-cz-id="77"'));
+    assert.ok(!/ disabled /.test(enabledHtml));
 
     for (const blocker of [CODES.CDV_GRANTED, CODES.MISSING_REQUIRED_FIELDS, CODES.SOLICITUD_NOT_FOUND]) {
       const c = computeElmCell({ process: null, eligibility: { eligible: false, blockers: [{ code: blocker }] }, nowMs: 0 });
@@ -837,38 +862,47 @@ async function main() {
     assert.strictEqual(CODES.SOURCE_BRAND_INDETERMINATE, undefined);
 
     const dash = readSrc('public/mie-dashboard.js');
-    assert.ok(!/preaprobados-elm-send['"]?\]?\s*[,)]|elm-send'\)|data-action="elm-send"|\/elm\/send/.test(dash));
+    assert.strictEqual((dash.match(/action === 'elm-send'/g) || []).length, 1, 'single send handler');
+    assert.strictEqual((dash.match(/\/elm\/send/g) || []).length, 1);
+    assert.ok(dash.includes("API + '/rechazados/' + encodeURIComponent(ci) + '/elm/send'"));
+    assert.ok(!/\/elm\/evaluate|\/elm\/refer/.test(dash), 'dashboard never calls S1/S2 routes directly');
+    assert.ok(!/CONSULTAR ELM|Consultar ELM/.test(dash), 'no "Consultar ELM" button');
+    assert.ok(dash.includes('window.confirm('), 'send asks for confirmation');
     assert.ok(dash.includes('<th>ELM</th>'));
     const htmlPage = readSrc('public/mie-dashboard.html');
     assert.ok(htmlPage.indexOf('elm-ui-helpers.js') !== -1);
     assert.ok(htmlPage.indexOf('elm-ui-helpers.js') < htmlPage.indexOf('mie-dashboard.js'));
   });
 
-  await test('#20 #21 #22 provider status text; Convertido shown "Otorgado" (raw kept); referred ≠ granted', async () => {
+  await test('#20 #21 #22 referred = "Preaprobado ELM" (raw status kept); only disbursed = "Otorgado ELM"', async () => {
     const nowMs = Date.now();
     const st = computeElmCell({ process: proc({ cz_solicitud_id: 1, provider_status: 'Pendiente de Doc' }), nowMs });
-    assert.strictEqual(st.kind, 'provider_status');
-    assert.strictEqual(st.label, 'Pendiente de Doc');
-    assert.ok(ElmUi.elmCellHtml(st).includes('Pendiente de Doc'));
+    assert.strictEqual(st.kind, 'referred');
+    assert.strictEqual(st.label, 'Preaprobado ELM');
+    assert.strictEqual(st.provider_status, 'Pendiente de Doc');
+    const sth = ElmUi.elmCellHtml(st);
+    assert.ok(sth.includes('Preaprobado ELM'));
+    assert.ok(sth.includes('Estado ELM: Pendiente de Doc'));
 
     const g = computeElmCell({
       process: proc({ cz_solicitud_id: 1, provider_status: 'Convertido', disbursed_at: '2026-10-06T10:00:00Z' }),
       nowMs,
     });
     assert.strictEqual(g.kind, 'granted');
-    assert.strictEqual(g.label, 'Otorgado');
+    assert.strictEqual(g.label, 'Otorgado ELM');
     assert.strictEqual(g.granted_elm, true);
     assert.strictEqual(g.provider_status, 'Convertido');
     const gh = ElmUi.elmCellHtml(g);
-    assert.ok(gh.includes('>Otorgado<'));
+    assert.ok(gh.includes('>Otorgado ELM<'));
     assert.ok(gh.includes('Estado ELM: Convertido'));
 
     const r = computeElmCell({ process: proc({ cz_solicitud_id: 1 }), nowMs });
     assert.strictEqual(r.kind, 'referred');
-    assert.strictEqual(r.label, 'Enviado');
+    assert.strictEqual(r.label, 'Preaprobado ELM');
     assert.strictEqual(r.granted_elm, false);
     assert.ok(!ElmUi.elmCellHtml(r).includes('Otorgado'));
     const unk = computeElmCell({ process: proc({ cz_solicitud_id: 1, s2_status: 'unknown' }), nowMs });
+    assert.strictEqual(unk.kind, 'review');
     assert.strictEqual(unk.granted_elm, false);
     const xss = ElmUi.elmCellHtml(computeElmCell({ process: proc({ cz_solicitud_id: 1, provider_status: '<img src=x>' }), nowMs }));
     assert.ok(!xss.includes('<img'));
@@ -922,7 +956,7 @@ async function main() {
     const orch = createElmOrchestrator({ repository: repo, config: EMPTY_CONFIG, logger: silentLogger });
     const out = await orch.getElmStatus('1001');
     assert.strictEqual(out.ok, true);
-    assert.strictEqual(out.data.cell.label, 'Otorgado');
+    assert.strictEqual(out.data.cell.label, 'Otorgado ELM');
     assert.strictEqual(out.data.process.granted_elm, true);
     assert.strictEqual(out.data.process.disbursed_amount, null);
     assert.strictEqual(out.data.process.last_postback_at, '2026-10-06T10:00:01Z');

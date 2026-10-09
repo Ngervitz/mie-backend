@@ -74,6 +74,7 @@ const {
 const {
   runRechazadosSurveyInviteDue,
 } = require('../src/jobs/rechazadosSurveyInviteDue');
+const { ELM_GATE_TABLES } = require('../src/lib/rejectedSurveyInviteElmGate');
 
 const CI = 42424242;
 const T0 = new Date('2026-09-01T12:00:00.000Z');
@@ -696,6 +697,24 @@ function makeMaterializeSb(opts) {
       };
     },
     from: function (table) {
+      if (ELM_GATE_TABLES.includes(table)) {
+        const elmRows = (o.elmRows && o.elmRows[table]) || [];
+        const chain = {
+          select: function () {
+            return chain;
+          },
+          in: function () {
+            return chain;
+          },
+          is: function () {
+            return chain;
+          },
+          then: function (resolve, reject) {
+            return Promise.resolve({ data: elmRows, error: null }).then(resolve, reject);
+          },
+        };
+        return chain;
+      }
       if (table === 'cz_funnel_solicitud_estados') {
         return {
           select: function () {

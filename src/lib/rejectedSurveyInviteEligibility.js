@@ -15,6 +15,7 @@ const {
   nullableTrimmedText,
 } = require('./rejectedSurveyInvite');
 const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken');
+const { loadElmSurveyBlocksByCi } = require('./rejectedSurveyInviteElmGate');
 
 function getWave1CampaignId() {
   const fromEnv =
@@ -240,6 +241,12 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
     priorRecipient = prior || null;
   }
 
+  let elmBlocked = false;
+  if (last && solicitud) {
+    const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
+    elmBlocked = (await loadElmBlocks(supabase, [ci])).has(ci);
+  }
+
   return evaluateRejectedSurveyInviteEligibility({
     ci: ci,
     campaignId: campaignId,
@@ -249,6 +256,7 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
     hasEncuesta: hasEncuesta,
     isSuppressed: isSuppressed,
     priorRecipient: priorRecipient,
+    elmBlocked: elmBlocked,
   });
 }
 
@@ -386,6 +394,15 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     isSurveyInviteSequenceComplete,
     SEQUENCE_REASONS,
   } = require('./rejectedSurveyInviteSequence');
+
+  // Display only: materialization re-checks the ELM gate and fails closed.
+  let elmBlocks = new Map();
+  try {
+    const loadElmBlocks = (opts && opts.loadElmBlocks) || loadElmSurveyBlocksByCi;
+    elmBlocks = await loadElmBlocks(supabase, cis);
+  } catch (_) {
+    elmBlocks = new Map();
+  }
 
   return list.map(function (row) {
     const ci = Number(row.ci);
@@ -536,6 +553,7 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       hasEncuesta: encuestaCis.has(ci),
       isSuppressed: emailNorm ? suppressed.has(emailNorm) : false,
       priorRecipient: priorRecipient,
+      elmBlocked: elmBlocks.has(ci),
     });
     return Object.assign({}, row, {
       survey_invite: {

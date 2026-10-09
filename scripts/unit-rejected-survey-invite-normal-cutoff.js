@@ -356,6 +356,9 @@ assert.strictEqual(
         in: function () {
           return chain;
         },
+        is: function () {
+          return chain;
+        },
         then: function (resolve, reject) {
           return Promise.resolve(result).then(resolve, reject);
         },

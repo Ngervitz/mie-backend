@@ -16,6 +16,11 @@
 
 const { S1, S2 } = require('../elm/constants');
 const {
+  classifyElmProcess,
+  readPostReferralRejectionStatuses,
+} = require('../elm/classification');
+const { computeElmKpis } = require('../elm/kpis');
+const {
   REVIEW_PRIORITIES,
   REVIEW_CZ_OUTCOMES,
   PROCESS_CZ_OUTCOMES,
@@ -252,6 +257,8 @@ function createElmOpsService(deps) {
   const c1StaleHours =
     d.c1StaleHours ||
     require('../providerFallback/config').readProviderFallbackConfig().activeReferralStaleHours;
+  const postReferralStatuses =
+    d.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
 
   async function listOpenProcesses(limit) {
     const nowMs = now();
@@ -450,6 +457,106 @@ function createElmOpsService(deps) {
     return repo.resolveCzConflict({ conflictId: conflictId, note: note, actorUserId: actorUserId });
   }
 
+  async function classifiedProcesses() {
+    const rows = await elmRepo.listAllProcesses();
+    const automatic = rows
+      .filter(function (p) { return p.trigger_origin === 'cz_automatic'; })
+      .map(function (p) { return Number(p.cz_solicitud_id); });
+    const projectedByCz = automatic.length
+      ? await elmRepo.getProjectedEstadosByCzIds(automatic)
+      : new Map();
+    return { rows: rows, projectedByCz: projectedByCz };
+  }
+
+  /** ELM KPIs (flow vs current state) segmented by trigger_origin. Window on process start. */
+  async function kpis(query) {
+    const q = query || {};
+    const fromMs = q.from ? Date.parse(String(q.from)) : NaN;
+    const toMs = q.to ? Date.parse(String(q.to)) : NaN;
+    if ((q.from && !Number.isFinite(fromMs)) || (q.to && !Number.isFinite(toMs))) return null;
+    const { rows, projectedByCz } = await classifiedProcesses();
+    return computeElmKpis(rows, {
+      from: q.from ? new Date(fromMs).toISOString() : null,
+      to: q.to ? new Date(toMs).toISOString() : null,
+      nowMs: now(),
+      projectedByCz: projectedByCz,
+      postReferralRejectionStatuses: postReferralStatuses,
+    });
+  }
+
+  /**
+   * Seguimiento operativo: everything that is neither in Preaprobados nor in Rechazados yet.
+   *   in_evaluation / review   any origin (S1 favorable waiting S2, in flight, uncertain,
+   *                            technical error, negative answer not confirmed as definitive)
+   *   rejected_pending_cz      automatic definitive rejection CZ has not reflected as 3 yet
+   *   queued                   automatic fallback request without ELM process yet
+   */
+  async function followup(limit) {
+    const nowMs = now();
+    const max = Math.min(limit || 200, 200);
+    const { rows, projectedByCz } = await classifiedProcesses();
+    const items = [];
+    const rejectedAutomatic = [];
+    for (const p of rows) {
+      const czId = Number(p.cz_solicitud_id);
+      const c = classifyElmProcess(p, {
+        nowMs: nowMs,
+        postReferralRejectionStatuses: postReferralStatuses,
+        projectedEstado: projectedByCz.has(czId) ? projectedByCz.get(czId) : null,
+      });
+      const since = p.updated_at || p.created_at;
+      const item = {
+        kind: c.state,
+        cz_solicitud_id: czId,
+        ci: p.ci != null ? String(p.ci) : null,
+        trigger_origin: p.trigger_origin || null,
+        process_id: p.id,
+        state: c.state,
+        label: c.detail_label,
+        provider_status: p.provider_status || null,
+        since: since || null,
+        age_hours: ageHours(since, nowMs),
+      };
+      if (c.state === 'in_evaluation' || c.state === 'review') items.push(item);
+      else if (c.state === 'rejected' && p.trigger_origin === 'cz_automatic') {
+        rejectedAutomatic.push(item);
+      }
+    }
+    if (rejectedAutomatic.length) {
+      const reflected = await repo.czIdsWithEstado3(
+        rejectedAutomatic.map(function (i) { return i.cz_solicitud_id; }),
+      );
+      for (const i of rejectedAutomatic) {
+        if (reflected.has(i.cz_solicitud_id)) continue;
+        items.push(Object.assign({}, i, {
+          kind: 'rejected_pending_cz',
+          label: i.label + ' · pendiente de reflejo en Credizona (estado 3)',
+        }));
+      }
+    }
+    const withProcess = new Set(rows.map(function (p) { return Number(p.cz_solicitud_id); }));
+    const queued = await repo.listOpenFallbackRequests(max);
+    for (const r of queued) {
+      if (withProcess.has(Number(r.cz_solicitud_id))) continue;
+      items.push({
+        kind: 'queued',
+        cz_solicitud_id: Number(r.cz_solicitud_id),
+        ci: r.ci != null ? String(r.ci) : null,
+        trigger_origin: 'cz_automatic',
+        process_id: null,
+        state: 'in_evaluation',
+        label: 'En cola para ELM (circuito automático)',
+        provider_status: null,
+        since: r.created_at || null,
+        age_hours: ageHours(r.created_at, nowMs),
+      });
+    }
+    items.sort(function (a, b) {
+      return String(a.since || '').localeCompare(String(b.since || ''));
+    });
+    return items.slice(0, max);
+  }
+
   async function listAuditEvents(entityType, entityId) {
     if (!['elm_process', 'review_case', 'cz_conflict'].includes(entityType) || !isUuid(entityId)) return null;
     return repo.listAuditEvents(entityType, entityId);
@@ -470,6 +577,8 @@ function createElmOpsService(deps) {
     listC1ActiveReferrals,
     listCzConflicts,
     resolveCzConflict,
+    kpis,
+    followup,
   };
 }
 

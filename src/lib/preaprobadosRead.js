@@ -75,7 +75,7 @@ function parseResultadoQuery(raw) {
 function parseEstadoQuery(raw) {
   if (raw == null || String(raw).trim() === '') return { ok: true, value: null };
   const n = Number(String(raw).trim());
-  if (!Number.isInteger(n) || n < 1 || n > 11) return { ok: false };
+  if (!Number.isInteger(n) || n < 1 || n > 16) return { ok: false };
   return { ok: true, value: n };
 }
 
@@ -701,6 +701,9 @@ module.exports = {
   buildCohortByCzId,
   isGrantedForSolicitud,
   cohortInProgress,
+  currentEstadoLabelByCzId,
+  matchesSearch,
+  inDateRange,
   assemblePreaprobadosList,
   assemblePreaprobadosDetail,
   fetchPreaprobadosListBundle,

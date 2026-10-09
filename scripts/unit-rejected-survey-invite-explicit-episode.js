@@ -97,6 +97,12 @@ function makeEligibilitySupabase(opts) {
           q._filters[col] = val;
           return q;
         },
+        in: function () {
+          return q;
+        },
+        is: function () {
+          return q;
+        },
         order: function () {
           return q;
         },

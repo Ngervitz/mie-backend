@@ -9,15 +9,20 @@ const express = require('express');
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
 const {
-  parseResultadoQuery,
   parseEstadoQuery,
   parseIsoQuery,
   parsePagination,
-  assemblePreaprobadosList,
   assemblePreaprobadosDetail,
   fetchPreaprobadosListBundle,
   fetchPreaprobadosDetailBundle,
 } = require('../lib/preaprobadosRead');
+const {
+  parseProveedorQuery,
+  parseCombinedResultadoQuery,
+  assembleCombinedPreaprobadosList,
+  fetchElmCohortBundle,
+  fetchElmCohortDetail,
+} = require('../lib/preaprobadosElmCohort');
 const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
 const { createElmOpsRouter } = require('./elmOps');
 const { createElmRepository } = require('../services/elm/repository');
@@ -25,12 +30,31 @@ const { createElmListView, attachElmCells } = require('../services/elm/listView'
 
 const router = express.Router();
 
+let elmRepository = null;
+function getElmRepository() {
+  if (!elmRepository) elmRepository = createElmRepository(supabase);
+  return elmRepository;
+}
+
 let elmListView = null;
 function getElmListView() {
   if (!elmListView) {
-    elmListView = createElmListView({ repository: createElmRepository(supabase) });
+    elmListView = createElmListView({ repository: getElmRepository() });
   }
   return elmListView;
+}
+
+/** ELM cohort never breaks the CDV list: on any error the list is CDV only. */
+async function fetchElmCohortSoft() {
+  try {
+    const out = await fetchElmCohortBundle(supabase, { elmRepository: getElmRepository() });
+    return Object.assign({ available: true }, out);
+  } catch (err) {
+    logger.warn('GET /preaprobados elm cohort unavailable', {
+      error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+    });
+    return { available: false, elmCohort: new Map(), elmSolicitudRows: [], elmHistoricoRows: [] };
+  }
 }
 
 router.use('/elm-ops', createElmOpsRouter());
@@ -49,9 +73,13 @@ router.get('/', async function getPreaprobadosList(req, res) {
   if (!estadoP.ok) {
     return res.status(400).json({ error: 'estado inválido' });
   }
-  const resultadoP = parseResultadoQuery(req.query && req.query.resultado);
+  const resultadoP = parseCombinedResultadoQuery(req.query && req.query.resultado);
   if (!resultadoP.ok) {
     return res.status(400).json({ error: 'resultado inválido' });
+  }
+  const proveedorP = parseProveedorQuery(req.query && req.query.proveedor);
+  if (!proveedorP.ok) {
+    return res.status(400).json({ error: 'proveedor inválido' });
   }
   const pageP = parsePagination(
     req.query && req.query.limit,
@@ -68,16 +96,22 @@ router.get('/', async function getPreaprobadosList(req, res) {
 
   try {
     const bundle = await fetchPreaprobadosListBundle(supabase);
-    const assembled = assemblePreaprobadosList({
+    const elm = await fetchElmCohortSoft();
+    const assembled = assembleCombinedPreaprobadosList({
       estado8Rows: bundle.estado8Rows,
       currentEstado8Solicitudes: bundle.currentEstado8Solicitudes,
       solicitudRows: bundle.solicitudRows,
       grantedRows: bundle.grantedRows,
       historicoRows: bundle.historicoRows,
+      elmCohort: elm.elmCohort,
+      elmSolicitudRows: elm.elmSolicitudRows,
+      elmHistoricoRows: elm.elmHistoricoRows,
       from: fromP.value,
       to: toP.value,
       estado: estadoP.value,
-      resultado: resultadoP.value,
+      resultadoCdv: resultadoP.cdv,
+      resultadoElm: resultadoP.elm,
+      proveedor: proveedorP.value,
       q: q,
       limit: pageP.limit,
       offset: pageP.offset,
@@ -88,6 +122,8 @@ router.get('/', async function getPreaprobadosList(req, res) {
       data: {
         cohort: assembled.cohort,
         kpis: assembled.kpis,
+        kpis_elm: assembled.kpis_elm,
+        elm_available: elm.available,
         rows: assembled.rows,
         total: assembled.total,
         limit: assembled.limit,
@@ -112,6 +148,19 @@ router.get('/:czId', async function getPreaprobadosDetail(req, res) {
       if (bundle.reason === 'invalid_cz_id') {
         return res.status(400).json({ error: 'cz_id inválido' });
       }
+      if (bundle.reason === 'not_in_cohort' || bundle.reason === 'not_found') {
+        let elmDetail = null;
+        try {
+          elmDetail = await fetchElmCohortDetail(supabase, Number(czRaw), {
+            elmRepository: getElmRepository(),
+          });
+        } catch (err) {
+          logger.warn('GET /preaprobados/:czId elm detail unavailable', {
+            error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+          });
+        }
+        if (elmDetail) return res.json({ ok: true, data: elmDetail });
+      }
       return res.status(404).json({ error: 'No encontrado' });
     }
     const detail = assemblePreaprobadosDetail({
@@ -124,6 +173,21 @@ router.get('/:czId', async function getPreaprobadosDetail(req, res) {
     });
     if (!detail) {
       return res.status(404).json({ error: 'No encontrado' });
+    }
+    detail.proveedor = 'cdv';
+    detail.elm_member = null;
+    try {
+      const elmDetail = await fetchElmCohortDetail(supabase, bundle.czId, {
+        elmRepository: getElmRepository(),
+      });
+      if (elmDetail) {
+        detail.proveedor = 'cdv_elm';
+        detail.elm_member = elmDetail.elm_member;
+      }
+    } catch (err) {
+      logger.warn('GET /preaprobados/:czId elm membership unavailable', {
+        error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+      });
     }
     return res.json({ ok: true, data: detail });
   } catch (err) {

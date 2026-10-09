@@ -5403,6 +5403,33 @@
 #mie-dashboard-app .ga4-table.rechazados-table th.rechazados-col-retry {
   line-height: 1.2;
 }
+#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-elm {
+  width: 9%;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.25;
+}
+#mie-dashboard-app .rechazados-elm-block {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+#mie-dashboard-app .rechazados-elm-msg {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: var(--surface-2);
+}
+#mie-dashboard-app .rechazados-elm-msg.is-ok {
+  background: var(--accent-success-soft);
+  color: var(--accent-success);
+}
+#mie-dashboard-app .rechazados-elm-msg.is-warn {
+  color: #fbbf24;
+}
+#mie-dashboard-app .rechazados-elm-msg.is-error {
+  color: #f87171;
+}
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-ver {
   width: 5%;
   text-align: center;
@@ -6013,6 +6040,34 @@
 #mie-dashboard-app .preaprobados-elm.is-granted {
   background: rgba(34, 197, 94, 0.15);
   color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-elm.is-referred,
+#mie-dashboard-app .preaprobados-result.is-referred-elm {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+#mie-dashboard-app .preaprobados-result.is-granted-elm {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-elm.is-rejected {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+#mie-dashboard-app .preaprobados-elm.is-review,
+#mie-dashboard-app .preaprobados-elm.is-in_evaluation {
+  background: rgba(234, 179, 8, 0.12);
+  color: #fde68a;
+}
+#mie-dashboard-app .preaprobados-elm.is-other {
+  font-style: italic;
+}
+#mie-dashboard-app .preaprobados-kpi-scope {
+  margin: 10px 0 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 #mie-dashboard-app .preaprobados-elm-send[disabled] {
   opacity: 0.55;

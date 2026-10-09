@@ -27,6 +27,7 @@ const {
   putPreferredAttempt,
   buildHistoricalPilotAttemptsByStep,
 } = require('./rejectedSurveyInviteHistorical');
+const { loadElmSurveyBlocksByCi } = require('./rejectedSurveyInviteElmGate');
 
 function normalizeEmail(email) {
   return String(email || '')
@@ -172,6 +173,9 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
     }
   }
 
+  const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
+  const elmBlocks = await loadElmBlocks(supabase, cis);
+
   const campaignIds = [
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[1],
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2],
@@ -281,6 +285,7 @@ async function runHistoricalSurveyInvitePilot(supabase, opts) {
       hasEncuesta: encuestaCis.has(ci),
       isSuppressed: emailNorm ? suppressed.has(emailNorm) : false,
       priorRecipient: attemptsByStep[dueStepGuess] || null,
+      elmBlocked: elmBlocks.has(ci),
     });
 
     const decision = decideHistoricalSurveyInviteAction({

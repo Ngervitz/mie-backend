@@ -64,8 +64,45 @@ const {
   runSurveyInviteSequenceForCi,
   evaluateSurveyInviteSequenceForCi,
 } = require('../lib/rejectedSurveyInviteEvaluate');
+const {
+  attachElmToRejectedRows,
+  loadRejectedDetailElm,
+} = require('../lib/rejectedElmRead');
+const { sendRejectedToElm } = require('../lib/rejectedElmSend');
+const { requireElmAction } = require('../middleware/requireElmAction');
 
 const router = express.Router();
+
+let elmOrchestrator = null;
+let elmListView = null;
+function getElmOrchestrator() {
+  if (!elmOrchestrator) {
+    elmOrchestrator = require('../services/elm/orchestrator').createElmOrchestrator();
+  }
+  return elmOrchestrator;
+}
+function getElmListView() {
+  if (!elmListView) {
+    elmListView = require('../services/elm/listView').createElmListView({
+      sendReadiness: function () {
+        return getElmOrchestrator().getSendReadiness();
+      },
+    });
+  }
+  return elmListView;
+}
+
+async function loadRejectedCzIds(ci) {
+  const detail = assembleRejectedDetail(await fetchRejectedDetailBundle(supabase, ci));
+  if (!detail) return null;
+  return detail.rejections
+    .map(function (r) {
+      return Number(r.cz_solicitud_id);
+    })
+    .filter(function (n) {
+      return Number.isSafeInteger(n) && n > 0;
+    });
+}
 
 const bcuUpload = multer({
   storage: multer.memoryStorage(),
@@ -150,9 +187,14 @@ router.get('/', async function getRechazadosList(req, res) {
     if (!optin.available) {
       logger.warn('GET /rechazados mi_deuda_optin unavailable', { code: optin.error_code });
     }
+    const elmAvailable = await attachElmToRejectedRows(optin.rows, { logger: logger });
     return res.json({
       ok: true,
-      data: { rows: optin.rows, mi_deuda_optin_available: optin.available },
+      data: {
+        rows: optin.rows,
+        mi_deuda_optin_available: optin.available,
+        elm_available: elmAvailable,
+      },
     });
   } catch (err) {
     logger.error('GET /rechazados failed', {
@@ -625,6 +667,37 @@ router.post(
   },
 );
 
+/**
+ * "Enviar a ELM" for one rejected solicitud of the CI: S1, then S2 when S1 is favorable.
+ * Body: { cz_solicitud_id }. Everything else is resolved server-side.
+ */
+router.post('/:ci/elm/send', requireElmAction, async function postElmSend(req, res) {
+  const ci = normalizeCi(req.params && req.params.ci);
+  if (ci == null) {
+    return res.status(400).json({ error: 'CI inválida' });
+  }
+  try {
+    const out = await sendRejectedToElm(
+      {
+        orchestrator: getElmOrchestrator(),
+        listView: getElmListView(),
+        loadRejectedCzIds: loadRejectedCzIds,
+      },
+      {
+        ci: ci,
+        czSolicitudId: req.body && req.body.cz_solicitud_id,
+        actorUserId: req.elmActorUserId,
+      },
+    );
+    return res.status(out.status).json(out.body);
+  } catch (err) {
+    logger.error('POST /rechazados/:ci/elm/send failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 router.get('/:ci', async function getRechazadosDetail(req, res) {
   const ci = normalizeCi(req.params && req.params.ci);
   if (ci == null) {
@@ -655,6 +728,13 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
         code: detail.mi_deuda_optin.error_code,
       });
     }
+    detail.elm = await loadRejectedDetailElm(supabase, detail, {
+      listView: getElmListView(),
+      sendReadiness: function () {
+        return getElmOrchestrator().getSendReadiness();
+      },
+      logger: logger,
+    });
     return res.json({ ok: true, data: detail });
   } catch (err) {
     logger.error('GET /rechazados/:ci failed', {

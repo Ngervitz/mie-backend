@@ -15069,6 +15069,11 @@ init();
           '<td class="rechazados-col-retry">' +
           renderCellDescriptor(retry, row.ci) +
           '</td>' +
+          '<td class="rechazados-col-elm">' +
+          (window.ElmUiHelpers
+            ? window.ElmUiHelpers.rejectedRowElmHtml(row.elm)
+            : '—') +
+          '</td>' +
           '<td class="rechazados-col-ver"><button type="button" class="btn rechazados-cell-btn" data-action="view-ci" data-ci="' +
           escapeHtml(String(row.ci)) +
           '">Ver</button></td>' +
@@ -15087,6 +15092,7 @@ init();
       '<th class="rechazados-col-deuda">Mi Deuda</th>' +
       '<th class="rechazados-col-bcu">Peor BCU</th>' +
       '<th class="rechazados-col-retry">Retry / Próx. revisión</th>' +
+      '<th class="rechazados-col-elm">ELM</th>' +
       '<th class="rechazados-col-ver">Ver</th>' +
       '</tr></thead><tbody>' +
       body +
@@ -16126,6 +16132,93 @@ init();
     );
   }
 
+  function rejectedElmBlockHtml(d) {
+    const ElmUi = window.ElmUiHelpers;
+    const elm = d.elm || {};
+    const parts = [];
+    const msg = state.elmSendMessage;
+    if (msg && String(msg.ci) === String(d.ci)) {
+      parts.push(
+        '<div class="rechazados-elm-msg is-' +
+          escapeHtml(msg.tone) +
+          '">' +
+          escapeHtml(msg.text) +
+          '</div>',
+      );
+    }
+    if (!elm.available) {
+      parts.push('<div class="rechazados-muted">Estado ELM no disponible.</div>');
+      return '<div class="rechazados-elm-block">' + parts.join('') + '</div>';
+    }
+    if (elm.send_readiness && elm.send_readiness.ready !== true) {
+      parts.push(
+        '<div class="rechazados-muted">Envío a ELM no habilitado' +
+          (elm.send_readiness.reasons && elm.send_readiness.reasons.length
+            ? ': ' + escapeHtml(elm.send_readiness.reasons.join(', '))
+            : '') +
+          '.</div>',
+      );
+    }
+    if (elm.ci_active) {
+      parts.push(
+        '<div class="rechazados-muted">Proceso ELM vigente para esta CI (solicitud ' +
+          escapeHtml(String(elm.ci_active.cz_solicitud_id)) +
+          ').</div>',
+      );
+    }
+    (elm.other_processes || []).forEach(function (p) {
+      parts.push(
+        '<div class="rechazados-muted">Otra solicitud ' +
+          escapeHtml(String(p.cz_solicitud_id)) +
+          ' · ' +
+          escapeHtml(ElmUi.originLabel(p.trigger_origin)) +
+          ': ' +
+          escapeHtml(p.label || '—') +
+          '</div>',
+      );
+    });
+    return parts.length ? '<div class="rechazados-elm-block">' + parts.join('') + '</div>' : '';
+  }
+
+  async function postElmSend(ci, czId, btn) {
+    const ElmUi = window.ElmUiHelpers;
+    if (!ElmUi || !ci || !czId) return;
+    const ok = window.confirm(
+      '¿Enviar la solicitud ' +
+        czId +
+        ' (CI ' +
+        ci +
+        ') a ELM?\n\nSe ejecuta la evaluación inicial (S1) y, si es favorable, la derivación a ventas de ELM (S2).',
+    );
+    if (!ok) return;
+    if (btn) btn.disabled = true;
+    let message;
+    try {
+      const res = await fetch(
+        API + '/rechazados/' + encodeURIComponent(ci) + '/elm/send',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ cz_solicitud_id: Number(czId) }),
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      message = data && data.outcome
+        ? ElmUi.sendResultMessage(data)
+        : { tone: 'error', text: 'No se envió a ELM. ' + ((data && data.error) || 'Error ' + res.status) };
+    } catch (_err) {
+      message = { tone: 'error', text: 'No se envió a ELM: no se pudo conectar.' };
+    }
+    state.elmSendMessage = { ci: ci, tone: message.tone, text: message.text };
+    await loadList();
+    if (state.detailCi && String(state.detailCi) === String(ci)) {
+      await openDetail(ci);
+    }
+  }
+
   function renderDetailModal() {
     if (!state.detailCi && !state.detailLoading && !state.detailError) {
       modalRoot.innerHTML = '';
@@ -16142,12 +16235,28 @@ init();
     } else if (state.detail) {
       const d = state.detail;
       const name = H.formatPersonName(d.nombre, d.apellido);
+      const ElmUi = window.ElmUiHelpers;
+      const elmCells = new Map();
+      if (ElmUi && d.elm && d.elm.available) {
+        (d.elm.solicitudes || []).forEach(function (s) {
+          elmCells.set(Number(s.cz_solicitud_id), s.cell);
+        });
+      }
+      const showElm = Boolean(ElmUi && d.elm);
       const rejRows = (d.rejections || []).map(function (r) {
-        return [
+        const cells = [
           escapeHtml(H.formatTsUy(r.fechahora_src)),
           escapeHtml(String(r.cz_solicitud_id != null ? r.cz_solicitud_id : '—')),
           escapeHtml(r.estado || '—'),
         ];
+        if (showElm) {
+          cells.push(
+            d.elm.available
+              ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null)
+              : '—',
+          );
+        }
+        return cells;
       });
       const showLoanPurpose = (d.encuestas || []).some(function (e) {
         return e.loan_purpose != null;
@@ -16238,7 +16347,11 @@ init();
         renderExtractAssist() +
         (state.showForm ? renderForm() : '') +
         '<div class="ad-modal-block"><div class="ad-modal-label">Rechazos</div>' +
-        renderSimpleTable(['Fecha', 'Solicitud', 'Estado'], rejRows) +
+        renderSimpleTable(
+          showElm ? ['Fecha', 'Solicitud', 'Estado', 'ELM'] : ['Fecha', 'Solicitud', 'Estado'],
+          rejRows,
+        ) +
+        (showElm ? rejectedElmBlockHtml(d) : '') +
         '</div>' +
         '<div class="ad-modal-block"><div class="ad-modal-label">Encuestas</div>' +
         renderSimpleTable(encHeaders, encRows) +
@@ -16538,6 +16651,7 @@ init();
     state.detail = null;
     state.detailError = null;
     state.detailLoading = false;
+    state.elmSendMessage = null;
     state.showForm = false;
     state.form = null;
     state.formError = null;
@@ -17206,6 +17320,10 @@ init();
       if (ciInvite) postSurveyInvite(ciInvite, actionEl);
       return;
     }
+    if (action === 'elm-send') {
+      postElmSend(state.detailCi, actionEl.getAttribute('data-cz-id'), actionEl);
+      return;
+    }
     if (action === 'open-form') {
       resetForm(state.detailCi);
       state.showForm = true;
@@ -17624,6 +17742,7 @@ init();
     fromCustom: '',
     toCustom: '',
     resultado: 'all',
+    proveedor: 'all',
     estado: '',
     q: '',
     loading: false,
@@ -17726,6 +17845,9 @@ init();
     if (state.resultado && state.resultado !== 'all') {
       params.set('resultado', state.resultado);
     }
+    if (state.proveedor && state.proveedor !== 'all') {
+      params.set('proveedor', state.proveedor);
+    }
     if (state.estado) params.set('estado', state.estado);
     if (state.q) params.set('q', state.q);
     params.set('limit', String(state.limit));
@@ -17744,6 +17866,13 @@ init();
       { id: 'all', label: 'Todos' },
       { id: 'granted', label: 'GRANTED CDV' },
       { id: 'sin_resultado', label: 'Sin resultado' },
+      { id: 'elm_preaprobado', label: 'Preaprobado ELM' },
+      { id: 'elm_otorgado', label: 'Otorgado ELM' },
+    ];
+    const proveedores = [
+      { id: 'all', label: 'Todas las entidades' },
+      { id: 'cdv', label: 'CDV' },
+      { id: 'elm', label: 'ELM' },
     ];
     let html =
       '<div class="preaprobados-filter-row">' +
@@ -17793,10 +17922,26 @@ init();
       '</div>';
     html +=
       '<div class="preaprobados-filter-row">' +
+      proveedores
+        .map(function (p) {
+          return (
+            '<button type="button" class="preaprobados-filter-btn' +
+            (state.proveedor === p.id ? ' is-active' : '') +
+            '" data-proveedor="' +
+            p.id +
+            '">' +
+            escapeHtml(p.label) +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>';
+    html +=
+      '<div class="preaprobados-filter-row">' +
       '<label class="mcl-field"><span class="mcl-field-label">Estado actual</span>' +
       '<select class="mcl-select" id="preaprobados-estado">' +
       '<option value="">Todos</option>' +
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         .map(function (n) {
           return (
             '<option value="' +
@@ -17830,7 +17975,22 @@ init();
       data.cohort && data.cohort.in_progress
         ? '<span class="preaprobados-in-progress">Cohorte en curso</span>'
         : '';
+    const ke = data.kpis_elm;
+    const elmKpis = ke
+      ? '<div class="preaprobados-kpi-scope">ELM · circuito automático (derivados S2)</div>' +
+        '<div class="preaprobados-kpi-grid">' +
+        kpiCard('Preaprobados ELM', String(ke.preaprobados_elm)) +
+        kpiCard('Otorgados ELM', String(ke.otorgados_elm)) +
+        kpiCard('Vigentes ELM', String(ke.vigentes_elm)) +
+        kpiCard('Conversión ELM', fmtPct(ke.conversion_elm)) +
+        '</div>'
+      : '';
+    const elmUnavailable =
+      data.elm_available === false
+        ? '<p class="preaprobados-muted">Cohorte ELM no disponible en este momento.</p>'
+        : '';
     kpisEl.innerHTML =
+      '<div class="preaprobados-kpi-scope">CDV · cohorte estado 8</div>' +
       '<div class="preaprobados-kpi-grid">' +
       kpiCard('Preaprobados', String(k.preaprobados)) +
       kpiCard('GRANTED CDV', String(k.granted)) +
@@ -17838,7 +17998,9 @@ init();
       kpiCard('$ otorgado', fmtMoney(k.monto_otorgado)) +
       kpiCard('Conversión', fmtPct(k.conversion)) +
       '</div>' +
-      inProgress;
+      inProgress +
+      elmKpis +
+      elmUnavailable;
   }
 
   function kpiCard(label, value) {
@@ -17858,6 +18020,30 @@ init();
       return '<span class="preaprobados-result is-granted">GRANTED CDV</span>';
     }
     return '<span class="preaprobados-result is-sin">Sin resultado</span>';
+  }
+
+  function elmMemberBadge(m) {
+    const granted = m.state === 'granted';
+    return (
+      '<span class="preaprobados-result ' +
+      (granted ? 'is-granted-elm' : 'is-referred-elm') +
+      '">' +
+      escapeHtml(granted ? 'Otorgado ELM' : 'Preaprobado ELM') +
+      '</span>'
+    );
+  }
+
+  function resultadoCell(row) {
+    if (row.proveedor === 'elm') return elmMemberBadge(row.elm_member);
+    let html = resultadoBadge(row.resultado);
+    if (row.proveedor === 'cdv_elm' && row.elm_member) html += ' ' + elmMemberBadge(row.elm_member);
+    return html;
+  }
+
+  function proveedorCell(row) {
+    if (row.proveedor === 'elm') return 'ELM';
+    if (row.proveedor === 'cdv_elm') return 'CDV · ELM';
+    return 'CDV';
   }
 
   function elmCell(row) {
@@ -17906,10 +18092,13 @@ init();
           escapeHtml(row.ci != null ? String(row.ci) : '—') +
           '</td>' +
           '<td>' +
+          escapeHtml(proveedorCell(row)) +
+          '</td>' +
+          '<td>' +
           estadoCell(row) +
           '</td>' +
           '<td>' +
-          resultadoBadge(row.resultado) +
+          resultadoCell(row) +
           '</td>' +
           '<td class="num">' +
           escapeHtml(fmtMoney(row.monto_otorgado)) +
@@ -17932,7 +18121,7 @@ init();
     resultsEl.innerHTML =
       '<div class="table-wrap"><table class="ga4-table preaprobados-table">' +
       '<thead><tr>' +
-      '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th>' +
+      '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th><th>Entidad</th>' +
       '<th>Estado actual</th><th>Resultado</th><th>Monto otorgado</th><th>ELM</th><th></th>' +
       '</tr></thead><tbody>' +
       body +
@@ -18002,7 +18191,7 @@ init();
       const p = e.process;
       let rows = dlRow('Estado ELM', elmStatusLabel(p));
       const H = window.ElmUiHelpers;
-      if (e.cell && H) rows += dlRow('Columna ELM', H.cellLabel(e.cell));
+      if (e.cell && H) rows += dlRow('Estado comercial ELM', H.cellLabel(e.cell));
       if (p) {
         if (p.s1) rows += dlRow('S1', p.s1.effective_status || '—');
         if (p.s1 && p.s1.result_message) rows += dlRow('Respuesta S1', p.s1.result_message);
@@ -18041,9 +18230,26 @@ init();
     return (
       '<section><h3>ELM</h3>' +
       body +
-      '<button type="button" class="btn" disabled aria-disabled="true">CONSULTAR ELM</button>' +
-      '<p class="preaprobados-muted">La integración ELM todavía no está habilitada/configurada. No se envía nada a ELM.</p>' +
+      '<p class="preaprobados-muted">Preaprobado ELM = derivado a ventas de ELM (S2); no implica préstamo otorgado. El envío manual a ELM se hace desde Rechazados.</p>' +
       '</section>'
+    );
+  }
+
+  function renderElmMemberSection(d) {
+    const m = d.elm_member;
+    if (!m) return '';
+    const H = window.ElmUiHelpers;
+    return (
+      '<section><h3>Preaprobado ELM</h3><dl class="preaprobados-dl">' +
+      dlRow('Entidad', 'ELM') +
+      dlRow('Estado comercial', m.detail_label || m.label || '—') +
+      dlRow('Fecha derivación (S2)', fmtDate(m.referred_at)) +
+      dlRow('Origen', H ? H.originLabel(m.trigger_origin) : String(m.trigger_origin || '—')) +
+      dlRow('Solicitud', m.cz_solicitud_id != null ? String(m.cz_solicitud_id) : '—') +
+      dlRow('Proceso ELM', m.process_id || '—') +
+      dlRow('Último estado ELM', m.provider_status || '—') +
+      dlRow('Otorgado ELM', m.disbursed_at ? 'Sí · ' + fmtDate(m.disbursed_at) : 'No') +
+      '</dl></section>'
     );
   }
 
@@ -18142,9 +18348,15 @@ init();
       '</dl></section>' +
       '<section><h3>Resultado</h3><dl class="preaprobados-dl">' +
       dlRow(
-        'Resultado',
-        d.resultado === 'granted' ? 'GRANTED CDV' : 'Sin resultado',
+        'Entidad',
+        d.proveedor === 'elm' ? 'ELM' : d.proveedor === 'cdv_elm' ? 'CDV · ELM' : 'CDV',
       ) +
+      (d.proveedor === 'elm'
+        ? ''
+        : dlRow(
+            'Resultado CDV',
+            d.resultado === 'granted' ? 'GRANTED CDV' : 'Sin resultado',
+          )) +
       dlRow(
         'Estado actual',
         (d.estado_id != null ? String(d.estado_id) : '—') +
@@ -18152,6 +18364,7 @@ init();
       ) +
       dlRow('Monto otorgado', fmtMoney(d.monto_otorgado)) +
       '</dl></section>' +
+      renderElmMemberSection(d) +
       renderElmSection() +
       '<section><h3>Sincronización</h3><dl class="preaprobados-dl">' +
       dlRow('synced_at', fmtDate(d.synced_at)) +
@@ -18281,6 +18494,13 @@ init();
     const resBtn = t.closest && t.closest('[data-resultado]');
     if (resBtn) {
       state.resultado = resBtn.getAttribute('data-resultado');
+      state.offset = 0;
+      loadList();
+      return;
+    }
+    const provBtn = t.closest && t.closest('[data-proveedor]');
+    if (provBtn) {
+      state.proveedor = provBtn.getAttribute('data-proveedor');
       state.offset = 0;
       loadList();
       return;
