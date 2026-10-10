@@ -381,6 +381,7 @@ async function upsertSolicitudes(items) {
       celular: profile.celular,
       salario: profile.salario,
       fecha_nacimiento: profile.fecha_nacimiento,
+      fecha_nacimiento_status: profile.fecha_nacimiento_status,
       relacion_laboral: profile.relacion_laboral,
       fecha_reg: parseCzDateTime(fechaRaw),
       updated_at_src: parseCzDateTime(updatedRaw),

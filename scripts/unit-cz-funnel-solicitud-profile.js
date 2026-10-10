@@ -112,6 +112,38 @@ assert.strictEqual(parseCalendarDate('0001-02-29'), null);
 assert.strictEqual(mapSolicitudProfileFields({ fecha_nacimiento: '0174-12-16' }).fecha_nacimiento, null);
 assert.strictEqual(mapSolicitudProfileFields({ fecha_nacimiento: '0088-04-08' }).fecha_nacimiento, null);
 
+// fecha_nacimiento_status keeps why a date was stored as null (a minor is never "impossible").
+const { classifyBirthDate } = require('../src/lib/birthDate');
+for (const [raw, status] of [
+  ['1990-05-08', 'valid'],
+  ['2008-10-10', 'valid'],
+  ['1926-10-10', 'valid'],
+  [null, 'absent'],
+  ['', 'absent'],
+  ['   ', 'absent'],
+  ['2026-02-30', 'impossible'],
+  ['31/03/1951', 'impossible'],
+  ['0000-00-00', 'impossible'],
+  ['0001-03-31', 'over_max_age'],
+  ['0088-04-08', 'over_max_age'],
+  ['1925-10-09', 'over_max_age'],
+  ['2008-10-11', 'underage'],
+  ['2015-01-01', 'underage'],
+  ['2026-10-10', 'underage'],
+  ['2026-10-11', 'future'],
+  ['2031-01-01', 'future'],
+]) {
+  assert.strictEqual(classifyBirthDate(raw, DOB_NOW), status, 'status of ' + raw);
+  const m = mapSolicitudProfileFields({ fecha_nacimiento: raw }, DOB_NOW);
+  assert.strictEqual(m.fecha_nacimiento_status, status, 'mapped status of ' + raw);
+  assert.strictEqual(m.fecha_nacimiento != null, status === 'valid', 'stored date only when valid: ' + raw);
+}
+assert.strictEqual(
+  mapSolicitudProfileFields({ celular: 59899111222 }, DOB_NOW).fecha_nacimiento_status,
+  null,
+  'field missing from the API item → not classified (never "absent")',
+);
+
 const mapped = mapSolicitudProfileFields({
   celular: 59899111222,
   salario: 70000,
@@ -191,6 +223,14 @@ function createStore() {
   assert.strictEqual(row.celular, '59899970709');
   assert.strictEqual(row.salario, 80000);
   assert.strictEqual(row.fecha_nacimiento, '1990-05-08');
+  assert.strictEqual(row.fecha_nacimiento_status, 'valid');
+
+  const storeMinor = createStore();
+  await upsertSolicitudes([item({ fecha_nacimiento: '2015-06-01' }), item({ id: 1154, fecha_nacimiento: '0088-04-08' })]);
+  assert.strictEqual(storeMinor.solicitudes.get(1153).fecha_nacimiento, null);
+  assert.strictEqual(storeMinor.solicitudes.get(1153).fecha_nacimiento_status, 'underage');
+  assert.strictEqual(storeMinor.solicitudes.get(1154).fecha_nacimiento, null);
+  assert.strictEqual(storeMinor.solicitudes.get(1154).fecha_nacimiento_status, 'over_max_age');
   assert.strictEqual(row.relacion_laboral, 'independiente');
   assert.strictEqual(row.email, 'user@example.com');
   assert.strictEqual(row.lrw_id, 'LRW-111-222-333');
@@ -211,6 +251,7 @@ function createStore() {
   assert.strictEqual(nulled.celular, null);
   assert.strictEqual(nulled.salario, null);
   assert.strictEqual(nulled.fecha_nacimiento, null);
+  assert.strictEqual(nulled.fecha_nacimiento_status, 'impossible');
   assert.strictEqual(nulled.relacion_laboral, null);
 
   // Same CI, two LRW episodes — distinct salario preserved

@@ -27,6 +27,7 @@ const {
   S1,
   S2,
   ENABLED_TRIGGER_ORIGINS,
+  MANUAL_TRIGGER_ORIGIN,
   TRIGGER_ORIGINS,
   SEND_ORIGINS_BY_TRIGGER,
   ELM_SOURCE,
@@ -125,27 +126,66 @@ function httpStatusOrNull(raw) {
   return Number.isInteger(n) && n >= 100 && n <= 599 ? n : null;
 }
 
+const RAW_ANSWER_MAX = 500;
+
+function nonEmptyText(v) {
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * ELM's own words when the body has no `result` text: NetSuite error message
+ * ({ error: { code, message } } / { message }) or the raw non-JSON body.
+ */
+function rawAnswerOf(body, responseText) {
+  if (body && typeof body === 'object') {
+    const err = body.error;
+    const fromError =
+      err && typeof err === 'object'
+        ? [nonEmptyText(err.code), nonEmptyText(err.message)].filter(Boolean).join(': ')
+        : nonEmptyText(err);
+    const text = fromError || nonEmptyText(body.message) || nonEmptyText(body.result_message);
+    if (text) return text;
+  }
+  return nonEmptyText(responseText);
+}
+
 /**
  * Normalize a client result into persisted step columns. Anything unexpected → unknown,
  * because the request may have been sent.
+ * `keepRawAnswer` (manual S1 only): with no `result` text, ELM's error message / raw body becomes
+ * the result message and a non-JSON body is stored as { raw_text }. Status is never derived
+ * from it.
  */
-function toStepResult(callResult, statusByOutcome, unknownStatus) {
+function toStepResult(callResult, statusByOutcome, unknownStatus, keepRawAnswer) {
   const r = callResult && typeof callResult === 'object' ? callResult : {};
   const status = statusByOutcome[r.outcome] || unknownStatus;
-  const body =
+  let body =
     r.responseBody && typeof r.responseBody === 'object'
       ? redactSecrets(r.responseBody)
       : null;
+  let resultMessage =
+    typeof r.resultMessage === 'string' ? redactSecretText(r.resultMessage) : null;
+  if (keepRawAnswer === true) {
+    const rawText = typeof r.responseText === 'string' ? redactSecretText(r.responseText, Infinity) : null;
+    if (!body && rawText) body = { raw_text: rawText };
+    if (resultMessage == null) {
+      const raw = rawAnswerOf(body, rawText);
+      resultMessage = raw ? redactSecretText(raw, RAW_ANSWER_MAX) : null;
+    }
+  }
   return {
     status: status,
     response: body,
     httpStatus: httpStatusOrNull(r.httpStatus),
-    resultMessage:
-      typeof r.resultMessage === 'string' ? redactSecretText(r.resultMessage) : null,
+    resultMessage: resultMessage,
     latencyMs: nonNegativeInt(r.latencyMs),
     errorCode: typeof r.errorCode === 'string' ? r.errorCode.slice(0, 100) : null,
     errorDetail: r.errorDetail != null ? redactSecretText(r.errorDetail) : null,
   };
+}
+
+function isManualTrigger(triggerOrigin) {
+  return triggerOrigin === MANUAL_TRIGGER_ORIGIN;
 }
 
 function threwResult(unknownStatus, err) {
@@ -295,13 +335,22 @@ function createElmOrchestrator(deps) {
   /**
    * Re-check of the frozen S1 dateOfBirth before any S1 resend: requests frozen before the
    * date-of-birth validation may hold impossible dates. Age reference = s1_started_at, so a
-   * valid request never becomes invalid by aging between attempts.
+   * valid request never becomes invalid by aging between attempts. A manual request frozen
+   * without dateOfBirth (omitted because CZ had no valid date) is resent as it was.
    * @returns {string|null} blocking code, or null when the frozen date is valid
    */
   function frozenS1BirthDateBlock(process) {
     const format = config && config.dateOfBirthFormat;
     if (!format) return CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED;
     const request = process && process.s1_request;
+    if (
+      isManualTrigger(process && process.trigger_origin) &&
+      request &&
+      typeof request === 'object' &&
+      !Object.prototype.hasOwnProperty.call(request, 'dateOfBirth')
+    ) {
+      return null;
+    }
     const ymd = parseFrozenDateOfBirth(request && request.dateOfBirth, format);
     const refMs = Date.parse((process && (process.s1_started_at || process.created_at)) || '');
     const ref = new Date(Number.isFinite(refMs) ? refMs : now());
@@ -356,12 +405,14 @@ function createElmOrchestrator(deps) {
 
     const { solicitud, grantedRow } = await loadContext(czId, ctx, context);
     const evaluatedAt = new Date(now());
+    const manual = isManualTrigger(ctx.triggerOrigin);
     const elig = evaluateElmEligibility({
       czId: czId,
       solicitud: solicitud,
       grantedRow: grantedRow,
       config: config,
       now: evaluatedAt,
+      manual: manual,
     });
     if (!elig.eligible) {
       return blocked(elig.blockers[0].code, { blockers: elig.blockers });
@@ -372,6 +423,7 @@ function createElmOrchestrator(deps) {
       solicitud: solicitud,
       config: config,
       now: evaluatedAt,
+      manual: manual,
     });
     if (!built.ok) return blocked(built.code, { blockers: [blockerOf(built)] });
 
@@ -408,7 +460,12 @@ function createElmOrchestrator(deps) {
     let step;
     try {
       step = isS1
-        ? toStepResult(await client.service1(payload), S1_BY_OUTCOME, S1.UNKNOWN)
+        ? toStepResult(
+            await client.service1(payload),
+            S1_BY_OUTCOME,
+            S1.UNKNOWN,
+            isManualTrigger(ctx.triggerOrigin),
+          )
         : toStepResult(await client.service2(payload), S2_BY_OUTCOME, S2.UNKNOWN);
     } catch (err) {
       step = threwResult(isS1 ? S1.UNKNOWN : S2.UNKNOWN, err);
@@ -670,6 +727,7 @@ function createElmOrchestrator(deps) {
       existingProcess: process,
       config: config,
       now: new Date(now()),
+      manual: true,
     });
     let lastPostbackMatchMethod = null;
     if (process && process.last_postback_event_id && repo.getPostbackEvent) {

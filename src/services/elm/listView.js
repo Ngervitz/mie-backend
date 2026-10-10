@@ -240,6 +240,7 @@ function computeElmCell(input) {
         reason: reason,
         reasons: reasons,
         blockers: codes,
+        notices: Array.isArray(input.eligibility.notices) ? input.eligibility.notices.slice() : [],
         hint: enabled ? null : SEND_PENDING_HINT,
       },
     },
@@ -344,11 +345,13 @@ function createElmListView(deps) {
         continue;
       }
       const ctx = contexts.get(id) || { solicitud: null, grantedRow: null };
+      // Sends offered by these screens are always janus_manual.
       const eligibility = evaluateElmEligibility({
         czId: id,
         solicitud: ctx.solicitud,
         grantedRow: ctx.grantedRow,
         config: config,
+        manual: true,
       });
       out.set(
         id,

@@ -33,6 +33,8 @@
     elm_cdv_granted: 'La solicitud tiene un préstamo CDV otorgado.',
     elm_missing_required_fields: 'Faltan datos obligatorios de la solicitud.',
     elm_date_of_birth_invalid: 'Fecha de nacimiento inválida.',
+    elm_date_of_birth_unverified:
+      'Fecha de nacimiento sin verificar: se habilita después de la próxima sincronización con Credizona.',
     elm_trigger_origin_not_enabled: 'Envío manual a ELM no habilitado.',
     elm_persist_failed: 'No se pudo guardar el resultado ELM; queda para revisión.',
     elm_solicitud_not_found: 'Solicitud no encontrada en el funnel CZ.',
@@ -42,6 +44,15 @@
       'No se puede reintentar: no está probado que ELM no haya recibido la solicitud.',
     elm_retry_attempts_exhausted: 'Se agotaron los intentos técnicos de esta solicitud.',
     elm_retry_not_allowed: 'Reintento ELM no permitido para este proceso.',
+  };
+  /** Manual S1 allowances (listView action.notices): what will be sent differently. */
+  var NOTICE_TEXTS = {
+    elm_date_of_birth_omitted: 'Se envía sin fecha de nacimiento: el dato de Credizona no es válido.',
+    elm_activity_type_raw: 'Actividad enviada con el código original de Credizona (OTR).',
+  };
+  var NOTICE_SHORT = {
+    elm_date_of_birth_omitted: 'Sin fecha nac.',
+    elm_activity_type_raw: 'Actividad OTR',
   };
   var CI_HOLD_REASONS = [
     'elm_ci_active',
@@ -311,13 +322,45 @@
     return '<div class="rechazados-elm-grid">' + rows.join('') + '</div>';
   }
 
+  function knownNotices(notices) {
+    return (Array.isArray(notices) ? notices : []).filter(function (n) {
+      return Object.prototype.hasOwnProperty.call(NOTICE_TEXTS, n);
+    });
+  }
+
+  /** Operator-facing text of the manual S1 allowances, '' when there are none. */
+  function sendNoticeText(notices) {
+    return knownNotices(notices)
+      .map(function (n) {
+        return NOTICE_TEXTS[n];
+      })
+      .join(' ');
+  }
+
+  function sendNoticeShort(notices) {
+    return knownNotices(notices)
+      .map(function (n) {
+        return NOTICE_SHORT[n];
+      })
+      .join(' · ');
+  }
+
+  function sendNoticeHtml(notices) {
+    var short = sendNoticeShort(notices);
+    if (!short) return '';
+    return '<span class="preaprobados-elm-notice" title="' + esc(sendNoticeText(notices)) + '">' + esc(short) + '</span>';
+  }
+
   function sendButtonHtml(czId, opts) {
     var o = opts || {};
     var attrs = ' data-action="elm-send" data-cz-id="' + esc(czId) + '"';
     if (o.ci) attrs += ' data-ci="' + esc(o.ci) + '"';
     var date = shortDate(o.rejectedAt);
     if (date) attrs += ' data-rejected-at="' + esc(date) + '"';
-    var title = 'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM';
+    var notice = sendNoticeText(o.notices);
+    if (notice) attrs += ' data-elm-notice="' + esc(notice) + '"';
+    var title =
+      'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM' + (notice ? '. ' + notice : '');
     return (
       '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send' +
       (o.extraClass ? ' ' + o.extraClass : '') +
@@ -327,7 +370,8 @@
       esc(title) +
       '">' +
       esc(o.label || 'Enviar a ELM') +
-      '</button>'
+      '</button>' +
+      sendNoticeHtml(o.notices)
     );
   }
 
@@ -392,7 +436,7 @@
     if (action.show === true) {
       var czId = Number(cell.cz_solicitud_id);
       if (action.enabled === true && czId > 0) {
-        return sendButtonHtml(czId, opts);
+        return sendButtonHtml(czId, Object.assign({}, opts, { notices: action.notices }));
       }
       return disabledSendButtonHtml(sendBlockedHint(action));
     }
@@ -429,7 +473,7 @@
     if (cell && cell.kind === 'not_sent' && action.show === true) {
       var czId = Number(cell.cz_solicitud_id);
       if (action.enabled === true && czId > 0) {
-        return sendButtonHtml(czId, { rejectedAt: opts && opts.rejectedAt });
+        return sendButtonHtml(czId, { rejectedAt: opts && opts.rejectedAt, notices: action.notices });
       }
       return blockedUnsentHtml([], sendBlockedHint(action), action.hold && action.hold.until);
     }
@@ -487,21 +531,31 @@
     if (send.needs_selection !== true && enabled.length === 1 && targetId === Number(enabled[0].cz_solicitud_id)) {
       return gridRowHtml(
         targetId,
-        sendButtonHtml(targetId, { ci: ci, rejectedAt: enabled[0].rejected_at, extraClass: 'rechazados-elm-send' }),
+        sendButtonHtml(targetId, {
+          ci: ci,
+          rejectedAt: enabled[0].rejected_at,
+          extraClass: 'rechazados-elm-send',
+          notices: enabled[0].notices,
+        }),
       );
     }
     var options = enabled
       .map(function (c) {
         var id = Number(c.cz_solicitud_id);
         var date = shortDate(c.rejected_at);
+        var notice = sendNoticeText(c.notices);
+        var short = sendNoticeShort(c.notices);
         return (
           '<option value="' +
           esc(id) +
           '" data-rejected-at="' +
           esc(date) +
-          '">Sol. ' +
+          '"' +
+          (notice ? ' data-elm-notice="' + esc(notice) + '"' : '') +
+          '>Sol. ' +
           esc(id) +
           (date ? ' · ' + esc(date) : '') +
+          (short ? ' · ' + esc(short) : '') +
           '</option>'
         );
       })
@@ -709,11 +763,16 @@
           '.',
       };
     }
+    var answer = elmAnswerText(b.cell, true);
+    var answerSuffix = answer ? ' ' + answer + '.' : '';
     switch (b.outcome) {
       case 's1_rejected':
-        return { tone: 'warn', text: 'ELM rechazó la solicitud en la evaluación inicial (S1). Queda como Rechazado ELM.' };
+        return {
+          tone: 'warn',
+          text: 'ELM rechazó la solicitud en la evaluación inicial (S1). Queda como Rechazado ELM.' + answerSuffix,
+        };
       case 'rejected':
-        return { tone: 'warn', text: 'ELM rechazó la solicitud (Rechazado ELM).' };
+        return { tone: 'warn', text: 'ELM rechazó la solicitud (Rechazado ELM).' + answerSuffix };
       case 'referred':
         return {
           tone: 'ok',
@@ -733,9 +792,15 @@
         }
         return { tone: 'warn', text: 'En evaluación ELM: resultado pendiente.' };
       case 'technical_error':
-        return { tone: 'error', text: 'Error técnico ELM: queda pendiente de revisión (no es un rechazo).' };
+        return {
+          tone: 'error',
+          text: 'Error técnico ELM: queda pendiente de revisión (no es un rechazo).' + answerSuffix,
+        };
       case 'review':
-        return { tone: 'warn', text: 'Resultado ELM incierto: queda pendiente de revisión (no es un rechazo).' };
+        return {
+          tone: 'warn',
+          text: 'Resultado ELM incierto: queda pendiente de revisión (no es un rechazo).' + answerSuffix,
+        };
       case 'closed':
         return { tone: 'warn', text: 'Proceso ELM cerrado sin préstamo.' };
       case 'duplicate_other_channel':
@@ -764,6 +829,7 @@
     elmAnswerText: elmAnswerText,
     opsResolutionText: opsResolutionText,
     elmAnswerHtml: elmAnswerHtml,
+    sendNoticeText: sendNoticeText,
     compactReason: compactReason,
     compactCellText: compactCellText,
     sendBlockedHint: sendBlockedHint,
