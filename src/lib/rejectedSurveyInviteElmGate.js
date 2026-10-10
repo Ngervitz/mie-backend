@@ -4,7 +4,7 @@
  * ELM gate for the Rechazados survey circuit (STEP 1/2/3 → encuesta → Mi Plan).
  *
  * A CI is held while any of its ELM processes is not definitively closed: in evaluation,
- * referred ("Preaprobado ELM"), granted, technical error or ambiguous result. Automatic-circuit
+ * accepted ("Aceptado ELM"), granted, technical error or ambiguous result. Automatic-circuit
  * solicitudes still open in CZ (projected 12/13/14/15/16) and fallback requests not finalized
  * hold it too. A definitive ELM rejection (or an ops closure without loan) does not hold: the
  * existing circuit continues with its own episode rules (one survey per CI for life, STEP per

@@ -435,14 +435,14 @@ function decide(over) {
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
-test('1 historical manual → S1 favorable → S2 referred (Preaprobado ELM, stays in Rechazados)', async () => {
+test('1 historical manual → S1 favorable → S2 referred (Aceptado ELM, stays in Rechazados)', async () => {
   const h = sendHarness([okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')]);
   const out = await h.send(1001);
   assert.strictEqual(out.status, 200);
   assert.strictEqual(out.body.ok, true);
   assert.strictEqual(out.body.stage, 's2');
   assert.strictEqual(out.body.outcome, OUTCOMES.REFERRED);
-  assert.strictEqual(out.body.cell.label, 'Preaprobado ELM');
+  assert.strictEqual(out.body.cell.label, 'Aceptado ELM');
   assert.strictEqual(out.body.cell.granted_elm, false);
   assert.strictEqual(h.fetchImpl.calls.length, 2, 'S1 then S2 automatically');
   const msg = ElmUi.sendResultMessage(out.body);
@@ -492,7 +492,7 @@ test('4 automatic → CDV rejects → S2 referred → Preaprobados (not Rechazad
   const row = out.rows.find((r) => r.cz_id === 900);
   assert.ok(row);
   assert.strictEqual(row.proveedor, 'elm');
-  assert.strictEqual(row.elm_member.label, 'Preaprobado ELM');
+  assert.strictEqual(row.elm_member.label, 'Aceptado ELM');
   assert.strictEqual(row.elm_member.trigger_origin, 'cz_automatic');
   assert.strictEqual(out.kpis_elm.preaprobados_elm, 1);
   assert.strictEqual(out.kpis_elm.otorgados_elm, 0);
@@ -590,7 +590,7 @@ test('9 CI with several solicitudes: per-solicitud exclusivity, CI-level holds',
   assert.strictEqual(s.cells.size, 0);
   assert.strictEqual(s.other_processes.length, 1);
   assert.strictEqual(s.other_processes[0].cz_solicitud_id, 8001);
-  assert.strictEqual(s.other_processes[0].label, 'Preaprobado ELM');
+  assert.strictEqual(s.other_processes[0].label, 'Aceptado ELM');
   assert.ok(s.ci_active);
   const otherHtml = ElmUi.rejectedRowElmHtml({ available: true, cell: null, other_processes: s.other_processes });
   assert.ok(otherHtml.includes('Sol. 8001</span>') && otherHtml.includes('>Aceptado</span>'), otherHtml);
@@ -838,9 +838,9 @@ test('16 list: one sendable solicitud → button bound to it; same S1→S2 send;
   assert.strictEqual(h.fetchImpl.calls.length, 2);
 
   const after = await listRow(h, ci, rejected);
-  assert.strictEqual(after.elm.cell.label, 'Preaprobado ELM');
+  assert.strictEqual(after.elm.cell.label, 'Aceptado ELM');
   const afterHtml = ElmUi.rejectedRowElmHtml(after.elm, after.ci);
-  assert.ok(afterHtml.includes('Preaprobado ELM'));
+  assert.ok(afterHtml.includes('Aceptado ELM'));
   assert.ok(afterHtml.includes('Sol. 9002</span>'), 'the sent solicitud is named next to its state');
   assert.ok(!afterHtml.includes('<button'), 'state replaces the button');
   const afterDetail = await loadRejectedDetailElm(null, { ci: ci, rejections: rejected.map((r) => ({ cz_solicitud_id: r.cz_solicitud_id, fechahora_src: r.rejected_at })) }, {
@@ -851,7 +851,7 @@ test('16 list: one sendable solicitud → button bound to it; same S1→S2 send;
     postReferralRejectionStatuses: [],
   });
   const sentDetail = ElmUi.rejectedDetailCellHtml(afterDetail.solicitudes[0].cell, { retryCi: ci, answer: 'full' });
-  assert.ok(sentDetail.includes('Preaprobado ELM') && !sentDetail.includes('<button'), 'detail: state, no send button: ' + sentDetail);
+  assert.ok(sentDetail.includes('Aceptado ELM') && !sentDetail.includes('<button'), 'detail: state, no send button: ' + sentDetail);
   const inPlace = ElmUi.rejectedListElmFromDetail(afterDetail, row.cz_solicitud_id);
   assert.strictEqual(ElmUi.rejectedRowElmHtml(inPlace, ci), afterHtml, 'row refreshed from GET /rechazados/:ci = row of a full list reload');
 });
@@ -1144,7 +1144,7 @@ test('25 list: fail-soft (state without send view; whole column unavailable only
   const row = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { listView: broken, processes: [proc({ cz_solicitud_id: 9401, ci: ci })] });
   assert.strictEqual(row.elm.available, true);
   assert.deepStrictEqual(row.elm.send, { available: false });
-  assert.ok(ElmUi.rejectedRowElmHtml(row.elm, row.ci).includes('Preaprobado ELM'));
+  assert.ok(ElmUi.rejectedRowElmHtml(row.elm, row.ci).includes('Aceptado ELM'));
   const noSend = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { listView: broken });
   assert.ok(!ElmUi.rejectedRowElmHtml(noSend.elm, noSend.ci).includes('<button'));
   const down = await listRow(h, ci, [{ cz_solicitud_id: 9401 }], { readRows: async () => { throw new Error('down'); } });

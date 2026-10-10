@@ -11,6 +11,8 @@
  *                                          automatic rejection not reflected in CZ / queued)
  *   GET  /processes                        active referrals + uncertain ELM results (CI blockers)
  *   POST /processes/:id/resolve            audited manual resolution (never sends, never GRANTED)
+ *                                          { expected_updated_at, resolution_code, cz_outcome,
+ *                                            note, correction?: true (Aceptado ELM only) }
  *   GET  /review-cases?status=open|resolved
  *   POST /review-cases/:id/assign          { expected_version, assignee_user_id|null }
  *   POST /review-cases/:id/triage          { expected_version, priority, due_at }

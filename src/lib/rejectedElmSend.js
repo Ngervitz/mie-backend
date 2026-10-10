@@ -14,7 +14,7 @@
  * when ELM provably never received the lead).
  *
  * The outcome is read back from the persisted process (refreshed cell), so the UI shows what is
- * stored: S1 rejected, S1 duplicate approved by another channel, S2 referred ("Preaprobado ELM",
+ * stored: S1 rejected, S1 duplicate approved by another channel, S2 accepted ("Aceptado ELM",
  * never a granted loan), pending, technical error / ambiguous (review), grant, or not sent
  * (blocked with a code).
  */

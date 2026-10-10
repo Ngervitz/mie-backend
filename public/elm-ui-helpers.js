@@ -4,7 +4,8 @@
  * Pure ELM UI helpers (browser + Node unit tests). No DOM / no fetch.
  * Renders the ELM cell computed server-side (src/services/elm/listView.js).
  * GRANTED CDV and GRANTED ELM are separate sources and are never merged here.
- * "Preaprobado ELM" (S2 referred) is never presented as a granted loan.
+ * "Aceptado ELM" (lead received and assigned to Copanel, green) is never presented as a granted
+ * loan; "Otorgado ELM" (blue) needs a confirmed disbursement.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -197,6 +198,14 @@
     var reason =
       item.ops_resolution || base.indexOf(' · ') >= 0 ? '' : compactReason(item.elm_answer && item.elm_answer.message);
     return reason ? base + ' · ' + reason : base;
+  }
+
+  /** Color modifiers on top of is-<state>: granted (blue), duplicate from another channel (amber). */
+  function stateModifierClasses(item) {
+    return (
+      (item.granted_elm === true ? ' is-granted' : '') +
+      (item.detail === 's1_duplicate_other_channel' ? ' is-duplicate' : '')
+    );
   }
 
   function cellTitleParts(cell) {
@@ -446,7 +455,7 @@
     var label =
       '<span class="preaprobados-elm is-' +
       kind +
-      (cell.granted_elm === true ? ' is-granted' : '') +
+      stateModifierClasses(cell) +
       (compact ? ' is-compact' : '') +
       '"' +
       titleAttr(compact ? compactTitleParts(cell).concat(cellTitleParts(cell)) : cellTitleParts(cell)) +
@@ -635,7 +644,7 @@
     return (
       '<span class="preaprobados-elm is-' +
       kind +
-      (item.granted_elm === true ? ' is-granted' : '') +
+      stateModifierClasses(item) +
       ' is-compact' +
       (text.indexOf('. ') >= 0 ? ' is-wrap' : '') +
       '"' +
@@ -776,7 +785,7 @@
       case 'referred':
         return {
           tone: 'ok',
-          text: 'Preaprobado ELM: S1 favorable y derivado a ventas de ELM (S2). No es un préstamo otorgado.',
+          text: 'Aceptado ELM: S1 favorable y ELM recibió el lead y lo asignó a Copanel (S2). No es un préstamo otorgado.',
         };
       case 'granted':
         return { tone: 'ok', text: 'Otorgado ELM: ELM confirmó el desembolso.' };
@@ -836,6 +845,7 @@
     ciHoldText: ciHoldText,
     shortDate: shortDate,
     elmCellHtml: elmCellHtml,
+    processPillHtml: processPillHtml,
     rejectedDetailCellHtml: rejectedDetailCellHtml,
     rejectedSendLabel: rejectedSendLabel,
     REJECTED_PICK_LABEL: REJECTED_PICK_LABEL,

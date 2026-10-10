@@ -4,8 +4,8 @@
  * ELM cell for any JANUS list (Preaprobados, Rechazados). Read-only.
  *
  * With a process the cell shows the commercial state (src/services/elm/classification.js):
- * "Preaprobado ELM" = S2 referred (derivado a ventas, never a granted loan), "Otorgado ELM" only
- * with disbursed_at, "Rechazado ELM" only with definitive evidence; uncertain / technical
+ * "Aceptado ELM" = ELM received the lead and assigned it to Copanel (never a granted loan),
+ * "Otorgado ELM" only with disbursed_at, "Rechazado ELM" only with definitive evidence; uncertain / technical
  * results are "pendiente de revisión". The raw ELM postback status is kept as extra info.
  *
  * Without a process: "Enviar a ELM" is offered only where the caller allows it (Rechazados);
