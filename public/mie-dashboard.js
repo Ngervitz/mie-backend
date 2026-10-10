@@ -16226,9 +16226,52 @@ init();
       message = { tone: 'error', text: 'No se envió a ELM: no se pudo conectar.' };
     }
     state.elmSendMessage = { ci: ci, czId: czId, tone: message.tone, text: message.text };
-    await loadList();
+    await refreshCiAfterElmAction(ci);
+  }
+
+  /**
+   * After "Enviar a ELM" / "Reintentar ELM": re-reads only that CI (GET /rechazados/:ci) and
+   * re-renders its row and open detail from it, keeping the rest of the list and the scroll.
+   * Falls back to reloading the list if the CI cannot be read.
+   */
+  async function refreshCiAfterElmAction(ci) {
+    const ElmUi = window.ElmUiHelpers;
+    const row = state.rows.find(function (r) {
+      return String(r.ci) === String(ci);
+    });
+    let detail = null;
+    try {
+      const res = await fetch(API + '/rechazados/' + encodeURIComponent(ci), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (res.ok && data && data.data) detail = data.data;
+    } catch (_err) {
+      detail = null;
+    }
+    if (!detail || !row) {
+      await loadList();
+      if (state.detailCi && String(state.detailCi) === String(ci)) {
+        await openDetail(ci);
+      }
+      return;
+    }
+    row.elm = ElmUi.rejectedListElmFromDetail(detail.elm, row.cz_solicitud_id);
+    const wrap = resultsEl.querySelector('.table-wrap');
+    const wrapLeft = wrap ? wrap.scrollLeft : 0;
+    renderList();
+    const nextWrap = resultsEl.querySelector('.table-wrap');
+    if (nextWrap) nextWrap.scrollLeft = wrapLeft;
     if (state.detailCi && String(state.detailCi) === String(ci)) {
-      await openDetail(ci);
+      const modal = modalRoot.querySelector('.ad-modal');
+      const modalTop = modal ? modal.scrollTop : 0;
+      state.detail = detail;
+      renderDetailModal();
+      const nextModal = modalRoot.querySelector('.ad-modal');
+      if (nextModal) nextModal.scrollTop = modalTop;
     }
   }
 
@@ -16273,10 +16316,7 @@ init();
       message = { tone: 'error', text: 'No se reintentó el envío a ELM: no se pudo conectar.' };
     }
     state.elmSendMessage = { ci: ci, czId: czId, tone: message.tone, text: message.text };
-    await loadList();
-    if (state.detailCi && String(state.detailCi) === String(ci)) {
-      await openDetail(ci);
-    }
+    await refreshCiAfterElmAction(ci);
   }
 
   function isElmSendAction(action) {
@@ -16294,7 +16334,7 @@ init();
     postElmSend(ci, czId, el);
   }
 
-  /** Binds the picked solicitud to the row's send button; unpicked keeps it disabled. */
+  /** Binds the picked solicitud (data-cz-id and label) to the row's send button; unpicked keeps it disabled. */
   function onElmPickChange(select) {
     const cell = select.closest('.rechazados-elm-action');
     const btn = cell ? cell.querySelector('[data-action="elm-send"]') : null;
@@ -16308,12 +16348,14 @@ init();
       else btn.removeAttribute('data-rejected-at');
       btn.disabled = false;
       btn.removeAttribute('aria-disabled');
+      btn.textContent = window.ElmUiHelpers.rejectedSendLabel(czId);
       btn.title = 'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM';
     } else {
       btn.removeAttribute('data-cz-id');
       btn.removeAttribute('data-rejected-at');
       btn.disabled = true;
       btn.setAttribute('aria-disabled', 'true');
+      btn.textContent = window.ElmUiHelpers.REJECTED_PICK_LABEL;
       btn.title = 'Elegí primero la solicitud a enviar';
     }
   }
@@ -16351,7 +16393,7 @@ init();
         if (showElm) {
           cells.push(
             d.elm.available
-              ? ElmUi.elmCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null, {
+              ? ElmUi.rejectedDetailCellHtml(elmCells.get(Number(r.cz_solicitud_id)) || null, {
                   rejectedAt: r.fechahora_src,
                   retryCi: d.ci,
                   answer: 'full',

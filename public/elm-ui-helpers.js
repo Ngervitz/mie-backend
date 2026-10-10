@@ -280,6 +280,14 @@
     }
   }
 
+  /** Rechazados send button text, bound to its solicitud: "Enviar sol. 1231" (ELM is in the tooltip; fits the 12% column). */
+  function rejectedSendLabel(czId) {
+    return 'Enviar sol. ' + Number(czId);
+  }
+
+  /** Rechazados picker button while no solicitud is chosen (disabled). */
+  var REJECTED_PICK_LABEL = 'Seleccionar solicitud';
+
   function sendButtonHtml(czId, opts) {
     var o = opts || {};
     var attrs = ' data-action="elm-send" data-cz-id="' + esc(czId) + '"';
@@ -294,8 +302,48 @@
       attrs +
       ' title="' +
       esc(title) +
-      '">Enviar a ELM</button>'
+      '">' +
+      esc(o.label || 'Enviar a ELM') +
+      '</button>'
     );
+  }
+
+  /**
+   * Rechazados: a solicitud without ELM process whose send is held. Grey text, never a button;
+   * the reason goes in the tooltip and the availability date is shown when there is one.
+   * List (czIds given): one short line, "Sol. 1231 · Envío desde 08/11" or "Sol. 1427 · Sin enviar".
+   * CI detail (no czIds, the row already names the solicitud): "Sin enviar · disponible desde 08/11/2026".
+   * @param {number[]} czIds solicitudes sharing the same hold
+   * @param {string} hint
+   * @param {string|null|undefined} until
+   */
+  function blockedUnsentHtml(czIds, hint, until) {
+    var ids = (czIds || []).map(Number).filter(function (n) {
+      return n > 0;
+    });
+    var date = shortDate(until);
+    var text;
+    var title = hint;
+    if (ids.length) {
+      text = 'Sol. ' + ids.join(', ') + ' · ' + (date ? 'Envío desde ' + date.slice(0, 5) : 'Sin enviar');
+      title = 'Sin enviar (sol. ' + ids.join(', ') + '). ' + hint;
+    } else {
+      text = 'Sin enviar' + (date ? ' · disponible desde ' + date : '');
+    }
+    return '<span class="rechazados-elm-blocked" title="' + esc(title) + '">' + esc(text) + '</span>';
+  }
+
+  function candidateHint(c, send) {
+    return sendBlockedHint({
+      reasons: c.reasons,
+      reason: c.reason,
+      hint: c.hint,
+      hold: (send && send.hold) || { until: c.until },
+    });
+  }
+
+  function candidateUntil(c, send) {
+    return c.until || (send && send.hold && send.hold.until) || null;
   }
 
   function disabledSendButtonHtml(title, extraClass) {
@@ -347,10 +395,33 @@
   }
 
   /**
-   * Rechazados list send control (`elm.send` from the server). One sendable solicitud: button
-   * bound to it, with the solicitud number shown. Several: a picker and a button that stays
-   * disabled until one is chosen (the dashboard binds data-cz-id on change). None sendable:
-   * disabled button with the reason as tooltip.
+   * Rechazados CI detail, one cell per rejected solicitud (the row already shows its number).
+   * Not sent and enabled: "Enviar sol. N". Not sent and held: grey text with the reason
+   * as tooltip, never a button. With an ELM process: same as elmCellHtml (state, answer, retry).
+   * @param {object|null|undefined} cell
+   * @param {{ rejectedAt?: string, retryCi?: number|string, answer?: string }} [opts]
+   */
+  function rejectedDetailCellHtml(cell, opts) {
+    var action = (cell && cell.action) || {};
+    if (cell && cell.kind === 'not_sent' && action.show === true) {
+      var czId = Number(cell.cz_solicitud_id);
+      if (action.enabled === true && czId > 0) {
+        return sendButtonHtml(czId, {
+          rejectedAt: opts && opts.rejectedAt,
+          label: rejectedSendLabel(czId),
+        });
+      }
+      return blockedUnsentHtml([], sendBlockedHint(action), action.hold && action.hold.until);
+    }
+    return elmCellHtml(cell, opts);
+  }
+
+  /**
+   * Rechazados list send controls (`elm.send` from the server), one per state of the CI's
+   * solicitudes without ELM process. Held ones: grey text per solicitud (grouped when the hold is
+   * the same), never a button. One enabled: "Enviar sol. N" bound to it. Several enabled:
+   * a picker and a button that stays disabled until one is chosen (the dashboard binds
+   * data-cz-id and the label on change).
    */
   function rejectedSendHtml(ci, send) {
     if (!send || send.available !== true) return '<span class="preaprobados-elm is-unavailable">—</span>';
@@ -366,24 +437,47 @@
       }
       return '<span class="preaprobados-elm is-none">—</span>';
     }
+    var parts = [];
     var enabled = candidates.filter(function (c) {
       return c.enabled === true;
     });
-    if (!enabled.length) {
-      var first = candidates[0];
-      return disabledSendButtonHtml(
-        sendBlockedHint({ reasons: first.reasons, reason: first.reason, hint: first.hint, hold: send.hold || { until: first.until } }),
-        'rechazados-elm-send',
-      );
-    }
+    if (enabled.length) parts.push(enabledSendHtml(ci, send, enabled));
+    parts = parts.concat(blockedCandidatesHtml(send, candidates));
+    return parts.length === 1 ? parts[0] : '<div class="rechazados-elm-stack">' + parts.join('') + '</div>';
+  }
+
+  /** Held candidates grouped by identical reason and availability date, input order kept. */
+  function blockedCandidatesHtml(send, candidates) {
+    var groups = [];
+    var byKey = {};
+    candidates.forEach(function (c) {
+      if (c.enabled === true) return;
+      var hint = candidateHint(c, send);
+      var until = candidateUntil(c, send);
+      var key = hint + '|' + (until || '');
+      if (!byKey[key]) {
+        byKey[key] = { ids: [], hint: hint, until: until };
+        groups.push(byKey[key]);
+      }
+      byKey[key].ids.push(Number(c.cz_solicitud_id));
+    });
+    return groups.map(function (g) {
+      return blockedUnsentHtml(g.ids, g.hint, g.until);
+    });
+  }
+
+  function enabledSendHtml(ci, send, enabled) {
     var targetId = Number(send.target_cz_id);
     if (send.needs_selection !== true && enabled.length === 1 && targetId === Number(enabled[0].cz_solicitud_id)) {
       return (
         '<div class="rechazados-elm-action">' +
-        sendButtonHtml(targetId, { ci: ci, rejectedAt: enabled[0].rejected_at, extraClass: 'rechazados-elm-send' }) +
-        '<span class="rechazados-elm-target">Sol. ' +
-        esc(targetId) +
-        '</span></div>'
+        sendButtonHtml(targetId, {
+          ci: ci,
+          rejectedAt: enabled[0].rejected_at,
+          extraClass: 'rechazados-elm-send',
+          label: rejectedSendLabel(targetId),
+        }) +
+        '</div>'
       );
     }
     var options = enabled
@@ -415,7 +509,9 @@
       '</select>' +
       '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send rechazados-elm-send" data-action="elm-send" data-ci="' +
       esc(ci) +
-      '" data-needs-pick="1" disabled aria-disabled="true" title="Elegí primero la solicitud a enviar">Enviar a ELM</button>' +
+      '" data-needs-pick="1" disabled aria-disabled="true" title="Elegí primero la solicitud a enviar">' +
+      REJECTED_PICK_LABEL +
+      '</button>' +
       '</div>'
     );
   }
@@ -450,65 +546,121 @@
     );
   }
 
+  function retryCandidatesOf(send) {
+    return send && send.available === true && Array.isArray(send.retry_candidates) ? send.retry_candidates : [];
+  }
+
+  function retryActionHtml(c, ci) {
+    return (
+      '<div class="rechazados-elm-action">' +
+      retryButtonHtml(c, ci) +
+      '<span class="rechazados-elm-target">Sol. ' +
+      esc(Number(c.cz_solicitud_id)) +
+      '</span></div>'
+    );
+  }
+
   /** Rechazados: "Reintentar ELM" controls (`elm.send.retry_candidates`), '' when none. */
   function rejectedRetryHtml(ci, send) {
-    var list = send && send.available === true && Array.isArray(send.retry_candidates) ? send.retry_candidates : [];
-    if (!list.length) return '';
-    return list
+    return retryCandidatesOf(send)
       .map(function (c) {
-        return (
-          '<div class="rechazados-elm-action">' +
-          retryButtonHtml(c, ci) +
-          '<span class="rechazados-elm-target">Sol. ' +
-          esc(Number(c.cz_solicitud_id)) +
-          '</span></div>'
-        );
+        return retryActionHtml(c, ci);
       })
       .join('');
   }
 
-  function historyHtml(elm) {
-    if (elm.cell) return elmCellHtml(elm.cell, { compact: true });
-    var other = elm.other_processes && elm.other_processes[0];
-    if (!other) return '';
+  /** One ELM process of the CI: its solicitud number, then the compact state and result. */
+  function processLineHtml(item) {
+    var kind = String(item.kind || item.state || '');
+    kind = /^[a-z0-9_]+$/.test(kind) ? kind : 'unknown';
     return (
+      '<div class="rechazados-elm-line">' +
+      '<span class="rechazados-elm-target">Sol. ' +
+      esc(Number(item.cz_solicitud_id)) +
+      '</span>' +
       '<span class="preaprobados-elm is-' +
-      esc(/^[a-z0-9_]+$/.test(String(other.state || '')) ? other.state : 'unknown') +
-      ' is-other is-compact"' +
-      titleAttr(
-        ['Solicitud ' + other.cz_solicitud_id, originLabel(other.trigger_origin)].concat(compactTitleParts(other)),
-      ) +
+      kind +
+      (item.granted_elm === true ? ' is-granted' : '') +
+      ' is-compact"' +
+      titleAttr(compactTitleParts(item).concat(cellTitleParts(item))) +
       '>' +
-      esc(compactCellText(other)) +
-      ' (otra sol.)</span>'
+      esc(compactCellText(item)) +
+      '</span></div>'
     );
   }
 
   /**
-   * Rechazados list: ELM history of the CI (the row's solicitud, else another one) and, when a
-   * rejected solicitud without its own process exists, the send control under it (enabled or
-   * disabled with the reason, decided server-side).
+   * Every ELM process of the CI (the row's solicitud first), each with its own "Reintentar ELM"
+   * when the server offers it. Retry candidates without a process line are kept after them.
+   */
+  function processLinesHtml(elm, ci) {
+    var items = (elm.cell ? [elm.cell] : []).concat(Array.isArray(elm.other_processes) ? elm.other_processes : []);
+    var retries = ci != null ? retryCandidatesOf(elm.send).slice() : [];
+    var out = items.map(function (item) {
+      var id = Number(item.cz_solicitud_id);
+      var html = processLineHtml(item);
+      for (var i = retries.length - 1; i >= 0; i -= 1) {
+        if (Number(retries[i].cz_solicitud_id) === id) {
+          html += retryButtonHtml(retries[i], ci);
+          retries.splice(i, 1);
+        }
+      }
+      return html;
+    });
+    return out.concat(
+      retries.map(function (c) {
+        return retryActionHtml(c, ci);
+      }),
+    );
+  }
+
+  function isProcessCell(cell) {
+    var kind = cell && cell.kind;
+    return Boolean(kind) && kind !== 'not_sent' && kind !== 'not_sendable' && kind !== 'unavailable';
+  }
+
+  /**
+   * List-row `elm` rebuilt from the CI detail block (GET /rechazados/:ci), so one row can be
+   * refreshed after a send without reloading the list. Same data as the list builds: the row's
+   * solicitud process as `cell`, every other process of the CI in `other_processes`, same `send`.
+   * @param {object|null|undefined} detailElm `elm` of the CI detail
+   * @param {number|string|null} focusCzId the row's solicitud (latest rejection)
+   */
+  function rejectedListElmFromDetail(detailElm, focusCzId) {
+    var d = detailElm || {};
+    if (d.available !== true) return { available: false };
+    var focus = Number(focusCzId);
+    var cell = null;
+    var others = [];
+    (Array.isArray(d.solicitudes) ? d.solicitudes : []).forEach(function (s) {
+      if (!isProcessCell(s && s.cell)) return;
+      if (Number(s.cz_solicitud_id) === focus && !cell) cell = s.cell;
+      else others.push(s.cell);
+    });
+    return {
+      available: true,
+      cell: cell,
+      other_processes: others.concat(Array.isArray(d.other_processes) ? d.other_processes : []),
+      ci_active: d.ci_active || null,
+      send: d.send || { available: false },
+    };
+  }
+
+  /**
+   * Rechazados list (one row per CI): each sent solicitud with its number, state and result,
+   * never a send button under it. Solicitudes without ELM process follow: "Enviar sol. N"
+   * when the server enabled the send, grey text with the reason when it is held.
    */
   function rejectedRowElmHtml(elm, ci) {
     if (!elm || elm.available !== true) {
       return '<span class="preaprobados-elm is-unavailable">—</span>';
     }
-    var history = historyHtml(elm);
+    var lines = processLinesHtml(elm, ci);
     var send = elm.send;
     var offered = send && send.available === true && Array.isArray(send.candidates) && send.candidates.length > 0;
-    var retry = ci != null ? rejectedRetryHtml(ci, send) : '';
-    if (history) {
-      if ((!offered || ci == null) && !retry) return history;
-      return (
-        '<div class="rechazados-elm-stack">' +
-        history +
-        retry +
-        (offered && ci != null ? rejectedSendHtml(ci, send) : '') +
-        '</div>'
-      );
-    }
-    if (retry) {
-      return '<div class="rechazados-elm-stack">' + retry + (offered ? rejectedSendHtml(ci, send) : '') + '</div>';
+    if (lines.length) {
+      if (offered && ci != null) lines.push(rejectedSendHtml(ci, send));
+      return lines.length === 1 ? lines[0] : '<div class="rechazados-elm-stack">' + lines.join('') + '</div>';
     }
     if (send && ci != null) return rejectedSendHtml(ci, send);
     return '<span class="preaprobados-elm is-none">—</span>';
@@ -588,6 +740,10 @@
     ciHoldText: ciHoldText,
     shortDate: shortDate,
     elmCellHtml: elmCellHtml,
+    rejectedDetailCellHtml: rejectedDetailCellHtml,
+    rejectedSendLabel: rejectedSendLabel,
+    REJECTED_PICK_LABEL: REJECTED_PICK_LABEL,
+    rejectedListElmFromDetail: rejectedListElmFromDetail,
     rejectedSendHtml: rejectedSendHtml,
     retryButtonHtml: retryButtonHtml,
     rejectedRetryHtml: rejectedRetryHtml,
