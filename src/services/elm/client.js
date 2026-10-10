@@ -26,6 +26,7 @@
  *     httpStatus: number|null,
  *     resultMessage: string|null, // ELM response.result text
  *     responseBody: object|null,  // parsed body; persisted only after redactSecrets
+ *     responseText: string|null,  // raw body when it is not a JSON object (redacted, truncated)
  *     latencyMs: number|null,
  *     errorCode: string|null,
  *     errorDetail: string|null,   // never credentials/headers
@@ -190,6 +191,7 @@ function createDisabledElmClient(reason, configIssues) {
 }
 
 const NETWORK_ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{1,40}$/;
+const RESPONSE_TEXT_MAX = 2000;
 
 function result(outcome, fields) {
   return Object.assign(
@@ -306,6 +308,9 @@ function createNetSuiteElmClient(deps) {
       latencyMs: latency(),
       responseBody: body && typeof body === 'object' && !Array.isArray(body) ? body : null,
     };
+    if (!base.responseBody && typeof text === 'string' && text.trim()) {
+      base.responseText = redactSecretText(text.trim(), RESPONSE_TEXT_MAX, knownSecrets);
+    }
     if (res.status === 401 || res.status === 403) {
       return result(OUTCOME.TECHNICAL_ERROR, Object.assign(base, { errorCode: CODES.HTTP_AUTH_REJECTED }));
     }

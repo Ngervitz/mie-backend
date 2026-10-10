@@ -201,6 +201,7 @@ function resolveRejectedSend(input) {
         reasons: cell.action.reasons || (cell.action.reason ? [cell.action.reason] : []),
         hint: cell.action.hint || null,
         until: (cell.action.hold && cell.action.hold.until) || null,
+        notices: cell.action.notices || [],
       });
     } else if (cell.kind === 'not_sendable' && !notSendable) {
       notSendable = {

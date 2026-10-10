@@ -418,7 +418,7 @@ const read = (p, extra) => classifyElmProcess(p, Object.assign({ nowMs: NOW }, e
     assert.ok(dash.includes("kpiCard('Aceptados ELM', String(km.preaprobados_elm))"));
     assert.ok(!dash.includes('Preaprobado ELM') && !dash.includes('Preaprobados ELM'), 'old label gone from Preaprobados');
     const html = readSrc('public/mie-dashboard.html');
-    assert.strictEqual((html.match(/\?v=20261010-elm-resolve-detail/g) || []).length, 4, 'cache version bumped');
+    assert.strictEqual((html.match(/\?v=20261010-elm-manual-flex/g) || []).length, 4, 'cache version bumped');
     const flow = new Map(ElmOpsUi.FLOW_LABELS);
     const current = new Map(ElmOpsUi.CURRENT_LABELS);
     assert.deepStrictEqual([flow.get('referred_s2'), flow.get('granted'), current.get('referred'), current.get('granted')], ['Aceptados S2 (Aceptado ELM)', 'Otorgados ELM', 'Aceptado ELM', 'Otorgado ELM']);

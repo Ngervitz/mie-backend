@@ -35,6 +35,18 @@ const TRIGGER_ORIGINS = Object.freeze([
 const ENABLED_TRIGGER_ORIGINS = Object.freeze(['janus_manual']);
 
 /**
+ * Operator sends (one click, one solicitud). Only these get the manual S1 allowances below; the
+ * automatic CDV → ELM circuit (cz_automatic) keeps the strict rules.
+ */
+const MANUAL_TRIGGER_ORIGIN = 'janus_manual';
+
+/**
+ * CZ relacion_laboral codes a manual S1 sends verbatim as activityType when ELM_ACTIVITY_TYPE_MAP_JSON
+ * has no entry for them. A configured mapping always wins.
+ */
+const MANUAL_RAW_ACTIVITY_TYPES = Object.freeze(['OTR']);
+
+/**
  * Where a send started (elm_lead_processes.send_origin, migration 20261012): stored once when
  * the process is created, immutable, never derived from the CZ state.
  */
@@ -101,6 +113,8 @@ const CODES = Object.freeze({
   ACTIVITY_TYPE_MAPPING_MISSING: 'elm_activity_type_mapping_missing',
   DATE_OF_BIRTH_FORMAT_UNCONFIRMED: 'elm_date_of_birth_format_unconfirmed',
   DATE_OF_BIRTH_INVALID: 'elm_date_of_birth_invalid',
+  /** Manual send: fecha_nacimiento is null and the sync has not classified why (no status yet). */
+  DATE_OF_BIRTH_UNVERIFIED: 'elm_date_of_birth_unverified',
   MOBILEPHONE_FORMAT_UNCONFIRMED: 'elm_mobilephone_format_unconfirmed',
   MOBILEPHONE_INVALID: 'elm_mobilephone_invalid',
   SALARY_INVALID: 'elm_salary_invalid',
@@ -138,6 +152,14 @@ const CODES = Object.freeze({
   POSTBACK_PERSIST_FAILED: 'elm_postback_persist_failed',
 });
 
+/** Manual S1 allowances applied to a payload (never blockers; shown to the operator). */
+const NOTICES = Object.freeze({
+  /** fecha_nacimiento absent or not a valid date of birth: dateOfBirth left out of S1. */
+  DATE_OF_BIRTH_OMITTED: 'elm_date_of_birth_omitted',
+  /** relacion_laboral without mapping sent as its CZ code (MANUAL_RAW_ACTIVITY_TYPES). */
+  ACTIVITY_TYPE_RAW: 'elm_activity_type_raw',
+});
+
 /**
  * Mirrors public.elm_pre_reception_error_codes() and the HTTP check of elm_manual_retry_s1
  * (NetSuite rejected the authentication before the RESTlet ran). Display only: the DB decides.
@@ -165,6 +187,9 @@ module.exports = {
   S2,
   TRIGGER_ORIGINS,
   ENABLED_TRIGGER_ORIGINS,
+  MANUAL_TRIGGER_ORIGIN,
+  MANUAL_RAW_ACTIVITY_TYPES,
+  NOTICES,
   SEND_ORIGIN,
   SEND_ORIGINS_BY_TRIGGER,
   ELM_SOURCE,

@@ -15,7 +15,7 @@ const PROCESS_TABLE = 'elm_lead_processes';
 const POSTBACK_EVENTS_TABLE = 'elm_postback_events';
 
 const SOLICITUD_SELECT =
-  'cz_id, ci, nombre, apellido, email, celular, salario, fecha_nacimiento, relacion_laboral, lrw_id, solicitudes_estados_id, updated_at_src, synced_at';
+  'cz_id, ci, nombre, apellido, email, celular, salario, fecha_nacimiento, fecha_nacimiento_status, relacion_laboral, lrw_id, solicitudes_estados_id, updated_at_src, synced_at';
 
 const GRANTED_SELECT = 'cz_id, ci, monto_otorgado, updated_at_src, synced_at';
 

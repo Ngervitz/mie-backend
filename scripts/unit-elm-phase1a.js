@@ -656,12 +656,20 @@ async function runAll() {
     });
     assert.deepStrictEqual(built, { ok: false, code: CODES.DATE_OF_BIRTH_INVALID });
 
-    const { orch, repo, client } = setup({
-      mutate: (m) => m.solicitudes.set(1001, solicitudFixture({ fecha_nacimiento: '0174-12-16' })),
+    const { repo, client } = setup();
+    const auto = createElmOrchestrator({
+      repository: repo,
+      client: client,
+      config: TEST_CONFIG,
+      now: () => NOW.getTime(),
+      enabledTriggerOrigins: ['janus_manual', 'cz_automatic'],
     });
-    const out = await orch.evaluateElm(1001, MANUAL);
+    const out = await auto.evaluateElm(1001, {
+      triggerOrigin: 'cz_automatic',
+      solicitud: solicitudFixture({ fecha_nacimiento: '0174-12-16' }),
+    });
     assert.strictEqual(out.ok, false);
-    assert.strictEqual(out.code, CODES.DATE_OF_BIRTH_INVALID);
+    assert.strictEqual(out.code, CODES.DATE_OF_BIRTH_INVALID, 'automatic circuit stays strict');
     assert.strictEqual(client.s1Calls, 0, 'ELM never called');
     assert.strictEqual(repo.rows.size, 0, 'no process claimed');
   });

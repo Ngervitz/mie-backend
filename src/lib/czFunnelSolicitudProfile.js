@@ -6,7 +6,7 @@
  * No I/O. No Credizona changes.
  */
 
-const { normalizeBirthDate } = require('./birthDate');
+const { normalizeBirthDate, classifyBirthDate } = require('./birthDate');
 
 /**
  * Digits-only celular text from API number/string. Empty → null.
@@ -51,6 +51,19 @@ function parseCzDateOnly(raw, now) {
 }
 
 /**
+ * Why fecha_nacimiento is stored as it is (birthDate.js BIRTH_DATE_STATUS). The stored date is
+ * null for every invalid value, so this keeps a minor's date apart from an impossible one.
+ * Null when the API item has no fecha_nacimiento key (nothing to classify).
+ * @param {object} src API item
+ * @param {Date} [now]
+ * @returns {string|null}
+ */
+function birthDateStatusOf(src, now) {
+  if (!src || !Object.prototype.hasOwnProperty.call(src, 'fecha_nacimiento')) return null;
+  return classifyBirthDate(src.fecha_nacimiento, now);
+}
+
+/**
  * @param {unknown} raw
  * @returns {string|null}
  */
@@ -67,15 +80,17 @@ function nullableTrimmedText(raw) {
  *   celular: string|null,
  *   salario: number|null,
  *   fecha_nacimiento: string|null,
+ *   fecha_nacimiento_status: string|null,
  *   relacion_laboral: string|null
  * }}
  */
-function mapSolicitudProfileFields(item) {
+function mapSolicitudProfileFields(item, now) {
   const src = item && typeof item === 'object' ? item : {};
   return {
     celular: nullableCelular(src.celular),
     salario: nullableSalario(src.salario),
-    fecha_nacimiento: parseCzDateOnly(src.fecha_nacimiento),
+    fecha_nacimiento: parseCzDateOnly(src.fecha_nacimiento, now),
+    fecha_nacimiento_status: birthDateStatusOf(src, now),
     relacion_laboral: nullableTrimmedText(src.relacion_laboral),
   };
 }
@@ -123,6 +138,7 @@ module.exports = {
   nullableCelular,
   nullableSalario,
   parseCzDateOnly,
+  birthDateStatusOf,
   mapSolicitudProfileFields,
   resolveLatestCelularByCi,
 };

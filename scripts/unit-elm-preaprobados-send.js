@@ -582,13 +582,15 @@ async function main() {
   });
 
   // --- eligibility and valid dates (orchestrator authority) ----------------------------------
-  await test('eligibility: CDV GRANTED, missing fields and invalid / underage birth dates never reach ELM', async () => {
+  await test('eligibility: CDV GRANTED, missing fields and underage / future birth dates never reach ELM', async () => {
     const cases = [
       [{ solicitudes_estados_id: 11 }, CODES.CDV_GRANTED],
       [{ celular: '' }, CODES.MISSING_REQUIRED_FIELDS],
-      [{ fecha_nacimiento: '1991-02-30' }, CODES.DATE_OF_BIRTH_INVALID],
       [{ fecha_nacimiento: '2015-01-01' }, CODES.DATE_OF_BIRTH_INVALID],
-      [{ fecha_nacimiento: '1880-01-01' }, CODES.DATE_OF_BIRTH_INVALID],
+      [{ fecha_nacimiento: '2027-01-01' }, CODES.DATE_OF_BIRTH_INVALID],
+      [{ fecha_nacimiento: null, fecha_nacimiento_status: 'underage' }, CODES.DATE_OF_BIRTH_INVALID],
+      [{ fecha_nacimiento: null, fecha_nacimiento_status: 'future' }, CODES.DATE_OF_BIRTH_INVALID],
+      [{ fecha_nacimiento: null }, CODES.DATE_OF_BIRTH_UNVERIFIED],
       [{ relacion_laboral: 'XYZ' }, CODES.ACTIVITY_TYPE_MAPPING_MISSING],
     ];
     for (const [over, code] of cases) {
@@ -875,11 +877,25 @@ async function main() {
     assert.strictEqual(warns.length, 1);
   });
 
-  await test('list: not sendable (invalid birth date) is never a button', async () => {
-    const h = harness([], { solicitud: solicitudFixture(CZ, CI, { fecha_nacimiento: '1991-02-30' }) });
+  await test('list: not sendable (missing email) is never a button', async () => {
+    const h = harness([], { solicitud: solicitudFixture(CZ, CI, { email: '' }) });
     const cell = (await h.listView.cellsForCzIds([CZ], { allowSend: true })).get(CZ);
     assert.strictEqual(cell.kind, 'not_sendable');
     assert.ok(!ElmUi.elmCellHtml(cell, { ci: CI }).includes('<button'));
+  });
+
+  await test('list: invalid birth date is a manual send without dateOfBirth, announced on the button', async () => {
+    const h = harness([], {
+      solicitud: solicitudFixture(CZ, CI, { fecha_nacimiento: null, fecha_nacimiento_status: 'impossible' }),
+    });
+    const cell = (await h.listView.cellsForCzIds([CZ], { allowSend: true })).get(CZ);
+    assert.strictEqual(cell.kind, 'not_sent');
+    assert.strictEqual(cell.action.enabled, true);
+    assert.deepStrictEqual(cell.action.notices, ['elm_date_of_birth_omitted']);
+    const html = ElmUi.elmCellHtml(cell, { ci: CI });
+    assert.ok(html.includes('data-action="elm-send"'));
+    assert.ok(html.includes('data-elm-notice="Se envía sin fecha de nacimiento'));
+    assert.ok(html.includes('Sin fecha nac.'));
   });
 
   // --- S1 / S2 / postback display ------------------------------------------------------------

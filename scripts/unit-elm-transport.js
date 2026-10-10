@@ -533,19 +533,50 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   assert.strictEqual(s2rej.repo.rows.get(1001).referred_at, null);
 });
 
-test('6b impossible or absent date of birth → blocked before transport, zero requests', async () => {
+test('6b impossible or absent date of birth: automatic blocked before transport; manual sends S1 without dateOfBirth', async () => {
   for (const dob of ['0174-12-16', '0001-03-31', '0088-04-08', null]) {
     const f = fakeFetch([ok('Listo para recibir datos en servicio 2')]);
     const o = orchestratorWith(f);
-    o.repo.loadSolicitudContext = async () => ({
-      solicitud: Object.assign(solicitudFixture(), { fecha_nacimiento: dob }),
-      grantedRow: null,
+    const auto = createElmOrchestrator({
+      repository: o.repo,
+      client: o.client,
+      config: readElmConfig(ENV),
+      logger: capturingLogger(),
+      enabledTriggerOrigins: ['janus_manual', 'cz_automatic'],
     });
-    const r = await o.orch.evaluateElm(1001, MANUAL);
+    const r = await auto.evaluateElm(1001, {
+      triggerOrigin: 'cz_automatic',
+      solicitud: Object.assign(solicitudFixture(), { fecha_nacimiento: dob }),
+    });
     assert.strictEqual(r.ok, false, String(dob));
     assert.strictEqual(r.code, CODES.DATE_OF_BIRTH_INVALID, String(dob));
     assert.strictEqual(f.calls.length, 0, 'no ELM request for ' + dob);
     assert.strictEqual(o.repo.rows.size, 0, 'no process for ' + dob);
+
+    o.repo.loadSolicitudContext = async () => ({
+      solicitud: Object.assign(
+        solicitudFixture(),
+        { fecha_nacimiento: dob },
+        dob == null ? { fecha_nacimiento_status: 'over_max_age' } : {},
+      ),
+      grantedRow: null,
+    });
+    const m = await o.orch.evaluateElm(1001, MANUAL);
+    assert.strictEqual(m.ok, true, String(dob));
+    assert.strictEqual(f.calls.length, 1, 'one S1 request for ' + dob);
+    assert.strictEqual(
+      f.calls[0].init.body,
+      JSON.stringify({
+        activityType: 'TEST_ACTIVITY_EPR',
+        docNumber: '12345678',
+        firstName: 'Ana',
+        lastName: 'Prueba',
+        salary: '30000',
+        source: ELM_SOURCE,
+      }),
+      'exact S1 body without dateOfBirth for ' + dob,
+    );
+    assert.ok(!('dateOfBirth' in o.repo.rows.get(1001).s1_request), 'frozen request has no dateOfBirth');
   }
 });
 

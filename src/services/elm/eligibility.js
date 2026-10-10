@@ -20,8 +20,8 @@
  */
 
 const { isGrantedForSolicitud } = require('../../lib/preaprobadosRead');
-const { CODES } = require('./constants');
-const { missingRequiredFields } = require('./payload');
+const { CODES, NOTICES } = require('./constants');
+const { missingRequiredFields, manualBirthDateDecision, resolveActivityType } = require('./payload');
 const { isValidBirthDate } = require('../../lib/birthDate');
 
 /**
@@ -47,16 +47,22 @@ function normalizeCommercialOrigin(baseLabel) {
  *   existingProcess?: object|null,
  *   config: { activityTypeMap?: Record<string,string> },
  *   now?: Date,
- * }} input
- * @returns {{ eligible: boolean, blockers: Array<{ code: string, fields?: string[] }> }}
+ *   manual?: boolean,
+ * }} input `manual` only for janus_manual sends: an absent / impossible fecha_nacimiento and an
+ *   unmapped MANUAL_RAW_ACTIVITY_TYPES code become `notices` (see buildService1Payload), not
+ *   blockers. An underage, future or unclassified date still blocks (manualBirthDateDecision).
+ * @returns {{ eligible: boolean, blockers: Array<{ code: string, fields?: string[] }>, notices: string[] }}
  */
 function evaluateElmEligibility(input) {
   const blockers = [];
+  const notices = [];
+  const manual = input != null && input.manual === true;
   const sol = input && input.solicitud ? input.solicitud : null;
   if (!sol) {
     return {
       eligible: false,
       blockers: [{ code: CODES.SOLICITUD_NOT_FOUND }],
+      notices: notices,
     };
   }
 
@@ -76,20 +82,24 @@ function evaluateElmEligibility(input) {
   // CZ requires fecha_nacimiento at capture: an empty value here means the sync parser
   // rejected what CZ stored, so absent and implausible dates share one blocker.
   if (!isValidBirthDate(sol.fecha_nacimiento, input.now)) {
-    blockers.push({ code: CODES.DATE_OF_BIRTH_INVALID });
+    const decision = manual ? manualBirthDateDecision(sol, input.now) : null;
+    if (decision && decision.omit) notices.push(NOTICES.DATE_OF_BIRTH_OMITTED);
+    else blockers.push({ code: (decision && decision.code) || CODES.DATE_OF_BIRTH_INVALID });
   }
 
   const relacion =
     sol.relacion_laboral == null ? '' : String(sol.relacion_laboral).trim();
-  const map = (input.config && input.config.activityTypeMap) || {};
-  if (
-    relacion &&
-    !(Object.prototype.hasOwnProperty.call(map, relacion) && String(map[relacion]).trim())
-  ) {
-    blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
+  if (relacion) {
+    const activity = resolveActivityType(
+      relacion,
+      input.config && input.config.activityTypeMap,
+      manual,
+    );
+    if (!activity) blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
+    else if (activity.raw) notices.push(NOTICES.ACTIVITY_TYPE_RAW);
   }
 
-  return { eligible: blockers.length === 0, blockers: blockers };
+  return { eligible: blockers.length === 0, blockers: blockers, notices: notices };
 }
 
 /**

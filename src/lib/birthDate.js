@@ -75,11 +75,64 @@ function isValidBirthDate(raw, now) {
   return normalizeBirthDate(raw, now) !== null;
 }
 
+/**
+ * Mirrors the CHECK of cz_funnel_solicitudes.fecha_nacimiento_status
+ * (migrations/20261014_cz_funnel_fecha_nacimiento_status.sql).
+ */
+const BIRTH_DATE_STATUS = Object.freeze({
+  VALID: 'valid',
+  ABSENT: 'absent',
+  IMPOSSIBLE: 'impossible',
+  OVER_MAX_AGE: 'over_max_age',
+  UNDERAGE: 'underage',
+  FUTURE: 'future',
+});
+
+/**
+ * Invalid dates that carry no usable information. underage / future are real or possible dates
+ * of a minor and are never in this list.
+ */
+const OMITTABLE_BIRTH_DATE_STATUSES = Object.freeze([
+  BIRTH_DATE_STATUS.ABSENT,
+  BIRTH_DATE_STATUS.IMPOSSIBLE,
+  BIRTH_DATE_STATUS.OVER_MAX_AGE,
+]);
+
+function isAfterToday(date, now) {
+  const ref = now instanceof Date && Number.isFinite(now.getTime()) ? now : new Date();
+  const today = [ref.getUTCFullYear(), ref.getUTCMonth() + 1, ref.getUTCDate()];
+  const d = [date.y, date.mo, date.d];
+  for (let i = 0; i < 3; i += 1) {
+    if (d[i] !== today[i]) return d[i] > today[i];
+  }
+  return false;
+}
+
+/**
+ * Why a raw CZ fecha_nacimiento is (not) a usable date of birth on `now`.
+ * @param {unknown} raw
+ * @param {Date} [now]
+ * @returns {string} BIRTH_DATE_STATUS value
+ */
+function classifyBirthDate(raw, now) {
+  if (raw == null || String(raw).trim() === '') return BIRTH_DATE_STATUS.ABSENT;
+  const date = parseCalendarDate(raw);
+  if (!date) return BIRTH_DATE_STATUS.IMPOSSIBLE;
+  if (isAfterToday(date, now)) return BIRTH_DATE_STATUS.FUTURE;
+  const age = ageInYears(date, now);
+  if (age < MIN_AGE_YEARS) return BIRTH_DATE_STATUS.UNDERAGE;
+  if (age > MAX_AGE_YEARS) return BIRTH_DATE_STATUS.OVER_MAX_AGE;
+  return BIRTH_DATE_STATUS.VALID;
+}
+
 module.exports = {
   MIN_AGE_YEARS,
   MAX_AGE_YEARS,
+  BIRTH_DATE_STATUS,
+  OMITTABLE_BIRTH_DATE_STATUSES,
   parseCalendarDate,
   ageInYears,
   normalizeBirthDate,
   isValidBirthDate,
+  classifyBirthDate,
 };

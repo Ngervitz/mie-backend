@@ -13,8 +13,13 @@
  * ELM returns as postback internal_id).
  */
 
-const { CODES, ELM_SOURCE } = require('./constants');
-const { isValidBirthDate } = require('../../lib/birthDate');
+const { CODES, ELM_SOURCE, MANUAL_RAW_ACTIVITY_TYPES, NOTICES } = require('./constants');
+const {
+  BIRTH_DATE_STATUS,
+  OMITTABLE_BIRTH_DATE_STATUSES,
+  isValidBirthDate,
+  classifyBirthDate,
+} = require('../../lib/birthDate');
 
 const SERVICE1_KEYS = Object.freeze([
   'activityType',
@@ -137,47 +142,90 @@ function missingRequiredFields(solicitud) {
 }
 
 /**
- * @param {{ czId: number, solicitud: object, config: object, now?: Date }} input
- * @returns {{ ok: true, payload: object } | { ok: false, code: string }}
+ * Manual send decision for fecha_nacimiento. A stored date is classified as is; a null date relies
+ * on fecha_nacimiento_status from the sync, because the mirror stores null for every invalid
+ * value (a minor's included). Omitted only for absent / impossible / over the maximum age.
+ * @param {object} solicitud cz_funnel_solicitudes row (fecha_nacimiento, fecha_nacimiento_status)
+ * @param {Date} [now]
+ * @returns {{ send: true } | { omit: true } | { code: string }}
+ */
+function manualBirthDateDecision(solicitud, now) {
+  const s = solicitud || {};
+  const status = text(s.fecha_nacimiento)
+    ? classifyBirthDate(s.fecha_nacimiento, now)
+    : s.fecha_nacimiento_status == null
+      ? null
+      : String(s.fecha_nacimiento_status);
+  if (status === BIRTH_DATE_STATUS.VALID && text(s.fecha_nacimiento)) return { send: true };
+  if (OMITTABLE_BIRTH_DATE_STATUSES.includes(status)) return { omit: true };
+  if (status == null) return { code: CODES.DATE_OF_BIRTH_UNVERIFIED };
+  return { code: CODES.DATE_OF_BIRTH_INVALID };
+}
+
+/**
+ * activityType for a relacion_laboral: the configured mapping, or (manual only) the CZ code itself
+ * when it is in MANUAL_RAW_ACTIVITY_TYPES and has no mapping.
+ * @returns {{ value: string, raw: boolean } | null}
+ */
+function resolveActivityType(relacionRaw, map, manual) {
+  const relacion = text(relacionRaw);
+  if (!relacion) return null;
+  const m = map || {};
+  const mapped = Object.prototype.hasOwnProperty.call(m, relacion) ? text(m[relacion]) : null;
+  if (mapped) return { value: mapped, raw: false };
+  if (manual === true && MANUAL_RAW_ACTIVITY_TYPES.includes(relacion)) {
+    return { value: relacion, raw: true };
+  }
+  return null;
+}
+
+/**
+ * Manual sends (`manual: true`, trigger janus_manual only) take two allowances, reported in
+ * `notices`: an unmapped MANUAL_RAW_ACTIVITY_TYPES code goes verbatim as activityType, and an
+ * absent / impossible fecha_nacimiento (manualBirthDateDecision) leaves dateOfBirth out, never
+ * replaced. An underage, future or unclassified date still blocks; the DOB format must still be
+ * confirmed.
+ * Every other rule is the same as the automatic circuit.
+ * @param {{ czId: number, solicitud: object, config: object, now?: Date, manual?: boolean }} input
+ * @returns {{ ok: true, payload: object, notices: string[] } | { ok: false, code: string }}
  */
 function buildService1Payload(input) {
   const s = (input && input.solicitud) || {};
   const config = (input && input.config) || {};
-  const missing = missingRequiredFields(s);
+  const manual = input != null && input.manual === true;
+  const notices = [];
+  const missing = missingRequiredFields(s).filter((f) => !(manual && f === 'fecha_nacimiento'));
   if (missing.length) return fail(CODES.MISSING_REQUIRED_FIELDS, { fields: missing });
 
   const czId = positiveSafeInt(input && input.czId);
   if (czId == null) return fail(CODES.INVALID_CZ_ID);
 
-  const relacion = text(s.relacion_laboral);
-  const map = config.activityTypeMap || {};
-  const activityType = Object.prototype.hasOwnProperty.call(map, relacion)
-    ? text(map[relacion])
-    : null;
-  if (!activityType) return fail(CODES.ACTIVITY_TYPE_MAPPING_MISSING);
+  const activity = resolveActivityType(s.relacion_laboral, config.activityTypeMap, manual);
+  if (!activity) return fail(CODES.ACTIVITY_TYPE_MAPPING_MISSING);
+  if (activity.raw) notices.push(NOTICES.ACTIVITY_TYPE_RAW);
 
-  const dob = formatDateOfBirth(
-    s.fecha_nacimiento,
-    config.dateOfBirthFormat || null,
-    input && input.now,
-  );
-  if (!dob.ok) return dob;
+  const dobFormat = config.dateOfBirthFormat || null;
+  let dob = formatDateOfBirth(s.fecha_nacimiento, dobFormat, input && input.now);
+  if (!dob.ok && dob.code === CODES.DATE_OF_BIRTH_INVALID && manual) {
+    const decision = manualBirthDateDecision(s, input && input.now);
+    if (!decision.omit) return fail(decision.code || CODES.DATE_OF_BIRTH_INVALID);
+    dob = null;
+    notices.push(NOTICES.DATE_OF_BIRTH_OMITTED);
+  } else if (!dob.ok) {
+    return dob;
+  }
 
   const salaryNum = Number(s.salario);
   if (!Number.isFinite(salaryNum) || salaryNum <= 0) return fail(CODES.SALARY_INVALID);
 
-  return {
-    ok: true,
-    payload: {
-      activityType: activityType,
-      dateOfBirth: dob.value,
-      docNumber: String(positiveSafeInt(s.ci)),
-      firstName: text(s.nombre),
-      lastName: text(s.apellido),
-      salary: String(salaryNum),
-      source: ELM_SOURCE,
-    },
-  };
+  const payload = { activityType: activity.value };
+  if (dob) payload.dateOfBirth = dob.value;
+  payload.docNumber = String(positiveSafeInt(s.ci));
+  payload.firstName = text(s.nombre);
+  payload.lastName = text(s.apellido);
+  payload.salary = String(salaryNum);
+  payload.source = ELM_SOURCE;
+  return { ok: true, payload: payload, notices: notices };
 }
 
 /**
@@ -218,6 +266,8 @@ module.exports = {
   parseFrozenDateOfBirth,
   formatMobilePhone,
   missingRequiredFields,
+  manualBirthDateDecision,
+  resolveActivityType,
   buildService1Payload,
   buildService2Payload,
 };

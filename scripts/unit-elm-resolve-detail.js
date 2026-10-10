@@ -316,7 +316,7 @@ const ADMIN = { 'GET /assignees': { status: 200, body: { ok: true, items: [] } }
     const ops = page.indexOf('elm-ops.js');
     const dash = page.indexOf('mie-dashboard.js');
     assert.ok(helpers < ops && ops < dash, 'elm-ops.js loaded as helper before the dashboard');
-    assert.strictEqual((page.match(/\?v=20261010-elm-resolve-detail/g) || []).length, 4, 'cache version bumped');
+    assert.strictEqual((page.match(/\?v=20261010-elm-manual-flex/g) || []).length, 4, 'cache version bumped');
     const src = readSrc('public/mie-dashboard.js');
     assert.ok(!src.includes('ElmOps.mount'), 'no ELM Ops panel mounted');
     assert.strictEqual((src.match(/ElmOps\.createProcessResolver\(/g) || []).length, 2, 'Rechazados + Preaprobados');

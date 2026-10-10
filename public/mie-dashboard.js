@@ -16217,13 +16217,15 @@ init();
     const ElmUi = window.ElmUiHelpers;
     if (!ElmUi || !ci || !czId) return;
     const rejectedAt = btn ? btn.getAttribute('data-rejected-at') : null;
+    const notice = btn ? btn.getAttribute('data-elm-notice') : null;
     const ok = window.confirm(
       '¿Enviar la solicitud ' +
         czId +
         ' (CI ' +
         ci +
         (rejectedAt ? ', rechazada ' + rejectedAt : '') +
-        ') a ELM?\n\nSe ejecuta la evaluación inicial (S1) y, si es favorable, la derivación a ventas de ELM (S2).',
+        ') a ELM?\n\nSe ejecuta la evaluación inicial (S1) y, si es favorable, la derivación a ventas de ELM (S2).' +
+        (notice ? '\n\nAtención: ' + notice : ''),
     );
     if (!ok) return;
     if (btn) btn.disabled = true;
@@ -16365,16 +16367,21 @@ init();
     const czId = select.value;
     if (czId) {
       const date = opt ? opt.getAttribute('data-rejected-at') : '';
+      const notice = opt ? opt.getAttribute('data-elm-notice') : '';
       btn.setAttribute('data-cz-id', czId);
       if (date) btn.setAttribute('data-rejected-at', date);
       else btn.removeAttribute('data-rejected-at');
+      if (notice) btn.setAttribute('data-elm-notice', notice);
+      else btn.removeAttribute('data-elm-notice');
       btn.disabled = false;
       btn.removeAttribute('aria-disabled');
       btn.textContent = window.ElmUiHelpers.rejectedSendLabel(czId);
-      btn.title = 'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM';
+      btn.title =
+        'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM' + (notice ? '. ' + notice : '');
     } else {
       btn.removeAttribute('data-cz-id');
       btn.removeAttribute('data-rejected-at');
+      btn.removeAttribute('data-elm-notice');
       btn.disabled = true;
       btn.setAttribute('aria-disabled', 'true');
       btn.textContent = window.ElmUiHelpers.REJECTED_PICK_LABEL;
@@ -18780,6 +18787,7 @@ init();
     const ElmUi = window.ElmUiHelpers;
     if (!ElmUi || !czId || state.elmSendingCzId) return;
     const row = preaprobadoRow(czId);
+    const notice = btn ? btn.getAttribute('data-elm-notice') : null;
     const ok = window.confirm(
       '¿Enviar la solicitud ' +
         czId +
@@ -18787,6 +18795,7 @@ init();
         ' a ELM?\n\n' +
         'Se envían a ELM los datos de esta solicitud. Se ejecuta la evaluación inicial (S1) y, si es ' +
         'favorable, la derivación a ventas de ELM (S2). Una derivación no es un préstamo otorgado.\n\n' +
+        (notice ? 'Atención: ' + notice + '\n\n' : '') +
         'El envío no se puede deshacer.',
     );
     if (!ok) return;
