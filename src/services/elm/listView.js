@@ -26,7 +26,11 @@ const {
 } = require('./constants');
 const { readElmConfig } = require('./config');
 const { evaluateElmEligibility } = require('./eligibility');
-const { classifyElmProcess, readPostReferralRejectionStatuses } = require('./classification');
+const {
+  classifyElmProcess,
+  readPostReferralRejectionStatuses,
+  DUPLICATE_OTHER_CHANNEL_DETAIL,
+} = require('./classification');
 
 const SEND_PENDING_HINT = 'Integración ELM pendiente de habilitación';
 
@@ -71,16 +75,19 @@ function answerAt(p, step) {
 
 /**
  * ELM's own answer text, as persisted (s1|s2_result_message, redacted at write time), with its
- * step. Rejected / review readings: the step that decided the reading. Processes closed by ELM
- * Ops: ELM's last answer (S2 once started, else S1), kept apart from the ops resolution. Null for
- * every other reading and when ELM sent no text (timeouts, HTTP errors, rejected credentials).
+ * step. Rejected / review / duplicate-from-another-channel readings: the step that decided the
+ * reading. Processes closed by ELM Ops: ELM's last answer (S2 once started, else S1), kept apart
+ * from the ops resolution. Null for every other reading and when ELM sent no text (timeouts, HTTP
+ * errors, rejected credentials).
  * @returns {{ step: 's1'|'s2', message: string }|null}
  */
 function elmAnswerOf(p, c) {
   if (p.ops_resolved_at) {
     return (p.s2_status && p.s2_status !== S2.NOT_STARTED ? answerAt(p, 's2') : null) || answerAt(p, 's1');
   }
-  if (c.state !== 'rejected' && c.state !== 'review') return null;
+  if (c.state !== 'rejected' && c.state !== 'review' && c.detail !== DUPLICATE_OTHER_CHANNEL_DETAIL) {
+    return null;
+  }
   if (c.stage !== 's1' && c.stage !== 's2') return null;
   return answerAt(p, c.stage);
 }

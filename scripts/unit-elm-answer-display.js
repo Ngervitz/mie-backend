@@ -516,5 +516,84 @@ test('27 every list cell is the same two-column grid: "Sol. N" left, value right
   assert.strictEqual(ElmUi.rejectedOtherProcessesHtml([]), '');
 });
 
+/** Same values as production solicitud 1341 (2026-10-10), PII-free: S1 {"success":true,"result":"Repetido. Aprobado"}. */
+const P1341 = proc({
+  cz_solicitud_id: 1341,
+  s1_status: S1.UNKNOWN,
+  s1_http_status: 200,
+  s1_error_code: 'elm_response_undocumented',
+  s1_result_message: 'Repetido. Aprobado',
+});
+
+test('28 "Repetido. Aprobado" stays uncertain and keeps "Aprobado" visible', () => {
+  assert.strictEqual(ElmUi.compactReason('Repetido. Aprobado'), 'Repetido. Aprobado');
+  const c = cellOf(P1341);
+  assert.strictEqual(c.state, 'review');
+  assert.strictEqual(c.detail, 's1_unknown');
+  assert.strictEqual(c.label, 'Resultado incierto ELM (S1)');
+  assert.deepStrictEqual(c.elm_answer, { step: 's1', message: 'Repetido. Aprobado' });
+  assert.strictEqual(c.retry, null, 'no retry for an uncertain result');
+  const html = rowOf(c);
+  assert.strictEqual(visible(html), 'Sol. 1341 Incierto · Repetido. Aprobado', html);
+  assert.ok(html.includes('class="preaprobados-elm is-review is-compact is-wrap"'), 'yellow, not accepted / rejected; may wrap so "Aprobado" is never cut: ' + html);
+  const css = require('fs').readFileSync(require('path').join(__dirname, '../public/mie-dashboard.css'), 'utf8');
+  const wrapRule = css.slice(css.indexOf('.preaprobados-elm.is-compact.is-wrap {'));
+  assert.ok(/^\.preaprobados-elm\.is-compact\.is-wrap \{[^}]*white-space:\s*normal;/.test(wrapRule), 'wrap rule present');
+  for (const p of [P1423, P1430, proc({ s1_status: S1.REJECTED, s1_result_message: 'Score bajo' })]) {
+    assert.ok(!rowOf(cellOf(p)).includes('is-wrap'), 'single-sentence labels stay on one line with ellipsis');
+  }
+  assert.ok(html.includes('title="Resultado incierto ELM (S1) · Respuesta ELM (S1): Repetido. Aprobado · Origen: Manual (JANUS)"'), html);
+  assert.ok(!html.includes('<button'), 'no send / retry button: ' + html);
+  const detail = ElmUi.elmCellHtml(c, { retryCi: 1, answer: 'full' });
+  assert.ok(detail.includes('>Respuesta ELM (S1): Repetido. Aprobado</span>') && !detail.includes('Reintentar'), detail);
+});
+
+test('29 "Repetido. Rechazado" is still a definitive rejection shown as "Rechazado · Repetido"', () => {
+  for (const message of ['Repetido. Rechazado', 'Repetido. rechazado']) {
+    const c = cellOf(Object.assign({}, P1423, { s1_result_message: message }));
+    assert.strictEqual(c.state, 'rejected', message);
+    assert.strictEqual(ElmUi.compactReason(message), 'Repetido', message);
+    const html = rowOf(c);
+    assert.strictEqual(visible(html), 'Sol. 1423 Rechazado · Repetido', html);
+    assert.ok(html.includes('class="preaprobados-elm is-rejected is-compact"'), html);
+  }
+  assert.strictEqual(stateText(rowOf(cellOf(P1430))), 'Incierto · Repetido', 'historical uncertain 1430 unchanged');
+});
+
+/** A new S1 "Repetido. Aprobado" as the orchestrator persists it now (1341 stays as stored). */
+const PDUP = proc({
+  cz_solicitud_id: 1600,
+  s1_status: S1.REJECTED,
+  s1_http_status: 200,
+  s1_error_code: 'elm_s1_duplicate_other_channel',
+  s1_result_message: 'Repetido. Aprobado',
+});
+
+test('30 new "Repetido. Aprobado" reads "Duplicado · Otro canal": terminal, original answer kept, no actions', () => {
+  const c = cellOf(PDUP);
+  assert.strictEqual(c.kind, 'closed');
+  assert.strictEqual(c.state, 'closed', 'neither accepted, rejected nor uncertain');
+  assert.strictEqual(c.detail, 's1_duplicate_other_channel');
+  assert.strictEqual(c.label, 'Duplicado · Otro canal');
+  assert.deepStrictEqual(c.elm_answer, { step: 's1', message: 'Repetido. Aprobado' });
+  assert.strictEqual(c.retry, null, 'no retry');
+  assert.strictEqual(c.action.show, false, 'no send');
+  const html = rowOf(c);
+  assert.strictEqual(visible(html), 'Sol. 1600 Duplicado · Otro canal', html);
+  assert.ok(html.includes('class="preaprobados-elm is-closed is-compact"'), html);
+  assert.ok(html.includes('title="Duplicado · Otro canal · Respuesta ELM (S1): Repetido. Aprobado · Origen: Manual (JANUS)"'), html);
+  assert.ok(!html.includes('<button'), html);
+  const detail = ElmUi.elmCellHtml(c, { retryCi: 1, answer: 'full' });
+  assert.ok(detail.includes('>Respuesta ELM (S1): Repetido. Aprobado</span>') && !detail.includes('Reintentar'), detail);
+  assert.strictEqual(stateText(rowOf(cellOf(P1341))), 'Incierto · Repetido. Aprobado', 'historical 1341 unchanged');
+
+  const msg = ElmUi.sendResultMessage({ ok: true, outcome: 'duplicate_other_channel', cell: c });
+  assert.strictEqual(msg.tone, 'warn');
+  assert.ok(/aprobado por otro canal/.test(msg.text) && !/rechaz|preaprobado/i.test(msg.text), msg.text);
+
+  const sibling = evaluateCiResendHold({ ci: 1, czSolicitudId: 1601, processes: [PDUP], locks: [], nowMs: NOW });
+  assert.ok(sibling && sibling.reason === 'elm_ci_recent_send', 'another solicitud of the CI still waits the ELM window: ' + JSON.stringify(sibling));
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

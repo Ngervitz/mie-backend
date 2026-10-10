@@ -6191,6 +6191,12 @@
   vertical-align: middle;
   line-height: 1.3;
 }
+/* Multi-sentence ELM answer ("Repetido. Aprobado"): wraps instead of hiding its last word. */
+#mie-dashboard-app .preaprobados-elm.is-compact.is-wrap {
+  white-space: normal;
+  border-radius: 8px;
+  text-align: left;
+}
 #mie-dashboard-app .preaprobados-kpi-scope {
   margin: 10px 0 6px;
   font-size: 0.75rem;

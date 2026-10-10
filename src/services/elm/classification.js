@@ -15,12 +15,17 @@
  *   referred       S2 referred ("Preaprobado ELM": derivado a ventas, NOT a granted loan)
  *   in_evaluation  S1 in flight, S1 favorable waiting for S2, S2 in flight
  *   review         unknown / technical_error / negative answer not confirmed as definitive
- *   closed         ops closure that is neither a rejection nor a loan (withdrew, not received...)
+ *   closed         ops closure that is neither a rejection nor a loan (withdrew, not received...),
+ *                  or S1 "Repetido. Aprobado" (s1_error_code elm_s1_duplicate_other_channel): the
+ *                  client is already approved by another ELM channel, not by Copanel
+ *
+ * The duplicate reading holds survey invites for good (blocksSurveyInvite): the client was not
+ * rejected.
  *
  * Unknown answers and unconfigured postback statuses never become a rejection (fail safe).
  */
 
-const { S1, S2 } = require('./constants');
+const { S1, S2, CODES } = require('./constants');
 const { isService1Negative } = require('./client');
 const { normalizeProviderStatus } = require('./providerStatus');
 const { DEFINITIVE_S2_REJECTION_RESULTS } = require('../providerFallback/constants');
@@ -33,6 +38,8 @@ const COMMERCIAL = Object.freeze({
   REVIEW: 'review',
   CLOSED: 'closed',
 });
+
+const DUPLICATE_OTHER_CHANNEL_DETAIL = 's1_duplicate_other_channel';
 
 const COMMERCIAL_LABELS = Object.freeze({
   in_evaluation: 'En evaluación ELM',
@@ -69,6 +76,7 @@ const DETAIL_LABELS = Object.freeze({
   ops_provider_confirmed_not_received: 'Cerrado ELM: ELM no recibió el lead',
   ops_provider_confirmed_no_referral: 'Cerrado ELM: sin derivación',
   ops_other: 'Cerrado ELM (ver nota)',
+  [DUPLICATE_OTHER_CHANNEL_DETAIL]: 'Duplicado · Otro canal',
   cz_already_referred: 'Derivación vigente en otra solicitud',
 });
 
@@ -144,6 +152,9 @@ function fromProcess(p, opts) {
   if (s2 === S2.IN_FLIGHT) return result(COMMERCIAL.IN_EVALUATION, 's2_in_flight', 's2');
 
   if (s1 === S1.REJECTED) {
+    if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {
+      return result(COMMERCIAL.CLOSED, DUPLICATE_OTHER_CHANNEL_DETAIL, 's1');
+    }
     return isService1Negative(p.s1_result_message)
       ? result(COMMERCIAL.REJECTED, 's1_negative', 's1')
       : result(COMMERCIAL.REVIEW, 's1_rejection_not_definitive', 's1');
@@ -181,6 +192,7 @@ function classifyElmProcess(p, options) {
 /** True when a survey invite must wait (or never happen) because of this ELM process. */
 function blocksSurveyInvite(classification) {
   if (!classification) return false;
+  if (classification.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) return true;
   return (
     classification.state !== COMMERCIAL.REJECTED && classification.state !== COMMERCIAL.CLOSED
   );
@@ -199,6 +211,7 @@ module.exports = {
   COMMERCIAL,
   COMMERCIAL_LABELS,
   DETAIL_LABELS,
+  DUPLICATE_OTHER_CHANNEL_DETAIL,
   STATE_BY_PROJECTED_ESTADO,
   classifyElmProcess,
   blocksSurveyInvite,

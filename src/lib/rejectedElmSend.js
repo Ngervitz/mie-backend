@@ -14,11 +14,13 @@
  * when ELM provably never received the lead).
  *
  * The outcome is read back from the persisted process (refreshed cell), so the UI shows what is
- * stored: S1 rejected, S2 referred ("Preaprobado ELM", never a granted loan), pending, technical
- * error / ambiguous (review), grant, or not sent (blocked with a code).
+ * stored: S1 rejected, S1 duplicate approved by another channel, S2 referred ("Preaprobado ELM",
+ * never a granted loan), pending, technical error / ambiguous (review), grant, or not sent
+ * (blocked with a code).
  */
 
 const { CODES } = require('../services/elm/constants');
+const { DUPLICATE_OTHER_CHANNEL_DETAIL } = require('../services/elm/classification');
 const { statusFor } = require('../routes/preaprobadosElm');
 
 const OUTCOMES = Object.freeze({
@@ -30,6 +32,7 @@ const OUTCOMES = Object.freeze({
   TECHNICAL_ERROR: 'technical_error',
   REVIEW: 'review',
   CLOSED: 'closed',
+  DUPLICATE_OTHER_CHANNEL: 'duplicate_other_channel',
   BLOCKED: 'blocked',
 });
 
@@ -56,7 +59,7 @@ function outcomeOf(cell) {
     case 'in_evaluation':
       return OUTCOMES.PENDING;
     case 'closed':
-      return OUTCOMES.CLOSED;
+      return cell.detail === DUPLICATE_OTHER_CHANNEL_DETAIL ? OUTCOMES.DUPLICATE_OTHER_CHANNEL : OUTCOMES.CLOSED;
     default:
       return /technical_error/.test(String(cell.detail || ''))
         ? OUTCOMES.TECHNICAL_ERROR

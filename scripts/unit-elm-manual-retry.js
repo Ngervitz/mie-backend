@@ -132,7 +132,7 @@ function failed1430(over) {
       s1_http_status: 403,
       s1_error_code: CODES.HTTP_AUTH_REJECTED,
       s1_result_message: null,
-      s1_request: { marker: FROZEN_MARKER, cedula: String(CI) },
+      s1_request: { marker: FROZEN_MARKER, cedula: String(CI), dateOfBirth: '10/7/1991' },
       s1_started_at: iso(NOW - 2 * DAY),
       s1_completed_at: iso(NOW - 2 * DAY),
       s1_lease_expires_at: null,
@@ -355,6 +355,69 @@ test('1430: retry reuses the same process, sends the frozen S1 request once, S2 
   assert.strictEqual(row.s2_status, S2.REFERRED);
   assert.strictEqual(h.holdCalls.length, 1);
   assert.deepStrictEqual(h.holdCalls[0].opts, { retryOwnProcess: true });
+});
+
+const frozenWithDob = (dob) =>
+  failed1430({ s1_request: { marker: FROZEN_MARKER, cedula: String(CI), dateOfBirth: dob } });
+const MANUAL_CTX = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+
+test('frozen S1 with an impossible date of birth: "Reintentar ELM" blocked, no attempt consumed, ELM never called', async () => {
+  for (const dob of ['16/12/0174', '31/3/1', '8/4/88', '30/2/1990', '1991-07-10', undefined]) {
+    const h = harness([], { processes: [frozenWithDob(dob)] });
+    const out = await h.retry();
+    assert.strictEqual(out.body.ok, false, String(dob));
+    assert.strictEqual(out.body.code, CODES.DATE_OF_BIRTH_INVALID, String(dob));
+    assert.strictEqual(h.repo.calls.manualRetryS1.length, 0, 'attempt not consumed: ' + dob);
+    assert.strictEqual(h.fetchImpl.calls.length, 0, 'ELM never called: ' + dob);
+    assert.strictEqual(h.repo.rows.get(CZ).s1_attempts, 1);
+    assert.strictEqual(h.repo.rows.get(CZ).s1_status, S1.TECHNICAL_ERROR);
+  }
+});
+
+test('frozen S1 date of birth is aged at s1_started_at: valid then, still retried now', async () => {
+  const start = new Date(NOW - 2 * DAY);
+  const birthday = new Date(Date.UTC(start.getUTCFullYear() - 101, start.getUTCMonth(), start.getUTCDate() + 1));
+  const dob = birthday.getUTCDate() + '/' + (birthday.getUTCMonth() + 1) + '/' + birthday.getUTCFullYear();
+  const h = harness(
+    [okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')],
+    { processes: [frozenWithDob(dob)] },
+  );
+  const out = await h.retry();
+  assert.strictEqual(out.body.ok, true, 'age 100 at the original attempt (101 today) is still a valid retry: ' + JSON.stringify(out.body));
+  assert.strictEqual(h.repo.calls.manualRetryS1.length, 1);
+  assert.strictEqual(h.fetchImpl.calls.length, 2);
+});
+
+test('automatic S1 retry (retryElmStep) re-checks the frozen date of birth; S2 retry does not', async () => {
+  const s1 = harness([], { processes: [frozenWithDob('16/12/0174')] });
+  const r1 = await s1.orch.retryElmStep(CZ, MANUAL_CTX, { step: 's1', expectedAttempts: 1 });
+  assert.strictEqual(r1.code, CODES.DATE_OF_BIRTH_INVALID);
+  assert.deepStrictEqual(r1.blockers, [{ code: CODES.DATE_OF_BIRTH_INVALID }]);
+  assert.strictEqual(s1.repo.calls.retryStep, 0, 'elm_retry_step never called: no attempt consumed');
+  assert.strictEqual(s1.fetchImpl.calls.length, 0);
+
+  const s2 = harness([], { processes: [frozenWithDob('16/12/0174')] });
+  s2.repo.retryStep = async () => {
+    s2.repo.calls.retryStep += 1;
+    return null;
+  };
+  const r2 = await s2.orch.retryElmStep(CZ, MANUAL_CTX, { step: 's2', expectedAttempts: 1 });
+  assert.strictEqual(r2.code, CODES.RETRY_NOT_ALLOWED, 'S2 retry goes straight to the DB check');
+  assert.strictEqual(s2.repo.calls.retryStep, 1);
+
+  const valid = harness([], { processes: [frozenWithDob('10/7/1991')] });
+  valid.repo.retryStep = async () => {
+    valid.repo.calls.retryStep += 1;
+    return null;
+  };
+  await valid.orch.retryElmStep(CZ, MANUAL_CTX, { step: 's1', expectedAttempts: 1 });
+  assert.strictEqual(valid.repo.calls.retryStep, 1, 'valid frozen date: S1 retry proceeds to the DB check');
+
+  const noFormat = harness([], { processes: [frozenWithDob('10/7/1991')], env: { ELM_DATE_OF_BIRTH_FORMAT: undefined } });
+  const r3 = await noFormat.orch.retrySendElm(CZ, MANUAL_CTX, { expectedAttempts: 1 });
+  assert.strictEqual(r3.code, CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED, 'format unknown: cannot verify, fail closed');
+  assert.strictEqual(noFormat.repo.calls.manualRetryS1.length, 0);
+  assert.strictEqual(noFormat.fetchImpl.calls.length, 0);
 });
 
 test('1430: a second 403 is stored as technical_error again (no automatic retry, no S2)', async () => {

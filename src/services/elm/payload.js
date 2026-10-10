@@ -14,6 +14,7 @@
  */
 
 const { CODES, ELM_SOURCE } = require('./constants');
+const { isValidBirthDate } = require('../../lib/birthDate');
 
 const SERVICE1_KEYS = Object.freeze([
   'activityType',
@@ -52,11 +53,12 @@ function fail(code, extra) {
 /**
  * @param {unknown} raw YYYY-MM-DD (cz_funnel_solicitudes.fecha_nacimiento)
  * @param {string|null} format
+ * @param {Date} [now] age reference (birthDate.js)
  */
-function formatDateOfBirth(raw, format) {
+function formatDateOfBirth(raw, format, now) {
   if (!format) return fail(CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw == null ? '' : raw).trim());
-  if (!m) return fail(CODES.DATE_OF_BIRTH_INVALID);
+  if (!m || !isValidBirthDate(m[0], now)) return fail(CODES.DATE_OF_BIRTH_INVALID);
   const y = m[1];
   const mm = m[2];
   const dd = m[3];
@@ -75,6 +77,33 @@ function formatDateOfBirth(raw, format) {
       return { ok: true, value: y + '-' + mm + '-' + dd };
     default:
       return fail(CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
+  }
+}
+
+/**
+ * Inverse of formatDateOfBirth: frozen S1 dateOfBirth → "YYYY-MM-DD", or null when it does not
+ * match the format.
+ * @param {unknown} value
+ * @param {string|null} format
+ * @returns {string|null}
+ */
+function parseFrozenDateOfBirth(value, format) {
+  const s = String(value == null ? '' : value).trim();
+  const ymd = (y, mo, d) => y + '-' + mo.padStart(2, '0') + '-' + d.padStart(2, '0');
+  let m;
+  switch (format) {
+    case 'D/M/YYYY':
+    case 'DD/MM/YYYY':
+      m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+      return m ? ymd(m[3], m[2], m[1]) : null;
+    case 'M/D/YYYY':
+    case 'MM/DD/YYYY':
+      m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+      return m ? ymd(m[3], m[1], m[2]) : null;
+    case 'YYYY-MM-DD':
+      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    default:
+      return null;
   }
 }
 
@@ -108,7 +137,7 @@ function missingRequiredFields(solicitud) {
 }
 
 /**
- * @param {{ czId: number, solicitud: object, config: object }} input
+ * @param {{ czId: number, solicitud: object, config: object, now?: Date }} input
  * @returns {{ ok: true, payload: object } | { ok: false, code: string }}
  */
 function buildService1Payload(input) {
@@ -127,7 +156,11 @@ function buildService1Payload(input) {
     : null;
   if (!activityType) return fail(CODES.ACTIVITY_TYPE_MAPPING_MISSING);
 
-  const dob = formatDateOfBirth(s.fecha_nacimiento, config.dateOfBirthFormat || null);
+  const dob = formatDateOfBirth(
+    s.fecha_nacimiento,
+    config.dateOfBirthFormat || null,
+    input && input.now,
+  );
   if (!dob.ok) return dob;
 
   const salaryNum = Number(s.salario);
@@ -182,6 +215,7 @@ module.exports = {
   SERVICE1_KEYS,
   SERVICE2_KEYS,
   formatDateOfBirth,
+  parseFrozenDateOfBirth,
   formatMobilePhone,
   missingRequiredFields,
   buildService1Payload,

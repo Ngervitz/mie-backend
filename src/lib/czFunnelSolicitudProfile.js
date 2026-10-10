@@ -6,6 +6,8 @@
  * No I/O. No Credizona changes.
  */
 
+const { normalizeBirthDate } = require('./birthDate');
+
 /**
  * Digits-only celular text from API number/string. Empty → null.
  * Does not invent E.164; stores what CZ returns after their own limpiarCelular.
@@ -39,35 +41,13 @@ function nullableSalario(raw) {
 /**
  * Parse CZ fecha_nacimiento to YYYY-MM-DD or null.
  * Accepts "YYYY-MM-DD" or datetime-ish strings; stores date-only.
+ * Dates that are not a valid date of birth (birthDate.js: calendar + age 18-100) → null.
  * @param {unknown} raw
+ * @param {Date} [now]
  * @returns {string|null}
  */
-function parseCzDateOnly(raw) {
-  if (raw == null || raw === '') return null;
-  const s = String(raw).trim();
-  if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  // Validate calendar date via UTC Date.
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  if (
-    dt.getUTCFullYear() !== y ||
-    dt.getUTCMonth() !== mo - 1 ||
-    dt.getUTCDate() !== d
-  ) {
-    return null;
-  }
-  return (
-    String(y).padStart(4, '0') +
-    '-' +
-    String(mo).padStart(2, '0') +
-    '-' +
-    String(d).padStart(2, '0')
-  );
+function parseCzDateOnly(raw, now) {
+  return normalizeBirthDate(raw, now);
 }
 
 /**

@@ -31,7 +31,12 @@ const {
 } = require('./constants');
 const { readElmConfig } = require('./config');
 const { createElmClient } = require('./client');
-const { buildService1Payload, buildService2Payload } = require('./payload');
+const {
+  buildService1Payload,
+  buildService2Payload,
+  parseFrozenDateOfBirth,
+} = require('./payload');
+const { isValidBirthDate } = require('../../lib/birthDate');
 const {
   normalizeCommercialOrigin,
   evaluateElmEligibility,
@@ -84,6 +89,7 @@ function validateContext(context, enabledOrigins) {
 const S1_BY_OUTCOME = Object.freeze({
   [OUTCOME.POSITIVE]: S1.ELIGIBLE,
   [OUTCOME.NEGATIVE]: S1.REJECTED,
+  [OUTCOME.DUPLICATE_OTHER_CHANNEL]: S1.REJECTED,
   [OUTCOME.UNKNOWN]: S1.UNKNOWN,
   [OUTCOME.TECHNICAL_ERROR]: S1.TECHNICAL_ERROR,
   [OUTCOME.NOT_SENT]: S1.TECHNICAL_ERROR,
@@ -274,6 +280,22 @@ function createElmOrchestrator(deps) {
   }
 
   /**
+   * Re-check of the frozen S1 dateOfBirth before any S1 resend: requests frozen before the
+   * date-of-birth validation may hold impossible dates. Age reference = s1_started_at, so a
+   * valid request never becomes invalid by aging between attempts.
+   * @returns {string|null} blocking code, or null when the frozen date is valid
+   */
+  function frozenS1BirthDateBlock(process) {
+    const format = config && config.dateOfBirthFormat;
+    if (!format) return CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED;
+    const request = process && process.s1_request;
+    const ymd = parseFrozenDateOfBirth(request && request.dateOfBirth, format);
+    const refMs = Date.parse((process && (process.s1_started_at || process.created_at)) || '');
+    const ref = new Date(Number.isFinite(refMs) ? refMs : now());
+    return ymd && isValidBirthDate(ymd, ref) ? null : CODES.DATE_OF_BIRTH_INVALID;
+  }
+
+  /**
    * The row already left in_flight (lease expired → unknown) before this result could be
    * stored. The process is NOT changed; the result is kept in elm_late_results for manual
    * reconciliation (best effort). Only codes are logged: no response body, result text or PII.
@@ -318,11 +340,13 @@ function createElmOrchestrator(deps) {
     if (gate) return gate;
 
     const { solicitud, grantedRow } = await loadContext(czId, ctx, context);
+    const evaluatedAt = new Date(now());
     const elig = evaluateElmEligibility({
       czId: czId,
       solicitud: solicitud,
       grantedRow: grantedRow,
       config: config,
+      now: evaluatedAt,
     });
     if (!elig.eligible) {
       return blocked(elig.blockers[0].code, { blockers: elig.blockers });
@@ -332,6 +356,7 @@ function createElmOrchestrator(deps) {
       czId: czId,
       solicitud: solicitud,
       config: config,
+      now: evaluatedAt,
     });
     if (!built.ok) return blocked(built.code, { blockers: [blockerOf(built)] });
 
@@ -473,6 +498,12 @@ function createElmOrchestrator(deps) {
       return blocked(elig.blockers[0].code, { blockers: elig.blockers });
     }
 
+    if (stepName === 's1') {
+      const current = await repo.getProcessByCzId(czId);
+      const dobBlock = current ? frozenS1BirthDateBlock(current) : null;
+      if (dobBlock) return blocked(dobBlock, { blockers: [{ code: dobBlock }] });
+    }
+
     const row = await repo.retryStep({
       czSolicitudId: czId,
       step: stepName,
@@ -525,6 +556,8 @@ function createElmOrchestrator(deps) {
     if (!elig.eligible) {
       return blocked(elig.blockers[0].code, { stage: 's1', blockers: elig.blockers });
     }
+    const dobBlock = frozenS1BirthDateBlock(process);
+    if (dobBlock) return blocked(dobBlock, { stage: 's1', blockers: [{ code: dobBlock }] });
 
     const out = await repo.manualRetryS1({
       czSolicitudId: czId,
@@ -620,6 +653,7 @@ function createElmOrchestrator(deps) {
       grantedRow: grantedRow,
       existingProcess: process,
       config: config,
+      now: new Date(now()),
     });
     let lastPostbackMatchMethod = null;
     if (process && process.last_postback_event_id && repo.getPostbackEvent) {

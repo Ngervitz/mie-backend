@@ -58,6 +58,7 @@
     elm_s1_bcu_error_repeated: 'ELM respondió "BCU error" dos veces (reintento de 24 h incluido)',
     elm_s1_rejection_not_definitive: 'Respuesta negativa ELM (S1) no confirmada como rechazo definitivo',
     elm_s2_rejection_not_definitive: 'Respuesta negativa ELM (S2) no confirmada como rechazo definitivo',
+    elm_s1_duplicate_other_channel: 'Duplicado · Otro canal: ELM informa que el cliente ya está aprobado por otro canal',
     rejection_not_confirmed: 'Rechazo sin motivo definitivo confirmado',
     elm_solicitud_not_found: 'Solicitud no encontrada',
     elm_cdv_granted: 'CDV otorgó esta solicitud',

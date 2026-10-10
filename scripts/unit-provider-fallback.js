@@ -1256,9 +1256,15 @@ test('eligibility: data blockers → not_eligible; organic not blocked; unconfir
   noEmail.applicant.email = null;
   await enqueue(env, 800, 80000000, { applicant: noEmail.applicant });
   await enqueue(env, 801, 80100000, { jt: null });
+  const badDob = startBody(803, 80300000);
+  badDob.applicant.fecha_nacimiento = '0174-12-16';
+  await enqueue(env, 803, 80300000, { applicant: badDob.applicant });
   await env.mk('A').runOnce();
   assert.strictEqual(job(env, 800).outcome, OUTCOME.NOT_ELIGIBLE);
   assert.strictEqual(job(env, 800).reason_code, CODES.MISSING_REQUIRED_FIELDS);
+  assert.strictEqual(job(env, 803).outcome, OUTCOME.NOT_ELIGIBLE, 'impossible date of birth: same rule as missing data');
+  assert.strictEqual(job(env, 803).reason_code, CODES.DATE_OF_BIRTH_INVALID);
+  assert.strictEqual(env.elmRepo.rows.has(803), false, 'no ELM process for an impossible date of birth');
   assert.strictEqual(job(env, 801).outcome, OUTCOME.REFERRED, 'organic lead (no SMS base) is not blocked');
   assert.deepStrictEqual(env.client.calls.s1.map((p) => p.docNumber), ['80100000']);
   assert.strictEqual(env.client.calls.s1[0].source, 'copanel');

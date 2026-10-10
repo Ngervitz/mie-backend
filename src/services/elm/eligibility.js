@@ -22,6 +22,7 @@
 const { isGrantedForSolicitud } = require('../../lib/preaprobadosRead');
 const { CODES } = require('./constants');
 const { missingRequiredFields } = require('./payload');
+const { isValidBirthDate } = require('../../lib/birthDate');
 
 /**
  * Commercial origin for tracking only (never sent, never blocks). Base comes from the SMS touch
@@ -45,6 +46,7 @@ function normalizeCommercialOrigin(baseLabel) {
  *   grantedRow: object|null,
  *   existingProcess?: object|null,
  *   config: { activityTypeMap?: Record<string,string> },
+ *   now?: Date,
  * }} input
  * @returns {{ eligible: boolean, blockers: Array<{ code: string, fields?: string[] }> }}
  */
@@ -66,9 +68,15 @@ function evaluateElmEligibility(input) {
 
   if (input.existingProcess) blockers.push({ code: CODES.PROCESS_EXISTS });
 
-  const missing = missingRequiredFields(sol);
+  const missing = missingRequiredFields(sol).filter((f) => f !== 'fecha_nacimiento');
   if (missing.length) {
     blockers.push({ code: CODES.MISSING_REQUIRED_FIELDS, fields: missing });
+  }
+
+  // CZ requires fecha_nacimiento at capture: an empty value here means the sync parser
+  // rejected what CZ stored, so absent and implausible dates share one blocker.
+  if (!isValidBirthDate(sol.fecha_nacimiento, input.now)) {
+    blockers.push({ code: CODES.DATE_OF_BIRTH_INVALID });
   }
 
   const relacion =

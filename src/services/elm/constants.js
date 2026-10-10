@@ -45,6 +45,11 @@ const ELM_SOURCE = 'copanel';
 const OUTCOME = Object.freeze({
   POSITIVE: 'positive',
   NEGATIVE: 'negative',
+  /**
+   * S1 "Repetido. Aprobado": the client is already approved by another ELM channel (not Copanel).
+   * Terminal without S2; persisted as s1 rejected + CODES.S1_DUPLICATE_OTHER_CHANNEL.
+   */
+  DUPLICATE_OTHER_CHANNEL: 'duplicate_other_channel',
   UNKNOWN: 'unknown',
   TECHNICAL_ERROR: 'technical_error',
   NOT_SENT: 'not_sent',
@@ -85,6 +90,8 @@ const CODES = Object.freeze({
   CI_MISMATCH: 'elm_ci_mismatch',
   CLIENT_THREW: 'elm_client_threw',
   PROVIDER_BCU_ERROR: 'elm_provider_bcu_error',
+  /** s1_error_code of OUTCOME.DUPLICATE_OTHER_CHANNEL (s1_result_message keeps ELM's text). */
+  S1_DUPLICATE_OTHER_CHANNEL: 'elm_s1_duplicate_other_channel',
   RETRY_NOT_ALLOWED: 'elm_retry_not_allowed',
   /** Manual retry (elm_manual_retry_s1): the attempt count changed since the operator saw it. */
   RETRY_STALE: 'elm_retry_stale',

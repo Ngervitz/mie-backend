@@ -583,6 +583,57 @@ async function runAll() {
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'x' })).code, CODES.INVALID_CONTEXT);
   });
 
+  await test('date of birth: impossible or absent → elm_date_of_birth_invalid, never built nor sent', async () => {
+    const NOW = new Date('2026-10-07T12:00:00.000Z');
+    const elig = (dob, extra) =>
+      evaluateElmEligibility({
+        czId: 1001,
+        solicitud: solicitudFixture(Object.assign({ fecha_nacimiento: dob }, extra || {})),
+        grantedRow: null,
+        config: TEST_CONFIG,
+        now: NOW,
+      });
+    for (const dob of ['0174-12-16', '0001-03-31', '0080-01-30', '0088-04-08', '1899-12-31',
+      '2026-02-30', '2008-10-08', '1925-10-06', '', null]) {
+      const r = elig(dob);
+      assert.strictEqual(r.eligible, false, 'blocked ' + dob);
+      assert.deepStrictEqual(r.blockers, [{ code: CODES.DATE_OF_BIRTH_INVALID }], 'only DOB blocker ' + dob);
+    }
+    for (const dob of ['2008-10-07', '1926-10-07', '1991-07-10']) {
+      assert.strictEqual(elig(dob).eligible, true, 'eligible ' + dob);
+    }
+    assert.deepStrictEqual(
+      elig('0174-12-16', { relacion_laboral: 'JUB' }).blockers.map((b) => b.code),
+      [CODES.DATE_OF_BIRTH_INVALID, CODES.ACTIVITY_TYPE_MAPPING_MISSING],
+      'secondary blockers kept',
+    );
+    const both = elig(null, { email: '' });
+    assert.deepStrictEqual(both.blockers, [
+      { code: CODES.MISSING_REQUIRED_FIELDS, fields: ['email'] },
+      { code: CODES.DATE_OF_BIRTH_INVALID },
+    ]);
+
+    assert.strictEqual(formatDateOfBirth('0174-12-16', 'D/M/YYYY', NOW).code, CODES.DATE_OF_BIRTH_INVALID);
+    assert.strictEqual(formatDateOfBirth('0174-12-16', null, NOW).code, CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
+    assert.strictEqual(formatDateOfBirth('2008-10-07', 'D/M/YYYY', NOW).value, '7/10/2008');
+    const built = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture({ fecha_nacimiento: '0174-12-16' }),
+      config: TEST_CONFIG,
+      now: NOW,
+    });
+    assert.deepStrictEqual(built, { ok: false, code: CODES.DATE_OF_BIRTH_INVALID });
+
+    const { orch, repo, client } = setup({
+      mutate: (m) => m.solicitudes.set(1001, solicitudFixture({ fecha_nacimiento: '0174-12-16' })),
+    });
+    const out = await orch.evaluateElm(1001, MANUAL);
+    assert.strictEqual(out.ok, false);
+    assert.strictEqual(out.code, CODES.DATE_OF_BIRTH_INVALID);
+    assert.strictEqual(client.s1Calls, 0, 'ELM never called');
+    assert.strictEqual(repo.rows.size, 0, 'no process claimed');
+  });
+
   // --- send disabled ------------------------------------------------------
   await test('send disabled → elm_send_disabled, ZERO HTTP, zero DB access, nothing persisted', async () => {
     const before = externalNet.length;

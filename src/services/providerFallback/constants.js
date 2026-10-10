@@ -68,6 +68,8 @@ const REASONS = Object.freeze({
   /** C1: ELM negative answer not confirmed as a definitive rejection (e.g. "Aprobado sin canal"). */
   ELM_S1_REJECTION_NOT_DEFINITIVE: 'elm_s1_rejection_not_definitive',
   ELM_S2_REJECTION_NOT_DEFINITIVE: 'elm_s2_rejection_not_definitive',
+  /** S1 "Repetido. Aprobado": already approved by another ELM channel. Never a rejection (no CZ 3). */
+  ELM_S1_DUPLICATE_OTHER_CHANNEL: 'elm_s1_duplicate_other_channel',
   /** C1: a rejected / not_eligible decision without a definitive reason (safety net). */
   REJECTION_NOT_CONFIRMED: 'rejection_not_confirmed',
   NOT_STARTED_EXHAUSTED: 'not_started_attempts_exhausted',

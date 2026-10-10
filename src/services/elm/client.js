@@ -22,7 +22,7 @@
  *
  *   ElmCallResult = {
  *     sent: boolean,              // request may have left the process
- *     outcome: 'positive'|'negative'|'unknown'|'technical_error'|'not_sent',
+ *     outcome: 'positive'|'negative'|'duplicate_other_channel'|'unknown'|'technical_error'|'not_sent',
  *     httpStatus: number|null,
  *     resultMessage: string|null, // ELM response.result text
  *     responseBody: object|null,  // parsed body; persisted only after redactSecrets
@@ -34,6 +34,8 @@
  *   technical_error = explicit ELM answer that is NOT a credit decision (e.g. "BCU error").
  *                     Never a rejection. Retried only by the orchestrator, only for error codes
  *                     configured as proven side-effect free (ELM_RETRY_SAFE_ERROR_CODES).
+ *   duplicate_other_channel = S1 "Repetido. Aprobado": ELM received the lead and the client is
+ *                     already approved by another channel. Terminal: no S2, never retried.
  *   unknown         = ELM may or may not have processed it (timeout after send, lost or
  *                     unparseable response). Never retried automatically.
  *   A transport must never retry by itself.
@@ -55,6 +57,11 @@ const SERVICE1_NEGATIVE = Object.freeze([
   'No hay oferta',
   'Mocasist',
 ]);
+/**
+ * Client already approved by another ELM channel (confirmed by ELM, not in the spec): terminal,
+ * neither a Copanel approval nor a rejection.
+ */
+const SERVICE1_DUPLICATE_OTHER_CHANNEL = Object.freeze(['Repetido. Aprobado']);
 /** Explicit non-credit answers: result text → errorCode stored with technical_error. */
 const SERVICE1_TECHNICAL = Object.freeze({
   'BCU error': CODES.PROVIDER_BCU_ERROR,
@@ -70,18 +77,24 @@ const SERVICE2_NEGATIVE = Object.freeze([
 const NO_TECHNICAL = Object.freeze({});
 
 /**
- * S1 rejection texts are compared ignoring letter case only (ELM answers "Repetido. Rechazado"
- * for the documented "Repetido. rechazado"); spacing and punctuation must still match exactly.
- * Every other list (S1 favorable, BCU error, all of S2) stays an exact match.
+ * S1 rejection and duplicate texts are compared ignoring letter case only (ELM answers
+ * "Repetido. Rechazado" for the documented "Repetido. rechazado"); spacing and punctuation must
+ * still match exactly. Every other list (S1 favorable, BCU error, all of S2) stays an exact match.
  */
 function caseKey(text) {
   return text.trim().toLowerCase();
 }
 const SERVICE1_NEGATIVE_KEYS = new Set(SERVICE1_NEGATIVE.map(caseKey));
+const SERVICE1_DUPLICATE_KEYS = new Set(SERVICE1_DUPLICATE_OTHER_CHANNEL.map(caseKey));
 
 /** Persisted / received S1 text is a documented definitive rejection. */
 function isService1Negative(text) {
   return typeof text === 'string' && SERVICE1_NEGATIVE_KEYS.has(caseKey(text));
+}
+
+/** Received S1 text means "already approved by another channel". */
+function isService1DuplicateOtherChannel(text) {
+  return typeof text === 'string' && SERVICE1_DUPLICATE_KEYS.has(caseKey(text));
 }
 
 function exactIn(list) {
@@ -105,6 +118,9 @@ function classifyResponse(text, positives, isNegative, technical) {
 
 /** Undocumented text → unknown (never treated as success or rejection). */
 function classifyService1Response(text) {
+  if (isService1DuplicateOtherChannel(text)) {
+    return { outcome: OUTCOME.DUPLICATE_OTHER_CHANNEL, errorCode: CODES.S1_DUPLICATE_OTHER_CHANNEL };
+  }
   return classifyResponse(text, SERVICE1_POSITIVE, isService1Negative, SERVICE1_TECHNICAL);
 }
 
@@ -330,10 +346,12 @@ function createElmClient(options) {
 module.exports = {
   SERVICE1_POSITIVE,
   SERVICE1_NEGATIVE,
+  SERVICE1_DUPLICATE_OTHER_CHANNEL,
   SERVICE1_TECHNICAL,
   SERVICE2_POSITIVE,
   SERVICE2_NEGATIVE,
   isService1Negative,
+  isService1DuplicateOtherChannel,
   classifyService1Response,
   classifyService2Response,
   classifyService1Result,

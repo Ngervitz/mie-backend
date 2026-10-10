@@ -10,7 +10,8 @@
  * otherwise → manual_review with a specific reason. Never a rejection.
  * S1 "BCU error" has its own fixed policy (BCU_RETRY): wait 24 h from the error, resend the same
  * frozen request once; a second BCU error → manual_review. The job stays pending meanwhile.
- * A rejection is only final for documented ELM negative texts; others → manual_review.
+ * A rejection is only final for documented ELM negative texts; others → manual_review. S1
+ * "Repetido. Aprobado" (approved by another channel) is not a rejection either → manual_review.
  *
  * evaluateCiGuard: reads the other ELM processes of the same CI. It never modifies them and
  * never matches anything by CI; it only decides whether this solicitud may start a new call.
@@ -116,6 +117,11 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
   if (p.s1_status === S1.UNKNOWN) return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN);
   if (p.s1_status === S1.TECHNICAL_ERROR) return technicalDecision('s1', p, nowMs, retryPolicy);
   if (p.s1_status === S1.REJECTED) {
+    if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {
+      return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL, {
+        result_message: p.s1_result_message || null,
+      });
+    }
     return isService1Negative(p.s1_result_message)
       ? final(OUTCOME.REJECTED, REASONS.ELM_S1_REJECTED)
       : final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_REJECTION_NOT_DEFINITIVE, {

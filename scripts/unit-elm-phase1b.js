@@ -852,12 +852,36 @@ async function main() {
     assert.ok(enabledHtml.includes('data-cz-id="77"'));
     assert.ok(!/ disabled /.test(enabledHtml));
 
-    for (const blocker of [CODES.CDV_GRANTED, CODES.MISSING_REQUIRED_FIELDS, CODES.SOLICITUD_NOT_FOUND]) {
+    for (const blocker of [CODES.CDV_GRANTED, CODES.MISSING_REQUIRED_FIELDS, CODES.SOLICITUD_NOT_FOUND, CODES.DATE_OF_BIRTH_INVALID]) {
       const c = computeElmCell({ process: null, eligibility: { eligible: false, blockers: [{ code: blocker }] }, nowMs: 0 });
       assert.strictEqual(c.kind, 'not_sendable');
       assert.strictEqual(c.action.show, false);
       assert.ok(!ElmUi.elmCellHtml(c).includes('<button'));
     }
+
+    const dob = computeElmCell({
+      process: null,
+      czId: 1186,
+      eligibility: {
+        eligible: false,
+        blockers: [{ code: CODES.DATE_OF_BIRTH_INVALID }, { code: CODES.ACTIVITY_TYPE_MAPPING_MISSING }],
+      },
+      nowMs: 0,
+      allowSend: true,
+      sendReadiness: ready,
+    });
+    assert.strictEqual(dob.kind, 'not_sendable', 'invalid date of birth is a hard block, not a pending config');
+    assert.strictEqual(dob.label, 'No enviable');
+    assert.strictEqual(dob.action.reason, CODES.DATE_OF_BIRTH_INVALID);
+    assert.strictEqual(
+      ElmUi.elmCellHtml(dob),
+      '<span class="preaprobados-elm is-not_sendable" title="Fecha de nacimiento inválida.">No enviable</span>',
+    );
+    const dobRow = ElmUi.rejectedRowElmHtml({
+      available: true,
+      send: { available: true, candidates: [], not_sendable: { cz_solicitud_id: 1186, reason: CODES.DATE_OF_BIRTH_INVALID }, retry_candidates: [] },
+    }, 1);
+    assert.ok(dobRow.includes('title="Solicitud 1186 · Fecha de nacimiento inválida.">No enviable</span>'), dobRow);
     // Fase 3B: organic leads are no longer blocked by provenance (source is always copanel).
     assert.strictEqual(CODES.SOURCE_BRAND_INDETERMINATE, undefined);
 

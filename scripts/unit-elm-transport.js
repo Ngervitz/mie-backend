@@ -447,6 +447,10 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
     ['service1', ok('Repetido. rechazado'), OUTCOME.NEGATIVE, null],
     ['service1', { status: 200, body: { success: false, result: 'Repetido. Rechazado', docNumber: '1' } }, OUTCOME.NEGATIVE, null],
     ['service1', ok('Repetido - Rechazado'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service1', { status: 200, body: { success: true, result: 'Repetido. Aprobado', docNumber: '1' } }, OUTCOME.DUPLICATE_OTHER_CHANNEL, CODES.S1_DUPLICATE_OTHER_CHANNEL],
+    ['service1', ok('REPETIDO. APROBADO'), OUTCOME.DUPLICATE_OTHER_CHANNEL, CODES.S1_DUPLICATE_OTHER_CHANNEL],
+    ['service1', ok('Repetido.Aprobado'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    ['service2', ok('Repetido. Aprobado'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service1', ok('listo para recibir datos en servicio 2'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service1', ok('BCU ERROR'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
     ['service2', ok('aprobado sin canal'), OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
@@ -494,6 +498,30 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   assert.strictEqual(moca.repo.rows.get(1001).s1_error_code, null);
   assert.strictEqual(moca.repo.rows.get(1001).s1_result_message, 'Mocasist', 'original text kept');
   assert.strictEqual(moca.repo.rows.get(1001).s2_status, S2.NOT_STARTED, 'no S2 after a rejection');
+  const repApprovedBody = { success: true, result: 'Repetido. Aprobado', docNumber: '1' };
+  const repApprovedFetch = fakeFetch([{ status: 200, body: repApprovedBody }]);
+  const repApproved = orchestratorWith(repApprovedFetch);
+  const sent = await repApproved.orch.sendElm(1001, MANUAL);
+  assert.strictEqual(sent.ok, true);
+  assert.strictEqual(sent.stage, 's1', 'the single "Enviar a ELM" action stops after S1');
+  assert.strictEqual(sent.s2_blocked, undefined);
+  const refer = await repApproved.orch.referElm(1001, MANUAL);
+  assert.strictEqual(refer.code, CODES.S1_NOT_ELIGIBLE, 'S2 cannot be started by hand either');
+  const ra = repApproved.repo.rows.get(1001);
+  assert.strictEqual(ra.s1_status, S1.REJECTED, 'terminal S1 (not eligible), never unknown');
+  assert.strictEqual(ra.s1_error_code, CODES.S1_DUPLICATE_OTHER_CHANNEL);
+  assert.strictEqual(ra.s1_result_message, 'Repetido. Aprobado', 'original text kept');
+  assert.deepStrictEqual(ra.s1_response, repApprovedBody, 'original response kept');
+  assert.strictEqual(ra.s2_status, S2.NOT_STARTED, 'no S2 after "Repetido. Aprobado"');
+  assert.strictEqual(repApprovedFetch.calls.length, 1, 'only the S1 request, S2 never called');
+  const favorableFetch = fakeFetch([ok('Listo para recibir datos en servicio 2'), ok('Lead Aprobado correctamente')]);
+  const favorable = orchestratorWith(favorableFetch);
+  const fav = await favorable.orch.sendElm(1001, MANUAL);
+  assert.strictEqual(fav.ok, true);
+  assert.strictEqual(fav.stage, 's2', 'documented favorable S1 still continues to S2');
+  assert.strictEqual(favorable.repo.rows.get(1001).s1_status, S1.ELIGIBLE);
+  assert.strictEqual(favorable.repo.rows.get(1001).s2_status, S2.REFERRED);
+  assert.strictEqual(favorableFetch.calls.length, 2);
   const tech = orchestratorWith(fakeFetch([ok('BCU error')]));
   await tech.orch.evaluateElm(1001, MANUAL);
   assert.strictEqual(tech.repo.rows.get(1001).s1_status, S1.TECHNICAL_ERROR);
@@ -503,6 +531,22 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   await s2rej.orch.referElm(1001, MANUAL);
   assert.strictEqual(s2rej.repo.rows.get(1001).s2_status, S2.REJECTED);
   assert.strictEqual(s2rej.repo.rows.get(1001).referred_at, null);
+});
+
+test('6b impossible or absent date of birth → blocked before transport, zero requests', async () => {
+  for (const dob of ['0174-12-16', '0001-03-31', '0088-04-08', null]) {
+    const f = fakeFetch([ok('Listo para recibir datos en servicio 2')]);
+    const o = orchestratorWith(f);
+    o.repo.loadSolicitudContext = async () => ({
+      solicitud: Object.assign(solicitudFixture(), { fecha_nacimiento: dob }),
+      grantedRow: null,
+    });
+    const r = await o.orch.evaluateElm(1001, MANUAL);
+    assert.strictEqual(r.ok, false, String(dob));
+    assert.strictEqual(r.code, CODES.DATE_OF_BIRTH_INVALID, String(dob));
+    assert.strictEqual(f.calls.length, 0, 'no ELM request for ' + dob);
+    assert.strictEqual(o.repo.rows.size, 0, 'no process for ' + dob);
+  }
 });
 
 test('7 timeout / network error / unreadable body → unknown, one request, never retried', async () => {

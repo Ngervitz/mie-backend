@@ -31,6 +31,7 @@
     elm_solicitud_not_in_rejections: 'La solicitud no figura entre los rechazos de esta CI.',
     elm_cdv_granted: 'La solicitud tiene un préstamo CDV otorgado.',
     elm_missing_required_fields: 'Faltan datos obligatorios de la solicitud.',
+    elm_date_of_birth_invalid: 'Fecha de nacimiento inválida.',
     elm_trigger_origin_not_enabled: 'Envío manual a ELM no habilitado.',
     elm_persist_failed: 'No se pudo guardar el resultado ELM; queda para revisión.',
     elm_solicitud_not_found: 'Solicitud no encontrada en el funnel CZ.',
@@ -144,6 +145,7 @@
     s2_rejection_not_definitive: 'Incierto',
     s1_technical_error: 'Error técnico',
     s2_technical_error: 'Error técnico',
+    s1_duplicate_other_channel: 'Duplicado · Otro canal',
     cz_already_referred: 'Derivado en otra sol.',
     post_referral_status: 'Rechazado · Tras derivación',
     ops_closed_no_loan: 'Rechazado · Sin préstamo',
@@ -154,8 +156,9 @@
   };
 
   /**
-   * Visible reason only: first sentence of ELM's answer, without a bare "Rechazado" the state
-   * already says ("Repetido. Rechazado" → "Repetido"). The original text stays in the data,
+   * Visible reason: ELM's answer without a bare "Rechazado" the state already says
+   * ("Repetido. Rechazado" → "Repetido"); every other sentence is kept
+   * ("Repetido. Aprobado" stays "Repetido. Aprobado"). The original text stays in the data,
    * the tooltip and the CI detail.
    */
   function compactReason(message) {
@@ -167,7 +170,7 @@
       .filter(function (s) {
         return s && !/^rechazad[oa]$/i.test(s);
       });
-    return parts.length ? parts[0] : '';
+    return parts.join('. ');
   }
 
   /**
@@ -573,14 +576,17 @@
   function processPillHtml(item) {
     var kind = String(item.kind || item.state || '');
     kind = /^[a-z0-9_]+$/.test(kind) ? kind : 'unknown';
+    var text = compactCellText(item);
     return (
       '<span class="preaprobados-elm is-' +
       kind +
       (item.granted_elm === true ? ' is-granted' : '') +
-      ' is-compact"' +
+      ' is-compact' +
+      (text.indexOf('. ') >= 0 ? ' is-wrap' : '') +
+      '"' +
       titleAttr(compactTitleParts(item).concat(cellTitleParts(item))) +
       '>' +
-      esc(compactCellText(item)) +
+      esc(text) +
       '</span>'
     );
   }
@@ -731,6 +737,11 @@
         return { tone: 'warn', text: 'Resultado ELM incierto: queda pendiente de revisión (no es un rechazo).' };
       case 'closed':
         return { tone: 'warn', text: 'Proceso ELM cerrado sin préstamo.' };
+      case 'duplicate_other_channel':
+        return {
+          tone: 'warn',
+          text: 'Duplicado · Otro canal: ELM informa que el cliente ya está aprobado por otro canal. No hay derivación por Copanel.',
+        };
       default:
         if (CI_HOLD_REASONS.indexOf(code) >= 0) {
           return { tone: 'warn', text: 'No se envió a ELM. ' + ciHoldText(code, b) };

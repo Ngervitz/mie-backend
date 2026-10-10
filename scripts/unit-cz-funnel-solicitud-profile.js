@@ -76,6 +76,42 @@ assert.strictEqual(parseCzDateOnly('1990-13-01'), null);
 assert.strictEqual(parseCzDateOnly('not-a-date'), null);
 assert.strictEqual(parseCzDateOnly(null), null);
 
+// Date of birth validation (calendar + age 18-100): CZ years 0001/0080/0088/0174 never pass.
+const {
+  normalizeBirthDate,
+  isValidBirthDate,
+  parseCalendarDate,
+} = require('../src/lib/birthDate');
+const DOB_NOW = new Date('2026-10-10T12:00:00Z');
+for (const bad of [
+  '0001-03-31',
+  '0001-09-28',
+  '0080-01-30',
+  '0088-04-08',
+  '0099-12-31',
+  '0174-12-16',
+  '1899-12-31',
+  '1925-10-10',
+  '2008-10-11',
+  '2026-02-30',
+  '1990-02-29',
+  '0000-00-00',
+  '',
+  '31/03/1951',
+]) {
+  assert.strictEqual(parseCzDateOnly(bad, DOB_NOW), null, 'parser rejects ' + bad);
+  assert.strictEqual(isValidBirthDate(bad, DOB_NOW), false, 'invalid ' + bad);
+}
+assert.strictEqual(parseCzDateOnly('1926-10-10', DOB_NOW), '1926-10-10');
+assert.strictEqual(parseCzDateOnly('2008-10-10', DOB_NOW), '2008-10-10');
+assert.strictEqual(parseCzDateOnly('1988-04-08 00:00:00', DOB_NOW), '1988-04-08');
+assert.strictEqual(parseCzDateOnly('2000-02-29', DOB_NOW), '2000-02-29');
+assert.strictEqual(normalizeBirthDate('1951-03-31', DOB_NOW), '1951-03-31');
+assert.deepStrictEqual(parseCalendarDate('0001-03-31'), { y: 1, mo: 3, d: 31 });
+assert.strictEqual(parseCalendarDate('0001-02-29'), null);
+assert.strictEqual(mapSolicitudProfileFields({ fecha_nacimiento: '0174-12-16' }).fecha_nacimiento, null);
+assert.strictEqual(mapSolicitudProfileFields({ fecha_nacimiento: '0088-04-08' }).fecha_nacimiento, null);
+
 const mapped = mapSolicitudProfileFields({
   celular: 59899111222,
   salario: 70000,
