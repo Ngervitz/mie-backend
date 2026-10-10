@@ -128,6 +128,28 @@ function classifyService2Response(text) {
   return classifyResponse(text, SERVICE2_POSITIVE, isService2Negative, NO_TECHNICAL);
 }
 
+/**
+ * S2 body ELM confirmed as "lead received and assigned to Copanel" (Aceptado ELM), outside the
+ * spec: exactly `{ success: true, result: null }`, optionally with `docNumber`. The transport
+ * keeps classifying it unknown / elm_response_undocumented (stored as received); only the
+ * commercial reading (classification.js) uses this, together with the process checks.
+ * Any other 2xx body (other keys, result text, success not literally true) is not accepted.
+ */
+const SERVICE2_ACCEPTED_BODY_KEYS = Object.freeze(['success', 'result', 'docNumber']);
+
+function isService2AcceptedBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body);
+  if (!keys.every((k) => SERVICE2_ACCEPTED_BODY_KEYS.includes(k))) return false;
+  if (body.success !== true) return false;
+  if (!Object.prototype.hasOwnProperty.call(body, 'result') || body.result !== null) return false;
+  if (Object.prototype.hasOwnProperty.call(body, 'docNumber')) {
+    const t = typeof body.docNumber;
+    if (t !== 'string' && t !== 'number') return false;
+  }
+  return true;
+}
+
 function classifyService1Result(text) {
   return classifyService1Response(text).outcome;
 }
@@ -356,6 +378,7 @@ module.exports = {
   classifyService2Response,
   classifyService1Result,
   classifyService2Result,
+  isService2AcceptedBody,
   createDisabledElmClient,
   createNetSuiteElmClient,
   createElmClient,

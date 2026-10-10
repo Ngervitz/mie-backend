@@ -668,6 +668,41 @@ test('9 flags off: no external calls even with complete config; default client d
   assert.strictEqual(externalNet.length, 0);
 });
 
+test('10 S2 { success: true, result: null }: stored as answered (unknown, undocumented), read as Aceptado ELM, never resent', async () => {
+  const { classifyElmProcess } = require('../src/services/elm/classification');
+  const { computeElmCell } = require('../src/services/elm/listView');
+  const f = fakeFetch([
+    ok('Listo para recibir datos en servicio 2'),
+    { status: 200, body: { success: true, result: null, docNumber: '12345678' } },
+  ]);
+  const { orch, repo } = orchestratorWith(f);
+  await orch.evaluateElm(1001, MANUAL);
+  await orch.referElm(1001, MANUAL);
+  const row = repo.rows.get(1001);
+  assert.strictEqual(row.s2_status, S2.UNKNOWN, 'transport classification unchanged');
+  assert.strictEqual(row.s2_error_code, CODES.RESPONSE_UNDOCUMENTED);
+  assert.strictEqual(row.s2_http_status, 200);
+  assert.strictEqual(row.s2_result_message, null);
+  assert.strictEqual(row.referred_at, null);
+  assert.deepStrictEqual(row.s2_response, { success: true, result: null, docNumber: '12345678' }, 'original answer kept');
+  const c = classifyElmProcess(row, { nowMs: Date.parse('2026-10-08T12:00:00Z') });
+  assert.deepStrictEqual([c.state, c.detail, c.label], ['referred', 's2_accepted', 'Aceptado ELM']);
+  const cell = computeElmCell({ process: row, nowMs: Date.parse('2026-10-08T12:00:00Z') });
+  assert.deepStrictEqual([cell.kind, cell.label, cell.granted_elm], ['referred', 'Aceptado ELM', false]);
+  assert.strictEqual((await orch.referElm(1001, MANUAL)).code, CODES.S2_ALREADY_STARTED);
+  assert.strictEqual(f.calls.length, 2, 'never resent');
+
+  const g = fakeFetch([
+    ok('Listo para recibir datos en servicio 2'),
+    { status: 200, body: { success: true, result: null, message: 'otro' } },
+  ]);
+  const other = orchestratorWith(g);
+  await other.orch.evaluateElm(1001, MANUAL);
+  await other.orch.referElm(1001, MANUAL);
+  const r2 = other.repo.rows.get(1001);
+  assert.strictEqual(classifyElmProcess(r2, { nowMs: Date.parse('2026-10-08T12:00:00Z') }).detail, 's2_unknown', 'any other 200 body stays in review');
+});
+
 test('logs and persisted rows carry no credentials, Authorization, URLs or applicant PII', async () => {
   const f = fakeFetch([
     { status: 200, body: { result: 'Listo para recibir datos en servicio 2', echo: 'oauth_token=' + FAKE.tokenId } },

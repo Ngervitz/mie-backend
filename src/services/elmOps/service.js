@@ -17,6 +17,7 @@
 const { S1, S2 } = require('../elm/constants');
 const {
   classifyElmProcess,
+  isS2Accepted,
   readPostReferralRejectionStatuses,
 } = require('../elm/classification');
 const { computeElmKpis } = require('../elm/kpis');
@@ -46,6 +47,21 @@ const PROCESS_RESOLUTIONS = Object.freeze({
   ]),
 });
 
+/**
+ * Aceptado ELM (S2 `{ success: true, result: null }`) is an s2_unknown for the DB, but ELM did
+ * receive the lead: "not received" contradicts it. It stays available only as an explicit
+ * correction (`correction: true`, longer note), recorded with CORRECTION_NOTE_PREFIX in the
+ * note the RPC audits.
+ */
+const ACCEPTED_RESOLUTIONS = Object.freeze([
+  'provider_closed_no_loan',
+  'provider_loan_disbursed',
+  'other',
+]);
+const ACCEPTED_CORRECTIONS = Object.freeze(['provider_confirmed_not_received']);
+const CORRECTION_NOTE_MIN = 30;
+const CORRECTION_NOTE_PREFIX = '[Corrección de Aceptado ELM] ';
+
 const CASE_RESOLUTIONS = Object.freeze([
   'resolved_with_provider',
   'customer_contacted',
@@ -74,6 +90,9 @@ const ACTION_HTTP = Object.freeze({
   cz_outcome_mismatch: 409,
   invalid_cz_outcome: 400,
   invalid_resolution: 400,
+  incompatible_with_accepted: 409,
+  invalid_correction: 400,
+  correction_note_required: 400,
   invalid_triage: 400,
   note_required: 400,
   invalid_assignee: 400,
@@ -96,7 +115,11 @@ function ageHours(iso, nowMs) {
   return Math.max(0, Math.floor((nowMs - t) / 36e5));
 }
 
-/** @returns {'referral'|'s2_unknown'|'s1_unknown'|null} */
+/**
+ * Technical kind, from s2_status: an accepted S2 answer (Aceptado ELM, s2_status unknown) stays
+ * 's2_unknown' because elm_resolve_process checks the resolution against s2_status.
+ * @returns {'referral'|'s2_unknown'|'s1_unknown'|null}
+ */
 function processKind(p, nowMs) {
   const s1 = effective(p.s1_status, p.s1_lease_expires_at, nowMs);
   const s2 = effective(p.s2_status, p.s2_lease_expires_at, nowMs);
@@ -127,6 +150,7 @@ function elmStateOf(p, nowMs) {
 function openProcessView(p, ctx) {
   const nowMs = ctx.nowMs;
   const kind = processKind(p, nowMs);
+  const accepted = kind === 's2_unknown' && isS2Accepted(p);
   const since = p.referred_at || p.s2_started_at || p.s1_started_at || p.created_at;
   const ev = ctx.lastEvent || null;
   return {
@@ -134,6 +158,7 @@ function openProcessView(p, ctx) {
     cz_solicitud_id: Number(p.cz_solicitud_id),
     ci: p.ci != null ? String(p.ci) : null,
     kind: kind,
+    s2_accepted: accepted,
     since: since || null,
     age_hours: ageHours(since, nowMs),
     trigger_origin: p.trigger_origin || null,
@@ -148,7 +173,12 @@ function openProcessView(p, ctx) {
       : null,
     blocked_cz_solicitud_ids: ctx.blockedCzIds || [],
     version: p.updated_at || null,
-    allowed_resolutions: kind ? PROCESS_RESOLUTIONS[kind].slice() : [],
+    allowed_resolutions: accepted
+      ? ACCEPTED_RESOLUTIONS.slice()
+      : kind
+        ? PROCESS_RESOLUTIONS[kind].slice()
+        : [],
+    correction_resolutions: accepted ? ACCEPTED_CORRECTIONS.slice() : [],
   };
 }
 
@@ -348,12 +378,24 @@ function createElmOpsService(deps) {
     const kind = processKind(p, nowMs);
     if (!kind) return { status: 'not_resolvable' };
     if (!PROCESS_RESOLUTIONS[kind].includes(code)) return { status: 'invalid_resolution' };
+    const accepted = kind === 's2_unknown' && isS2Accepted(p);
+    const correction = b.correction === true;
+    let auditedNote = note;
+    if (correction) {
+      if (!accepted || !ACCEPTED_CORRECTIONS.includes(code)) return { status: 'invalid_correction' };
+      if (note.length < CORRECTION_NOTE_MIN || note.length > NOTE_MAX - CORRECTION_NOTE_PREFIX.length) {
+        return { status: 'correction_note_required' };
+      }
+      auditedNote = CORRECTION_NOTE_PREFIX + note;
+    } else if (accepted && !ACCEPTED_RESOLUTIONS.includes(code)) {
+      return { status: 'incompatible_with_accepted' };
+    }
 
     const out = await repo.resolveProcess({
       processId: processId,
       expectedUpdatedAt: expected,
       resolutionCode: code,
-      note: note,
+      note: auditedNote,
       actorUserId: actorUserId,
       czOutcome: czOutcome,
     });
@@ -362,6 +404,7 @@ function createElmOpsService(deps) {
       cz_solicitud_id: Number(p.cz_solicitud_id),
       resolution_code: code,
       cz_outcome: czOutcome,
+      accepted_correction: correction,
       status: out.status,
     });
     return out;
@@ -584,6 +627,10 @@ function createElmOpsService(deps) {
 
 module.exports = {
   PROCESS_RESOLUTIONS,
+  ACCEPTED_RESOLUTIONS,
+  ACCEPTED_CORRECTIONS,
+  CORRECTION_NOTE_MIN,
+  CORRECTION_NOTE_PREFIX,
   CASE_RESOLUTIONS,
   ACTION_HTTP,
   processKind,

@@ -12,7 +12,10 @@
  *                  DEFINITIVE_S2_REJECTION_RESULTS, a post-referral postback status configured in
  *                  ELM_POST_REFERRAL_REJECTION_STATUSES, ops provider_closed_no_loan, or CZ 3
  *                  projected for an automatic process
- *   referred       S2 referred ("Preaprobado ELM": derivado a ventas, NOT a granted loan)
+ *   referred       "Aceptado ELM": ELM received the lead and assigned it to Copanel, NOT a granted
+ *                  loan. S2 referred ("Lead Aprobado correctamente"), or the S2 answer
+ *                  `{ success: true, result: null }` ELM confirmed as accepted (isS2Accepted);
+ *                  that one stays s2_status unknown / elm_response_undocumented as stored
  *   in_evaluation  S1 in flight, S1 favorable waiting for S2, S2 in flight
  *   review         unknown / technical_error / negative answer not confirmed as definitive
  *   closed         ops closure that is neither a rejection nor a loan (withdrew, not received...),
@@ -26,7 +29,7 @@
  */
 
 const { S1, S2, CODES } = require('./constants');
-const { isService1Negative } = require('./client');
+const { isService1Negative, isService2AcceptedBody } = require('./client');
 const { normalizeProviderStatus } = require('./providerStatus');
 const { DEFINITIVE_S2_REJECTION_RESULTS } = require('../providerFallback/constants');
 
@@ -43,7 +46,7 @@ const DUPLICATE_OTHER_CHANNEL_DETAIL = 's1_duplicate_other_channel';
 
 const COMMERCIAL_LABELS = Object.freeze({
   in_evaluation: 'En evaluación ELM',
-  referred: 'Preaprobado ELM',
+  referred: 'Aceptado ELM',
   granted: 'Otorgado ELM',
   rejected: 'Rechazado ELM',
   review: 'Pendiente de revisión ELM',
@@ -53,8 +56,9 @@ const COMMERCIAL_LABELS = Object.freeze({
 const DETAIL_LABELS = Object.freeze({
   disbursed: 'Otorgado ELM',
   cz_granted: 'Otorgado ELM',
-  s2_referred: 'Preaprobado ELM (derivado a ventas)',
-  cz_referred: 'Preaprobado ELM (derivado a ventas)',
+  s2_referred: 'Aceptado ELM (derivado a ventas)',
+  s2_accepted: 'Aceptado ELM (asignado a Copanel)',
+  cz_referred: 'Aceptado ELM (derivado a ventas)',
   s1_negative: 'Rechazado ELM (S1)',
   s2_definitive: 'Rechazado ELM (S2)',
   post_referral_status: 'Rechazado ELM (posterior a la derivación)',
@@ -105,6 +109,25 @@ function textIn(list, raw) {
   return typeof raw === 'string' && list.includes(raw.trim());
 }
 
+/**
+ * S2 answered `{ success: true, result: null }` (Aceptado ELM). Read from the stored attempt
+ * only: the raw s2_status unknown with HTTP 200 and elm_response_undocumented, no result text,
+ * and the stored body's docNumber (when present) equal to the process CI. Any other unknown
+ * (timeout, expired lease, other body) stays in review.
+ */
+function isS2Accepted(p) {
+  if (!p || p.s2_status !== S2.UNKNOWN) return false;
+  if (Number(p.s2_http_status) !== 200) return false;
+  if (p.s2_error_code !== CODES.RESPONSE_UNDOCUMENTED) return false;
+  if (p.s2_result_message != null && p.s2_result_message !== '') return false;
+  const body = p.s2_response;
+  if (!isService2AcceptedBody(body)) return false;
+  if (Object.prototype.hasOwnProperty.call(body, 'docNumber')) {
+    if (p.ci == null || String(body.docNumber).trim() !== String(p.ci).trim()) return false;
+  }
+  return true;
+}
+
 function result(state, detail, stage) {
   return {
     state: state,
@@ -135,12 +158,13 @@ function fromProcess(p, opts) {
   const s1 = effective(p.s1_status, p.s1_lease_expires_at, nowMs);
   const s2 = effective(p.s2_status, p.s2_lease_expires_at, nowMs);
 
-  if (s2 === S2.REFERRED) {
+  const accepted = s2 === S2.UNKNOWN && isS2Accepted(p);
+  if (s2 === S2.REFERRED || accepted) {
     const norm = normalizeProviderStatus(p.provider_status);
     if (norm && postReferral.includes(norm)) {
       return result(COMMERCIAL.REJECTED, 'post_referral_status', 'post_referral');
     }
-    return result(COMMERCIAL.REFERRED, 's2_referred', 's2');
+    return result(COMMERCIAL.REFERRED, accepted ? 's2_accepted' : 's2_referred', 's2');
   }
   if (s2 === S2.REJECTED) {
     return textIn(DEFINITIVE_S2_REJECTION_RESULTS, p.s2_result_message)
@@ -214,6 +238,7 @@ module.exports = {
   DUPLICATE_OTHER_CHANNEL_DETAIL,
   STATE_BY_PROJECTED_ESTADO,
   classifyElmProcess,
+  isS2Accepted,
   blocksSurveyInvite,
   readPostReferralRejectionStatuses,
 };

@@ -798,7 +798,7 @@ async function main() {
     const rows = [{ cz_id: 1, resultado: 'granted' }, { cz_id: 2, resultado: 'sin_resultado' }];
     await attachElmCells(rows, view, silentLogger);
     assert.strictEqual(rows[0].resultado, 'granted');
-    assert.strictEqual(rows[1].elm.label, 'Preaprobado ELM');
+    assert.strictEqual(rows[1].elm.label, 'Aceptado ELM');
     assert.strictEqual(rows[1].elm.provider_status, 'Latente');
     const broken = [{ cz_id: 3, resultado: 'granted' }];
     await attachElmCells(broken, { async cellsForCzIds() { throw new Error('relation missing'); } }, silentLogger);
@@ -907,14 +907,14 @@ async function main() {
     assert.ok(htmlPage.indexOf('elm-ui-helpers.js') < htmlPage.indexOf('mie-dashboard.js'));
   });
 
-  await test('#20 #21 #22 referred = "Preaprobado ELM" (raw status kept); only disbursed = "Otorgado ELM"', async () => {
+  await test('#20 #21 #22 referred = "Aceptado ELM" (raw status kept); only disbursed = "Otorgado ELM"', async () => {
     const nowMs = Date.now();
     const st = computeElmCell({ process: proc({ cz_solicitud_id: 1, provider_status: 'Pendiente de Doc' }), nowMs });
     assert.strictEqual(st.kind, 'referred');
-    assert.strictEqual(st.label, 'Preaprobado ELM');
+    assert.strictEqual(st.label, 'Aceptado ELM');
     assert.strictEqual(st.provider_status, 'Pendiente de Doc');
     const sth = ElmUi.elmCellHtml(st);
-    assert.ok(sth.includes('Preaprobado ELM'));
+    assert.ok(sth.includes('Aceptado ELM'));
     assert.ok(sth.includes('Estado ELM: Pendiente de Doc'));
 
     const g = computeElmCell({
@@ -931,7 +931,7 @@ async function main() {
 
     const r = computeElmCell({ process: proc({ cz_solicitud_id: 1 }), nowMs });
     assert.strictEqual(r.kind, 'referred');
-    assert.strictEqual(r.label, 'Preaprobado ELM');
+    assert.strictEqual(r.label, 'Aceptado ELM');
     assert.strictEqual(r.granted_elm, false);
     assert.ok(!ElmUi.elmCellHtml(r).includes('Otorgado'));
     const unk = computeElmCell({ process: proc({ cz_solicitud_id: 1, s2_status: 'unknown' }), nowMs });

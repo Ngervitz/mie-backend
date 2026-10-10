@@ -20,11 +20,13 @@ const SOLICITUD_SELECT =
 const GRANTED_SELECT = 'cz_id, ci, monto_otorgado, updated_at_src, synced_at';
 
 /**
- * List/cell/KPI projection: no request/response bodies. Result messages are ELM's short
- * documented answers (needed to tell a definitive rejection from an ambiguous one).
+ * List/cell/KPI projection: no request bodies. Result messages are ELM's short documented
+ * answers (needed to tell a definitive rejection from an ambiguous one). The S2 response body
+ * (redacted at write time) is read only to recognize Aceptado ELM (classification.isS2Accepted);
+ * views never return it.
  */
 const PROCESS_LIST_SELECT =
-  'id, cz_solicitud_id, ci, trigger_origin, send_origin, created_at, updated_at, s1_status, s1_attempts, s1_http_status, s1_error_code, s1_started_at, s1_completed_at, s1_lease_expires_at, s1_result_message, s2_status, s2_started_at, s2_completed_at, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount, ops_resolution_code, ops_resolved_at';
+  'id, cz_solicitud_id, ci, trigger_origin, send_origin, created_at, updated_at, s1_status, s1_attempts, s1_http_status, s1_error_code, s1_started_at, s1_completed_at, s1_lease_expires_at, s1_result_message, s2_status, s2_http_status, s2_error_code, s2_response, s2_started_at, s2_completed_at, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, disbursed_amount, ops_resolution_code, ops_resolved_at';
 
 const CZ_STATE_TABLE = 'provider_cz_state';
 

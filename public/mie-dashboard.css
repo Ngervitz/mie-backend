@@ -6158,18 +6158,16 @@
   background: var(--surface-2);
   color: var(--text-muted);
 }
-#mie-dashboard-app .preaprobados-elm.is-granted {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
+/* ELM: Aceptado (lead received, assigned to Copanel) green; Otorgado (confirmed disbursement) blue. */
 #mie-dashboard-app .preaprobados-elm.is-referred,
 #mie-dashboard-app .preaprobados-result.is-referred-elm {
-  background: rgba(59, 130, 246, 0.15);
-  color: #93c5fd;
-}
-#mie-dashboard-app .preaprobados-result.is-granted-elm {
   background: rgba(34, 197, 94, 0.15);
   color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-elm.is-granted,
+#mie-dashboard-app .preaprobados-result.is-granted-elm {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
 }
 #mie-dashboard-app .preaprobados-elm.is-rejected {
   background: rgba(239, 68, 68, 0.12);
@@ -6179,6 +6177,11 @@
 #mie-dashboard-app .preaprobados-elm.is-in_evaluation {
   background: rgba(234, 179, 8, 0.12);
   color: #fde68a;
+}
+/* "Duplicado · Otro canal": closed, not a rejection nor a Copanel approval. */
+#mie-dashboard-app .preaprobados-elm.is-closed.is-duplicate {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
 }
 #mie-dashboard-app .preaprobados-elm.is-other {
   font-style: italic;
@@ -6249,37 +6252,15 @@
   color: var(--text-muted);
 }
 
-#mie-dashboard-app .elm-ops {
-  margin: 12px 0;
-}
-
-#mie-dashboard-app .elm-ops-section {
+#mie-dashboard-app .elm-resolve {
   margin: 8px 0;
-}
-
-#mie-dashboard-app .elm-ops-section > summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-#mie-dashboard-app .elm-ops-alert {
-  margin: 8px 0;
-  padding: 8px 12px;
-  border: 1px solid #d97706;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(217, 119, 6, 0.1);
 }
 
-#mie-dashboard-app .elm-ops-flag {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  background: rgba(217, 119, 6, 0.15);
-}
-
-#mie-dashboard-app .elm-ops-flag-danger {
-  background: rgba(220, 38, 38, 0.15);
+#mie-dashboard-app .elm-resolve-head {
+  margin-bottom: 6px;
 }
 
 #mie-dashboard-app .elm-ops-form {
