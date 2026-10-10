@@ -19,7 +19,7 @@
  * (blocked with a code).
  */
 
-const { CODES } = require('../services/elm/constants');
+const { CODES, SEND_ORIGIN } = require('../services/elm/constants');
 const { DUPLICATE_OTHER_CHANNEL_DETAIL } = require('../services/elm/classification');
 const { statusFor } = require('../routes/preaprobadosElm');
 
@@ -137,6 +137,7 @@ async function respondWithCell(deps, czId, out) {
  *   listView: { cellsForCzIds: Function },
  *   loadRejectedCzIds: (ci: number) => Promise<number[]|null>,
  *   loadCiResendHold: (ci: number, czId: number) => Promise<object|null>,
+ *   sendOrigin?: string,   server wiring only (Preaprobados); default rechazados_manual
  * }} deps
  * @param {{ ci: number, czSolicitudId: unknown, actorUserId: string }} input
  * @returns {Promise<{ status: number, body: object }>}
@@ -152,6 +153,7 @@ async function sendRejectedToElm(deps, input) {
   const out = await deps.orchestrator.sendElm(czId, {
     triggerOrigin: 'janus_manual',
     triggeredByUserId: input.actorUserId,
+    sendOrigin: deps.sendOrigin || SEND_ORIGIN.RECHAZADOS_MANUAL,
   });
   return respondWithCell(deps, czId, out);
 }

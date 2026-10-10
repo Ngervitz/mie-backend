@@ -359,7 +359,7 @@ test('1430: retry reuses the same process, sends the frozen S1 request once, S2 
 
 const frozenWithDob = (dob) =>
   failed1430({ s1_request: { marker: FROZEN_MARKER, cedula: String(CI), dateOfBirth: dob } });
-const MANUAL_CTX = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+const MANUAL_CTX = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1', sendOrigin: 'rechazados_manual' };
 
 test('frozen S1 with an impossible date of birth: "Reintentar ELM" blocked, no attempt consumed, ELM never called', async () => {
   for (const dob of ['16/12/0174', '31/3/1', '8/4/88', '30/2/1990', '1991-07-10', undefined]) {

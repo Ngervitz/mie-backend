@@ -256,6 +256,7 @@ function createFakeRepo(opts) {
         source_brand: a.sourceBrand,
         commercial_origin: a.commercialOrigin || null,
         trigger_origin: a.triggerOrigin,
+        send_origin: a.sendOrigin,
         triggered_by_user_id: a.triggeredByUserId,
         cz_estado_id_at_start: a.czEstadoIdAtStart,
         lrw_id_at_start: a.lrwIdAtStart,
@@ -385,7 +386,7 @@ const S2_OK = Object.assign({}, S1_OK, {
   responseBody: { result: 'Lead Aprobado correctamente' },
 });
 
-const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1', sendOrigin: 'rechazados_manual' };
 
 function setup(extra) {
   const e = extra || {};
@@ -581,6 +582,37 @@ async function runAll() {
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'janus_batch' })).code, CODES.TRIGGER_ORIGIN_NOT_ENABLED);
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'cz_automatic' })).code, CODES.TRIGGER_ORIGIN_NOT_ENABLED);
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'x' })).code, CODES.INVALID_CONTEXT);
+  });
+
+  await test('send origin: explicit for manual sends, stored on the claim, never guessed', async () => {
+    const { orch, repo, client } = setup({
+      mutate: (m) => {
+        m.solicitudes.set(3003, solicitudFixture({ cz_id: 3003 }));
+        m.bases.set(3003, 'BASE_TEST');
+      },
+    });
+    const base = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+    for (const bad of [undefined, null, '', 'cz_automatic', 'janus_batch', 'otro']) {
+      const r = await orch.evaluateElm(1001, Object.assign({}, base, bad === undefined ? {} : { sendOrigin: bad }));
+      assert.strictEqual(r.code, CODES.INVALID_SEND_ORIGIN, 'refused: ' + bad);
+    }
+    assert.strictEqual(repo.rows.size, 0, 'no claim without a valid origin');
+    assert.strictEqual(client.s1Calls || 0, 0, 'no ELM call');
+    const pre = await orch.evaluateElm(1001, Object.assign({}, base, { sendOrigin: 'preaprobados_manual' }));
+    assert.strictEqual(pre.ok, true);
+    assert.strictEqual(repo.rows.get(1001).send_origin, 'preaprobados_manual');
+    assert.strictEqual(pre.process.send_origin, 'preaprobados_manual', 'process view carries the origin');
+    const rec = await orch.evaluateElm(3003, Object.assign({}, base, { sendOrigin: 'rechazados_manual' }));
+    assert.strictEqual(rec.ok, true);
+    assert.strictEqual(repo.rows.get(3003).send_origin, 'rechazados_manual');
+    const auto = createElmOrchestrator({
+      repository: repo,
+      client: client,
+      config: TEST_CONFIG,
+      enabledTriggerOrigins: ['janus_manual', 'cz_automatic'],
+    });
+    const wrongAuto = await auto.evaluateElm(4004, { triggerOrigin: 'cz_automatic', sendOrigin: 'preaprobados_manual' });
+    assert.strictEqual(wrongAuto.code, CODES.INVALID_SEND_ORIGIN, 'automatic never takes a manual origin');
   });
 
   await test('date of birth: impossible or absent → elm_date_of_birth_invalid, never built nor sent', async () => {
@@ -1030,7 +1062,7 @@ async function runAll() {
       assert.strictEqual(admin.body.code, CODES.SEND_DISABLED);
       assert.deepStrictEqual(memberCalls, [1001], 'membership of the URL solicitud only');
       const sendCall = orchCalls.find((c) => c[0] === 'send');
-      assert.deepStrictEqual(sendCall, ['send', 1001, { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1' }]);
+      assert.deepStrictEqual(sendCall, ['send', 1001, { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1', sendOrigin: 'preaprobados_manual' }]);
 
       // Real /preaprobados router wiring (default orchestrator, disabled client): POST is 503
       // before any DB access beyond the auth lookups; the legacy routes do not exist.

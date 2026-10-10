@@ -13,7 +13,6 @@ const {
   parseIsoQuery,
   parsePagination,
   assemblePreaprobadosDetail,
-  buildCohortByCzId,
   fetchPreaprobadosListBundle,
   fetchPreaprobadosDetailBundle,
 } = require('../lib/preaprobadosRead');
@@ -62,12 +61,9 @@ function getElmListView() {
 }
 
 /** ELM cohort never breaks the CDV list: on any error the list is CDV only. */
-async function fetchElmCohortSoft(cdvCohortCzIds) {
+async function fetchElmCohortSoft() {
   try {
-    const out = await fetchElmCohortBundle(supabase, {
-      elmRepository: getElmRepository(),
-      cdvCohortCzIds: cdvCohortCzIds,
-    });
+    const out = await fetchElmCohortBundle(supabase, { elmRepository: getElmRepository() });
     return Object.assign({ available: true }, out);
   } catch (err) {
     logger.warn('GET /preaprobados elm cohort unavailable', {
@@ -128,9 +124,7 @@ router.get('/', async function getPreaprobadosList(req, res) {
 
   try {
     const bundle = await fetchPreaprobadosListBundle(supabase);
-    const elm = await fetchElmCohortSoft(
-      buildCohortByCzId(bundle.estado8Rows, bundle.currentEstado8Solicitudes).keys(),
-    );
+    const elm = await fetchElmCohortSoft();
     const assembled = assembleCombinedPreaprobadosList({
       estado8Rows: bundle.estado8Rows,
       currentEstado8Solicitudes: bundle.currentEstado8Solicitudes,
@@ -215,7 +209,6 @@ router.get('/:czId', async function getPreaprobadosDetail(req, res) {
     try {
       const elmDetail = await fetchElmCohortDetail(supabase, bundle.czId, {
         elmRepository: getElmRepository(),
-        cdvMember: true,
       });
       if (elmDetail) {
         detail.proveedor = 'cdv_elm';

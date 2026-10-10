@@ -10,7 +10,8 @@
  * send in progress, monthly quota, ELM's 30-day duplicate window; an unreadable history blocks),
  * then orchestrator.sendElm (eligibility incl. CDV GRANTED and date of birth, DB CI lock, one
  * process per solicitud), and the answer read back from the persisted process. Its own membership
- * step is satisfied with the solicitud already checked here.
+ * step is satisfied with the solicitud already checked here. The process is created with
+ * send_origin preaprobados_manual.
  *
  * List side: offered "Enviar a ELM" cells are held by the same CI rule as the send endpoint
  * (rejectedElmResendGuard + rejectedElmRead.holdSend), so the button says why before the click.
@@ -20,7 +21,7 @@ const { fetchPreaprobadosDetailBundle } = require('./preaprobadosRead');
 const { holdSend } = require('./rejectedElmRead');
 const { HOLD, evaluateCiResendHold, readElmSendRowsByCis } = require('./rejectedElmResendGuard');
 const { readPostReferralRejectionStatuses } = require('../services/elm/classification');
-const { CODES } = require('../services/elm/constants');
+const { CODES, SEND_ORIGIN } = require('../services/elm/constants');
 
 const NOT_IN_PREAPROBADOS = 'elm_solicitud_not_in_preaprobados';
 const SEND_NOT_READY = 'elm_send_not_ready';
@@ -91,6 +92,7 @@ async function sendPreaprobadoToElm(deps, input) {
         return [czId];
       },
       loadCiResendHold: deps.loadCiResendHold,
+      sendOrigin: SEND_ORIGIN.PREAPROBADOS_MANUAL,
     },
     { ci: ci, czSolicitudId: czId, actorUserId: input.actorUserId },
   );

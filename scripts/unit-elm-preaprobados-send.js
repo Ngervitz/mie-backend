@@ -63,6 +63,7 @@ const { S1, S2, CODES, ENABLED_TRIGGER_ORIGINS } = require('../src/services/elm/
 const { readElmConfig } = require('../src/services/elm/config');
 const { createElmClient } = require('../src/services/elm/client');
 const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
+const { createElmRepository, PROCESS_LIST_SELECT } = require('../src/services/elm/repository');
 const { createElmListView, computeElmCell } = require('../src/services/elm/listView');
 const { DUPLICATE_OTHER_CHANNEL_DETAIL } = require('../src/services/elm/classification');
 const { loadCiResendHold, HOLD } = require('../src/lib/rejectedElmResendGuard');
@@ -220,6 +221,7 @@ function createFakeRepo(solicitudes, opts) {
         cz_solicitud_id: a.czSolicitudId,
         ci: a.ci,
         trigger_origin: a.triggerOrigin,
+        send_origin: a.sendOrigin,
         triggered_by_user_id: a.triggeredByUserId,
         created_at: iso(NOW),
         s1_status: S1.IN_FLIGHT,
@@ -396,6 +398,7 @@ function manualProc(czId, over) {
         id: 'm-' + czId,
         cz_solicitud_id: czId,
         ci: czId * 10,
+        send_origin: 'preaprobados_manual',
         created_at: iso(NOW - 2 * DAY),
         s1_started_at: iso(NOW - 2 * DAY),
         s1_completed_at: iso(NOW - 2 * DAY),
@@ -422,21 +425,20 @@ function kpiProcesses() {
       manualProc(730, { s1_status: S1.IN_FLIGHT, s1_completed_at: null, s1_result_message: null, s1_lease_expires_at: iso(NOW + 3600 * 1000), s2_status: S2.NOT_STARTED, s2_started_at: null, s2_completed_at: null, s2_result_message: null, referred_at: null }),
       manualProc(740),
     ],
-    rechazados: manualProc(800),
-    automatic: manualProc(900, { trigger_origin: 'cz_automatic', ci: 9990 }),
+    rechazados: manualProc(800, { send_origin: 'rechazados_manual' }),
+    rechazadosInCohort: manualProc(600, { send_origin: 'rechazados_manual' }),
+    automatic: manualProc(900, { trigger_origin: 'cz_automatic', send_origin: 'cz_automatic', ci: 9990 }),
   };
 }
 
 function kpiList(extra) {
   const p = kpiProcesses();
   const elmManual = buildPreaprobadosManualElmByCzId({
-    processes: p.manual.concat([p.rechazados]),
-    cdvCohortCzIds: new Set(COHORT_IDS),
-    rejectedCzIds: new Set([740]),
+    processes: p.manual.concat([p.rechazados, p.rechazadosInCohort]),
     nowMs: NOW,
   });
   const elmCohort = buildElmCohortByCzId({
-    processes: [p.automatic, p.rechazados].concat(p.manual),
+    processes: [p.automatic, p.rechazados, p.rechazadosInCohort].concat(p.manual),
     projectedByCz: new Map([[900, 13]]),
     nowMs: NOW,
   });
@@ -444,7 +446,7 @@ function kpiList(extra) {
     Object.assign({}, KPI_CDV, KPI_WINDOW, {
       elmCohort: elmCohort,
       elmManual: elmManual,
-      elmSolicitudRows: [cdvSol(900, 9990, 13)].concat([100, 700, 710, 720, 730].map((id) => cdvSol(id, id * 10, 8))),
+      elmSolicitudRows: [cdvSol(900, 9990, 13), cdvSol(740, 7400, 3)].concat([100, 700, 710, 720, 730].map((id) => cdvSol(id, id * 10, 8))),
       elmHistoricoRows: [],
       limit: 100,
       offset: 0,
@@ -481,7 +483,11 @@ function cohortRepo(processes) {
     calls,
     async listAllProcesses(opts) {
       calls.listAll.push(opts);
-      return processes.filter((p) => opts.triggerOrigins.includes(p.trigger_origin));
+      return processes.filter(
+        (p) =>
+          (!opts.triggerOrigins || opts.triggerOrigins.includes(p.trigger_origin)) &&
+          (!opts.sendOrigins || opts.sendOrigins.includes(p.send_origin)),
+      );
     },
     async getProcessesByCzIds(ids) {
       calls.byCzIds.push(ids.slice());
@@ -670,8 +676,10 @@ async function main() {
     assert.strictEqual(h.fetchImpl.calls.length, 2);
     const row = h.repo.rows.get(CZ);
     assert.strictEqual(row.trigger_origin, 'janus_manual');
+    assert.strictEqual(row.send_origin, 'preaprobados_manual', 'origin persisted at creation');
     assert.strictEqual(row.triggered_by_user_id, 'user-admin-1');
     assert.strictEqual(h.repo.claims[0].ci, CI);
+    assert.strictEqual(h.repo.claims[0].sendOrigin, 'preaprobados_manual');
     const msg = ElmUi.sendResultMessage(out.body);
     assert.strictEqual(msg.tone, 'ok');
     assert.ok(msg.text.includes('No es un préstamo otorgado'), msg.text);
@@ -742,6 +750,11 @@ async function main() {
       const pa = await p.send(CZ);
       const ra = await r.sendRejected(CZ);
       assert.deepStrictEqual(pa, ra, steps.map((s) => s.body.result).join(' / '));
+      assert.deepStrictEqual(
+        [p.repo.claims[0].sendOrigin, r.repo.claims[0].sendOrigin],
+        ['preaprobados_manual', 'rechazados_manual'],
+        'each screen persists its own send origin',
+      );
     }
     const pHold = harness([], { holdThrows: true });
     assert.deepStrictEqual(await pHold.send(CZ), await pHold.sendRejected(CZ));
@@ -860,16 +873,16 @@ async function main() {
       conversion_elm: 0,
     });
     assert.deepStrictEqual(ke.by_origin[ORIGIN.PREAPROBADOS_MANUAL], {
-      enviados_elm: 5,
+      enviados_elm: 6,
       en_evaluacion_elm: 1,
       rechazados_elm: 1,
       duplicado_otro_canal_elm: 1,
       revision_elm: 0,
       cerrados_elm: 0,
-      preaprobados_elm: 2,
+      preaprobados_elm: 3,
       otorgados_elm: 1,
-      vigentes_elm: 1,
-      conversion_elm: 0.5,
+      vigentes_elm: 2,
+      conversion_elm: 1 / 3,
     });
     const m = ke.by_origin[ORIGIN.PREAPROBADOS_MANUAL];
     assert.strictEqual(
@@ -877,31 +890,41 @@ async function main() {
       m.enviados_elm,
       'manual buckets add up to the sends',
     );
-    assert.strictEqual(ke.preaprobados_elm, 3);
+    assert.strictEqual(ke.preaprobados_elm, 4);
     assert.strictEqual(ke.otorgados_elm, 1);
-    assert.strictEqual(ke.vigentes_elm, 2);
-    assert.strictEqual(ke.conversion_elm, 1 / 3);
+    assert.strictEqual(ke.vigentes_elm, 3);
+    assert.strictEqual(ke.conversion_elm, 1 / 4);
     assert.strictEqual(ke.scope, 'cz_automatic+preaprobados_manual');
     assert.deepStrictEqual(out.kpis, kpiList({ elmManual: new Map(), elmCohort: new Map() }).kpis, 'CDV KPIs untouched');
   });
 
-  await test('KPIs: Rechazados sends and cohort solicitudes later rejected (estado 3) never count', async () => {
+  await test('KPIs: origin is the stored send_origin; Rechazados sends never count, later CZ estado never moves a send', async () => {
     const p = kpiProcesses();
     const manual = buildPreaprobadosManualElmByCzId({
-      processes: p.manual.concat([p.rechazados, p.automatic]),
-      cdvCohortCzIds: new Set(COHORT_IDS),
-      rejectedCzIds: new Set([740]),
+      processes: p.manual.concat([p.rechazados, p.rechazadosInCohort, p.automatic]),
       nowMs: NOW,
     });
-    assert.deepStrictEqual([...manual.keys()].sort(), [100, 700, 710, 720, 730]);
+    assert.deepStrictEqual([...manual.keys()].sort(), [100, 700, 710, 720, 730, 740]);
     assert.ok(!manual.has(800), 'a Rechazados send is not a Preaprobados send');
-    assert.ok(!manual.has(740), 'estado 3 hands the solicitud over to Rechazados');
+    assert.ok(!manual.has(600), 'a Rechazados send of a CDV cohort solicitud is still a Rechazados send');
+    assert.ok(manual.has(740), 'a Preaprobados send whose solicitud later reached estado 3 stays a Preaprobados send');
     assert.ok(!manual.has(900), 'the automatic circuit is its own origin');
+    const legacy = buildPreaprobadosManualElmByCzId({
+      processes: [manualProc(100, { send_origin: undefined }), manualProc(700, { send_origin: null })],
+      nowMs: NOW,
+    });
+    assert.strictEqual(legacy.size, 0, 'a process without a stored origin is never guessed into Preaprobados');
     assert.strictEqual(
-      buildElmCohortByCzId({ processes: p.manual.concat([p.rechazados]), nowMs: NOW }).size,
+      buildElmCohortByCzId({ processes: p.manual.concat([p.rechazados, p.rechazadosInCohort]), nowMs: NOW }).size,
       0,
       'automatic cohort rule unchanged: manual sends never enter it',
     );
+    const before = kpiList().kpis_elm.by_origin[ORIGIN.PREAPROBADOS_MANUAL];
+    const after = kpiList({
+      solicitudRows: KPI_CDV.solicitudRows.map((s) => (s.cz_id === 100 ? cdvSol(100, 1000, 3) : s)),
+      elmSolicitudRows: [cdvSol(900, 9990, 13), cdvSol(740, 7400, 3), cdvSol(100, 1000, 3)].concat([700, 710, 720, 730].map((id) => cdvSol(id, id * 10, 8))),
+    }).kpis_elm.by_origin[ORIGIN.PREAPROBADOS_MANUAL];
+    assert.deepStrictEqual(after, before, 'Preaprobados KPIs stable when a solicitud changes CZ estado');
   });
 
   await test('KPIs: rows mark Preaprobados referrals as ELM members (cdv_elm) with their origin', async () => {
@@ -934,38 +957,79 @@ async function main() {
     assert.strictEqual(one.kpis_elm.by_origin[ORIGIN.PREAPROBADOS_MANUAL].rechazados_elm, 1);
   });
 
-  await test('KPIs: bundle reads Preaprobados sends only for CDV cohort ids; estado 3 drops them', async () => {
+  await test('KPIs: bundle reads Preaprobados sends by stored send_origin; estado 3 drops automatic only', async () => {
     const p = kpiProcesses();
-    const all = p.manual.concat([p.rechazados, p.automatic]);
+    const all = p.manual.concat([p.rechazados, p.rechazadosInCohort, p.automatic]);
     const tables = {
       cz_funnel_solicitudes: [cdvSol(900, 9990, 13), cdvSol(740, 7400, 3)].concat([100, 700, 710, 720, 730].map((id) => cdvSol(id, id * 10, 8))),
       cz_funnel_solicitud_estados: [{ cz_historico_id: 99, cz_solicitud_id: 740, solicitudes_estados_id: 3, estado: 'Rechazado', fechahora_src: iso(NOW - DAY) }],
     };
     const repo = cohortRepo(all);
-    const out = await fetchElmCohortBundle(inSupabase(tables), { elmRepository: repo, cdvCohortCzIds: COHORT_IDS, nowMs: NOW, postReferralRejectionStatuses: [] });
-    assert.deepStrictEqual(repo.calls.listAll, [{ triggerOrigins: ['cz_automatic'] }], 'automatic read unchanged');
-    assert.deepStrictEqual(repo.calls.byCzIds, [COHORT_IDS], 'manual read limited to the cohort');
-    assert.deepStrictEqual([...out.elmManual.keys()].sort(), [100, 700, 710, 720, 730]);
+    const out = await fetchElmCohortBundle(inSupabase(tables), { elmRepository: repo, nowMs: NOW, postReferralRejectionStatuses: [] });
+    assert.deepStrictEqual(
+      repo.calls.listAll,
+      [{ triggerOrigins: ['cz_automatic'] }, { sendOrigins: ['preaprobados_manual'] }],
+      'automatic read unchanged; manual read by stored origin',
+    );
+    assert.strictEqual(repo.calls.byCzIds.length, 0, 'no membership-based manual read');
+    assert.deepStrictEqual([...out.elmManual.keys()].sort(), [100, 700, 710, 720, 730, 740]);
     assert.deepStrictEqual([...out.elmCohort.keys()], [900]);
-    const none = cohortRepo(all);
-    const noIds = await fetchElmCohortBundle(inSupabase(tables), { elmRepository: none, nowMs: NOW, postReferralRejectionStatuses: [] });
-    assert.strictEqual(noIds.elmManual.size, 0);
-    assert.strictEqual(none.calls.byCzIds.length, 0, 'no cohort → no manual read');
+    const autoRejected = cohortRepo([manualProc(950, { trigger_origin: 'cz_automatic', send_origin: 'cz_automatic', ci: 9500 })]);
+    const dropped = await fetchElmCohortBundle(
+      inSupabase({ cz_funnel_solicitudes: [cdvSol(950, 9500, 3)], cz_funnel_solicitud_estados: [] }),
+      { elmRepository: autoRejected, nowMs: NOW, postReferralRejectionStatuses: [] },
+    );
+    assert.strictEqual(dropped.elmCohort.size, 0, 'automatic rule unchanged: estado 3 drops an automatic member');
   });
 
-  await test('KPIs: detail shows a Preaprobados referral only for a CDV cohort member', async () => {
+  await test('KPIs: detail by stored send_origin; Rechazados sends and S1 rejections are not members', async () => {
     const p = kpiProcesses();
-    const tables = { cz_funnel_solicitudes: [cdvSol(100, 1000, 8), cdvSol(710, 7100, 8)], cz_funnel_solicitud_estados: [] };
-    const repo = cohortRepo(p.manual);
+    const tables = {
+      cz_funnel_solicitudes: [cdvSol(100, 1000, 8), cdvSol(710, 7100, 8), cdvSol(740, 7400, 3), cdvSol(600, 6000, 11)],
+      cz_funnel_solicitud_estados: [],
+    };
+    const repo = cohortRepo(p.manual.concat([p.rechazadosInCohort]));
     const deps = { elmRepository: repo, nowMs: NOW, postReferralRejectionStatuses: [] };
-    assert.strictEqual(await fetchElmCohortDetail(inSupabase(tables), 100, deps), null, 'outside the CDV detail: automatic only');
-    const member = await fetchElmCohortDetail(inSupabase(tables), 100, Object.assign({ cdvMember: true }, deps));
+    const member = await fetchElmCohortDetail(inSupabase(tables), 100, deps);
     assert.strictEqual(member.elm_member.origin, ORIGIN.PREAPROBADOS_MANUAL);
     assert.strictEqual(member.elm_member.label, 'Preaprobado ELM');
-    assert.strictEqual(await fetchElmCohortDetail(inSupabase(tables), 710, Object.assign({ cdvMember: true }, deps)), null, 'S1 rejection is not a member');
+    const rejectedLater = await fetchElmCohortDetail(inSupabase(tables), 740, deps);
+    assert.strictEqual(rejectedLater.elm_member.origin, ORIGIN.PREAPROBADOS_MANUAL, 'estado 3 never changes the origin');
+    assert.strictEqual(await fetchElmCohortDetail(inSupabase(tables), 710, deps), null, 'S1 rejection is not a member');
+    assert.strictEqual(await fetchElmCohortDetail(inSupabase(tables), 600, deps), null, 'a Rechazados send is not a Preaprobados member');
     const route = readSrc('src/routes/preaprobados.js');
-    assert.ok(/fetchElmCohortDetail\(supabase, bundle\.czId, \{\s*elmRepository: getElmRepository\(\),\s*cdvMember: true,/.test(route), 'only the CDV detail passes cdvMember');
-    assert.strictEqual((route.match(/cdvMember: true/g) || []).length, 1);
+    assert.ok(!/cdvMember/.test(route), 'membership never derived from the current CZ cohort');
+  });
+
+  await test('repository: claim passes p_send_origin; list reads and filters the stored send_origin', async () => {
+    const rpcCalls = [];
+    const reads = [];
+    const sb = {
+      async rpc(name, args) {
+        rpcCalls.push([name, args]);
+        return { data: [{ claimed: true, process: { id: 'p1' } }], error: null };
+      },
+      from(table) {
+        const read = { table, select: null, in: [] };
+        reads.push(read);
+        const q = {
+          select(s) { read.select = s; return q; },
+          in(c, v) { read.in.push([c, v]); return q; },
+          order() { return q; },
+          async range() { return { data: [], error: null }; },
+        };
+        return q;
+      },
+    };
+    const repo = createElmRepository(sb);
+    await repo.claimProcess({ czSolicitudId: 1, ci: 2, sourceBrand: 'copanel', triggerOrigin: 'janus_manual', triggeredByUserId: 'u', czEstadoIdAtStart: 8, lrwIdAtStart: null, s1Request: {}, leaseSeconds: 60, sendOrigin: 'preaprobados_manual' });
+    assert.strictEqual(rpcCalls[0][0], 'elm_claim_process');
+    assert.strictEqual(rpcCalls[0][1].p_send_origin, 'preaprobados_manual');
+    assert.ok(PROCESS_LIST_SELECT.split(',').map((s) => s.trim()).includes('send_origin'));
+    await repo.listAllProcesses({ sendOrigins: ['preaprobados_manual'] });
+    assert.deepStrictEqual(reads[0].in, [['send_origin', ['preaprobados_manual']]]);
+    await repo.listAllProcesses({ triggerOrigins: ['cz_automatic'] });
+    assert.deepStrictEqual(reads[1].in, [['trigger_origin', ['cz_automatic']]], 'automatic read unchanged');
   });
 
   await test('KPIs UI: one group per origin, referral ≠ grant; Rechazados code does not read these KPIs', async () => {

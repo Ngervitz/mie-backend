@@ -35,6 +35,24 @@ const TRIGGER_ORIGINS = Object.freeze([
 const ENABLED_TRIGGER_ORIGINS = Object.freeze(['janus_manual']);
 
 /**
+ * Where a send started (elm_lead_processes.send_origin, migration 20261012): stored once when
+ * the process is created, immutable, never derived from the CZ state.
+ */
+const SEND_ORIGIN = Object.freeze({
+  CZ_AUTOMATIC: 'cz_automatic',
+  RECHAZADOS_MANUAL: 'rechazados_manual',
+  PREAPROBADOS_MANUAL: 'preaprobados_manual',
+  JANUS_BATCH: 'janus_batch',
+});
+
+/** send_origin values allowed for each trigger origin (same pairs as the DB CHECK). */
+const SEND_ORIGINS_BY_TRIGGER = Object.freeze({
+  cz_automatic: Object.freeze([SEND_ORIGIN.CZ_AUTOMATIC]),
+  janus_batch: Object.freeze([SEND_ORIGIN.JANUS_BATCH]),
+  janus_manual: Object.freeze([SEND_ORIGIN.RECHAZADOS_MANUAL, SEND_ORIGIN.PREAPROBADOS_MANUAL]),
+});
+
+/**
  * Value sent as `source` in S1 and S2 for every lead (decision Fase 3B). The commercial origin
  * of the lead (SMS base / organic) is tracked separately in elm_lead_processes.commercial_origin
  * and never sent. Real sends stay disabled until ELM confirms this value.
@@ -71,6 +89,8 @@ const CODES = Object.freeze({
   INVALID_CONTEXT: 'elm_invalid_context',
   TRIGGER_ORIGIN_NOT_ENABLED: 'elm_trigger_origin_not_enabled',
   MANUAL_REQUIRES_USER: 'elm_manual_trigger_requires_user',
+  /** A new process needs the screen / circuit it was sent from (SEND_ORIGINS_BY_TRIGGER). */
+  INVALID_SEND_ORIGIN: 'elm_invalid_send_origin',
   SOLICITUD_NOT_FOUND: 'elm_solicitud_not_found',
   CDV_GRANTED: 'elm_cdv_granted',
   PROCESS_EXISTS: 'elm_process_exists',
@@ -145,6 +165,8 @@ module.exports = {
   S2,
   TRIGGER_ORIGINS,
   ENABLED_TRIGGER_ORIGINS,
+  SEND_ORIGIN,
+  SEND_ORIGINS_BY_TRIGGER,
   ELM_SOURCE,
   OUTCOME,
   CODES,

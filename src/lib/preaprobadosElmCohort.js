@@ -14,10 +14,10 @@
  * sends of rejected solicitudes never enter: they stay in Rechazados. A solicitud in both
  * cohorts is one row (proveedor 'cdv_elm'). ELM KPIs (`kpis_elm`) never mix with CDV.
  *
- * Manual sends from Preaprobados ("Enviar a ELM", origin ORIGIN.PREAPROBADOS_MANUAL) are the
- * 'janus_manual' processes of a CDV cohort solicitud (ever estado 8) that never reached CZ
- * estado 3: the same membership the send endpoint enforces, and the same estado-3 rule that
- * hands a solicitud over to Rechazados. Their referred / granted solicitudes are ELM members
+ * Manual sends from Preaprobados ("Enviar a ELM") are the processes stored with send_origin
+ * 'preaprobados_manual' when they were created (migration 20261012). The origin never depends on
+ * the CZ state: a later estado 3 does not move them out, and Rechazados sends
+ * ('rechazados_manual') never count here. Their referred / granted solicitudes are ELM members
  * like the automatic ones; `kpis_elm.by_origin` keeps each origin's results apart.
  */
 
@@ -36,13 +36,14 @@ const {
   COMMERCIAL,
   DUPLICATE_OTHER_CHANNEL_DETAIL,
 } = require('../services/elm/classification');
+const { SEND_ORIGIN } = require('../services/elm/constants');
 
 const REJECTED_ESTADO_ID = 3;
 const ELM_MEMBER_STATES = Object.freeze([COMMERCIAL.REFERRED, COMMERCIAL.GRANTED]);
 const PROVEEDOR = Object.freeze({ CDV: 'cdv', ELM: 'elm', BOTH: 'cdv_elm' });
 const ORIGIN = Object.freeze({
-  AUTOMATIC: 'cz_automatic',
-  PREAPROBADOS_MANUAL: 'preaprobados_manual',
+  AUTOMATIC: SEND_ORIGIN.CZ_AUTOMATIC,
+  PREAPROBADOS_MANUAL: SEND_ORIGIN.PREAPROBADOS_MANUAL,
 });
 const IN_CHUNK = 200;
 const PAGE_SIZE = 1000;
@@ -131,12 +132,11 @@ function buildElmCohortByCzId(input) {
 }
 
 /**
- * Every "Enviar a ELM" from Preaprobados, whatever its result (KPIs by origin need the sends
- * that were not referred too).
+ * Every "Enviar a ELM" from Preaprobados (send_origin preaprobados_manual), whatever its result
+ * (KPIs by origin need the sends that were not referred too). `sent_at` is the process creation,
+ * fixed even if S1 is retried.
  * @param {{
  *   processes: object[],                      elm_lead_processes rows (list projection)
- *   cdvCohortCzIds: Set<number>,              CDV cohort (ever estado 8)
- *   rejectedCzIds?: Set<number>,              solicitudes with CZ estado 3 (historico or current)
  *   nowMs?: number,
  *   postReferralRejectionStatuses?: readonly string[],
  * }} input
@@ -145,12 +145,10 @@ function buildElmCohortByCzId(input) {
  */
 function buildPreaprobadosManualElmByCzId(input) {
   const out = new Map();
-  const cohort = input.cdvCohortCzIds || new Set();
-  const rejected = input.rejectedCzIds || new Set();
   for (const p of input.processes || []) {
-    if (!p || p.trigger_origin !== 'janus_manual') continue;
+    if (!p || p.send_origin !== SEND_ORIGIN.PREAPROBADOS_MANUAL) continue;
     const czId = toNum(p.cz_solicitud_id);
-    if (czId == null || !cohort.has(czId) || rejected.has(czId)) continue;
+    if (czId == null) continue;
     const c = classifyElmProcess(p, {
       nowMs: input.nowMs,
       postReferralRejectionStatuses: input.postReferralRejectionStatuses || [],
@@ -161,7 +159,7 @@ function buildPreaprobadosManualElmByCzId(input) {
       process: p,
       classification: c,
       origin: ORIGIN.PREAPROBADOS_MANUAL,
-      sent_at: p.s1_started_at || p.created_at || null,
+      sent_at: p.created_at || null,
       entered_at: p.referred_at || p.s2_completed_at || p.disbursed_at || null,
     });
   }
@@ -416,20 +414,14 @@ function rejectedSetFrom(estado3Rows, solicitudRows) {
 
 /**
  * @param {object} supabase
- * @param {{ elmRepository: object, cdvCohortCzIds?: Iterable<number>, nowMs?: number,
- *   postReferralRejectionStatuses?: string[] }} deps
+ * @param {{ elmRepository: object, nowMs?: number, postReferralRejectionStatuses?: string[] }} deps
  */
 async function fetchElmCohortBundle(supabase, deps) {
   const repo = deps.elmRepository;
-  const cdvCohortCzIds = new Set(
-    Array.from(deps.cdvCohortCzIds || [])
-      .map(Number)
-      .filter(function (n) { return Number.isSafeInteger(n) && n > 0; }),
-  );
   const processes = await repo.listAllProcesses({ triggerOrigins: ['cz_automatic'] });
-  const manualProcesses = cdvCohortCzIds.size
-    ? Array.from((await repo.getProcessesByCzIds(Array.from(cdvCohortCzIds))).values())
-    : [];
+  const manualProcesses = await repo.listAllProcesses({
+    sendOrigins: [SEND_ORIGIN.PREAPROBADOS_MANUAL],
+  });
   const postReferral = deps.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
   const candidates = processes.length
     ? buildElmCohortByCzId({
@@ -443,7 +435,6 @@ async function fetchElmCohortBundle(supabase, deps) {
     : new Map();
   const manual = buildPreaprobadosManualElmByCzId({
     processes: manualProcesses,
-    cdvCohortCzIds: cdvCohortCzIds,
     nowMs: deps.nowMs,
     postReferralRejectionStatuses: postReferral,
   });
@@ -461,11 +452,7 @@ async function fetchElmCohortBundle(supabase, deps) {
       candidateIds,
     ),
   ]);
-  const rejected = rejectedSetFrom(historicoRows, solicitudRows);
-  for (const id of rejected) {
-    candidates.delete(id);
-    manual.delete(id);
-  }
+  for (const id of rejectedSetFrom(historicoRows, solicitudRows)) candidates.delete(id);
   return {
     elmCohort: candidates,
     elmManual: manual,
@@ -475,18 +462,16 @@ async function fetchElmCohortBundle(supabase, deps) {
 }
 
 /**
- * ELM membership of one solicitud. Without `cdvMember` (CDV detail answered not_in_cohort) only
- * the automatic circuit counts; with `cdvMember: true` (the solicitud is in the CDV cohort) a
- * referred / granted send from Preaprobados counts too.
- * @param {{ elmRepository: object, cdvMember?: boolean, nowMs?: number,
- *   postReferralRejectionStatuses?: string[] }} deps
+ * ELM membership of one solicitud: automatic circuit (existing rule) or a referred / granted
+ * send from Preaprobados (send_origin preaprobados_manual, whatever the later CZ state).
+ * @param {{ elmRepository: object, nowMs?: number, postReferralRejectionStatuses?: string[] }} deps
  * @returns {Promise<object|null>}
  */
 async function fetchElmCohortDetail(supabase, czId, deps) {
   const repo = deps.elmRepository;
   const process = await repo.getProcessByCzId(czId);
   if (!process) return null;
-  const manualMember = deps.cdvMember === true && process.trigger_origin === 'janus_manual';
+  const manualMember = process.send_origin === SEND_ORIGIN.PREAPROBADOS_MANUAL;
   if (process.trigger_origin !== 'cz_automatic' && !manualMember) return null;
   const projected = manualMember ? new Map() : await repo.getProjectedEstadosByCzIds([czId]);
   const { data: sol, error: solErr } = await supabase
@@ -502,15 +487,12 @@ async function fetchElmCohortDetail(supabase, czId, deps) {
     'cz_solicitud_id',
     [czId],
   );
-  const rejectedCzIds = rejectedSetFrom(historicoRows, sol ? [sol] : []);
   const postReferral = deps.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
   const cohort = manualMember
     ? elmMembersByCzId(
         null,
         buildPreaprobadosManualElmByCzId({
           processes: [process],
-          cdvCohortCzIds: new Set([czId]),
-          rejectedCzIds: rejectedCzIds,
           nowMs: deps.nowMs,
           postReferralRejectionStatuses: postReferral,
         }),
@@ -518,7 +500,7 @@ async function fetchElmCohortDetail(supabase, czId, deps) {
     : buildElmCohortByCzId({
         processes: [process],
         projectedByCz: projected,
-        rejectedCzIds: rejectedCzIds,
+        rejectedCzIds: rejectedSetFrom(historicoRows, sol ? [sol] : []),
         nowMs: deps.nowMs,
         postReferralRejectionStatuses: postReferral,
       });
