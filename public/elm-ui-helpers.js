@@ -29,6 +29,7 @@
     elm_ci_lock_blocked: 'Hay un proceso ELM vigente o reciente para esta CI.',
     elm_ci_active: 'Hay un proceso ELM vigente para esta CI.',
     elm_solicitud_not_in_rejections: 'La solicitud no figura entre los rechazos de esta CI.',
+    elm_solicitud_not_in_preaprobados: 'La solicitud no figura en la cohorte CDV de Preaprobados.',
     elm_cdv_granted: 'La solicitud tiene un préstamo CDV otorgado.',
     elm_missing_required_fields: 'Faltan datos obligatorios de la solicitud.',
     elm_date_of_birth_invalid: 'Fecha de nacimiento inválida.',
@@ -691,7 +692,7 @@
   }
 
   /**
-   * Message for the POST /rechazados/:ci/elm/send answer.
+   * Message for the POST /rechazados/:ci/elm/send and POST /preaprobados/:czId/elm/send answers.
    * @returns {{ tone: 'ok'|'warn'|'error', text: string }}
    */
   function sendResultMessage(body) {

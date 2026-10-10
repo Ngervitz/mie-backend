@@ -17913,6 +17913,8 @@ init();
     elmLoading: false,
     elmError: null,
     elmCzId: null,
+    elmSendMessage: null,
+    elmSendingCzId: null,
   };
 
   function setStatus(msg, isError) {
@@ -18132,14 +18134,38 @@ init();
         ? '<span class="preaprobados-in-progress">Cohorte en curso</span>'
         : '';
     const ke = data.kpis_elm;
+    const byOrigin = (ke && ke.by_origin) || {};
+    const ka = byOrigin.cz_automatic || ke;
+    const km = byOrigin.preaprobados_manual || null;
     const elmKpis = ke
       ? '<div class="preaprobados-kpi-scope">ELM · circuito automático (derivados S2)</div>' +
         '<div class="preaprobados-kpi-grid">' +
-        kpiCard('Preaprobados ELM', String(ke.preaprobados_elm)) +
-        kpiCard('Otorgados ELM', String(ke.otorgados_elm)) +
-        kpiCard('Vigentes ELM', String(ke.vigentes_elm)) +
-        kpiCard('Conversión ELM', fmtPct(ke.conversion_elm)) +
-        '</div>'
+        kpiCard('Preaprobados ELM', String(ka.preaprobados_elm)) +
+        kpiCard('Otorgados ELM', String(ka.otorgados_elm)) +
+        kpiCard('Vigentes ELM', String(ka.vigentes_elm)) +
+        kpiCard('Conversión ELM', fmtPct(ka.conversion_elm)) +
+        '</div>' +
+        (km
+          ? '<div class="preaprobados-kpi-scope">ELM · envío manual desde Preaprobados</div>' +
+            '<div class="preaprobados-kpi-grid">' +
+            kpiCard('Enviados a ELM', String(km.enviados_elm)) +
+            kpiCard('Preaprobados ELM', String(km.preaprobados_elm)) +
+            kpiCard('Otorgados ELM', String(km.otorgados_elm)) +
+            kpiCard('Rechazados ELM', String(km.rechazados_elm)) +
+            kpiCard('Duplicado · Otro canal', String(km.duplicado_otro_canal_elm)) +
+            kpiCard('Cerrados sin préstamo', String(km.cerrados_elm)) +
+            kpiCard(
+              'En evaluación / revisión',
+              String(km.en_evaluacion_elm + km.revision_elm),
+            ) +
+            kpiCard('Conversión ELM', fmtPct(km.conversion_elm)) +
+            '</div>' +
+            '<p class="preaprobados-muted">Total ELM (automático + manual): ' +
+            escapeHtml(String(ke.preaprobados_elm)) +
+            ' preaprobados ELM, ' +
+            escapeHtml(String(ke.otorgados_elm)) +
+            ' otorgados. Preaprobado ELM = derivado a ventas de ELM; no es un préstamo otorgado.</p>'
+          : '')
       : '';
     const elmUnavailable =
       data.elm_available === false
@@ -18204,7 +18230,21 @@ init();
 
   function elmCell(row) {
     const H = window.ElmUiHelpers;
-    return H ? H.elmCellHtml(row.elm) : '—';
+    return H ? H.elmCellHtml(row.elm, { ci: row.ci }) : '—';
+  }
+
+  function elmSendMessageHtml() {
+    const msg = state.elmSendMessage;
+    if (!msg) return '';
+    return (
+      '<div class="rechazados-elm-msg is-' +
+      escapeHtml(msg.tone) +
+      '">Solicitud ' +
+      escapeHtml(String(msg.czId)) +
+      ': ' +
+      escapeHtml(msg.text) +
+      '</div>'
+    );
   }
 
   function estadoCell(row) {
@@ -18275,6 +18315,7 @@ init();
     const canPrev = offset > 0;
     const canNext = offset + rows.length < total;
     resultsEl.innerHTML =
+      elmSendMessageHtml() +
       '<div class="table-wrap"><table class="ga4-table preaprobados-table">' +
       '<thead><tr>' +
       '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th><th>Entidad</th>' +
@@ -18386,7 +18427,7 @@ init();
     return (
       '<section><h3>ELM</h3>' +
       body +
-      '<p class="preaprobados-muted">Preaprobado ELM = derivado a ventas de ELM (S2); no implica préstamo otorgado. El envío manual a ELM se hace desde Rechazados.</p>' +
+      '<p class="preaprobados-muted">Preaprobado ELM = derivado a ventas de ELM (S2); no implica préstamo otorgado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla, una solicitud por vez.</p>' +
       '</section>'
     );
   }
@@ -18400,7 +18441,14 @@ init();
       dlRow('Entidad', 'ELM') +
       dlRow('Estado comercial', m.detail_label || m.label || '—') +
       dlRow('Fecha derivación (S2)', fmtDate(m.referred_at)) +
-      dlRow('Origen', H ? H.originLabel(m.trigger_origin) : String(m.trigger_origin || '—')) +
+      dlRow(
+        'Origen',
+        m.origin === 'preaprobados_manual'
+          ? 'Envío manual desde Preaprobados'
+          : H
+            ? H.originLabel(m.trigger_origin)
+            : String(m.trigger_origin || '—'),
+      ) +
       dlRow('Solicitud', m.cz_solicitud_id != null ? String(m.cz_solicitud_id) : '—') +
       dlRow('Proceso ELM', m.process_id || '—') +
       dlRow('Último estado ELM', m.provider_status || '—') +
@@ -18636,9 +18684,63 @@ init();
     if (state.detail) loadElmStatus(czId);
   }
 
+  function preaprobadoRow(czId) {
+    const rows = (state.payload && state.payload.rows) || [];
+    for (let i = 0; i < rows.length; i += 1) {
+      if (String(rows[i].cz_id) === String(czId)) return rows[i];
+    }
+    return null;
+  }
+
+  /**
+   * "Enviar a ELM" of ONE solicitud, after an explicit confirmation. The browser sends only the
+   * solicitud id (URL); membership, CI, eligibility and every ELM rule are decided server-side.
+   */
+  async function postPreaprobadoElmSend(czId, btn) {
+    const ElmUi = window.ElmUiHelpers;
+    if (!ElmUi || !czId || state.elmSendingCzId) return;
+    const row = preaprobadoRow(czId);
+    const ok = window.confirm(
+      '¿Enviar la solicitud ' +
+        czId +
+        (row && row.ci != null ? ' (CI ' + row.ci + ', ' + clientName(row) + ')' : '') +
+        ' a ELM?\n\n' +
+        'Se envían a ELM los datos de esta solicitud. Se ejecuta la evaluación inicial (S1) y, si es ' +
+        'favorable, la derivación a ventas de ELM (S2). Una derivación no es un préstamo otorgado.\n\n' +
+        'El envío no se puede deshacer.',
+    );
+    if (!ok) return;
+    state.elmSendingCzId = String(czId);
+    if (btn) btn.disabled = true;
+    let message;
+    try {
+      const res = await fetch(
+        API + '/preaprobados/' + encodeURIComponent(czId) + '/elm/send',
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        },
+      );
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      message = data && data.outcome
+        ? ElmUi.sendResultMessage(data)
+        : { tone: 'error', text: 'No se envió a ELM. ' + ((data && data.error) || 'Error ' + res.status) };
+    } catch (_err) {
+      message = { tone: 'error', text: 'No se envió a ELM: no se pudo conectar.' };
+    } finally {
+      state.elmSendingCzId = null;
+    }
+    state.elmSendMessage = { czId: czId, tone: message.tone, text: message.text };
+    await loadList();
+  }
+
   filtersEl.addEventListener('click', function (ev) {
     const t = ev.target;
     if (!t) return;
+    state.elmSendMessage = null;
     const periodBtn = t.closest && t.closest('[data-period]');
     if (periodBtn) {
       state.period = periodBtn.getAttribute('data-period');
@@ -18689,6 +18791,10 @@ init();
     const action = btn.getAttribute('data-action');
     if (action === 'view') {
       openDetail(btn.getAttribute('data-cz-id'));
+      return;
+    }
+    if (action === 'elm-send' && !btn.disabled) {
+      postPreaprobadoElmSend(btn.getAttribute('data-cz-id'), btn);
       return;
     }
     if (action === 'prev-page' && !btn.disabled) {

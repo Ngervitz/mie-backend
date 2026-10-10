@@ -901,10 +901,18 @@ async function runAll() {
     SECTION_PERMS.add('reader-1:preaprobados');
 
     const orchCalls = [];
+    const memberCalls = [];
     const fakeOrch = {
       async getElmStatus(czId) {
         orchCalls.push(['get', czId]);
         return { ok: true, data: { cz_solicitud_id: Number(czId), send_enabled: false } };
+      },
+      getSendReadiness() {
+        return { ready: true, reasons: [] };
+      },
+      async sendElm(czId, ctx) {
+        orchCalls.push(['send', czId, ctx]);
+        return { ok: false, stage: 's1', code: CODES.SEND_DISABLED };
       },
       async evaluateElm(czId, ctx) {
         orchCalls.push(['evaluate', czId, ctx]);
@@ -920,7 +928,15 @@ async function runAll() {
     app.use(
       '/preaprobados',
       requireDashboardPermission('preaprobados'),
-      createPreaprobadosElmRouter({ orchestrator: fakeOrch }),
+      createPreaprobadosElmRouter({
+        orchestrator: fakeOrch,
+        listView: { async cellsForCzIds() { return new Map(); } },
+        loadMember: async (czId) => {
+          memberCalls.push(czId);
+          return { ci: 12345678 };
+        },
+        loadCiResendHold: async () => null,
+      }),
     );
     const realApp = express();
     realApp.use(requireAuth);
@@ -973,28 +989,37 @@ async function runAll() {
 
     try {
       const cron = { 'X-Cron-Key': TEST_CRON_SECRET };
-      const ev = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', cron);
-      assert.strictEqual(ev.status, 403);
-      assert.strictEqual(ev.body.code, 'elm_cron_forbidden');
-      const rf = await call(port, 'POST', '/preaprobados/1001/elm/refer', cron);
-      assert.strictEqual(rf.status, 403);
-      assert.strictEqual(rf.body.code, 'elm_cron_forbidden');
-      const cronWithSession = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', Object.assign({ Cookie: cookie('admin-1') }, cron));
+      const sendCron = await call(port, 'POST', '/preaprobados/1001/elm/send', cron);
+      assert.strictEqual(sendCron.status, 403);
+      assert.strictEqual(sendCron.body.code, 'elm_cron_forbidden');
+      const cronWithSession = await call(port, 'POST', '/preaprobados/1001/elm/send', Object.assign({ Cookie: cookie('admin-1') }, cron));
       assert.strictEqual(cronWithSession.status, 403);
       assert.strictEqual(orchCalls.filter((c) => c[0] !== 'get').length, 0);
+      assert.strictEqual(memberCalls.length, 0);
 
-      const reader = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('reader-1') });
+      // S1 / S2 are not exposed separately any more: no route, the orchestrator is never reached.
+      for (const legacy of ['/preaprobados/1001/elm/evaluate', '/preaprobados/1001/elm/refer']) {
+        const r = await call(port, 'POST', legacy, { Cookie: cookie('admin-1') });
+        assert.strictEqual(r.status, 404, legacy);
+        const rc = await call(port, 'POST', legacy, cron);
+        assert.strictEqual(rc.status, 404, legacy + ' (cron)');
+      }
+      assert.strictEqual(orchCalls.filter((c) => c[0] !== 'get').length, 0, 'legacy routes never reach ELM');
+
+      const reader = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('reader-1') });
       assert.strictEqual(reader.status, 403);
       assert.strictEqual(reader.body.code, 'elm_action_forbidden');
       const readerGet = await call(port, 'GET', '/preaprobados/1001/elm', { Cookie: cookie('reader-1') });
       assert.strictEqual(readerGet.status, 200);
-      const inactive = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('off-1') });
+      const inactive = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('off-1') });
       assert.strictEqual(inactive.status, 401);
-      const anon = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', {});
+      const anon = await call(port, 'POST', '/preaprobados/1001/elm/send', {});
       assert.strictEqual(anon.status, 401);
+      assert.strictEqual(memberCalls.length, 0);
 
-      const admin = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') }, {
+      const admin = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('admin-1') }, {
         ci: 99999999,
+        cz_solicitud_id: 2002,
         salario: 1,
         email: 'x@y.z',
         celular: '1',
@@ -1003,17 +1028,21 @@ async function runAll() {
       });
       assert.strictEqual(admin.status, 503);
       assert.strictEqual(admin.body.code, CODES.SEND_DISABLED);
-      const evCall = orchCalls.find((c) => c[0] === 'evaluate');
-      assert.deepStrictEqual(evCall, ['evaluate', '1001', { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1' }]);
+      assert.deepStrictEqual(memberCalls, [1001], 'membership of the URL solicitud only');
+      const sendCall = orchCalls.find((c) => c[0] === 'send');
+      assert.deepStrictEqual(sendCall, ['send', 1001, { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1' }]);
 
       // Real /preaprobados router wiring (default orchestrator, disabled client): POST is 503
-      // before any DB access beyond the auth lookups.
+      // before any DB access beyond the auth lookups; the legacy routes do not exist.
       supabaseCalls.length = 0;
-      const real = await call(realPort, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') });
+      const real = await call(realPort, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('admin-1') });
       assert.strictEqual(real.status, 503);
-      assert.strictEqual(real.body.code, CODES.SEND_DISABLED);
+      assert.strictEqual(real.body.code, 'elm_send_not_ready');
+      assert.strictEqual(real.body.outcome, 'blocked');
       assert.ok(supabaseCalls.every((t) => t === 'dashboard_users'), 'no ELM DB access: ' + supabaseCalls.join(','));
-      const realCron = await call(realPort, 'POST', '/preaprobados/1001/elm/refer', cron);
+      const realLegacy = await call(realPort, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') });
+      assert.strictEqual(realLegacy.status, 404);
+      const realCron = await call(realPort, 'POST', '/preaprobados/1001/elm/send', cron);
       assert.strictEqual(realCron.status, 403);
     } finally {
       for (const s of servers) await new Promise((r) => s.close(r));
