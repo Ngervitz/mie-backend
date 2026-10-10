@@ -323,7 +323,9 @@ const ADMIN = { 'GET /assignees': { status: 200, body: { ok: true, items: [] } }
     assert.ok(/onResolved: function \(\) \{\s*return state\.detailCi \? refreshCiAfterElmAction\(state\.detailCi\) : null;/.test(src), 'Rechazados: re-reads only that CI');
     assert.ok(/return \(d\.elm\.solicitudes \|\| \[\]\)\s*\.map\(function \(s\) \{\s*return elmResolver\.html\(s\.cz_solicitud_id\);/.test(src), 'Rechazados: own rejected solicitudes only');
     assert.ok(src.includes("(elmResolver && state.elmCzId != null ? elmResolver.html(state.elmCzId) : '')"), 'Preaprobados: the detail solicitud only');
-    assert.ok(/modalRoot\.addEventListener\('click', function \(ev\) \{\s*elmResolver\.handleClick\(ev\.target\);\s*\}, true\);/.test(src), 'Preaprobados: capture listener (dialog stops propagation)');
+    assert.ok(/modalRoot\.addEventListener\('click', function \(ev\) \{\s*elmResolver\.handleClick\(ev\.target\);\s*\}, true\);/.test(src), 'Preaprobados: resolver capture listener');
+    assert.ok(!src.includes('aria-label="Detalle preaprobado" onclick="event.stopPropagation()"'), 'Preaprobados: dialog does not swallow the «Cerrar» click');
+    assert.ok(src.includes("if (t.classList.contains('ad-modal-backdrop') || t.closest('button[data-action=\"close-modal\"]')) {"), 'Preaprobados: «Cerrar» or the backdrop itself close; clicks inside the dialog do not');
     assert.ok(src.includes('async function postPreaprobadoElmSend(czId, btn)') && src.includes('async function postElmSend(ci, czId, btn)') && src.includes('async function postElmRetry(ci, btn)'), 'send / retry untouched');
   });
 

@@ -18608,7 +18608,7 @@ init();
       .join('');
     modalRoot.innerHTML =
       '<div class="ad-modal-backdrop" data-action="close-modal">' +
-      '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle preaprobado" onclick="event.stopPropagation()">' +
+      '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle preaprobado">' +
       '<div class="preaprobados-modal-header">' +
       '<h2>Detalle · ' +
       escapeHtml(String(d.cz_id)) +
@@ -18891,13 +18891,14 @@ init();
   modalRoot.addEventListener('click', function (ev) {
     const t = ev.target;
     if (!t || !t.closest) return;
-    if (t.closest('[data-action="close-modal"]')) {
+    // The backdrop carries data-action="close-modal" too: only a click on the backdrop itself closes.
+    if (t.classList.contains('ad-modal-backdrop') || t.closest('button[data-action="close-modal"]')) {
       closeModal();
     }
   });
 
   if (elmResolver) {
-    // Capture: the detail dialog stops click propagation to keep the backdrop from closing it.
+    // Capture: the resolver handles its clicks before the close handler sees them.
     modalRoot.addEventListener('click', function (ev) {
       elmResolver.handleClick(ev.target);
     }, true);
