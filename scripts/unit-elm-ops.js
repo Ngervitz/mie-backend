@@ -523,9 +523,12 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   assert.ok(caseForm.includes('name="cz_outcome"'));
   assert.ok(ElmOpsUi.actionErrorText('cz_outcome_required').includes('14'));
   const page = readSrc('public/mie-dashboard.html');
-  assert.ok(page.indexOf('elm-ops.js') > page.indexOf('elm-ui-helpers.js'));
-  assert.ok(page.indexOf('elm-ops.js') < page.indexOf('mie-dashboard.js'));
-  assert.ok(page.includes('id="elm-ops-root"'));
+  assert.ok(!page.includes('elm-ops.js') && !page.includes('id="elm-ops-root"'), 'ELM Ops panels retired from Preaprobados');
+  assert.ok(!readSrc('public/mie-dashboard.js').includes('ElmOps'), 'dashboard no longer mounts ELM Ops');
+  const pane = page.slice(page.indexOf('id="preaprobados-panel"'), page.indexOf('id="preaprobados-modal-root"'));
+  for (const id of ['preaprobados-reload-btn', 'preaprobados-filters', 'preaprobados-kpis', 'preaprobados-status', 'preaprobados-results']) {
+    assert.ok(pane.includes('id="' + id + '"'), 'Preaprobados keeps #' + id);
+  }
 });
 
 test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, never resolved by precedence', async () => {

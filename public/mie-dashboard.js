@@ -18822,23 +18822,15 @@ init();
     }
   });
 
-  const elmOpsRoot = document.getElementById('elm-ops-root');
-  const elmOps =
-    elmOpsRoot && typeof ElmOps !== 'undefined'
-      ? ElmOps.mount({ root: elmOpsRoot, api: API, fmtDate: fmtDate })
-      : null;
-
   if (reloadBtn) {
     reloadBtn.addEventListener('click', function () {
       state.offset = 0;
       loadList();
-      if (elmOps) elmOps.load();
     });
   }
 
   window.__openPreaprobados = function () {
     renderFilters();
     loadList();
-    if (elmOps) elmOps.load();
   };
 })();
