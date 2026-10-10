@@ -18024,7 +18024,7 @@ init();
       { id: 'all', label: 'Todos' },
       { id: 'granted', label: 'GRANTED CDV' },
       { id: 'sin_resultado', label: 'Sin resultado' },
-      { id: 'elm_preaprobado', label: 'Preaprobado ELM' },
+      { id: 'elm_aceptado', label: 'Aceptado ELM' },
       { id: 'elm_otorgado', label: 'Otorgado ELM' },
     ];
     const proveedores = [
@@ -18138,18 +18138,18 @@ init();
     const ka = byOrigin.cz_automatic || ke;
     const km = byOrigin.preaprobados_manual || null;
     const elmKpis = ke
-      ? '<div class="preaprobados-kpi-scope">ELM · circuito automático (derivados S2)</div>' +
+      ? '<div class="preaprobados-kpi-scope">ELM · circuito automático (aceptados S2)</div>' +
         '<div class="preaprobados-kpi-grid">' +
-        kpiCard('Preaprobados ELM', String(ka.preaprobados_elm)) +
+        kpiCard('Aceptados ELM', String(ka.preaprobados_elm)) +
         kpiCard('Otorgados ELM', String(ka.otorgados_elm)) +
-        kpiCard('Vigentes ELM', String(ka.vigentes_elm)) +
+        kpiCard('Aceptados sin otorgar', String(ka.vigentes_elm)) +
         kpiCard('Conversión ELM', fmtPct(ka.conversion_elm)) +
         '</div>' +
         (km
           ? '<div class="preaprobados-kpi-scope">ELM · envío manual desde Preaprobados</div>' +
             '<div class="preaprobados-kpi-grid">' +
             kpiCard('Enviados a ELM', String(km.enviados_elm)) +
-            kpiCard('Preaprobados ELM', String(km.preaprobados_elm)) +
+            kpiCard('Aceptados ELM', String(km.preaprobados_elm)) +
             kpiCard('Otorgados ELM', String(km.otorgados_elm)) +
             kpiCard('Rechazados ELM', String(km.rechazados_elm)) +
             kpiCard('Duplicado · Otro canal', String(km.duplicado_otro_canal_elm)) +
@@ -18162,9 +18162,9 @@ init();
             '</div>' +
             '<p class="preaprobados-muted">Total ELM (automático + manual): ' +
             escapeHtml(String(ke.preaprobados_elm)) +
-            ' preaprobados ELM, ' +
+            ' aceptados ELM, ' +
             escapeHtml(String(ke.otorgados_elm)) +
-            ' otorgados. Preaprobado ELM = derivado a ventas de ELM; no es un préstamo otorgado.</p>'
+            ' otorgados. Aceptado ELM = ELM recibió el lead y lo asignó a Copanel; no es un préstamo otorgado.</p>'
           : '')
       : '';
     const elmUnavailable =
@@ -18210,7 +18210,7 @@ init();
       '<span class="preaprobados-result ' +
       (granted ? 'is-granted-elm' : 'is-referred-elm') +
       '">' +
-      escapeHtml(granted ? 'Otorgado ELM' : 'Preaprobado ELM') +
+      escapeHtml(granted ? 'Otorgado ELM' : 'Aceptado ELM') +
       '</span>'
     );
   }
@@ -18360,11 +18360,14 @@ init();
     elm_source_brand_indeterminate: 'Marca de origen (source) no determinable',
   };
 
-  function elmStatusLabel(p) {
+  function elmStatusLabel(p, cell) {
     if (!p) return 'No consultado';
     const s2 = p.s2 ? p.s2.effective_status : 'not_started';
     const s1 = p.s1 ? p.s1.effective_status : 'not_started';
-    if (s2 === 'referred') return 'S2 · Derivado a ventas ELM (no implica otorgado ni desembolsado)';
+    if (cell && cell.detail === 's2_accepted') {
+      return 'S2 · Aceptado por ELM: lead recibido y asignado a Copanel (no implica otorgado ni desembolsado)';
+    }
+    if (s2 === 'referred') return 'S2 · Aceptado por ELM, derivado a ventas (no implica otorgado ni desembolsado)';
     if (s2 === 'in_flight') return 'S2 · En curso';
     if (s2 === 'rejected') return 'S2 · Rechazado por ELM';
     if (s2 === 'unknown') return 'S2 · Resultado desconocido';
@@ -18386,7 +18389,7 @@ init();
     } else if (state.elm) {
       const e = state.elm;
       const p = e.process;
-      let rows = dlRow('Estado ELM', elmStatusLabel(p));
+      let rows = dlRow('Estado ELM', elmStatusLabel(p, e.cell));
       const H = window.ElmUiHelpers;
       if (e.cell && H) rows += dlRow('Estado comercial ELM', H.cellLabel(e.cell));
       if (p) {
@@ -18395,6 +18398,9 @@ init();
         if (p.s1 && p.s1.started_at) rows += dlRow('S1 iniciado', fmtDate(p.s1.started_at));
         if (p.s2) rows += dlRow('S2', p.s2.effective_status || '—');
         if (p.s2 && p.s2.result_message) rows += dlRow('Respuesta S2', p.s2.result_message);
+        else if (e.cell && e.cell.detail === 's2_accepted') {
+          rows += dlRow('Respuesta S2', 'success: true · result: null (Aceptado ELM)');
+        }
         if (p.referred_at) rows += dlRow('Derivado a ventas', fmtDate(p.referred_at));
         rows += dlRow('Último estado ELM', p.provider_status || '—');
         rows += dlRow('Último postback', p.last_postback_at ? fmtDate(p.last_postback_at) : '—');
@@ -18427,7 +18433,7 @@ init();
     return (
       '<section><h3>ELM</h3>' +
       body +
-      '<p class="preaprobados-muted">Preaprobado ELM = derivado a ventas de ELM (S2); no implica préstamo otorgado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla, una solicitud por vez.</p>' +
+      '<p class="preaprobados-muted">Aceptado ELM = ELM recibió el lead y lo asignó a Copanel (S2); no implica préstamo otorgado. Otorgado ELM solo con desembolso confirmado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla, una solicitud por vez.</p>' +
       '</section>'
     );
   }
@@ -18437,10 +18443,10 @@ init();
     if (!m) return '';
     const H = window.ElmUiHelpers;
     return (
-      '<section><h3>Preaprobado ELM</h3><dl class="preaprobados-dl">' +
+      '<section><h3>' + escapeHtml(m.state === 'granted' ? 'Otorgado ELM' : 'Aceptado ELM') + '</h3><dl class="preaprobados-dl">' +
       dlRow('Entidad', 'ELM') +
       dlRow('Estado comercial', m.detail_label || m.label || '—') +
-      dlRow('Fecha derivación (S2)', fmtDate(m.referred_at)) +
+      dlRow('Fecha aceptación (S2)', fmtDate(m.accepted_at || m.referred_at)) +
       dlRow(
         'Origen',
         m.origin === 'preaprobados_manual'

@@ -580,7 +580,7 @@ test('30 new "Repetido. Aprobado" reads "Duplicado · Otro canal": terminal, ori
   assert.strictEqual(c.action.show, false, 'no send');
   const html = rowOf(c);
   assert.strictEqual(visible(html), 'Sol. 1600 Duplicado · Otro canal', html);
-  assert.ok(html.includes('class="preaprobados-elm is-closed is-compact"'), html);
+  assert.ok(html.includes('class="preaprobados-elm is-closed is-duplicate is-compact"'), html);
   assert.ok(html.includes('title="Duplicado · Otro canal · Respuesta ELM (S1): Repetido. Aprobado · Origen: Manual (JANUS)"'), html);
   assert.ok(!html.includes('<button'), html);
   const detail = ElmUi.elmCellHtml(c, { retryCi: 1, answer: 'full' });

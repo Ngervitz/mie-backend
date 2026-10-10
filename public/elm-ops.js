@@ -14,6 +14,8 @@
     s2_unknown: 'Derivación incierta (S2)',
     s1_unknown: 'Evaluación incierta (S1)',
   });
+  const S2_ACCEPTED_KIND_LABEL = 'Aceptado ELM (S2, asignado a Copanel)';
+  const CORRECTION_PREFIX = 'correction:';
 
   const PROCESS_RESOLUTION_LABELS = Object.freeze({
     provider_closed_no_loan: 'ELM cerró el caso sin préstamo',
@@ -80,6 +82,9 @@
     not_resolvable: 'Este proceso ya no admite resolución manual.',
     evidence_required: 'No hay evidencia de otorgamiento (postback Convertido) para este proceso.',
     invalid_resolution: 'Resolución no válida para este caso.',
+    incompatible_with_accepted: 'ELM aceptó este lead: esa resolución lo contradice. Usá la corrección auditada si hay evidencia.',
+    invalid_correction: 'Corrección no válida para este proceso.',
+    correction_note_required: 'La corrección requiere una nota de al menos 30 caracteres con la evidencia.',
     invalid_cz_outcome: 'Elegí el resultado para Credizona.',
     cz_outcome_required: 'Credizona todavía tiene la solicitud abierta (13 derivada / 14 en revisión): elegí el resultado para Credizona. Sin evidencia definitiva, dejala pendiente.',
     cz_outcome_not_applicable: 'Esta solicitud no está abierta en Credizona: elegí "Sin cambio en Credizona".',
@@ -146,6 +151,11 @@
       .join('');
   }
 
+  function processKindLabel(p) {
+    if (p.s2_accepted === true) return S2_ACCEPTED_KIND_LABEL;
+    return KIND_LABELS[p.kind] || p.kind || '—';
+  }
+
   function processRowHtml(p, fmtDate, canAct) {
     const blocked = (p.blocked_cz_solicitud_ids || []).join(', ');
     const ev = p.last_event;
@@ -153,7 +163,7 @@
       '<tr data-process-id="' + esc(p.process_id) + '">' +
       '<td>' + esc(p.cz_solicitud_id) + '</td>' +
       '<td>' + esc(p.ci || '—') + '</td>' +
-      '<td>' + esc(KIND_LABELS[p.kind] || p.kind || '—') + '</td>' +
+      '<td>' + esc(processKindLabel(p)) + '</td>' +
       '<td>' + esc(fmtDate(p.since)) + '</td>' +
       '<td>' + esc(fmtAge(p.age_hours)) + '</td>' +
       '<td>' + esc(elmStateText(p.elm)) + '</td>' +
@@ -177,7 +187,7 @@
     ['started', 'Iniciados'],
     ['s1_executed', 'S1 ejecutados'],
     ['s1_favorable', 'S1 favorables'],
-    ['referred_s2', 'Derivados S2 (Preaprobado ELM)'],
+    ['referred_s2', 'Aceptados S2 (Aceptado ELM)'],
     ['rejected_definitive', 'Rechazos definitivos'],
     ['granted', 'Otorgados ELM'],
     ['pending_or_review', 'Pendientes / en revisión'],
@@ -186,7 +196,7 @@
 
   const CURRENT_LABELS = Object.freeze([
     ['in_evaluation', 'En evaluación'],
-    ['referred', 'Preaprobado ELM'],
+    ['referred', 'Aceptado ELM'],
     ['granted', 'Otorgado ELM'],
     ['rejected', 'Rechazado ELM'],
     ['review', 'Pendiente de revisión'],
@@ -267,13 +277,44 @@
     );
   }
 
+  /** Select value of an audited correction ("correction:<code>"); the code otherwise. */
+  function parseResolutionChoice(raw) {
+    const s = String(raw || '');
+    return s.indexOf(CORRECTION_PREFIX) === 0
+      ? { resolution_code: s.slice(CORRECTION_PREFIX.length), correction: true }
+      : { resolution_code: s, correction: false };
+  }
+
+  function correctionOptionsHtml(p) {
+    const codes = p.correction_resolutions || [];
+    if (!codes.length) return '';
+    return (
+      '<optgroup label="Corrección auditada (contradice Aceptado ELM)">' +
+      codes
+        .map(function (c) {
+          return (
+            '<option value="' + esc(CORRECTION_PREFIX + c) + '">Corrección: ' +
+            esc(PROCESS_RESOLUTION_LABELS[c] || c) + '</option>'
+          );
+        })
+        .join('') +
+      '</optgroup>'
+    );
+  }
+
   function resolveProcessFormHtml(p) {
+    const correctionHint = (p.correction_resolutions || []).length
+      ? '<p class="preaprobados-muted">ELM aceptó este lead (asignado a Copanel). Una corrección requiere ' +
+        'una nota de al menos 30 caracteres con la evidencia y queda registrada como corrección en la auditoría.</p>'
+      : '';
     return (
       '<form class="elm-ops-form" data-elm-ops-form="resolve-process">' +
       '<p class="preaprobados-muted">No envía nada a ELM ni marca el préstamo como otorgado. ' +
       'Deja de bloquear nuevos envíos ELM de esta CI.</p>' +
+      correctionHint +
       '<label>Resolución <select name="resolution_code" required>' +
       optionsHtml(p.allowed_resolutions || [], PROCESS_RESOLUTION_LABELS, null) +
+      correctionOptionsHtml(p) +
       '</select></label>' +
       '<label>Resultado en Credizona <select name="cz_outcome" required>' +
       optionsHtml(['none', 'rejected', 'granted'], PROCESS_CZ_OUTCOME_LABELS, 'none') +
@@ -393,7 +434,7 @@
           '<summary>KPI ELM (todos los procesos, por origen)</summary>' +
           '<p class="preaprobados-muted">Flujo: lo que pasó con los procesos iniciados (no baja si el estado cambia). ' +
           'Estado actual: dónde está hoy cada proceso. Un proceso por solicitud; sin datos CDV. ' +
-          '"Derivados S2" no son préstamos otorgados.</p>' +
+          '"Aceptados S2" no son préstamos otorgados: solo "Otorgados ELM" confirma el desembolso.</p>' +
           '<h4>Flujo</h4>' + kpiTableHtml(state.kpis.flow, FLOW_LABELS) +
           '<h4>Estado actual</h4>' + kpiTableHtml(state.kpis.current, CURRENT_LABELS) +
           '</details>';
@@ -497,9 +538,11 @@
       let out;
       if (kind === 'resolve-process') {
         const p = findProcess(target.id);
+        const choice = parseResolutionChoice(fd.get('resolution_code'));
         out = await request('POST', '/processes/' + encodeURIComponent(target.id) + '/resolve', {
           expected_updated_at: p ? p.version : null,
-          resolution_code: fd.get('resolution_code'),
+          resolution_code: choice.resolution_code,
+          correction: choice.correction,
           cz_outcome: fd.get('cz_outcome'),
           note: fd.get('note'),
         });
@@ -585,6 +628,7 @@
     alertText,
     actionErrorText,
     elmStateText,
+    processKindLabel,
     kpiTableHtml,
     followupRowHtml,
     FLOW_LABELS,
@@ -592,6 +636,7 @@
     processRowHtml,
     caseRowHtml,
     resolveProcessFormHtml,
+    parseResolutionChoice,
     resolveCaseFormHtml,
     mount,
   };

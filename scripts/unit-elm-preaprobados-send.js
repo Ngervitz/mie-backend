@@ -260,6 +260,9 @@ function createFakeRepo(solicitudes, opts) {
       Object.assign(row, {
         s2_status: r.status,
         s2_result_message: r.resultMessage,
+        s2_http_status: r.httpStatus,
+        s2_error_code: r.errorCode,
+        s2_response: r.response,
         s2_lease_expires_at: null,
         referred_at: r.status === S2.REFERRED ? iso(NOW) : null,
       });
@@ -642,6 +645,29 @@ async function main() {
     assert.strictEqual(old.fetchImpl.calls.length, 1);
   });
 
+  await test('CI: Aceptado ELM of a Rechazados solicitud (40 days ago) → 409 active; list button disabled', async () => {
+    const acceptedOther = otherProcess({
+      send_origin: 'rechazados_manual',
+      s1_status: S1.ELIGIBLE,
+      s1_result_message: 'Listo para recibir datos en servicio 2',
+      s2_status: S2.UNKNOWN,
+      s2_http_status: 200,
+      s2_error_code: CODES.RESPONSE_UNDOCUMENTED,
+      s2_response: { result: null, success: true, docNumber: String(CI) },
+      s2_started_at: iso(NOW - 40 * DAY),
+    });
+    const h = harness([], { others: [acceptedOther] });
+    const out = await h.send(CZ);
+    assert.deepStrictEqual([out.status, out.body.code, out.body.related_cz_solicitud_id], [409, HOLD.ACTIVE, 900]);
+    assert.strictEqual(h.repo.claims.length, 0);
+    assert.strictEqual(h.fetchImpl.calls.length, 0);
+    const rows = [{ cz_id: CZ, ci: CI }];
+    rows[0].elm = (await h.listView.cellsForCzIds([CZ], { allowSend: true })).get(CZ);
+    await attachPreaprobadosElmSendHolds(rows, { readRows: h.readRows, now: () => NOW, postReferralRejectionStatuses: [] });
+    assert.deepStrictEqual([rows[0].elm.action.enabled, rows[0].elm.action.reason], [false, HOLD.ACTIVE]);
+    assert.ok(!ElmUi.elmCellHtml(rows[0].elm, { ci: CI }).includes('data-action'));
+  });
+
   await test('CI: unreadable history (read error or locks unreadable) → 503 unverifiable, fail closed', async () => {
     const h = harness([], { holdThrows: true });
     const out = await h.send(CZ);
@@ -664,14 +690,14 @@ async function main() {
   });
 
   // --- outcomes ------------------------------------------------------------------------------
-  await test('S1 + S2 favorable → "Preaprobado ELM" (referred), never a granted loan', async () => {
+  await test('S1 + S2 favorable → "Aceptado ELM" (referred), never a granted loan', async () => {
     const h = harness([okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')]);
     const out = await h.send(CZ);
     assert.strictEqual(out.status, 200);
     assert.strictEqual(out.body.ok, true);
     assert.strictEqual(out.body.stage, 's2');
     assert.strictEqual(out.body.outcome, 'referred');
-    assert.strictEqual(out.body.cell.label, 'Preaprobado ELM');
+    assert.strictEqual(out.body.cell.label, 'Aceptado ELM');
     assert.strictEqual(out.body.cell.granted_elm, false);
     assert.strictEqual(h.fetchImpl.calls.length, 2);
     const row = h.repo.rows.get(CZ);
@@ -683,6 +709,22 @@ async function main() {
     const msg = ElmUi.sendResultMessage(out.body);
     assert.strictEqual(msg.tone, 'ok');
     assert.ok(msg.text.includes('No es un préstamo otorgado'), msg.text);
+  });
+
+  await test('S2 { success: true, result: null } → "Aceptado ELM" (stored as answered), never resent', async () => {
+    const h = harness([
+      okResult('Listo para recibir datos en servicio 2'),
+      { status: 200, body: { success: true, result: null, docNumber: String(CI) } },
+    ]);
+    const out = await h.send(CZ);
+    assert.strictEqual(out.status, 200);
+    assert.deepStrictEqual([out.body.outcome, out.body.cell.label, out.body.cell.detail, out.body.cell.granted_elm], ['referred', 'Aceptado ELM', 's2_accepted', false]);
+    const row = h.repo.rows.get(CZ);
+    assert.deepStrictEqual([row.s2_status, row.s2_error_code, row.send_origin], [S2.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED, 'preaprobados_manual']);
+    assert.ok(ElmUi.sendResultMessage(out.body).text.startsWith('Aceptado ELM'));
+    const again = await h.send(CZ);
+    assert.strictEqual(again.body.outcome, 'referred');
+    assert.strictEqual(h.fetchImpl.calls.length, 2, 'second click never calls ELM');
   });
 
   await test('S1 rejected ("Mocasist", any letter case) → s1_rejected, no S2', async () => {
@@ -847,7 +889,7 @@ async function main() {
       nowMs: NOW,
       postReferralRejectionStatuses: [],
     });
-    assert.strictEqual(ElmUi.cellLabel(referred), 'Preaprobado ELM');
+    assert.strictEqual(ElmUi.cellLabel(referred), 'Aceptado ELM');
     assert.strictEqual(referred.granted_elm, false);
     assert.ok(ElmUi.elmCellHtml(referred).includes('Estado ELM: Latente'));
     const granted = computeElmCell({
@@ -859,7 +901,7 @@ async function main() {
     const dash = readSrc('public/mie-dashboard.js');
     assert.ok(dash.includes("dlRow('Respuesta S1'") && dash.includes("dlRow('Respuesta S2'"));
     assert.ok(dash.includes("'Último postback'") && dash.includes("'GRANTED ELM'"));
-    assert.ok(dash.includes('S2 · Derivado a ventas ELM (no implica otorgado ni desembolsado)'));
+    assert.ok(dash.includes('S2 · Aceptado por ELM, derivado a ventas (no implica otorgado ni desembolsado)'));
   });
 
   // --- KPIs by origin ------------------------------------------------------------------------
@@ -932,7 +974,7 @@ async function main() {
     const byId = new Map(out.rows.map((r) => [r.cz_id, r]));
     assert.strictEqual(byId.get(100).proveedor, 'cdv_elm');
     assert.strictEqual(byId.get(100).elm_member.origin, ORIGIN.PREAPROBADOS_MANUAL);
-    assert.strictEqual(byId.get(100).elm_member.label, 'Preaprobado ELM');
+    assert.strictEqual(byId.get(100).elm_member.label, 'Aceptado ELM');
     assert.strictEqual(byId.get(700).elm_member.label, 'Otorgado ELM');
     assert.strictEqual(byId.get(710).proveedor, 'cdv', 'an S1 rejection is not an ELM member');
     assert.strictEqual(byId.get(710).elm_member, null);
@@ -992,7 +1034,7 @@ async function main() {
     const deps = { elmRepository: repo, nowMs: NOW, postReferralRejectionStatuses: [] };
     const member = await fetchElmCohortDetail(inSupabase(tables), 100, deps);
     assert.strictEqual(member.elm_member.origin, ORIGIN.PREAPROBADOS_MANUAL);
-    assert.strictEqual(member.elm_member.label, 'Preaprobado ELM');
+    assert.strictEqual(member.elm_member.label, 'Aceptado ELM');
     const rejectedLater = await fetchElmCohortDetail(inSupabase(tables), 740, deps);
     assert.strictEqual(rejectedLater.elm_member.origin, ORIGIN.PREAPROBADOS_MANUAL, 'estado 3 never changes the origin');
     assert.strictEqual(await fetchElmCohortDetail(inSupabase(tables), 710, deps), null, 'S1 rejection is not a member');
@@ -1034,7 +1076,7 @@ async function main() {
 
   await test('KPIs UI: one group per origin, referral ≠ grant; Rechazados code does not read these KPIs', async () => {
     const dash = readSrc('public/mie-dashboard.js');
-    assert.ok(dash.includes("'<div class=\"preaprobados-kpi-scope\">ELM · circuito automático (derivados S2)</div>'"));
+    assert.ok(dash.includes("'<div class=\"preaprobados-kpi-scope\">ELM · circuito automático (aceptados S2)</div>'"));
     assert.ok(dash.includes("'<div class=\"preaprobados-kpi-scope\">ELM · envío manual desde Preaprobados</div>'"));
     assert.ok(dash.includes('const ka = byOrigin.cz_automatic || ke;'));
     assert.ok(dash.includes("kpiCard('Duplicado · Otro canal', String(km.duplicado_otro_canal_elm))"));

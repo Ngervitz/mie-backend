@@ -6,7 +6,7 @@
  * CDV cohort (ever estado 8) is assembled by preaprobadosRead.js exactly as before and its
  * `kpis` are returned untouched. The ELM cohort is added here:
  *
- *   member = trigger_origin 'cz_automatic' AND commercial state referred ("Preaprobado ELM")
+ *   member = trigger_origin 'cz_automatic' AND commercial state referred ("Aceptado ELM")
  *            or granted ("Otorgado ELM") AND the solicitud never reached CZ estado 3.
  *
  * Membership is dynamic (recomputed on every read): a later definitive rejection removes the
@@ -86,7 +86,7 @@ function parseProveedorQuery(raw) {
  */
 function parseCombinedResultadoQuery(raw) {
   const s = raw == null ? '' : String(raw).trim().toLowerCase();
-  if (s === 'elm_preaprobado' || s === 'elm_referred') {
+  if (s === 'elm_aceptado' || s === 'elm_preaprobado' || s === 'elm_referred') {
     return { ok: true, cdv: null, elm: COMMERCIAL.REFERRED };
   }
   if (s === 'elm_otorgado' || s === 'elm_granted') {
@@ -180,8 +180,11 @@ function elmMemberView(czId, m) {
   return {
     state: m.classification.state,
     label: m.classification.label,
+    detail: m.classification.detail,
     detail_label: m.classification.detail_label,
     referred_at: p.referred_at || null,
+    accepted_at:
+      p.referred_at || (m.classification.detail === 's2_accepted' ? p.s2_completed_at || null : null),
     disbursed_at: p.disbursed_at || null,
     provider_status: p.provider_status || null,
     trigger_origin: p.trigger_origin,
@@ -207,7 +210,7 @@ function memberKpis(members) {
 
 /**
  * Results of the Preaprobados sends. The buckets add up to `enviados_elm`; `preaprobados_elm`
- * (referred + granted) is a referral, only `otorgados_elm` is a loan.
+ * (Aceptado ELM: referred + granted) is an acceptance, only `otorgados_elm` is a loan.
  */
 function manualSendKpis(sends) {
   const k = {
