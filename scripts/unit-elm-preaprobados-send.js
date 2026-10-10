@@ -1096,7 +1096,17 @@ async function main() {
     const kpis = dash.slice(start, dash.indexOf('\n  }\n', start));
     assert.ok(kpis.includes('const kc = data && data.kpis_ci;'), 'KPIs read the per-CI block');
     const labels = (kpis.match(/kpiCard\(\s*'([^']+)'/g) || []).map((m) => m.replace(/kpiCard\(\s*'/, '').replace(/'$/, ''));
-    assert.deepStrictEqual(labels, ['Preaprobados', 'Aceptados ELM', 'Otorgados CDV', 'Otorgados ELM', 'Pendientes']);
+    assert.deepStrictEqual(labels, [
+      'Preaprobados',
+      'Aceptados ELM',
+      'Otorgados CDV',
+      'Otorgados ELM',
+      'Pendientes',
+      'Monto total otorgado',
+      'Conversión CDV',
+      'Otorgadas CDV (solicitudes)',
+      'Sin resultado CDV (solicitudes)',
+    ]);
     assert.ok(kpis.includes('circuito automático o envío manual desde Preaprobados'), 'manual sends counted');
     assert.ok(kpis.includes('No es un préstamo otorgado.') && kpis.includes('no es un préstamo otorgado.'));
     assert.ok(!/by_origin|kpis_elm/.test(kpis), 'no per-origin blocks left');

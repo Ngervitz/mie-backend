@@ -6152,6 +6152,38 @@
 #mie-dashboard-app .preaprobados-kpi-note {
   margin: 6px 0 0;
 }
+/* CDV cohort (estado 8), per solicitud: kept apart from the per-CI KPIs above. */
+#mie-dashboard-app .preaprobados-cdv-kpis {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+#mie-dashboard-app .preaprobados-kpi-scope {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-kpi-scope .preaprobados-muted {
+  font-weight: 400;
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv .preaprobados-kpi-card {
+  padding: 5px 12px;
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv .preaprobados-kpi-value {
+  font-size: 1rem;
+}
+@media (max-width: 720px) {
+  #mie-dashboard-app .preaprobados-kpi-grid.is-cdv {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 #mie-dashboard-app .preaprobados-result {
   display: inline-block;
   max-width: 100%;
@@ -6248,18 +6280,26 @@
   text-overflow: ellipsis;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-date {
-  width: 11%;
+  width: 10%;
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
-  width: 30%;
+  width: 22%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ci {
-  width: 15%;
+  width: 13%;
   font-variant-numeric: tabular-nums;
 }
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
+  width: 6%;
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
-  width: 15%;
+  width: 20%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
   width: 22%;
@@ -6267,6 +6307,9 @@
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ver {
   width: 7%;
   text-align: center;
+}
+#mie-dashboard-app .preaprobados-cz-state {
+  color: var(--text-muted);
 }
 #mie-dashboard-app .preaprobados-sol-count {
   display: inline-block;
