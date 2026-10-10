@@ -709,6 +709,67 @@
     return Boolean(kind) && kind !== 'not_sent' && kind !== 'not_sendable' && kind !== 'unavailable';
   }
 
+  function lineTextOf(cell) {
+    if (isProcessCell(cell)) return compactCellText(cell);
+    if (cell && cell.kind === 'not_sent') return 'Sin enviar';
+    if (cell && cell.kind === 'not_sendable') return 'No enviable';
+    return '—';
+  }
+
+  /**
+   * Preaprobados list (one row per CI): the CI's ELM state as one pill that never wraps and is
+   * never a button (sends and resolutions live in the CI detail). Same labels and colors as
+   * Rechazados. Without ELM cells (read failed) the ELM membership is shown (Aceptado / Otorgado).
+   * The other solicitudes of the CI are listed in the tooltip.
+   * @param {object|null|undefined} cell ELM cell of the solicitud the row shows
+   * @param {{ czId?: number|string, member?: { state?: string, label?: string,
+   *   detail_label?: string }|null, others?: Array<{ cz_id: number|string, elm?: object }> }} [opts]
+   * @returns {string}
+   */
+  function preaprobadosElmStatusHtml(cell, opts) {
+    var o = opts || {};
+    var member = o.member && (o.member.state === 'referred' || o.member.state === 'granted') ? o.member : null;
+    var cls;
+    var text;
+    var parts;
+    if (isProcessCell(cell)) {
+      var kind = /^[a-z0-9_]+$/.test(String(cell.kind)) ? String(cell.kind) : 'unknown';
+      cls = 'is-' + kind + stateModifierClasses(cell);
+      text = compactCellText(cell);
+      parts = compactTitleParts(cell).concat(cellTitleParts(cell));
+    } else if (member) {
+      var granted = member.state === 'granted';
+      cls = granted ? 'is-granted' : 'is-referred';
+      text = granted ? COMPACT_STATE_LABELS.granted : COMPACT_STATE_LABELS.referred;
+      parts = [member.detail_label || member.label || (granted ? ELM_GRANTED_LABEL : 'Aceptado ELM')];
+    } else if (cell && (cell.kind === 'not_sent' || cell.kind === 'not_sendable')) {
+      cls = 'is-' + cell.kind;
+      text = lineTextOf(cell);
+      parts = cellTitleParts(cell);
+    } else {
+      return '<span class="preaprobados-elm is-none is-compact is-line">—</span>';
+    }
+    if (Number(o.czId) > 0) parts.unshift('Sol. ' + Number(o.czId));
+    var title = parts.join(' · ');
+    var others = (Array.isArray(o.others) ? o.others : [])
+      .filter(function (s) {
+        return s && Number(s.cz_id) > 0;
+      })
+      .map(function (s) {
+        return 'Sol. ' + Number(s.cz_id) + ': ' + lineTextOf(s.elm);
+      });
+    if (others.length) title += '\nOtras solicitudes de la CI:\n' + others.join('\n');
+    return (
+      '<span class="preaprobados-elm ' +
+      cls +
+      ' is-compact is-line" title="' +
+      esc(title) +
+      '">' +
+      esc(text) +
+      '</span>'
+    );
+  }
+
   /**
    * List-row `elm` rebuilt from the CI detail block (GET /rechazados/:ci), so one row can be
    * refreshed after a send without reloading the list. Same data as the list builds: the row's
@@ -846,6 +907,7 @@
     shortDate: shortDate,
     elmCellHtml: elmCellHtml,
     processPillHtml: processPillHtml,
+    preaprobadosElmStatusHtml: preaprobadosElmStatusHtml,
     rejectedDetailCellHtml: rejectedDetailCellHtml,
     rejectedSendLabel: rejectedSendLabel,
     REJECTED_PICK_LABEL: REJECTED_PICK_LABEL,

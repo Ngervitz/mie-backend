@@ -805,9 +805,10 @@ async function main() {
     assert.strictEqual(broken[0].elm.kind, 'unavailable');
     assert.strictEqual(broken[0].resultado, 'granted');
     const route = readSrc('src/routes/preaprobados.js');
-    assert.ok(/await attachElmCells\(assembled\.rows, getElmListView\(\), logger, \{ allowSend: true \}\)/.test(route));
+    assert.ok(/const solicitudes = solicitudesOf\(assembled\.rows\);/.test(route), 'every solicitud of the listed CI groups');
+    assert.ok(/await attachElmCells\(solicitudes, getElmListView\(\), logger, \{ allowSend: true \}\)/.test(route));
     assert.ok(
-      /await attachPreaprobadosElmSendHolds\(assembled\.rows, \{ supabase: supabase, logger: logger \}\)/.test(route),
+      /await attachPreaprobadosElmSendHolds\(solicitudes, \{ supabase: supabase, logger: logger \}\)/.test(route),
       'offered sends are held by the CI rule',
     );
   });
@@ -943,10 +944,11 @@ async function main() {
 
   await test('#23 GRANTED CDV and GRANTED ELM stay separate sources', async () => {
     const dash = readSrc('public/mie-dashboard.js');
-    assert.ok(dash.includes("kpiCard('GRANTED CDV'"));
-    assert.ok(dash.includes('is-granted">GRANTED CDV</span>'));
-    assert.ok(dash.includes("{ id: 'granted', label: 'GRANTED CDV' }"));
-    assert.ok(dash.includes("'GRANTED ELM'"));
+    assert.ok(dash.includes("kpiCard('Otorgados CDV', String(kc.otorgados_cdv)"));
+    assert.ok(dash.includes("kpiCard('Otorgados ELM', String(kc.otorgados_elm)"));
+    assert.ok(dash.includes('is-granted">Otorgado CDV</span>'));
+    assert.ok(dash.includes("{ id: 'granted', label: 'Otorgado CDV' }"));
+    assert.ok(dash.includes("'GRANTED ELM'"), 'ELM technical detail keeps its own field');
     assert.strictEqual(ElmUi.CDV_GRANTED_LABEL, 'GRANTED CDV');
     const row = { cz_id: 5, resultado: 'granted', monto_otorgado: 1000 };
     const view = {

@@ -1090,13 +1090,16 @@ async function main() {
     assert.deepStrictEqual(reads[1].in, [['trigger_origin', ['cz_automatic']]], 'automatic read unchanged');
   });
 
-  await test('KPIs UI: one group per origin, referral ≠ grant; Rechazados code does not read these KPIs', async () => {
+  await test('KPIs UI: five per-CI KPIs (automatic + manual), referral ≠ grant; Rechazados code does not read these KPIs', async () => {
     const dash = readSrc('public/mie-dashboard.js');
-    assert.ok(dash.includes("'<div class=\"preaprobados-kpi-scope\">ELM · circuito automático (aceptados S2)</div>'"));
-    assert.ok(dash.includes("'<div class=\"preaprobados-kpi-scope\">ELM · envío manual desde Preaprobados</div>'"));
-    assert.ok(dash.includes('const ka = byOrigin.cz_automatic || ke;'));
-    assert.ok(dash.includes("kpiCard('Duplicado · Otro canal', String(km.duplicado_otro_canal_elm))"));
-    assert.ok(dash.includes('no es un préstamo otorgado.</p>'));
+    const start = dash.indexOf('function renderKpis()');
+    const kpis = dash.slice(start, dash.indexOf('\n  }\n', start));
+    assert.ok(kpis.includes('const kc = data && data.kpis_ci;'), 'KPIs read the per-CI block');
+    const labels = (kpis.match(/kpiCard\(\s*'([^']+)'/g) || []).map((m) => m.replace(/kpiCard\(\s*'/, '').replace(/'$/, ''));
+    assert.deepStrictEqual(labels, ['Preaprobados', 'Aceptados ELM', 'Otorgados CDV', 'Otorgados ELM', 'Pendientes']);
+    assert.ok(kpis.includes('circuito automático o envío manual desde Preaprobados'), 'manual sends counted');
+    assert.ok(kpis.includes('No es un préstamo otorgado.') && kpis.includes('no es un préstamo otorgado.'));
+    assert.ok(!/by_origin|kpis_elm/.test(kpis), 'no per-origin blocks left');
     assert.ok(dash.includes("'Envío manual desde Preaprobados'"));
     for (const rel of ['src/routes/rechazados.js', 'src/lib/rejectedElmSend.js', 'src/lib/rejectedElmRead.js', 'src/lib/rejectedOpsRead.js', 'src/lib/rejectedElmResendGuard.js']) {
       assert.ok(!readSrc(rel).includes('preaprobadosElmCohort'), rel + ' does not depend on Preaprobados KPIs');
