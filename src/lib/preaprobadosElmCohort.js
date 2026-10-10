@@ -11,8 +11,14 @@
  *
  * Membership is dynamic (recomputed on every read): a later definitive rejection removes the
  * solicitud (it moves to Rechazados through CZ estado 3), a grant keeps it. Manual / batch
- * sends (historical rejected solicitudes) never enter: they stay in Rechazados. A solicitud in
- * both cohorts is one row (proveedor 'cdv_elm'). ELM KPIs (`kpis_elm`) never mix with CDV.
+ * sends of rejected solicitudes never enter: they stay in Rechazados. A solicitud in both
+ * cohorts is one row (proveedor 'cdv_elm'). ELM KPIs (`kpis_elm`) never mix with CDV.
+ *
+ * Manual sends from Preaprobados ("Enviar a ELM") are the processes stored with send_origin
+ * 'preaprobados_manual' when they were created (migration 20261012). The origin never depends on
+ * the CZ state: a later estado 3 does not move them out, and Rechazados sends
+ * ('rechazados_manual') never count here. Their referred / granted solicitudes are ELM members
+ * like the automatic ones; `kpis_elm.by_origin` keeps each origin's results apart.
  */
 
 const {
@@ -28,11 +34,17 @@ const {
   classifyElmProcess,
   readPostReferralRejectionStatuses,
   COMMERCIAL,
+  DUPLICATE_OTHER_CHANNEL_DETAIL,
 } = require('../services/elm/classification');
+const { SEND_ORIGIN } = require('../services/elm/constants');
 
 const REJECTED_ESTADO_ID = 3;
 const ELM_MEMBER_STATES = Object.freeze([COMMERCIAL.REFERRED, COMMERCIAL.GRANTED]);
 const PROVEEDOR = Object.freeze({ CDV: 'cdv', ELM: 'elm', BOTH: 'cdv_elm' });
+const ORIGIN = Object.freeze({
+  AUTOMATIC: SEND_ORIGIN.CZ_AUTOMATIC,
+  PREAPROBADOS_MANUAL: SEND_ORIGIN.PREAPROBADOS_MANUAL,
+});
 const IN_CHUNK = 200;
 const PAGE_SIZE = 1000;
 
@@ -112,8 +124,53 @@ function buildElmCohortByCzId(input) {
     out.set(czId, {
       process: p,
       classification: c,
+      origin: ORIGIN.AUTOMATIC,
       entered_at: p.referred_at || p.s2_completed_at || p.disbursed_at || null,
     });
+  }
+  return out;
+}
+
+/**
+ * Every "Enviar a ELM" from Preaprobados (send_origin preaprobados_manual), whatever its result
+ * (KPIs by origin need the sends that were not referred too). `sent_at` is the process creation,
+ * fixed even if S1 is retried.
+ * @param {{
+ *   processes: object[],                      elm_lead_processes rows (list projection)
+ *   nowMs?: number,
+ *   postReferralRejectionStatuses?: readonly string[],
+ * }} input
+ * @returns {Map<number, { process: object, classification: object, origin: string,
+ *   sent_at: string|null, entered_at: string|null }>}
+ */
+function buildPreaprobadosManualElmByCzId(input) {
+  const out = new Map();
+  for (const p of input.processes || []) {
+    if (!p || p.send_origin !== SEND_ORIGIN.PREAPROBADOS_MANUAL) continue;
+    const czId = toNum(p.cz_solicitud_id);
+    if (czId == null) continue;
+    const c = classifyElmProcess(p, {
+      nowMs: input.nowMs,
+      postReferralRejectionStatuses: input.postReferralRejectionStatuses || [],
+      projectedEstado: null,
+    });
+    if (!c) continue;
+    out.set(czId, {
+      process: p,
+      classification: c,
+      origin: ORIGIN.PREAPROBADOS_MANUAL,
+      sent_at: p.created_at || null,
+      entered_at: p.referred_at || p.s2_completed_at || p.disbursed_at || null,
+    });
+  }
+  return out;
+}
+
+/** Automatic members plus the referred / granted Preaprobados sends (one process per solicitud). */
+function elmMembersByCzId(elmCohort, elmManual) {
+  const out = new Map(elmCohort || []);
+  for (const [czId, m] of (elmManual || new Map()).entries()) {
+    if (!out.has(czId) && ELM_MEMBER_STATES.includes(m.classification.state)) out.set(czId, m);
   }
   return out;
 }
@@ -128,9 +185,50 @@ function elmMemberView(czId, m) {
     disbursed_at: p.disbursed_at || null,
     provider_status: p.provider_status || null,
     trigger_origin: p.trigger_origin,
+    origin: m.origin || ORIGIN.AUTOMATIC,
     process_id: p.id || null,
     cz_solicitud_id: czId,
   };
+}
+
+function memberKpis(members) {
+  let granted = 0;
+  for (const m of members) {
+    if (m.classification.state === COMMERCIAL.GRANTED) granted += 1;
+  }
+  const referred = members.length;
+  return {
+    preaprobados_elm: referred,
+    otorgados_elm: granted,
+    vigentes_elm: referred - granted,
+    conversion_elm: referred > 0 ? granted / referred : null,
+  };
+}
+
+/**
+ * Results of the Preaprobados sends. The buckets add up to `enviados_elm`; `preaprobados_elm`
+ * (referred + granted) is a referral, only `otorgados_elm` is a loan.
+ */
+function manualSendKpis(sends) {
+  const k = {
+    enviados_elm: sends.length,
+    en_evaluacion_elm: 0,
+    rechazados_elm: 0,
+    duplicado_otro_canal_elm: 0,
+    revision_elm: 0,
+    cerrados_elm: 0,
+  };
+  const members = [];
+  for (const m of sends) {
+    const c = m.classification;
+    if (ELM_MEMBER_STATES.includes(c.state)) members.push(m);
+    else if (c.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) k.duplicado_otro_canal_elm += 1;
+    else if (c.state === COMMERCIAL.IN_EVALUATION) k.en_evaluacion_elm += 1;
+    else if (c.state === COMMERCIAL.REJECTED) k.rechazados_elm += 1;
+    else if (c.state === COMMERCIAL.REVIEW) k.revision_elm += 1;
+    else k.cerrados_elm += 1;
+  }
+  return Object.assign(k, memberKpis(members));
 }
 
 function cmpDescNullsLast(aIso, bIso) {
@@ -154,7 +252,8 @@ function assembleCombinedPreaprobadosList(input) {
   const proveedor = input.proveedor || null;
   const resultadoCdv = input.resultadoCdv || null;
   const resultadoElm = input.resultadoElm || null;
-  const elmCohort = input.elmCohort || new Map();
+  const elmManual = input.elmManual || new Map();
+  const elmCohort = elmMembersByCzId(input.elmCohort, elmManual);
 
   const cdv = assemblePreaprobadosList({
     estado8Rows: input.estado8Rows,
@@ -193,7 +292,8 @@ function assembleCombinedPreaprobadosList(input) {
   }
 
   const elmRowsForKpi = [];
-  if (includeElm && elmCohort.size) {
+  const manualSendsForKpi = [];
+  if (includeElm && (elmCohort.size || elmManual.size)) {
     const solById = new Map();
     for (const s of input.elmSolicitudRows || []) solById.set(Number(s.cz_id), s);
     const labelByCz = currentEstadoLabelByCzId(
@@ -202,13 +302,11 @@ function assembleCombinedPreaprobadosList(input) {
     );
     const estadoFilter =
       input.estado != null && input.estado !== '' ? Number(input.estado) : null;
-    for (const [czId, m] of elmCohort.entries()) {
-      if (resultadoElm && m.classification.state !== resultadoElm) continue;
-      if (!inDateRange(m.entered_at, input.from || null, input.to || null)) continue;
+    const baseRow = function (czId, m, enteredAt) {
       const sol = solById.get(czId) || null;
-      const base = {
+      return {
         cz_id: czId,
-        cohort_entered_at: m.entered_at,
+        cohort_entered_at: enteredAt,
         nombre: nonemptyText(sol && sol.nombre),
         apellido: nonemptyText(sol && sol.apellido),
         ci: toNum(sol && sol.ci) != null ? toNum(sol.ci) : toNum(m.process.ci),
@@ -218,8 +316,22 @@ function assembleCombinedPreaprobadosList(input) {
         monto_otorgado: null,
         lrw_id: nonemptyText(sol && sol.lrw_id),
       };
-      if (estadoFilter != null && base.estado_id !== estadoFilter) continue;
-      if (!matchesSearch(base, input.q || null)) continue;
+    };
+    const passesFilters = function (base) {
+      if (estadoFilter != null && base.estado_id !== estadoFilter) return false;
+      return matchesSearch(base, input.q || null);
+    };
+    for (const [czId, m] of elmManual.entries()) {
+      if (resultadoElm && m.classification.state !== resultadoElm) continue;
+      if (!inDateRange(m.sent_at, input.from || null, input.to || null)) continue;
+      if (!passesFilters(baseRow(czId, m, m.sent_at))) continue;
+      manualSendsForKpi.push(m);
+    }
+    for (const [czId, m] of elmCohort.entries()) {
+      if (resultadoElm && m.classification.state !== resultadoElm) continue;
+      if (!inDateRange(m.entered_at, input.from || null, input.to || null)) continue;
+      const base = baseRow(czId, m, m.entered_at);
+      if (!passesFilters(base)) continue;
       elmRowsForKpi.push(m);
       const existing = byCz.get(czId);
       if (existing) continue;
@@ -238,21 +350,28 @@ function assembleCombinedPreaprobadosList(input) {
     return Number(b.cz_id) - Number(a.cz_id);
   });
 
-  let grantedElm = 0;
-  for (const m of elmRowsForKpi) {
-    if (m.classification.state === COMMERCIAL.GRANTED) grantedElm += 1;
-  }
-  const preaprobadosElm = elmRowsForKpi.length;
+  const automatic = memberKpis(
+    elmRowsForKpi.filter(function (m) {
+      return m.origin !== ORIGIN.PREAPROBADOS_MANUAL;
+    }),
+  );
+  const manual = manualSendKpis(manualSendsForKpi);
+  const totalReferred = automatic.preaprobados_elm + manual.preaprobados_elm;
+  const totalGranted = automatic.otorgados_elm + manual.otorgados_elm;
 
   return {
     cohort: cdv.cohort,
     kpis: cdv.kpis,
     kpis_elm: {
-      preaprobados_elm: preaprobadosElm,
-      otorgados_elm: grantedElm,
-      vigentes_elm: preaprobadosElm - grantedElm,
-      conversion_elm: preaprobadosElm > 0 ? grantedElm / preaprobadosElm : null,
-      scope: 'cz_automatic',
+      preaprobados_elm: totalReferred,
+      otorgados_elm: totalGranted,
+      vigentes_elm: totalReferred - totalGranted,
+      conversion_elm: totalReferred > 0 ? totalGranted / totalReferred : null,
+      scope: ORIGIN.AUTOMATIC + '+' + ORIGIN.PREAPROBADOS_MANUAL,
+      by_origin: {
+        [ORIGIN.AUTOMATIC]: automatic,
+        [ORIGIN.PREAPROBADOS_MANUAL]: manual,
+      },
     },
     rows: rows.slice(offset, offset + limit),
     total: rows.length,
@@ -300,21 +419,28 @@ function rejectedSetFrom(estado3Rows, solicitudRows) {
 async function fetchElmCohortBundle(supabase, deps) {
   const repo = deps.elmRepository;
   const processes = await repo.listAllProcesses({ triggerOrigins: ['cz_automatic'] });
-  if (!processes.length) {
-    return { elmCohort: new Map(), elmSolicitudRows: [], elmHistoricoRows: [] };
-  }
-  const ids = processes.map(function (p) { return Number(p.cz_solicitud_id); });
-  const projectedByCz = await repo.getProjectedEstadosByCzIds(ids);
+  const manualProcesses = await repo.listAllProcesses({
+    sendOrigins: [SEND_ORIGIN.PREAPROBADOS_MANUAL],
+  });
   const postReferral = deps.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
-  const candidates = buildElmCohortByCzId({
-    processes: processes,
-    projectedByCz: projectedByCz,
+  const candidates = processes.length
+    ? buildElmCohortByCzId({
+        processes: processes,
+        projectedByCz: await repo.getProjectedEstadosByCzIds(
+          processes.map(function (p) { return Number(p.cz_solicitud_id); }),
+        ),
+        nowMs: deps.nowMs,
+        postReferralRejectionStatuses: postReferral,
+      })
+    : new Map();
+  const manual = buildPreaprobadosManualElmByCzId({
+    processes: manualProcesses,
     nowMs: deps.nowMs,
     postReferralRejectionStatuses: postReferral,
   });
-  const candidateIds = Array.from(candidates.keys());
+  const candidateIds = Array.from(new Set([...candidates.keys(), ...manual.keys()]));
   if (!candidateIds.length) {
-    return { elmCohort: candidates, elmSolicitudRows: [], elmHistoricoRows: [] };
+    return { elmCohort: candidates, elmManual: manual, elmSolicitudRows: [], elmHistoricoRows: [] };
   }
   const [solicitudRows, historicoRows] = await Promise.all([
     fetchInChunks(supabase, 'cz_funnel_solicitudes', SOLICITUD_SELECT, 'cz_id', candidateIds),
@@ -326,24 +452,28 @@ async function fetchElmCohortBundle(supabase, deps) {
       candidateIds,
     ),
   ]);
-  const rejected = rejectedSetFrom(historicoRows, solicitudRows);
-  for (const id of rejected) candidates.delete(id);
+  for (const id of rejectedSetFrom(historicoRows, solicitudRows)) candidates.delete(id);
   return {
     elmCohort: candidates,
+    elmManual: manual,
     elmSolicitudRows: solicitudRows,
     elmHistoricoRows: historicoRows,
   };
 }
 
 /**
- * Detail for a solicitud that is only in the ELM cohort (CDV detail answered not_in_cohort).
+ * ELM membership of one solicitud: automatic circuit (existing rule) or a referred / granted
+ * send from Preaprobados (send_origin preaprobados_manual, whatever the later CZ state).
+ * @param {{ elmRepository: object, nowMs?: number, postReferralRejectionStatuses?: string[] }} deps
  * @returns {Promise<object|null>}
  */
 async function fetchElmCohortDetail(supabase, czId, deps) {
   const repo = deps.elmRepository;
   const process = await repo.getProcessByCzId(czId);
-  if (!process || process.trigger_origin !== 'cz_automatic') return null;
-  const projected = await repo.getProjectedEstadosByCzIds([czId]);
+  if (!process) return null;
+  const manualMember = process.send_origin === SEND_ORIGIN.PREAPROBADOS_MANUAL;
+  if (process.trigger_origin !== 'cz_automatic' && !manualMember) return null;
+  const projected = manualMember ? new Map() : await repo.getProjectedEstadosByCzIds([czId]);
   const { data: sol, error: solErr } = await supabase
     .from('cz_funnel_solicitudes')
     .select(SOLICITUD_SELECT)
@@ -357,14 +487,23 @@ async function fetchElmCohortDetail(supabase, czId, deps) {
     'cz_solicitud_id',
     [czId],
   );
-  const cohort = buildElmCohortByCzId({
-    processes: [process],
-    projectedByCz: projected,
-    rejectedCzIds: rejectedSetFrom(historicoRows, sol ? [sol] : []),
-    nowMs: deps.nowMs,
-    postReferralRejectionStatuses:
-      deps.postReferralRejectionStatuses || readPostReferralRejectionStatuses(),
-  });
+  const postReferral = deps.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
+  const cohort = manualMember
+    ? elmMembersByCzId(
+        null,
+        buildPreaprobadosManualElmByCzId({
+          processes: [process],
+          nowMs: deps.nowMs,
+          postReferralRejectionStatuses: postReferral,
+        }),
+      )
+    : buildElmCohortByCzId({
+        processes: [process],
+        projectedByCz: projected,
+        rejectedCzIds: rejectedSetFrom(historicoRows, sol ? [sol] : []),
+        nowMs: deps.nowMs,
+        postReferralRejectionStatuses: postReferral,
+      });
   const m = cohort.get(czId);
   if (!m) return null;
   return assembleElmCohortDetail(czId, m, sol || null, historicoRows);
@@ -415,10 +554,12 @@ function assembleElmCohortDetail(czId, m, sol, historicoRows) {
 
 module.exports = {
   PROVEEDOR,
+  ORIGIN,
   ELM_MEMBER_STATES,
   parseProveedorQuery,
   parseCombinedResultadoQuery,
   buildElmCohortByCzId,
+  buildPreaprobadosManualElmByCzId,
   assembleCombinedPreaprobadosList,
   assembleElmCohortDetail,
   rejectedSetFrom,

@@ -1930,7 +1930,7 @@ test('BCU error: pending (CZ 12), one automatic retry exactly 24 h later, same T
   assert.strictEqual((await env.mk('B').runOnce()).claimed, 0, 'newer job of the CI waits for the older one');
   const solOf = (czId) => snapshotToSolicitud(parseStartBody(startBody(czId, CI)).value.snapshot);
   env.elmRepo.loadSolicitudContext = async (czId) => ({ solicitud: solOf(czId), grantedRow: null });
-  const manual = await env.orchestrator.evaluateElm(2502, { triggerOrigin: 'janus_manual', triggeredByUserId: 'u-1' });
+  const manual = await env.orchestrator.evaluateElm(2502, { triggerOrigin: 'janus_manual', triggeredByUserId: 'u-1', sendOrigin: 'rechazados_manual' });
   assert.deepStrictEqual([manual.code, manual.lock.block, Number(manual.lock.related_cz_solicitud_id)], [CODES.CI_LOCK_BLOCKED, 'send_in_progress', 2500]);
   assert.strictEqual(env.client.calls.s1.length, 1);
 
@@ -2018,7 +2018,7 @@ test('unified claim: manual, batch and automatic go through the same CI lock', a
   env.elmRepo.loadSolicitudContext = async (czId) => ({ solicitud: solOf(czId, ciOf.get(czId)), grantedRow: null });
   const manual = (czId, ci) => {
     ciOf.set(czId, ci);
-    return orch.evaluateElm(czId, { triggerOrigin: 'janus_manual', triggeredByUserId: 'u-1' });
+    return orch.evaluateElm(czId, { triggerOrigin: 'janus_manual', triggeredByUserId: 'u-1', sendOrigin: 'rechazados_manual' });
   };
   const batch = (czId, ci) => {
     ciOf.set(czId, ci);

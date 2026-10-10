@@ -1154,7 +1154,12 @@ test('25 list: fail-soft (state without send view; whole column unavailable only
 test('26 list and detail share one send path (dashboard + route wiring)', async () => {
   const fs = require('fs');
   const path = require('path');
-  const dash = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.js'), 'utf8');
+  const fullDash = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.js'), 'utf8');
+  const start = fullDash.indexOf('(function initRechazados()');
+  const end = fullDash.indexOf('(function initMiDeudaBags()');
+  assert.ok(start >= 0 && end > start, 'Rechazados block located');
+  // Preaprobados has its own single-solicitud send (unit-elm-preaprobados-send.js).
+  const dash = fullDash.slice(start, end);
   const route = fs.readFileSync(path.join(__dirname, '../src/routes/rechazados.js'), 'utf8');
   assert.strictEqual((dash.match(/action === 'elm-send'/g) || []).length, 1, 'single send action check');
   assert.strictEqual((dash.match(/\/elm\/send'/g) || []).length, 1, 'single POST to the send endpoint');
@@ -1178,11 +1183,11 @@ test('26 list and detail share one send path (dashboard + route wiring)', async 
     assert.ok(body.includes('await refreshCiAfterElmAction(ci);'), fn);
     assert.ok(!body.includes('loadList(') && !body.includes('openDetail('), fn + ' no full reload');
   }
-  assert.ok(dash.includes('return H ? H.elmCellHtml(row.elm) : '), 'Preaprobados keeps the shared cell');
+  assert.ok(fullDash.includes('return H ? H.elmCellHtml(row.elm, { ci: row.ci }) : '), 'Preaprobados keeps the shared cell');
   assert.ok(/attachElmToRejectedRows\(optin\.rows, \{\s*supabase: supabase,\s*listView: getElmListView\(\)/.test(route));
   assert.strictEqual((route.match(/sendRejectedToElm\(/g) || []).length, 1, 'one send route');
   assert.ok(/loadCiResendHold: function \(holdCi, czId\) \{\s*return loadCiResendHold\(supabase, holdCi, czId\);/.test(route), 'endpoint uses the same guard');
-  assert.ok(!dash.includes('elm.ci_active'), 'detail shows the send hold, not the survey-gate meaning');
+  assert.ok(!fullDash.includes('elm.ci_active'), 'detail shows the send hold, not the survey-gate meaning');
 });
 
 test('27 Rechazados assets share one version token; in-place row rebuild edge cases', async () => {

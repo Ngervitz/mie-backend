@@ -805,7 +805,11 @@ async function main() {
     assert.strictEqual(broken[0].elm.kind, 'unavailable');
     assert.strictEqual(broken[0].resultado, 'granted');
     const route = readSrc('src/routes/preaprobados.js');
-    assert.ok(/await attachElmCells\(assembled\.rows, getElmListView\(\), logger\)/.test(route));
+    assert.ok(/await attachElmCells\(assembled\.rows, getElmListView\(\), logger, \{ allowSend: true \}\)/.test(route));
+    assert.ok(
+      /await attachPreaprobadosElmSendHolds\(assembled\.rows, \{ supabase: supabase, logger: logger \}\)/.test(route),
+      'offered sends are held by the CI rule',
+    );
   });
 
   await test('#19 "Enviar a ELM" only where allowed, enabled only when ready + eligible; not sendable → no button', async () => {
@@ -886,9 +890,14 @@ async function main() {
     assert.strictEqual(CODES.SOURCE_BRAND_INDETERMINATE, undefined);
 
     const dash = readSrc('public/mie-dashboard.js');
-    assert.strictEqual((dash.match(/action === 'elm-send'/g) || []).length, 1, 'single send handler');
-    assert.strictEqual((dash.match(/\/elm\/send/g) || []).length, 1);
+    assert.strictEqual(
+      (dash.match(/action === 'elm-send'/g) || []).length,
+      2,
+      'one send handler per screen (Rechazados, Preaprobados)',
+    );
+    assert.strictEqual((dash.match(/\/elm\/send/g) || []).length, 2);
     assert.ok(dash.includes("API + '/rechazados/' + encodeURIComponent(ci) + '/elm/send'"));
+    assert.ok(dash.includes("API + '/preaprobados/' + encodeURIComponent(czId) + '/elm/send'"));
     assert.ok(!/\/elm\/evaluate|\/elm\/refer/.test(dash), 'dashboard never calls S1/S2 routes directly');
     assert.ok(!/CONSULTAR ELM|Consultar ELM/.test(dash), 'no "Consultar ELM" button');
     assert.ok(dash.includes('window.confirm('), 'send asks for confirmation');

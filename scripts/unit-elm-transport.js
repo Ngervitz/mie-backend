@@ -225,7 +225,7 @@ function createFakeRepo(now) {
   };
 }
 
-const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1', sendOrigin: 'rechazados_manual' };
 
 function capturingLogger() {
   const lines = [];

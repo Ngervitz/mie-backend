@@ -256,6 +256,7 @@ function createFakeRepo(opts) {
         source_brand: a.sourceBrand,
         commercial_origin: a.commercialOrigin || null,
         trigger_origin: a.triggerOrigin,
+        send_origin: a.sendOrigin,
         triggered_by_user_id: a.triggeredByUserId,
         cz_estado_id_at_start: a.czEstadoIdAtStart,
         lrw_id_at_start: a.lrwIdAtStart,
@@ -385,7 +386,7 @@ const S2_OK = Object.assign({}, S1_OK, {
   responseBody: { result: 'Lead Aprobado correctamente' },
 });
 
-const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+const MANUAL = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1', sendOrigin: 'rechazados_manual' };
 
 function setup(extra) {
   const e = extra || {};
@@ -581,6 +582,37 @@ async function runAll() {
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'janus_batch' })).code, CODES.TRIGGER_ORIGIN_NOT_ENABLED);
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'cz_automatic' })).code, CODES.TRIGGER_ORIGIN_NOT_ENABLED);
     assert.strictEqual((await orch.evaluateElm(1001, { triggerOrigin: 'x' })).code, CODES.INVALID_CONTEXT);
+  });
+
+  await test('send origin: explicit for manual sends, stored on the claim, never guessed', async () => {
+    const { orch, repo, client } = setup({
+      mutate: (m) => {
+        m.solicitudes.set(3003, solicitudFixture({ cz_id: 3003 }));
+        m.bases.set(3003, 'BASE_TEST');
+      },
+    });
+    const base = { triggerOrigin: 'janus_manual', triggeredByUserId: 'user-admin-1' };
+    for (const bad of [undefined, null, '', 'cz_automatic', 'janus_batch', 'otro']) {
+      const r = await orch.evaluateElm(1001, Object.assign({}, base, bad === undefined ? {} : { sendOrigin: bad }));
+      assert.strictEqual(r.code, CODES.INVALID_SEND_ORIGIN, 'refused: ' + bad);
+    }
+    assert.strictEqual(repo.rows.size, 0, 'no claim without a valid origin');
+    assert.strictEqual(client.s1Calls || 0, 0, 'no ELM call');
+    const pre = await orch.evaluateElm(1001, Object.assign({}, base, { sendOrigin: 'preaprobados_manual' }));
+    assert.strictEqual(pre.ok, true);
+    assert.strictEqual(repo.rows.get(1001).send_origin, 'preaprobados_manual');
+    assert.strictEqual(pre.process.send_origin, 'preaprobados_manual', 'process view carries the origin');
+    const rec = await orch.evaluateElm(3003, Object.assign({}, base, { sendOrigin: 'rechazados_manual' }));
+    assert.strictEqual(rec.ok, true);
+    assert.strictEqual(repo.rows.get(3003).send_origin, 'rechazados_manual');
+    const auto = createElmOrchestrator({
+      repository: repo,
+      client: client,
+      config: TEST_CONFIG,
+      enabledTriggerOrigins: ['janus_manual', 'cz_automatic'],
+    });
+    const wrongAuto = await auto.evaluateElm(4004, { triggerOrigin: 'cz_automatic', sendOrigin: 'preaprobados_manual' });
+    assert.strictEqual(wrongAuto.code, CODES.INVALID_SEND_ORIGIN, 'automatic never takes a manual origin');
   });
 
   await test('date of birth: impossible or absent → elm_date_of_birth_invalid, never built nor sent', async () => {
@@ -901,10 +933,18 @@ async function runAll() {
     SECTION_PERMS.add('reader-1:preaprobados');
 
     const orchCalls = [];
+    const memberCalls = [];
     const fakeOrch = {
       async getElmStatus(czId) {
         orchCalls.push(['get', czId]);
         return { ok: true, data: { cz_solicitud_id: Number(czId), send_enabled: false } };
+      },
+      getSendReadiness() {
+        return { ready: true, reasons: [] };
+      },
+      async sendElm(czId, ctx) {
+        orchCalls.push(['send', czId, ctx]);
+        return { ok: false, stage: 's1', code: CODES.SEND_DISABLED };
       },
       async evaluateElm(czId, ctx) {
         orchCalls.push(['evaluate', czId, ctx]);
@@ -920,7 +960,15 @@ async function runAll() {
     app.use(
       '/preaprobados',
       requireDashboardPermission('preaprobados'),
-      createPreaprobadosElmRouter({ orchestrator: fakeOrch }),
+      createPreaprobadosElmRouter({
+        orchestrator: fakeOrch,
+        listView: { async cellsForCzIds() { return new Map(); } },
+        loadMember: async (czId) => {
+          memberCalls.push(czId);
+          return { ci: 12345678 };
+        },
+        loadCiResendHold: async () => null,
+      }),
     );
     const realApp = express();
     realApp.use(requireAuth);
@@ -973,28 +1021,37 @@ async function runAll() {
 
     try {
       const cron = { 'X-Cron-Key': TEST_CRON_SECRET };
-      const ev = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', cron);
-      assert.strictEqual(ev.status, 403);
-      assert.strictEqual(ev.body.code, 'elm_cron_forbidden');
-      const rf = await call(port, 'POST', '/preaprobados/1001/elm/refer', cron);
-      assert.strictEqual(rf.status, 403);
-      assert.strictEqual(rf.body.code, 'elm_cron_forbidden');
-      const cronWithSession = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', Object.assign({ Cookie: cookie('admin-1') }, cron));
+      const sendCron = await call(port, 'POST', '/preaprobados/1001/elm/send', cron);
+      assert.strictEqual(sendCron.status, 403);
+      assert.strictEqual(sendCron.body.code, 'elm_cron_forbidden');
+      const cronWithSession = await call(port, 'POST', '/preaprobados/1001/elm/send', Object.assign({ Cookie: cookie('admin-1') }, cron));
       assert.strictEqual(cronWithSession.status, 403);
       assert.strictEqual(orchCalls.filter((c) => c[0] !== 'get').length, 0);
+      assert.strictEqual(memberCalls.length, 0);
 
-      const reader = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('reader-1') });
+      // S1 / S2 are not exposed separately any more: no route, the orchestrator is never reached.
+      for (const legacy of ['/preaprobados/1001/elm/evaluate', '/preaprobados/1001/elm/refer']) {
+        const r = await call(port, 'POST', legacy, { Cookie: cookie('admin-1') });
+        assert.strictEqual(r.status, 404, legacy);
+        const rc = await call(port, 'POST', legacy, cron);
+        assert.strictEqual(rc.status, 404, legacy + ' (cron)');
+      }
+      assert.strictEqual(orchCalls.filter((c) => c[0] !== 'get').length, 0, 'legacy routes never reach ELM');
+
+      const reader = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('reader-1') });
       assert.strictEqual(reader.status, 403);
       assert.strictEqual(reader.body.code, 'elm_action_forbidden');
       const readerGet = await call(port, 'GET', '/preaprobados/1001/elm', { Cookie: cookie('reader-1') });
       assert.strictEqual(readerGet.status, 200);
-      const inactive = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('off-1') });
+      const inactive = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('off-1') });
       assert.strictEqual(inactive.status, 401);
-      const anon = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', {});
+      const anon = await call(port, 'POST', '/preaprobados/1001/elm/send', {});
       assert.strictEqual(anon.status, 401);
+      assert.strictEqual(memberCalls.length, 0);
 
-      const admin = await call(port, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') }, {
+      const admin = await call(port, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('admin-1') }, {
         ci: 99999999,
+        cz_solicitud_id: 2002,
         salario: 1,
         email: 'x@y.z',
         celular: '1',
@@ -1003,17 +1060,21 @@ async function runAll() {
       });
       assert.strictEqual(admin.status, 503);
       assert.strictEqual(admin.body.code, CODES.SEND_DISABLED);
-      const evCall = orchCalls.find((c) => c[0] === 'evaluate');
-      assert.deepStrictEqual(evCall, ['evaluate', '1001', { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1' }]);
+      assert.deepStrictEqual(memberCalls, [1001], 'membership of the URL solicitud only');
+      const sendCall = orchCalls.find((c) => c[0] === 'send');
+      assert.deepStrictEqual(sendCall, ['send', 1001, { triggerOrigin: 'janus_manual', triggeredByUserId: 'admin-1', sendOrigin: 'preaprobados_manual' }]);
 
       // Real /preaprobados router wiring (default orchestrator, disabled client): POST is 503
-      // before any DB access beyond the auth lookups.
+      // before any DB access beyond the auth lookups; the legacy routes do not exist.
       supabaseCalls.length = 0;
-      const real = await call(realPort, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') });
+      const real = await call(realPort, 'POST', '/preaprobados/1001/elm/send', { Cookie: cookie('admin-1') });
       assert.strictEqual(real.status, 503);
-      assert.strictEqual(real.body.code, CODES.SEND_DISABLED);
+      assert.strictEqual(real.body.code, 'elm_send_not_ready');
+      assert.strictEqual(real.body.outcome, 'blocked');
       assert.ok(supabaseCalls.every((t) => t === 'dashboard_users'), 'no ELM DB access: ' + supabaseCalls.join(','));
-      const realCron = await call(realPort, 'POST', '/preaprobados/1001/elm/refer', cron);
+      const realLegacy = await call(realPort, 'POST', '/preaprobados/1001/elm/evaluate', { Cookie: cookie('admin-1') });
+      assert.strictEqual(realLegacy.status, 404);
+      const realCron = await call(realPort, 'POST', '/preaprobados/1001/elm/send', cron);
       assert.strictEqual(realCron.status, 403);
     } finally {
       for (const s of servers) await new Promise((r) => s.close(r));

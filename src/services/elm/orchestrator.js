@@ -18,6 +18,9 @@
  *
  * One process per solicitud. A lost/uncertain answer ends as unknown (in_flight lease expiry),
  * never as a second send. Only technical_error with a retry-safe code can be resent.
+ *
+ * context.sendOrigin (SEND_ORIGIN) is stored on the new process: required for janus_manual
+ * (rechazados_manual | preaprobados_manual); the single allowed value otherwise.
  */
 
 const {
@@ -25,6 +28,7 @@ const {
   S2,
   ENABLED_TRIGGER_ORIGINS,
   TRIGGER_ORIGINS,
+  SEND_ORIGINS_BY_TRIGGER,
   ELM_SOURCE,
   OUTCOME,
   CODES,
@@ -84,6 +88,14 @@ function validateContext(context, enabledOrigins) {
     context.triggeredByUserId != null ? String(context.triggeredByUserId).trim() : '';
   if (origin === 'janus_manual' && !userId) return blocked(CODES.MANUAL_REQUIRES_USER);
   return { ok: true, triggerOrigin: origin, triggeredByUserId: userId || null };
+}
+
+/** @returns {string|null} send_origin for a new process of this trigger origin */
+function resolveSendOrigin(triggerOrigin, context) {
+  const allowed = SEND_ORIGINS_BY_TRIGGER[triggerOrigin] || [];
+  const raw = context ? context.sendOrigin : null;
+  if (raw == null && allowed.length === 1) return allowed[0];
+  return allowed.includes(raw) ? raw : null;
 }
 
 const S1_BY_OUTCOME = Object.freeze({
@@ -179,6 +191,7 @@ function toProcessView(p, nowMs) {
     id: p.id,
     cz_solicitud_id: p.cz_solicitud_id,
     trigger_origin: p.trigger_origin,
+    send_origin: p.send_origin || null,
     source_brand: p.source_brand,
     commercial_origin: p.commercial_origin || null,
     created_at: p.created_at || null,
@@ -335,6 +348,8 @@ function createElmOrchestrator(deps) {
     if (czId == null) return blocked(CODES.INVALID_CZ_ID);
     const ctx = validateContext(context, enabledTriggerOrigins);
     if (!ctx.ok) return ctx;
+    const sendOrigin = resolveSendOrigin(ctx.triggerOrigin, context);
+    if (!sendOrigin) return blocked(CODES.INVALID_SEND_ORIGIN);
 
     const gate = sendGate();
     if (gate) return gate;
@@ -367,6 +382,7 @@ function createElmOrchestrator(deps) {
       commercialOrigin: await commercialOriginOf(czId, ctx, context),
       triggerOrigin: ctx.triggerOrigin,
       triggeredByUserId: ctx.triggeredByUserId,
+      sendOrigin: sendOrigin,
       czEstadoIdAtStart:
         solicitud.solicitudes_estados_id != null
           ? Number(solicitud.solicitudes_estados_id)

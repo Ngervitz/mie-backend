@@ -23,6 +23,7 @@ const {
   fetchElmCohortBundle,
   fetchElmCohortDetail,
 } = require('../lib/preaprobadosElmCohort');
+const { attachPreaprobadosElmSendHolds } = require('../lib/preaprobadosElmSend');
 const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
 const { createElmOpsRouter } = require('./elmOps');
 const { createElmRepository } = require('../services/elm/repository');
@@ -36,10 +37,25 @@ function getElmRepository() {
   return elmRepository;
 }
 
+let elmOrchestrator = null;
+function getElmOrchestrator() {
+  if (!elmOrchestrator) {
+    elmOrchestrator = require('../services/elm/orchestrator').createElmOrchestrator({
+      repository: getElmRepository(),
+    });
+  }
+  return elmOrchestrator;
+}
+
 let elmListView = null;
 function getElmListView() {
   if (!elmListView) {
-    elmListView = createElmListView({ repository: getElmRepository() });
+    elmListView = createElmListView({
+      repository: getElmRepository(),
+      sendReadiness: function () {
+        return getElmOrchestrator().getSendReadiness();
+      },
+    });
   }
   return elmListView;
 }
@@ -53,12 +69,24 @@ async function fetchElmCohortSoft() {
     logger.warn('GET /preaprobados elm cohort unavailable', {
       error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
     });
-    return { available: false, elmCohort: new Map(), elmSolicitudRows: [], elmHistoricoRows: [] };
+    return {
+      available: false,
+      elmCohort: new Map(),
+      elmManual: new Map(),
+      elmSolicitudRows: [],
+      elmHistoricoRows: [],
+    };
   }
 }
 
 router.use('/elm-ops', createElmOpsRouter());
-router.use(createPreaprobadosElmRouter());
+router.use(
+  createPreaprobadosElmRouter({
+    getOrchestrator: getElmOrchestrator,
+    getListView: getElmListView,
+    supabase: supabase,
+  }),
+);
 
 router.get('/', async function getPreaprobadosList(req, res) {
   const fromP = parseIsoQuery(req.query && req.query.from);
@@ -104,6 +132,7 @@ router.get('/', async function getPreaprobadosList(req, res) {
       grantedRows: bundle.grantedRows,
       historicoRows: bundle.historicoRows,
       elmCohort: elm.elmCohort,
+      elmManual: elm.elmManual,
       elmSolicitudRows: elm.elmSolicitudRows,
       elmHistoricoRows: elm.elmHistoricoRows,
       from: fromP.value,
@@ -116,7 +145,8 @@ router.get('/', async function getPreaprobadosList(req, res) {
       limit: pageP.limit,
       offset: pageP.offset,
     });
-    await attachElmCells(assembled.rows, getElmListView(), logger);
+    await attachElmCells(assembled.rows, getElmListView(), logger, { allowSend: true });
+    await attachPreaprobadosElmSendHolds(assembled.rows, { supabase: supabase, logger: logger });
     return res.json({
       ok: true,
       data: {
