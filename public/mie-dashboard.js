@@ -16175,19 +16175,10 @@ init();
         '<div class="rechazados-muted">' + escapeHtml(ElmUi.ciHoldText(hold.reason, hold)) + '</div>',
       );
     }
-    (elm.other_processes || []).forEach(function (p) {
-      parts.push(
-        '<div class="rechazados-muted">Otra solicitud ' +
-          escapeHtml(String(p.cz_solicitud_id)) +
-          ' · ' +
-          escapeHtml(ElmUi.originLabel(p.trigger_origin)) +
-          ': ' +
-          escapeHtml(p.label || '—') +
-          (p.elm_answer ? ' · ' + escapeHtml(ElmUi.elmAnswerText(p, true)) : '') +
-          (p.ops_resolution ? ' · ' + escapeHtml(ElmUi.opsResolutionText(p)) : '') +
-          '</div>',
-      );
-    });
+    const others = ElmUi.rejectedOtherProcessesHtml(elm.other_processes);
+    if (others) {
+      parts.push('<div class="rechazados-muted">Otras solicitudes de la CI con proceso ELM</div>' + others);
+    }
     return parts.length ? '<div class="rechazados-elm-block">' + parts.join('') + '</div>' : '';
   }
 

@@ -623,7 +623,7 @@ test('9 CI with several solicitudes: per-solicitud exclusivity, CI-level holds',
   assert.strictEqual(free.solicitudes[0].cell.action.enabled, true);
   const freeDetail = ElmUi.rejectedDetailCellHtml(free.solicitudes[0].cell);
   assert.ok(freeDetail.includes('data-action="elm-send"') && freeDetail.includes('data-cz-id="8002"'), freeDetail);
-  assert.ok(freeDetail.includes('>Enviar sol. 8002</button>'), freeDetail);
+  assert.ok(freeDetail.includes('>Enviar a ELM</button>'), 'detail: the Solicitud column names it: ' + freeDetail);
 
   const autoReferred = proc({ cz_solicitud_id: 8003, ci: ci, trigger_origin: 'cz_automatic' });
   const estado3 = [{ cz_historico_id: 1, cz_solicitud_id: 8002, solicitudes_estados_id: 3, fechahora_src: iso(NOW) }];
@@ -813,7 +813,7 @@ test('16 list: one sendable solicitud → button bound to it; same S1→S2 send;
   assert.ok(html.includes('data-cz-id="9002"'));
   assert.ok(html.includes('data-ci="' + ci + '"'));
   assert.ok(html.includes('data-rejected-at="07/10/2026"'));
-  assert.ok(html.includes('>Enviar sol. 9002</button>'), 'the solicitud is named on the button');
+  assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 9002</span><span class="rechazados-elm-value"><button') && html.includes('>Enviar a ELM</button>'), 'the solicitud is named next to its button: ' + html);
   assert.ok(!html.includes('<select'));
   assert.ok(!/ disabled /.test(html));
 
@@ -826,7 +826,7 @@ test('16 list: one sendable solicitud → button bound to it; same S1→S2 send;
   });
   assert.deepStrictEqual(detail.send, row.elm.send, 'list and detail resolve the target identically');
   const detailHtml = ElmUi.rejectedDetailCellHtml(detail.solicitudes[0].cell, { rejectedAt: rejected[0].rejected_at, retryCi: ci });
-  assert.ok(detailHtml.includes('data-cz-id="9002"') && detailHtml.includes('>Enviar sol. 9002</button>'), detailHtml);
+  assert.ok(detailHtml.includes('data-cz-id="9002"') && detailHtml.includes('>Enviar a ELM</button>'), detailHtml);
   assert.strictEqual(h.fetchImpl.calls.length, 0, 'rendering never calls ELM');
 
   const out = await h.send(9002);
@@ -911,7 +911,9 @@ test('18 list: ELM disabled or config missing → grey text with a short reason,
     assert.strictEqual(row.elm.send.needs_selection, false, 'nothing to choose while disabled');
     const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
     assert.ok(!html.includes('<button'), 'held: no button that looks available ' + JSON.stringify(c.env));
-    assert.strictEqual(html, '<span class="rechazados-elm-blocked" title="Sin enviar (sol. 9202, 9201). ' + c.title + '">Sol. 9202, 9201 · Sin enviar</span>', html);
+    const heldRow = (id) =>
+      '<span class="rechazados-elm-target">Sol. ' + id + '</span><span class="rechazados-elm-value"><span class="rechazados-elm-blocked" title="Sin enviar (sol. ' + id + '). ' + c.title + '">Sin enviar</span></span>';
+    assert.strictEqual(html, '<div class="rechazados-elm-grid">' + heldRow(9202) + heldRow(9201) + '</div>', html);
     assert.ok(!html.includes('data-action'), 'disabled: no click wiring');
     assert.ok(!html.includes('<select'));
     const out = await h.send(9202);
@@ -932,7 +934,7 @@ test('19 vigente process of another solicitud (evaluation / referred / review) b
     const row = await listRow(h, ci, [{ cz_solicitud_id: 9302 }, { cz_solicitud_id: 9301 }]);
     const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
     assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 9301</span>'), 'history stays visible, with its solicitud');
-    assert.ok(html.includes('<span class="rechazados-elm-blocked" title="Sin enviar (sol. 9302). Hay un proceso ELM vigente para esta CI (sol. 9301).">Sol. 9302 · Sin enviar</span>'), html);
+    assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 9302</span><span class="rechazados-elm-value"><span class="rechazados-elm-blocked" title="Sin enviar (sol. 9302). Hay un proceso ELM vigente para esta CI (sol. 9301).">Sin enviar</span></span>'), html);
     assert.ok(!html.includes('<button') && !html.includes('data-action'), 'no send button while held');
     assert.strictEqual(row.elm.send.hold.reason, CI_ACTIVE_REASON);
     assert.deepStrictEqual(row.elm.send.candidates.map((c) => c.cz_solicitud_id), [9302], 'own-process solicitud is never a candidate');
@@ -968,7 +970,7 @@ test('20 closed process of another solicitud (>30 days, other month): history + 
   const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
   assert.ok(html.includes('Sol. 9301</span>') && html.includes('>Rechazado · SCORE BAJO</span>'), 'historical ELM state shown with its solicitud');
   assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="9302"'), 'button not hidden');
-  assert.ok(html.includes('>Enviar sol. 9302</button>'), 'button names the unsent solicitud');
+  assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 9302</span><span class="rechazados-elm-value"><button') && html.includes('>Enviar a ELM</button>'), 'button on the unsent solicitud row');
   assert.ok(html.indexOf('Sol. 9301') < html.indexOf('<button'), 'history above the button');
 
   const resend = await h.send(9301);
@@ -995,7 +997,7 @@ test('21 ELM 30-day duplicate window: closed in JANUS does not mean ELM accepts 
     assert.strictEqual(row.elm.send.hold.until, iso(NOW + 20 * DAY));
     const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
     assert.ok(html.includes('dentro de los 30 días del anterior (sol. 9301); disponible desde el 29/10/2026.'), html);
-    assert.ok(html.includes('>Sol. 9302 · Envío desde 29/10</span>'), html);
+    assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 9302</span>') && html.includes('>Envío desde 29/10</span>'), html);
     assert.ok(!html.includes('<button') && !html.includes('data-action'), c.name);
     const out = await h.send(9302);
     assert.strictEqual(out.status, 409, c.name);
@@ -1104,9 +1106,9 @@ test('24 history + several eligible new solicitudes → explicit selection', asy
   const afterHtml = ElmUi.rejectedRowElmHtml(after.elm, after.ci);
   assert.ok(!afterHtml.includes('<button') && !afterHtml.includes('<select'), 'after the send: no "Enviar a ELM" under the result: ' + afterHtml);
   assert.ok(afterHtml.includes('Sol. 9502</span>') && afterHtml.includes('Sol. 9501</span>'), 'each sent solicitud with its own result');
-  assert.ok(/>Sol\. 9503 · Envío desde \d\d\/\d\d<\/span>/.test(afterHtml), 'the unsent one is named, held, as text: ' + afterHtml);
+  assert.ok(/<span class="rechazados-elm-target">Sol\. 9503<\/span><span class="rechazados-elm-value"><span class="rechazados-elm-blocked" title="[^"]*">Envío desde \d\d\/\d\d<\/span>/.test(afterHtml), 'the unsent one is named, held, as text: ' + afterHtml);
   assert.ok(afterHtml.includes('title="Sin enviar (sol. 9503). ELM no admite otro envío de esta CI dentro de los 30 días del anterior (sol. 9502)'), 'full reason in the tooltip');
-  assert.ok(afterHtml.indexOf('Sol. 9502') < afterHtml.indexOf('Sol. 9503 · Envío desde'), 'results first');
+  assert.ok(afterHtml.indexOf('Sol. 9502') < afterHtml.indexOf('Sol. 9503</span>'), 'results first');
   const afterDetail = await loadRejectedDetailElm(null, { ci: ci, rejections: [{ cz_solicitud_id: 9503 }, { cz_solicitud_id: 9502 }, { cz_solicitud_id: 9501 }] }, {
     listView: h.listView,
     sendReadiness: () => h.orch.getSendReadiness(),

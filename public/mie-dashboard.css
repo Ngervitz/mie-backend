@@ -5407,7 +5407,7 @@
   width: 19%;
   padding-left: 4px;
   padding-right: 4px;
-  text-align: center;
+  text-align: left;
   white-space: normal;
   line-height: 1.25;
 }
@@ -5421,8 +5421,9 @@
 #mie-dashboard-app .rechazados-elm-action {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
+  width: 100%;
   min-width: 0;
 }
 #mie-dashboard-app .rechazados-elm-send,
@@ -5440,21 +5441,56 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-#mie-dashboard-app .rechazados-elm-line {
-  display: flex;
-  flex-wrap: nowrap;
+/* Two columns with the same widths in every table row: "Sol. N" | state, hold or button. */
+#mie-dashboard-app .rechazados-elm-grid {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  grid-auto-rows: minmax(1.25rem, auto);
+  column-gap: 4px;
+  row-gap: 2px;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
+  justify-items: start;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+#mie-dashboard-app .rechazados-elm-grid > .rechazados-elm-target {
+  justify-self: stretch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .rechazados-elm-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   max-width: 100%;
+}
+#mie-dashboard-app .rechazados-elm-value > * {
+  min-width: 0;
+  max-width: 100%;
+}
+#mie-dashboard-app .rechazados-elm-detail-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
-#mie-dashboard-app .rechazados-elm-line .rechazados-elm-target {
+#mie-dashboard-app .rechazados-elm-detail-line > .preaprobados-elm {
   flex: none;
 }
-#mie-dashboard-app .rechazados-elm-line .preaprobados-elm.is-compact {
-  flex: 0 1 auto;
+#mie-dashboard-app .rechazados-elm-note {
   min-width: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .rechazados-detail-modal .rechazados-elm-stack {
+  align-items: flex-start;
+}
+#mie-dashboard-app .rechazados-detail-modal .elm-answer {
+  text-align: left;
 }
 #mie-dashboard-app .rechazados-elm-blocked {
   display: block;
@@ -5462,7 +5498,7 @@
   font-size: 0.72rem;
   color: var(--text-muted);
   line-height: 1.3;
-  text-align: center;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

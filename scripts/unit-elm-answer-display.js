@@ -182,6 +182,9 @@ test('6 classification, action and retry are unchanged by the answer', () => {
 const visible = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 /** Visible state of a single-process row, without its "Sol. N" prefix. */
 const stateText = (html) => visible(html).replace(/^Sol\. \d+ /, '');
+/** Left column of every grid row ("Sol. N" or '' for a continuation row), in order. */
+const targets = (html) => Array.from(html.matchAll(/<span class="rechazados-elm-target">([^<]*)<\/span><span class="rechazados-elm-value">/g), (m) => m[1]);
+const gridInner = (html) => html.replace(/^<div class="rechazados-elm-grid">/, '').replace(/<\/div>$/, '');
 const rowOf = (cell, send) => ElmUi.rejectedRowElmHtml({ available: true, cell: cell, other_processes: [], send: send || { available: true, candidates: [], retry_candidates: [] } }, 1);
 
 test('7 Rechazados list: solicitud number, then one compact label with state and reason', () => {
@@ -335,20 +338,21 @@ test('20 list shows no redundant ELM / step / prefix text and no second line', (
 test('21 send / retry controls bound to their solicitud; held send is text, never a button', () => {
   const enabledSend = { available: true, candidates: [{ cz_solicitud_id: 1500, enabled: true, rejected_at: '2026-10-01T10:00:00' }], target_cz_id: 1500, retry_candidates: [] };
   const html = rowOf(cellOf(P1423), enabledSend);
-  assert.ok(html.includes(ElmUi.rejectedSendHtml(1, enabledSend)), 'same send control');
-  assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="1500"') && html.includes('>Enviar sol. 1500</button>'), html);
-  assert.ok(html.indexOf('Sol. 1423') < html.indexOf('Enviar sol. 1500'), 'sent solicitud first, then the other one');
+  assert.ok(html.includes(gridInner(ElmUi.rejectedSendHtml(1, enabledSend))), 'same send control');
+  assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="1500"') && html.includes('>Enviar a ELM</button>'), html);
+  assert.deepStrictEqual(targets(html), ['Sol. 1423', 'Sol. 1500'], 'sent solicitud first, then the other one, each on its row');
   const heldSend = { available: true, candidates: [{ cz_solicitud_id: 1500, enabled: false, reasons: ['elm_ci_recent_send'], until: '2026-11-08' }], retry_candidates: [] };
   const held = rowOf(cellOf(P1423), heldSend);
-  assert.ok(held.includes(ElmUi.rejectedSendHtml(1, heldSend)), held);
+  assert.ok(held.includes(gridInner(ElmUi.rejectedSendHtml(1, heldSend))), held);
   assert.ok(!held.includes('<button') && !held.includes('Enviar'), 'no send button under a sent solicitud: ' + held);
   assert.ok(held.includes('class="rechazados-elm-blocked" title="Sin enviar (sol. 1500). ELM no admite otro envío de esta CI dentro de los 30 días del anterior; disponible desde el 08/11/2026."'), held);
-  assert.strictEqual(visible(held), 'Sol. 1423 Rechazado · Repetido Sol. 1500 · Envío desde 08/11');
+  assert.strictEqual(visible(held), 'Sol. 1423 Rechazado · Repetido Sol. 1500 Envío desde 08/11');
   const retry = { available: true, candidates: [], retry_candidates: [{ cz_solicitud_id: 1430, enabled: true, expected_attempts: 1 }] };
   const rhtml = rowOf(cellOf(P1430), retry);
   const retryButton = ElmUi.retryButtonHtml(retry.retry_candidates[0], 1);
   assert.ok(rhtml.includes('Sol. 1430</span>') && rhtml.includes(retryButton) && rhtml.includes('data-action="elm-retry"'), rhtml);
-  assert.ok(rhtml.indexOf('Sol. 1430') < rhtml.indexOf(retryButton), 'retry right under its own solicitud');
+  assert.ok(rhtml.includes('<span class="rechazados-elm-target"></span><span class="rechazados-elm-value">' + retryButton + '</span>'), 'retry on the next row, right column, under its own solicitud');
+  assert.deepStrictEqual(targets(rhtml), ['Sol. 1430', ''], rhtml);
   assert.ok(!rhtml.includes('elm-send"'), 'no send button with a retry');
 });
 
@@ -403,7 +407,8 @@ test('24 production 2026-10-09: sent solicitud shows only its result; the unsent
   assert.strictEqual(a.elm.send.hold.reason, 'elm_ci_recent_send', 'hold unchanged');
   const html = ElmUi.rejectedRowElmHtml(a.elm, 49658210);
   assert.ok(!html.includes('<button') && !html.includes('Enviar'), html);
-  assert.strictEqual(visible(html), 'Sol. 1429 Rechazado · Score bajo Sol. 1231 · Envío desde 08/11');
+  assert.strictEqual(visible(html), 'Sol. 1429 Rechazado · Score bajo Sol. 1231 Envío desde 08/11');
+  assert.deepStrictEqual(targets(html), ['Sol. 1429', 'Sol. 1231']);
   assert.ok(html.includes('title="Sin enviar (sol. 1231). ELM no admite otro envío de esta CI dentro de los 30 días del anterior (sol. 1429); disponible desde el 08/11/2026."'), html);
   const d1231 = ElmUi.rejectedDetailCellHtml(a.resolved.solicitudes[1].cell, { retryCi: 49658210, answer: 'full' });
   assert.ok(!d1231.includes('<button') && d1231.includes('>Sin enviar · disponible desde 08/11/2026</span>'), d1231);
@@ -415,7 +420,7 @@ test('24 production 2026-10-09: sent solicitud shows only its result; the unsent
   assert.strictEqual(b.elm.send.hold.reason, 'elm_ci_active', 'hold unchanged');
   const bhtml = ElmUi.rejectedRowElmHtml(b.elm, 39236232);
   assert.ok(!bhtml.includes('<button'), bhtml);
-  assert.strictEqual(visible(bhtml), 'Sol. 1428 Incierto Sol. 1427 · Sin enviar');
+  assert.strictEqual(visible(bhtml), 'Sol. 1428 Incierto Sol. 1427 Sin enviar');
   assert.ok(bhtml.includes('title="Sin enviar (sol. 1427). Hay un proceso ELM vigente para esta CI (sol. 1428)."'), bhtml);
 });
 
@@ -432,8 +437,8 @@ test('25 enabled and held unsent solicitudes side by side: button only for the e
   };
   const html = ElmUi.rejectedSendHtml(7, send);
   assert.strictEqual((html.match(/<button/g) || []).length, 1, html);
-  assert.ok(html.includes('data-cz-id="1600"') && html.includes('>Enviar sol. 1600</button>') && html.includes('title="Enviar la solicitud 1600 (rechazada 02/10/2026) a ELM"'), html);
-  assert.ok(html.includes('<span class="rechazados-elm-blocked" title="Sin enviar (sol. 1601). Faltan datos obligatorios de la solicitud.">Sol. 1601 · Sin enviar</span>'), html);
+  assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 1600</span><span class="rechazados-elm-value"><button') && html.includes('data-cz-id="1600"') && html.includes('>Enviar a ELM</button>') && html.includes('title="Enviar la solicitud 1600 (rechazada 02/10/2026) a ELM"'), html);
+  assert.ok(html.includes('<span class="rechazados-elm-target">Sol. 1601</span><span class="rechazados-elm-value"><span class="rechazados-elm-blocked" title="Sin enviar (sol. 1601). Faltan datos obligatorios de la solicitud.">Sin enviar</span></span>'), html);
   assert.strictEqual(ElmUi.rejectedSendLabel('1601'), 'Enviar sol. 1601');
 });
 
@@ -443,27 +448,72 @@ test('26 compact list column: short visible text, full reason only in tooltip / 
   const hint = 'ELM no admite otro envío de esta CI dentro de los 30 días del anterior; disponible desde el 08/11/2026.';
   const held = { available: true, candidates: [{ cz_solicitud_id: 1231, enabled: false, reasons: ['elm_ci_recent_send'], until: '2026-11-08' }], retry_candidates: [] };
   const list = ElmUi.rejectedSendHtml(1, held);
-  assert.strictEqual(visible(list), 'Sol. 1231 · Envío desde 08/11');
+  assert.strictEqual(visible(list), 'Sol. 1231 Envío desde 08/11');
   assert.ok(visible(list).length <= 32, 'fits one line');
   assert.ok(!visible(list).includes('30 días'), 'reason not repeated in the cell');
   assert.ok(list.includes('title="Sin enviar (sol. 1231). ' + hint + '"'), 'full reason in the tooltip');
   const detail = ElmUi.rejectedDetailCellHtml({ kind: 'not_sent', cz_solicitud_id: 1231, action: { show: true, enabled: false, reasons: ['elm_ci_recent_send'], hold: { until: '2026-11-08' } } }, {});
   assert.ok(detail.includes('title="' + hint + '"') && visible(detail) === 'Sin enviar · disponible desde 08/11/2026', detail);
   const single = rowOf(cellOf(P1423));
-  assert.ok(!single.includes('rechazados-elm-stack') && (single.match(/rechazados-elm-line/g) || []).length === 1, 'single process: one line, no stack');
+  assert.ok(!single.includes('rechazados-elm-stack') && (single.match(/rechazados-elm-grid/g) || []).length === 1, 'single process: one grid, no stack');
+  assert.deepStrictEqual(targets(single), ['Sol. 1423'], 'single process: one row');
   const css = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.css'), 'utf8');
   const rule = (sel) => {
     const i = css.indexOf(sel + ' {');
     assert.ok(i >= 0, sel);
     return css.slice(i, css.indexOf('}', i));
   };
-  assert.ok(/flex-wrap:\s*nowrap/.test(rule('#mie-dashboard-app .rechazados-elm-line')), 'line never wraps');
+  const grid = rule('#mie-dashboard-app .rechazados-elm-grid');
+  assert.ok(/grid-template-columns:\s*3rem minmax\(0, 1fr\)/.test(grid), 'fixed-width "Sol. N" column, same in every table row');
+  assert.ok(/align-items:\s*center/.test(grid) && /justify-items:\s*start/.test(grid), 'rows centered vertically, values left-aligned');
+  assert.ok(/text-align:\s*left/.test(rule('#mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-elm')), 'column left-aligned');
   const blocked = rule('#mie-dashboard-app .rechazados-elm-blocked');
   assert.ok(/white-space:\s*nowrap/.test(blocked) && /text-overflow:\s*ellipsis/.test(blocked), 'held text on one line');
   assert.ok(/white-space:\s*normal/.test(rule('#mie-dashboard-app .rechazados-detail-modal .rechazados-elm-blocked')), 'detail keeps the full text');
   const buttons = rule('#mie-dashboard-app .rechazados-elm-retry');
   assert.ok(/#mie-dashboard-app \.rechazados-elm-send,\r?\n#mie-dashboard-app \.rechazados-elm-retry \{/.test(css), 'send and retry share the one-line rule');
   assert.ok(/white-space:\s*nowrap/.test(buttons) && /text-overflow:\s*ellipsis/.test(buttons), 'button text never wraps nor spills out of the column');
+});
+
+test('27 every list cell is the same two-column grid: "Sol. N" left, value right, one row per solicitud', () => {
+  const pairs = (html) => {
+    assert.ok(/^<div class="rechazados-elm-grid">/.test(html) && html.endsWith('</div>'), 'one grid: ' + html);
+    const inner = gridInner(html);
+    const t = (inner.match(/<span class="rechazados-elm-target">/g) || []).length;
+    const v = (inner.match(/<span class="rechazados-elm-value">/g) || []).length;
+    assert.strictEqual(t, v, 'every row has both columns: ' + html);
+    assert.ok(inner.startsWith('<span class="rechazados-elm-target">'), 'rows start with the left column: ' + html);
+    return targets(html);
+  };
+  const p1429 = proc({ cz_solicitud_id: 1429, ci: 49658210, s1_status: S1.REJECTED, s1_http_status: 200, s1_result_message: 'Score bajo' });
+  const cases = [
+    [rowOf(cellOf(P1423)), ['Sol. 1423']],
+    [sentAndUnsentRow(p1429, 1231).elm, ['Sol. 1429', 'Sol. 1231']],
+    [rowOf(null, { available: true, candidates: [{ cz_solicitud_id: 1600, enabled: true }], target_cz_id: 1600, retry_candidates: [] }), ['Sol. 1600']],
+    [rowOf(null, { available: true, candidates: [{ cz_solicitud_id: 1700, enabled: true }, { cz_solicitud_id: 1701, enabled: true }], needs_selection: true, retry_candidates: [] }), ['']],
+    [rowOf(null, { available: true, candidates: [], retry_candidates: [] }), ['']],
+    [ElmUi.rejectedRowElmHtml({ available: false }, 1), ['']],
+    [rowOf(null, { available: true, candidates: [], not_sendable: { cz_solicitud_id: 1800, reason: 'elm_missing_required_fields' }, retry_candidates: [] }), ['Sol. 1800']],
+  ];
+  for (const [value, expected] of cases) {
+    const html = typeof value === 'string' ? value : ElmUi.rejectedRowElmHtml(value, 49658210);
+    assert.deepStrictEqual(pairs(html), expected, html);
+  }
+  const multi = ElmUi.rejectedRowElmHtml({
+    available: true,
+    cell: cellOf(P1423),
+    other_processes: [Object.assign(cellOf(P1430), { cz_solicitud_id: 1430 })],
+    send: { available: true, candidates: [{ cz_solicitud_id: 1500, enabled: false, reasons: ['elm_ci_active'] }, { cz_solicitud_id: 1501, enabled: false, reasons: ['elm_ci_active'] }], retry_candidates: [] },
+  }, 1);
+  assert.deepStrictEqual(pairs(multi), ['Sol. 1423', 'Sol. 1430', 'Sol. 1500', 'Sol. 1501'], 'held solicitudes are no longer grouped: one row each');
+  assert.ok(multi.includes('<span class="rechazados-elm-target">Sol. 1500</span><span class="rechazados-elm-value"><span class="rechazados-elm-blocked" title="Sin enviar (sol. 1500). '), multi);
+
+  const s = summarizeCiElm({ ci: 55597953, focusCzIds: [9999], processes: [P1423], nowMs: NOW });
+  const others = ElmUi.rejectedOtherProcessesHtml(s.other_processes);
+  assert.deepStrictEqual(pairs(others), ['Sol. 1423'], 'CI detail other processes use the same grid');
+  assert.ok(others.includes('class="preaprobados-elm is-rejected is-compact"'), others);
+  assert.ok(others.includes('<span class="rechazados-elm-note" title="Manual (JANUS) · Motivo ELM (S1): Repetido. Rechazado">'), others);
+  assert.strictEqual(ElmUi.rejectedOtherProcessesHtml([]), '');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
