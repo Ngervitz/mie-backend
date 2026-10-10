@@ -1,5 +1,7 @@
 /* ELM operations (Fase 3B): active referrals / uncertain ELM results + manual review queue.
- * Lives inside the Preaprobados panel. Pure helpers are exported for Node tests (UMD).
+ * The dashboard uses createProcessResolver ("Resolver ELM" in the Rechazados / Preaprobados
+ * solicitud detail); mount() is no longer placed on any screen. Pure helpers are exported for
+ * Node tests (UMD).
  * Every action sends the version the operator saw; the backend answers `stale` if anything
  * changed in between (postback, worker, another operator). Nothing here sends to ELM. */
 (function (root, factory) {
@@ -285,15 +287,16 @@
       : { resolution_code: s, correction: false };
   }
 
-  function correctionOptionsHtml(p) {
+  function correctionOptionsHtml(p, selected) {
     const codes = p.correction_resolutions || [];
     if (!codes.length) return '';
     return (
       '<optgroup label="Corrección auditada (contradice Aceptado ELM)">' +
       codes
         .map(function (c) {
+          const value = CORRECTION_PREFIX + c;
           return (
-            '<option value="' + esc(CORRECTION_PREFIX + c) + '">Corrección: ' +
+            '<option value="' + esc(value) + '"' + (value === selected ? ' selected' : '') + '>Corrección: ' +
             esc(PROCESS_RESOLUTION_LABELS[c] || c) + '</option>'
           );
         })
@@ -302,7 +305,27 @@
     );
   }
 
-  function resolveProcessFormHtml(p) {
+  /** Resolution options; "loan disbursed" stays visible but disabled without GRANTED evidence. */
+  function resolutionOptionsHtml(p, selected) {
+    const granted = Boolean(p.elm && p.elm.granted_elm === true);
+    return (p.allowed_resolutions || [])
+      .map(function (v) {
+        const noEvidence = v === 'provider_loan_disbursed' && !granted;
+        return (
+          '<option value="' + esc(v) + '"' +
+          (v === selected && !noEvidence ? ' selected' : '') +
+          (noEvidence ? ' disabled' : '') + '>' +
+          esc(PROCESS_RESOLUTION_LABELS[v] || v) +
+          (noEvidence ? ' · sin evidencia de otorgamiento' : '') +
+          '</option>'
+        );
+      })
+      .join('');
+  }
+
+  /** @param {object} p open process view @param {{ choice?: string, cz_outcome?: string, note?: string }} [draft] */
+  function resolveProcessFormHtml(p, draft) {
+    const dr = draft || {};
     const correctionHint = (p.correction_resolutions || []).length
       ? '<p class="preaprobados-muted">ELM aceptó este lead (asignado a Copanel). Una corrección requiere ' +
         'una nota de al menos 30 caracteres con la evidencia y queda registrada como corrección en la auditoría.</p>'
@@ -310,16 +333,17 @@
     return (
       '<form class="elm-ops-form" data-elm-ops-form="resolve-process">' +
       '<p class="preaprobados-muted">No envía nada a ELM ni marca el préstamo como otorgado. ' +
-      'Deja de bloquear nuevos envíos ELM de esta CI.</p>' +
+      'Queda auditada; el bloqueo de la CI se recalcula con las reglas vigentes (cupo mensual y ventana de reenvío).</p>' +
       correctionHint +
       '<label>Resolución <select name="resolution_code" required>' +
-      optionsHtml(p.allowed_resolutions || [], PROCESS_RESOLUTION_LABELS, null) +
-      correctionOptionsHtml(p) +
+      resolutionOptionsHtml(p, dr.choice) +
+      correctionOptionsHtml(p, dr.choice) +
       '</select></label>' +
       '<label>Resultado en Credizona <select name="cz_outcome" required>' +
-      optionsHtml(['none', 'rejected', 'granted'], PROCESS_CZ_OUTCOME_LABELS, 'none') +
+      optionsHtml(['none', 'rejected', 'granted'], PROCESS_CZ_OUTCOME_LABELS, dr.cz_outcome || 'none') +
       '</select></label>' +
-      '<label>Nota (obligatoria) <textarea name="note" minlength="10" maxlength="2000" required></textarea></label>' +
+      '<label>Nota (obligatoria) <textarea name="note" minlength="10" maxlength="2000" required>' +
+      esc(dr.note || '') + '</textarea></label>' +
       '<button type="submit" class="btn">Confirmar</button> ' +
       '<button type="button" class="btn" data-elm-ops-action="cancel">Cancelar</button>' +
       '</form>'
@@ -386,6 +410,196 @@
       '<button type="button" class="btn" data-elm-ops-action="cancel">Cancelar</button>' +
       '</form>'
     );
+  }
+
+  /**
+   * "Resolver ELM" inside one solicitud detail (Rechazados / Preaprobados). The action shows only
+   * for the solicitud's own process and only when the backend lists resolutions for it (open
+   * referral, uncertain S1 / S2, Aceptado ELM); blocking another solicitud of the CI is never a
+   * reason by itself. The host re-renders its modal (onChange) and refreshes its data after a
+   * resolution (onResolved); POST /processes/:id/resolve re-validates and audits everything.
+   * @param {{ api?: string, fetch?: Function, onChange?: Function, onResolved?: Function }} opts
+   */
+  function createProcessResolver(opts) {
+    const o = opts || {};
+    const api = o.api || '';
+    const fetchFn = o.fetch || (typeof fetch === 'function' ? fetch.bind(null) : null);
+    const onChange = o.onChange || function () {};
+    const onResolved = o.onResolved || function () {};
+    const state = {
+      byCz: new Map(),
+      canAct: null,
+      openCz: null,
+      busy: false,
+      draft: {},
+      notice: new Map(),
+      seq: 0,
+    };
+
+    async function request(method, path, body) {
+      const res = await fetchFn(api + '/preaprobados/elm-ops' + path, {
+        method: method,
+        headers: body
+          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+          : { Accept: 'application/json' },
+        credentials: 'same-origin',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      return { status: res.status, data: data };
+    }
+
+    /** Re-reads the open processes (and, once, whether this user may act). */
+    async function load() {
+      const seq = ++state.seq;
+      const byCz = new Map();
+      try {
+        const reads = [request('GET', '/processes?limit=200')];
+        if (state.canAct === null) reads.push(request('GET', '/assignees'));
+        const out = await Promise.all(reads);
+        if (out[0].status === 200) {
+          (out[0].data.items || []).forEach(function (v) {
+            if ((v.allowed_resolutions || []).length) byCz.set(Number(v.cz_solicitud_id), v);
+          });
+        }
+        if (out[1]) state.canAct = out[1].status === 200;
+      } catch (_) {
+        /* no process list → no action offered */
+      }
+      if (seq !== state.seq) return;
+      state.byCz = byCz;
+      if (state.openCz != null && !byCz.has(state.openCz)) state.openCz = null;
+      onChange();
+    }
+
+    function reset() {
+      state.seq += 1;
+      state.byCz = new Map();
+      state.openCz = null;
+      state.busy = false;
+      state.draft = {};
+      state.notice = new Map();
+    }
+
+    function noticeHtml(czId) {
+      const n = state.notice.get(czId);
+      return n ? '<div class="rechazados-elm-msg is-' + esc(n.tone) + '">' + esc(n.text) + '</div>' : '';
+    }
+
+    /** HTML for one solicitud: '' when its process admits no manual resolution. */
+    function html(czId) {
+      const id = Number(czId);
+      const p = state.byCz.get(id);
+      const notice = noticeHtml(id);
+      if (!p) return notice ? '<div class="elm-resolve" data-elm-resolve-cz="' + id + '">' + notice + '</div>' : '';
+      let body =
+        '<div class="elm-resolve-head"><strong>Resolución manual ELM</strong> · Sol. ' + esc(String(id)) +
+        ' · ' + esc(processKindLabel(p)) + '</div>';
+      if (state.canAct !== true) {
+        body += '<p class="preaprobados-muted">Solo un administrador puede registrar la resolución.</p>';
+      } else if (state.openCz === id) {
+        body += resolveProcessFormHtml(p, state.draft);
+      } else {
+        body +=
+          '<button type="button" class="btn preaprobados-cell-btn" data-elm-resolve-open="' + id + '">Resolver ELM</button>';
+      }
+      return '<div class="elm-resolve" data-elm-resolve-cz="' + id + '">' + notice + body + '</div>';
+    }
+
+    /** Keeps what the operator typed across host re-renders. */
+    function handleInput(target) {
+      if (!target || !target.closest || !target.closest('[data-elm-resolve-cz]')) return false;
+      if (target.name === 'resolution_code') state.draft.choice = target.value;
+      else if (target.name === 'cz_outcome') state.draft.cz_outcome = target.value;
+      else if (target.name === 'note') state.draft.note = target.value;
+      else return false;
+      return true;
+    }
+
+    /** @returns {boolean} true when the click belonged to the resolver */
+    function handleClick(target) {
+      const box = target && target.closest ? target.closest('[data-elm-resolve-cz]') : null;
+      if (!box) return false;
+      const id = Number(box.getAttribute('data-elm-resolve-cz'));
+      if (target.closest('[data-elm-resolve-open]')) {
+        if (state.canAct !== true || !state.byCz.has(id) || state.busy) return true;
+        state.openCz = id;
+        state.draft = {};
+        state.notice.delete(id);
+        onChange();
+        return true;
+      }
+      if (target.closest('[data-elm-ops-action="cancel"]')) {
+        state.openCz = null;
+        state.draft = {};
+        onChange();
+        return true;
+      }
+      return Boolean(target.closest('button, select, textarea, option, label'));
+    }
+
+    /** @returns {Promise<boolean>} true when the form belonged to the resolver */
+    async function handleSubmit(form) {
+      const box = form && form.closest ? form.closest('[data-elm-resolve-cz]') : null;
+      if (!box || form.getAttribute('data-elm-ops-form') !== 'resolve-process') return false;
+      const id = Number(box.getAttribute('data-elm-resolve-cz'));
+      const p = state.byCz.get(id);
+      if (!p || state.busy) return true;
+      const choice = parseResolutionChoice(form.elements.resolution_code.value);
+      state.busy = true;
+      let out;
+      try {
+        out = await request('POST', '/processes/' + encodeURIComponent(p.process_id) + '/resolve', {
+          expected_updated_at: p.version,
+          resolution_code: choice.resolution_code,
+          correction: choice.correction,
+          cz_outcome: form.elements.cz_outcome.value,
+          note: form.elements.note.value,
+        });
+      } catch (_) {
+        out = { status: 0, data: {} };
+      }
+      state.busy = false;
+      const status = out.data && out.data.status;
+      if (out.status === 200) {
+        state.openCz = null;
+        state.draft = {};
+        state.notice.set(id, {
+          tone: 'ok',
+          text: 'Resolución registrada y auditada: ' +
+            (choice.correction ? 'Corrección: ' : '') +
+            (PROCESS_RESOLUTION_LABELS[choice.resolution_code] || choice.resolution_code) + '.',
+        });
+        await onResolved(id);
+        await load();
+        return true;
+      }
+      state.notice.set(id, {
+        tone: 'error',
+        text: out.status === 0 ? 'No se pudo conectar.' : actionErrorText(status),
+      });
+      if (status === 'stale' || status === 'already_resolved' || status === 'not_resolvable') {
+        state.openCz = null;
+        state.draft = {};
+        await onResolved(id);
+        await load();
+      } else {
+        onChange();
+      }
+      return true;
+    }
+
+    return {
+      load: load,
+      reset: reset,
+      html: html,
+      handleClick: handleClick,
+      handleInput: handleInput,
+      handleSubmit: handleSubmit,
+      viewFor: function (czId) { return state.byCz.get(Number(czId)) || null; },
+    };
   }
 
   /** DOM wiring. @param {{ root: HTMLElement, api: string, fmtDate: Function }} opts */
@@ -638,6 +852,7 @@
     resolveProcessFormHtml,
     parseResolutionChoice,
     resolveCaseFormHtml,
+    createProcessResolver,
     mount,
   };
 });

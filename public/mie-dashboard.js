@@ -14666,6 +14666,19 @@ init();
 
   const API = typeof API_BASE === 'string' ? API_BASE : '';
 
+  const elmResolver =
+    typeof ElmOps !== 'undefined' && ElmOps.createProcessResolver
+      ? ElmOps.createProcessResolver({
+          api: API,
+          onChange: function () {
+            if (state.detail) rerenderDetailKeepScroll();
+          },
+          onResolved: function () {
+            return state.detailCi ? refreshCiAfterElmAction(state.detailCi) : null;
+          },
+        })
+      : null;
+
   const state = {
     statusFilter: null,
     loading: false,
@@ -16182,6 +16195,24 @@ init();
     return parts.length ? '<div class="rechazados-elm-block">' + parts.join('') + '</div>' : '';
   }
 
+  /** "Resolver ELM" only for the CI's rejected solicitudes listed in this detail (own process). */
+  function elmResolveHtml(d) {
+    if (!elmResolver || !d.elm || !d.elm.available) return '';
+    return (d.elm.solicitudes || [])
+      .map(function (s) {
+        return elmResolver.html(s.cz_solicitud_id);
+      })
+      .join('');
+  }
+
+  function rerenderDetailKeepScroll() {
+    const modal = modalRoot.querySelector('.ad-modal');
+    const top = modal ? modal.scrollTop : 0;
+    renderDetailModal();
+    const next = modalRoot.querySelector('.ad-modal');
+    if (next) next.scrollTop = top;
+  }
+
   async function postElmSend(ci, czId, btn) {
     const ElmUi = window.ElmUiHelpers;
     if (!ElmUi || !ci || !czId) return;
@@ -16487,7 +16518,7 @@ init();
           showElm ? ['Fecha', 'Solicitud', 'Estado', 'ELM'] : ['Fecha', 'Solicitud', 'Estado'],
           rejRows,
         ) +
-        (showElm ? rejectedElmBlockHtml(d) : '') +
+        (showElm ? rejectedElmBlockHtml(d) + elmResolveHtml(d) : '') +
         '</div>' +
         '<div class="ad-modal-block"><div class="ad-modal-label">Encuestas</div>' +
         renderSimpleTable(encHeaders, encRows) +
@@ -16755,6 +16786,7 @@ init();
     state.form = null;
     revokePreview();
     resetExtractUiState();
+    if (elmResolver) elmResolver.reset();
     renderDetailModal();
     try {
       const res = await fetch(API + '/rechazados/' + encodeURIComponent(ci), {
@@ -16774,6 +16806,7 @@ init();
       state.detail = data && data.data ? data.data : null;
       state.detailLoading = false;
       renderDetailModal();
+      if (elmResolver && state.detail && state.detail.elm && state.detail.elm.available) elmResolver.load();
       await refreshExtractLatest({ startPoll: true });
     } catch (_err) {
       state.detailError = 'No se pudo conectar.';
@@ -16788,6 +16821,7 @@ init();
     state.detailError = null;
     state.detailLoading = false;
     state.elmSendMessage = null;
+    if (elmResolver) elmResolver.reset();
     state.showForm = false;
     state.form = null;
     state.formError = null;
@@ -17444,6 +17478,19 @@ init();
       if (btn) btn.disabled = false;
     }
   }
+  if (elmResolver) {
+    modalRoot.addEventListener('submit', function (ev) {
+      const form = ev.target;
+      if (!form || !form.closest || !form.closest('[data-elm-resolve-cz]')) return;
+      ev.preventDefault();
+      elmResolver.handleSubmit(form);
+    });
+    ['input', 'change'].forEach(function (type) {
+      modalRoot.addEventListener(type, function (ev) {
+        elmResolver.handleInput(ev.target);
+      });
+    });
+  }
   modalRoot.addEventListener('click', function (ev) {
     const t = ev.target;
     if (!t || !t.closest) return;
@@ -17457,6 +17504,8 @@ init();
     if (modalPanel) {
       /* clicks inside modal should not close via backdrop logic */
     }
+
+    if (elmResolver && elmResolver.handleClick(t)) return;
 
     const actionEl = t.closest('[data-action]');
     if (!actionEl) return;
@@ -17917,6 +17966,25 @@ init();
     elmSendingCzId: null,
   };
 
+  const elmResolver =
+    typeof ElmOps !== 'undefined' && ElmOps.createProcessResolver
+      ? ElmOps.createProcessResolver({
+          api: API,
+          onChange: function () {
+            if (!state.detail) return;
+            const modal = modalRoot.querySelector('.ad-modal');
+            const top = modal ? modal.scrollTop : 0;
+            renderDetailModal();
+            const next = modalRoot.querySelector('.ad-modal');
+            if (next) next.scrollTop = top;
+          },
+          onResolved: function (czId) {
+            loadList();
+            return Number(state.elmCzId) === Number(czId) ? loadElmStatus(state.elmCzId) : null;
+          },
+        })
+      : null;
+
   function setStatus(msg, isError) {
     statusEl.textContent = msg || '';
     statusEl.classList.toggle('mcl-error', Boolean(isError));
@@ -18348,6 +18416,7 @@ init();
     state.elmError = null;
     state.elmLoading = false;
     state.elmCzId = null;
+    if (elmResolver) elmResolver.reset();
     modalRoot.innerHTML = '';
   }
 
@@ -18433,6 +18502,7 @@ init();
     return (
       '<section><h3>ELM</h3>' +
       body +
+      (elmResolver && state.elmCzId != null ? elmResolver.html(state.elmCzId) : '') +
       '<p class="preaprobados-muted">Aceptado ELM = ELM recibió el lead y lo asignó a Copanel (S2); no implica préstamo otorgado. Otorgado ELM solo con desembolso confirmado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla, una solicitud por vez.</p>' +
       '</section>'
     );
@@ -18662,6 +18732,7 @@ init();
     state.elmError = null;
     state.elmLoading = false;
     state.elmCzId = czId;
+    if (elmResolver) elmResolver.reset();
     renderDetailModal();
     try {
       const res = await fetch(
@@ -18687,7 +18758,10 @@ init();
       state.detailLoading = false;
       renderDetailModal();
     }
-    if (state.detail) loadElmStatus(czId);
+    if (state.detail) {
+      loadElmStatus(czId);
+      if (elmResolver) elmResolver.load();
+    }
   }
 
   function preaprobadoRow(czId) {
@@ -18821,6 +18895,24 @@ init();
       closeModal();
     }
   });
+
+  if (elmResolver) {
+    // Capture: the detail dialog stops click propagation to keep the backdrop from closing it.
+    modalRoot.addEventListener('click', function (ev) {
+      elmResolver.handleClick(ev.target);
+    }, true);
+    modalRoot.addEventListener('submit', function (ev) {
+      const form = ev.target;
+      if (!form || !form.closest || !form.closest('[data-elm-resolve-cz]')) return;
+      ev.preventDefault();
+      elmResolver.handleSubmit(form);
+    });
+    ['input', 'change'].forEach(function (type) {
+      modalRoot.addEventListener(type, function (ev) {
+        elmResolver.handleInput(ev.target);
+      });
+    });
+  }
 
   if (reloadBtn) {
     reloadBtn.addEventListener('click', function () {

@@ -6251,3 +6251,26 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+
+#mie-dashboard-app .elm-resolve {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#mie-dashboard-app .elm-resolve-head {
+  margin-bottom: 6px;
+}
+
+#mie-dashboard-app .elm-ops-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+#mie-dashboard-app .elm-ops-form textarea {
+  min-width: 320px;
+  min-height: 60px;
+}
