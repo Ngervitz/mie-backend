@@ -1183,7 +1183,8 @@ test('26 list and detail share one send path (dashboard + route wiring)', async 
     assert.ok(body.includes('await refreshCiAfterElmAction(ci);'), fn);
     assert.ok(!body.includes('loadList(') && !body.includes('openDetail('), fn + ' no full reload');
   }
-  assert.ok(fullDash.includes('return H ? H.elmCellHtml(row.elm, { ci: row.ci }) : '), 'Preaprobados keeps the shared cell');
+  assert.ok(fullDash.includes('return H.preaprobadosElmStatusHtml(focus ? focus.elm : null, {'), 'Preaprobados list: shared one-line ELM state');
+  assert.ok(fullDash.includes('return H.rejectedDetailCellHtml(cell, { compact: true });'), 'Preaprobados CI detail: shared per-solicitud cell');
   assert.ok(/attachElmToRejectedRows\(optin\.rows, \{\s*supabase: supabase,\s*listView: getElmListView\(\)/.test(route));
   assert.strictEqual((route.match(/sendRejectedToElm\(/g) || []).length, 1, 'one send route');
   assert.ok(/loadCiResendHold: function \(holdCi, czId\) \{\s*return loadCiResendHold\(supabase, holdCi, czId\);/.test(route), 'endpoint uses the same guard');

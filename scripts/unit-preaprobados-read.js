@@ -630,6 +630,22 @@ const historicoRows = [
     json.data.kpis.preaprobados,
     json.data.kpis.granted + json.data.kpis.sin_resultado,
   );
+  assert.strictEqual(json.data.grouped_by, 'ci');
+  assert.deepStrictEqual(json.data.kpis_ci, {
+    preaprobados: 0,
+    aceptados_elm: 0,
+    otorgados_cdv: 0,
+    otorgados_elm: 0,
+    pendientes: 0,
+    solicitudes: 0,
+  });
+  assert.strictEqual(json.data.total_solicitudes, 0);
+  for (const bad of ['abc', '0', '1234567890', '12.5']) {
+    const r = await fetch(base + '/preaprobados/ci/' + bad);
+    assert.strictEqual(r.status, 400, 'CI ' + bad);
+  }
+  const missing = await fetch(base + '/preaprobados/ci/12345678');
+  assert.strictEqual(missing.status, 404);
   server.close();
 
   console.log('unit-preaprobados-read: OK');

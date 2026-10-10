@@ -17933,7 +17933,7 @@ init();
 })();
 
 /* ----------------------------------------------------------------------------
- * Preaprobados V1 — CZ→CDV observation (estado 8 cohort)
+ * Preaprobados — CZ→CDV cohort (estado 8) + ELM, one row per CI
  * ------------------------------------------------------------------------- */
 (function initPreaprobados() {
   const panel = document.getElementById('preaprobados-panel');
@@ -17948,6 +17948,27 @@ init();
   }
 
   const API = typeof API_BASE === 'string' ? API_BASE : '';
+  const RH = window.RechazadosHelpers || null;
+
+  const PERIODS = [
+    { id: 'hoy', label: 'Hoy' },
+    { id: '7d', label: '7 días' },
+    { id: '30d', label: '30 días' },
+    { id: 'custom', label: 'Personalizado' },
+  ];
+  const PROVEEDORES = [
+    { id: 'all', label: 'Todas las entidades' },
+    { id: 'cdv', label: 'CDV' },
+    { id: 'elm', label: 'ELM' },
+  ];
+  const RESULTADOS = [
+    { id: 'all', label: 'Todos los resultados' },
+    { id: 'granted', label: 'Otorgado CDV' },
+    { id: 'sin_resultado', label: 'Sin resultado CDV' },
+    { id: 'elm_aceptado', label: 'Aceptado ELM' },
+    { id: 'elm_otorgado', label: 'Otorgado ELM' },
+  ];
+  const CZ_ESTADOS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
   const state = {
     period: '30d',
@@ -17957,11 +17978,16 @@ init();
     proveedor: 'all',
     estado: '',
     q: '',
+    estadoLabels: {},
     loading: false,
     payload: null,
     error: null,
     offset: 0,
     limit: 100,
+    // CI detail: the group (every Preaprobados solicitud of the CI) and the selected solicitud.
+    group: null,
+    groupLoading: false,
+    groupError: null,
     detail: null,
     detailLoading: false,
     detailError: null,
@@ -17978,15 +18004,11 @@ init();
       ? ElmOps.createProcessResolver({
           api: API,
           onChange: function () {
-            if (!state.detail) return;
-            const modal = modalRoot.querySelector('.ad-modal');
-            const top = modal ? modal.scrollTop : 0;
-            renderDetailModal();
-            const next = modalRoot.querySelector('.ad-modal');
-            if (next) next.scrollTop = top;
+            if (state.group) rerenderDetailKeepingScroll();
           },
           onResolved: function (czId) {
             loadList();
+            refreshGroup();
             return Number(state.elmCzId) === Number(czId) ? loadElmStatus(state.elmCzId) : null;
           },
         })
@@ -18023,12 +18045,8 @@ init();
       return { from: startOfDayIso(from), to: endOfDayIso(now) };
     }
     if (state.period === 'custom') {
-      const from = state.fromCustom
-        ? startOfDayIso(state.fromCustom + 'T12:00:00')
-        : null;
-      const to = state.toCustom
-        ? endOfDayIso(state.toCustom + 'T12:00:00')
-        : null;
+      const from = state.fromCustom ? startOfDayIso(state.fromCustom + 'T12:00:00') : null;
+      const to = state.toCustom ? endOfDayIso(state.toCustom + 'T12:00:00') : null;
       return { from: from, to: to };
     }
     return { from: null, to: null };
@@ -18048,6 +18066,11 @@ init();
     });
   }
 
+  function dateCell(iso) {
+    if (RH && RH.formatRejectedAtDateCell) return RH.formatRejectedAtDateCell(iso);
+    return { text: fmtDate(iso), title: '' };
+  }
+
   function fmtMoney(n) {
     if (n == null || n === '') return '—';
     const x = Number(n);
@@ -18058,16 +18081,16 @@ init();
     });
   }
 
-  function fmtPct(ratio) {
-    if (ratio == null || !Number.isFinite(ratio)) return '—';
-    return (Math.round(ratio * 1000) / 10).toFixed(1) + '%';
-  }
-
   function clientName(row) {
     const parts = [];
-    if (row.nombre) parts.push(row.nombre);
-    if (row.apellido) parts.push(row.apellido);
+    if (row && row.nombre) parts.push(row.nombre);
+    if (row && row.apellido) parts.push(row.apellido);
     return parts.length ? parts.join(' ') : '—';
+  }
+
+  function estadoText(row) {
+    const id = row.estado_id != null ? String(row.estado_id) : '—';
+    return row.estado_label ? id + ' · ' + row.estado_label : id;
   }
 
   function buildQuery() {
@@ -18088,181 +18111,91 @@ init();
     return params.toString();
   }
 
+  function hasActiveFilters() {
+    return Boolean(
+      state.resultado !== 'all' || state.proveedor !== 'all' || state.estado || state.q,
+    );
+  }
+
+  function optionsHtml(items, current) {
+    return items
+      .map(function (o) {
+        return (
+          '<option value="' +
+          escapeHtml(o.id) +
+          '"' +
+          (String(current) === String(o.id) ? ' selected' : '') +
+          '>' +
+          escapeHtml(o.label) +
+          '</option>'
+        );
+      })
+      .join('');
+  }
+
+  function estadoOptions() {
+    return [{ id: '', label: 'Estado CZ: todos' }].concat(
+      CZ_ESTADOS.map(function (n) {
+        const label = state.estadoLabels[n];
+        return { id: String(n), label: 'Estado CZ ' + n + (label ? ' · ' + label : '') };
+      }),
+    );
+  }
+
+  /** One toolbar, same pills as Rechazados: period, then entity, result, CZ state and search. */
   function renderFilters() {
-    const periods = [
-      { id: 'hoy', label: 'Hoy' },
-      { id: '7d', label: '7 días' },
-      { id: '30d', label: '30 días' },
-      { id: 'custom', label: 'Personalizado' },
-    ];
-    const resultados = [
-      { id: 'all', label: 'Todos' },
-      { id: 'granted', label: 'GRANTED CDV' },
-      { id: 'sin_resultado', label: 'Sin resultado' },
-      { id: 'elm_aceptado', label: 'Aceptado ELM' },
-      { id: 'elm_otorgado', label: 'Otorgado ELM' },
-    ];
-    const proveedores = [
-      { id: 'all', label: 'Todas las entidades' },
-      { id: 'cdv', label: 'CDV' },
-      { id: 'elm', label: 'ELM' },
-    ];
-    let html =
-      '<div class="preaprobados-filter-row">' +
-      periods
-        .map(function (p) {
-          return (
-            '<button type="button" class="preaprobados-filter-btn' +
-            (state.period === p.id ? ' is-active' : '') +
-            '" data-period="' +
-            p.id +
-            '">' +
-            escapeHtml(p.label) +
-            '</button>'
-          );
-        })
-        .join('') +
-      '</div>';
-    if (state.period === 'custom') {
-      html +=
-        '<div class="preaprobados-filter-row">' +
-        '<label class="mcl-field"><span class="mcl-field-label">Desde</span>' +
-        '<input type="date" class="mcl-input" id="preaprobados-from" value="' +
-        escapeHtml(state.fromCustom) +
-        '" /></label>' +
-        '<label class="mcl-field"><span class="mcl-field-label">Hasta</span>' +
-        '<input type="date" class="mcl-input" id="preaprobados-to" value="' +
-        escapeHtml(state.toCustom) +
-        '" /></label>' +
-        '<button type="button" class="btn" data-action="apply-custom">Aplicar</button>' +
-        '</div>';
-    }
-    html +=
-      '<div class="preaprobados-filter-row">' +
-      resultados
-        .map(function (r) {
-          return (
-            '<button type="button" class="preaprobados-filter-btn' +
-            (state.resultado === r.id ? ' is-active' : '') +
-            '" data-resultado="' +
-            r.id +
-            '">' +
-            escapeHtml(r.label) +
-            '</button>'
-          );
-        })
-        .join('') +
-      '</div>';
-    html +=
-      '<div class="preaprobados-filter-row">' +
-      proveedores
-        .map(function (p) {
-          return (
-            '<button type="button" class="preaprobados-filter-btn' +
-            (state.proveedor === p.id ? ' is-active' : '') +
-            '" data-proveedor="' +
-            p.id +
-            '">' +
-            escapeHtml(p.label) +
-            '</button>'
-          );
-        })
-        .join('') +
-      '</div>';
-    html +=
-      '<div class="preaprobados-filter-row">' +
-      '<label class="mcl-field"><span class="mcl-field-label">Estado actual</span>' +
-      '<select class="mcl-select" id="preaprobados-estado">' +
-      '<option value="">Todos</option>' +
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        .map(function (n) {
-          return (
-            '<option value="' +
-            n +
-            '"' +
-            (String(state.estado) === String(n) ? ' selected' : '') +
-            '>' +
-            n +
-            '</option>'
-          );
-        })
-        .join('') +
-      '</select></label>' +
-      '<label class="mcl-field preaprobados-search-field"><span class="mcl-field-label">Buscar</span>' +
-      '<input type="search" class="mcl-input" id="preaprobados-q" placeholder="CI, nombre, cz_id, lrw" value="' +
-      escapeHtml(state.q) +
-      '" /></label>' +
-      '<button type="button" class="btn" data-action="search">Buscar</button>' +
-      '</div>';
-    filtersEl.innerHTML = html;
-  }
-
-  function renderKpis() {
-    const data = state.payload;
-    if (!data || !data.kpis) {
-      kpisEl.innerHTML = '';
-      return;
-    }
-    const k = data.kpis;
-    const inProgress =
-      data.cohort && data.cohort.in_progress
-        ? '<span class="preaprobados-in-progress">Cohorte en curso</span>'
+    const custom =
+      state.period === 'custom'
+        ? '<span class="preaprobados-custom-range">' +
+          '<input type="date" class="mcl-input" id="preaprobados-from" aria-label="Desde" value="' +
+          escapeHtml(state.fromCustom) +
+          '" />' +
+          '<span class="preaprobados-muted">–</span>' +
+          '<input type="date" class="mcl-input" id="preaprobados-to" aria-label="Hasta" value="' +
+          escapeHtml(state.toCustom) +
+          '" /></span>'
         : '';
-    const ke = data.kpis_elm;
-    const byOrigin = (ke && ke.by_origin) || {};
-    const ka = byOrigin.cz_automatic || ke;
-    const km = byOrigin.preaprobados_manual || null;
-    const elmKpis = ke
-      ? '<div class="preaprobados-kpi-scope">ELM · circuito automático (aceptados S2)</div>' +
-        '<div class="preaprobados-kpi-grid">' +
-        kpiCard('Aceptados ELM', String(ka.preaprobados_elm)) +
-        kpiCard('Otorgados ELM', String(ka.otorgados_elm)) +
-        kpiCard('Aceptados sin otorgar', String(ka.vigentes_elm)) +
-        kpiCard('Conversión ELM', fmtPct(ka.conversion_elm)) +
-        '</div>' +
-        (km
-          ? '<div class="preaprobados-kpi-scope">ELM · envío manual desde Preaprobados</div>' +
-            '<div class="preaprobados-kpi-grid">' +
-            kpiCard('Enviados a ELM', String(km.enviados_elm)) +
-            kpiCard('Aceptados ELM', String(km.preaprobados_elm)) +
-            kpiCard('Otorgados ELM', String(km.otorgados_elm)) +
-            kpiCard('Rechazados ELM', String(km.rechazados_elm)) +
-            kpiCard('Duplicado · Otro canal', String(km.duplicado_otro_canal_elm)) +
-            kpiCard('Cerrados sin préstamo', String(km.cerrados_elm)) +
-            kpiCard(
-              'En evaluación / revisión',
-              String(km.en_evaluacion_elm + km.revision_elm),
-            ) +
-            kpiCard('Conversión ELM', fmtPct(km.conversion_elm)) +
-            '</div>' +
-            '<p class="preaprobados-muted">Total ELM (automático + manual): ' +
-            escapeHtml(String(ke.preaprobados_elm)) +
-            ' aceptados ELM, ' +
-            escapeHtml(String(ke.otorgados_elm)) +
-            ' otorgados. Aceptado ELM = ELM recibió el lead y lo asignó a Copanel; no es un préstamo otorgado.</p>'
-          : '')
-      : '';
-    const elmUnavailable =
-      data.elm_available === false
-        ? '<p class="preaprobados-muted">Cohorte ELM no disponible en este momento.</p>'
-        : '';
-    kpisEl.innerHTML =
-      '<div class="preaprobados-kpi-scope">CDV · cohorte estado 8</div>' +
-      '<div class="preaprobados-kpi-grid">' +
-      kpiCard('Preaprobados', String(k.preaprobados)) +
-      kpiCard('GRANTED CDV', String(k.granted)) +
-      kpiCard('Sin resultado', String(k.sin_resultado)) +
-      kpiCard('$ otorgado', fmtMoney(k.monto_otorgado)) +
-      kpiCard('Conversión', fmtPct(k.conversion)) +
+    filtersEl.innerHTML =
+      '<div class="preaprobados-toolbar">' +
+      '<div class="preaprobados-periods" role="group" aria-label="Período">' +
+      PERIODS.map(function (p) {
+        return (
+          '<button type="button" class="rechazados-filter-btn' +
+          (state.period === p.id ? ' is-active' : '') +
+          '" data-period="' +
+          p.id +
+          '">' +
+          escapeHtml(p.label) +
+          '</button>'
+        );
+      }).join('') +
       '</div>' +
-      inProgress +
-      elmKpis +
-      elmUnavailable;
+      custom +
+      '<select class="mcl-select preaprobados-select" id="preaprobados-proveedor" aria-label="Entidad">' +
+      optionsHtml(PROVEEDORES, state.proveedor) +
+      '</select>' +
+      '<select class="mcl-select preaprobados-select" id="preaprobados-resultado" aria-label="Resultado">' +
+      optionsHtml(RESULTADOS, state.resultado) +
+      '</select>' +
+      '<select class="mcl-select preaprobados-select" id="preaprobados-estado" aria-label="Estado CZ actual">' +
+      optionsHtml(estadoOptions(), state.estado) +
+      '</select>' +
+      '<input type="search" class="mcl-input preaprobados-search" id="preaprobados-q" aria-label="Buscar" placeholder="Buscar CI, nombre, solicitud o lrw" value="' +
+      escapeHtml(state.q) +
+      '" />' +
+      (hasActiveFilters()
+        ? '<button type="button" class="btn preaprobados-clear" data-action="clear-filters">Limpiar</button>'
+        : '') +
+      '</div>';
   }
 
-  function kpiCard(label, value) {
+  function kpiCard(label, value, title, tone) {
     return (
-      '<div class="preaprobados-kpi-card">' +
+      '<div class="preaprobados-kpi-card' +
+      (tone ? ' is-' + tone : '') +
+      '" title="' +
+      escapeHtml(title) +
+      '">' +
       '<div class="preaprobados-kpi-value">' +
       escapeHtml(value) +
       '</div>' +
@@ -18272,11 +18205,43 @@ init();
     );
   }
 
-  function resultadoBadge(resultado) {
-    if (resultado === 'granted') {
-      return '<span class="preaprobados-result is-granted">GRANTED CDV</span>';
+  /** Five KPIs counted per CI over the listed groups (automatic and manual ELM sends included). */
+  function renderKpis() {
+    const data = state.payload;
+    const kc = data && data.kpis_ci;
+    if (!kc) {
+      kpisEl.innerHTML = '';
+      return;
     }
-    return '<span class="preaprobados-result is-sin">Sin resultado</span>';
+    const notes = [];
+    if (data.cohort && data.cohort.in_progress) notes.push('Cohorte en curso.');
+    if (data.elm_available === false) notes.push('Estado ELM no disponible en este momento.');
+    kpisEl.innerHTML =
+      '<div class="preaprobados-kpi-grid preaprobados-kpi-row">' +
+      kpiCard('Preaprobados', String(kc.preaprobados), 'CI distintas con al menos una solicitud en la cohorte (CDV o ELM).') +
+      kpiCard(
+        'Aceptados ELM',
+        String(kc.aceptados_elm),
+        'CI con una solicitud aceptada por ELM (S2), por circuito automático o envío manual desde Preaprobados. Incluye las que después ELM otorgó. No es un préstamo otorgado.',
+        'referred',
+      ) +
+      kpiCard('Otorgados CDV', String(kc.otorgados_cdv), 'CI con préstamo otorgado por CDV.', 'granted') +
+      kpiCard('Otorgados ELM', String(kc.otorgados_elm), 'CI con desembolso confirmado por ELM.', 'granted') +
+      kpiCard('Pendientes', String(kc.pendientes), 'CI sin préstamo otorgado por CDV ni por ELM.') +
+      '</div>' +
+      '<p class="preaprobados-muted preaprobados-kpi-note">Conteo por CI: una CI con varias solicitudes cuenta una vez. Aceptado ELM = ELM recibió el lead y lo asignó a Copanel; no es un préstamo otorgado.' +
+      (notes.length ? ' ' + escapeHtml(notes.join(' ')) : '') +
+      '</p>';
+  }
+
+  function cdvBadge(status) {
+    if (status === 'granted') {
+      return '<span class="preaprobados-result is-granted">Otorgado CDV</span>';
+    }
+    if (status === 'sin_resultado') {
+      return '<span class="preaprobados-result is-sin">Sin resultado</span>';
+    }
+    return '<span class="preaprobados-result is-none" title="Fuera de la cohorte CDV (solo ELM)">—</span>';
   }
 
   function elmMemberBadge(m) {
@@ -18290,22 +18255,42 @@ init();
     );
   }
 
-  function resultadoCell(row) {
-    if (row.proveedor === 'elm') return elmMemberBadge(row.elm_member);
-    let html = resultadoBadge(row.resultado);
-    if (row.proveedor === 'cdv_elm' && row.elm_member) html += ' ' + elmMemberBadge(row.elm_member);
-    return html;
+  function solicitudesOf(group) {
+    return group && Array.isArray(group.solicitudes) && group.solicitudes.length ? group.solicitudes : group ? [group] : [];
   }
 
-  function proveedorCell(row) {
-    if (row.proveedor === 'elm') return 'ELM';
-    if (row.proveedor === 'cdv_elm') return 'CDV · ELM';
-    return 'CDV';
+  function findSolicitud(group, czId) {
+    const sols = solicitudesOf(group);
+    for (let i = 0; i < sols.length; i += 1) {
+      if (Number(sols[i].cz_id) === Number(czId)) return sols[i];
+    }
+    return null;
   }
 
-  function elmCell(row) {
+  /** Solicitud whose ELM state the row shows (server-picked: most advanced ELM result). */
+  function focusSolicitud(group) {
+    return findSolicitud(group, group.elm_focus_cz_id) || solicitudesOf(group)[0];
+  }
+
+  function elmStatusCell(group) {
     const H = window.ElmUiHelpers;
-    return H ? H.elmCellHtml(row.elm, { ci: row.ci }) : '—';
+    if (!H) return '—';
+    const focus = focusSolicitud(group);
+    const member =
+      (focus && focus.elm_member) ||
+      solicitudesOf(group)
+        .map(function (s) {
+          return s.elm_member;
+        })
+        .filter(Boolean)[0] ||
+      null;
+    return H.preaprobadosElmStatusHtml(focus ? focus.elm : null, {
+      czId: solicitudesOf(group).length > 1 && focus ? focus.cz_id : null,
+      member: member,
+      others: solicitudesOf(group).filter(function (s) {
+        return s !== focus;
+      }),
+    });
   }
 
   function elmSendMessageHtml() {
@@ -18314,20 +18299,14 @@ init();
     return (
       '<div class="rechazados-elm-msg is-' +
       escapeHtml(msg.tone) +
-      '">Solicitud ' +
+      '">' +
+      (msg.ci != null ? 'CI ' + escapeHtml(String(msg.ci)) + ' · s' : 'S') +
+      'olicitud ' +
       escapeHtml(String(msg.czId)) +
       ': ' +
       escapeHtml(msg.text) +
       '</div>'
     );
-  }
-
-  function estadoCell(row) {
-    const id = row.estado_id != null ? String(row.estado_id) : '—';
-    if (row.estado_label) {
-      return escapeHtml(id) + ' · ' + escapeHtml(row.estado_label);
-    }
-    return escapeHtml(id);
   }
 
   function renderTable() {
@@ -18337,48 +18316,49 @@ init();
       return;
     }
     if (state.error) {
-      resultsEl.innerHTML =
-        '<p class="mcl-empty">' + escapeHtml(state.error) + '</p>';
+      resultsEl.innerHTML = '<p class="mcl-empty">' + escapeHtml(state.error) + '</p>';
       return;
     }
     const rows = (data && data.rows) || [];
     if (!rows.length) {
-      resultsEl.innerHTML =
-        '<p class="mcl-empty">Sin preaprobados en el período.</p>';
+      resultsEl.innerHTML = '<p class="mcl-empty">Sin preaprobados en el período.</p>';
       return;
     }
     const body = rows
-      .map(function (row) {
+      .map(function (row, idx) {
+        const name = clientName(row);
+        const date = dateCell(row.cohort_entered_at);
+        const count = Number(row.solicitudes_count) || solicitudesOf(row).length;
         return (
           '<tr>' +
-          '<td>' +
-          escapeHtml(fmtDate(row.cohort_entered_at)) +
+          '<td class="preaprobados-col-date"' +
+          (date.title ? ' title="' + escapeHtml(date.title) + '"' : '') +
+          '>' +
+          escapeHtml(date.text) +
           '</td>' +
-          '<td title="' +
-          escapeHtml(clientName(row)) +
-          '">' +
-          escapeHtml(clientName(row)) +
-          '</td>' +
-          '<td>' +
+          '<td class="preaprobados-col-name" title="' +
+          escapeHtml(name) +
+          '"><span class="rechazados-name-text">' +
+          escapeHtml(name) +
+          '</span></td>' +
+          '<td class="preaprobados-col-ci">' +
           escapeHtml(row.ci != null ? String(row.ci) : '—') +
+          (count > 1
+            ? ' <span class="preaprobados-sol-count" title="' +
+              escapeHtml(count + ' solicitudes en Preaprobados') +
+              '">' +
+              escapeHtml(String(count)) +
+              ' sol.</span>'
+            : '') +
           '</td>' +
-          '<td>' +
-          escapeHtml(proveedorCell(row)) +
+          '<td class="preaprobados-col-cdv">' +
+          cdvBadge(row.cdv_status) +
           '</td>' +
-          '<td>' +
-          estadoCell(row) +
+          '<td class="preaprobados-col-elm">' +
+          elmStatusCell(row) +
           '</td>' +
-          '<td>' +
-          resultadoCell(row) +
-          '</td>' +
-          '<td class="num">' +
-          escapeHtml(fmtMoney(row.monto_otorgado)) +
-          '</td>' +
-          '<td>' +
-          elmCell(row) +
-          '</td>' +
-          '<td><button type="button" class="btn preaprobados-cell-btn" data-action="view" data-cz-id="' +
-          escapeHtml(String(row.cz_id)) +
+          '<td class="preaprobados-col-ver"><button type="button" class="btn rechazados-cell-btn" data-action="view" data-row="' +
+          idx +
           '">Ver</button></td>' +
           '</tr>'
         );
@@ -18386,15 +18366,18 @@ init();
       .join('');
     const total = data.total != null ? data.total : rows.length;
     const offset = data.offset != null ? data.offset : 0;
-    const limit = data.limit != null ? data.limit : state.limit;
     const canPrev = offset > 0;
     const canNext = offset + rows.length < total;
     resultsEl.innerHTML =
       elmSendMessageHtml() +
-      '<div class="table-wrap"><table class="ga4-table preaprobados-table">' +
+      '<div class="table-wrap"><table class="ga4-table rechazados-table preaprobados-table">' +
       '<thead><tr>' +
-      '<th>Fecha ingreso</th><th>Cliente</th><th>CI</th><th>Entidad</th>' +
-      '<th>Estado actual</th><th>Resultado</th><th>Monto otorgado</th><th>ELM</th><th></th>' +
+      '<th class="preaprobados-col-date">Fecha</th>' +
+      '<th class="preaprobados-col-name">Cliente</th>' +
+      '<th class="preaprobados-col-ci">CI</th>' +
+      '<th class="preaprobados-col-cdv">Estado CDV</th>' +
+      '<th class="preaprobados-col-elm">Estado ELM</th>' +
+      '<th class="preaprobados-col-ver">Ver</th>' +
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>' +
@@ -18405,7 +18388,7 @@ init();
       escapeHtml(String(offset + rows.length)) +
       ' de ' +
       escapeHtml(String(total)) +
-      '</span>' +
+      ' CI</span>' +
       '<button type="button" class="btn" data-action="prev-page"' +
       (canPrev ? '' : ' disabled') +
       '>Anterior</button>' +
@@ -18416,6 +18399,9 @@ init();
   }
 
   function closeModal() {
+    state.group = null;
+    state.groupLoading = false;
+    state.groupError = null;
     state.detail = null;
     state.detailError = null;
     state.detailLoading = false;
@@ -18510,7 +18496,7 @@ init();
       '<section><h3>ELM</h3>' +
       body +
       (elmResolver && state.elmCzId != null ? elmResolver.html(state.elmCzId) : '') +
-      '<p class="preaprobados-muted">Aceptado ELM = ELM recibió el lead y lo asignó a Copanel (S2); no implica préstamo otorgado. Otorgado ELM solo con desembolso confirmado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla, una solicitud por vez.</p>' +
+      '<p class="preaprobados-muted">Aceptado ELM = ELM recibió el lead y lo asignó a Copanel (S2); no implica préstamo otorgado. Otorgado ELM solo con desembolso confirmado. El envío manual a ELM se hace con «Enviar a ELM» en la tabla de solicitudes, una solicitud por vez.</p>' +
       '</section>'
     );
   }
@@ -18545,7 +18531,7 @@ init();
     state.elm = null;
     state.elmError = null;
     state.elmLoading = true;
-    renderDetailModal();
+    rerenderDetailKeepingScroll();
     try {
       const res = await fetch(
         API + '/preaprobados/' + encodeURIComponent(czId) + '/elm',
@@ -18569,34 +18555,88 @@ init();
     } finally {
       if (state.elmCzId === czId) {
         state.elmLoading = false;
-        renderDetailModal();
+        rerenderDetailKeepingScroll();
       }
     }
   }
 
-  function renderDetailModal() {
-    if (!state.detail && !state.detailLoading && !state.detailError) {
-      modalRoot.innerHTML = '';
-      return;
+  /** ELM cell of one solicitud in the CI detail: state and answer, or "Enviar a ELM" bound to it. */
+  function solicitudElmCell(s) {
+    const H = window.ElmUiHelpers;
+    if (!H) return '—';
+    const cell = s.elm;
+    const isProcess =
+      cell && cell.kind && ['not_sent', 'not_sendable', 'unavailable'].indexOf(cell.kind) < 0;
+    if (!isProcess && s.elm_member) return elmMemberBadge(s.elm_member);
+    if (!cell || cell.kind === 'unavailable') return '<span class="preaprobados-elm is-unavailable">—</span>';
+    if (Number(state.elmSendingCzId) === Number(s.cz_id)) {
+      return '<span class="preaprobados-muted">Enviando…</span>';
     }
-    if (state.detailLoading) {
-      modalRoot.innerHTML =
-        '<div class="ad-modal-backdrop" data-action="close-modal">' +
-        '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true">' +
-        '<p>Cargando…</p></div></div>';
-      return;
-    }
-    if (state.detailError) {
-      modalRoot.innerHTML =
-        '<div class="ad-modal-backdrop" data-action="close-modal">' +
-        '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true">' +
-        '<button type="button" class="btn" data-action="close-modal">Cerrar</button>' +
-        '<p class="mcl-error">' +
-        escapeHtml(state.detailError) +
-        '</p></div></div>';
-      return;
-    }
+    return H.rejectedDetailCellHtml(cell, { compact: true });
+  }
+
+  function solicitudesTableHtml(group) {
+    const sols = solicitudesOf(group);
+    const selected = Number(state.elmCzId);
+    const body = sols
+      .map(function (s) {
+        const isSel = Number(s.cz_id) === selected;
+        const date = dateCell(s.cohort_entered_at);
+        return (
+          '<tr class="preaprobados-sol-row' +
+          (isSel ? ' is-selected' : '') +
+          '">' +
+          '<td class="preaprobados-col-date"' +
+          (date.title ? ' title="' + escapeHtml(date.title) + '"' : '') +
+          '>' +
+          escapeHtml(date.text) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(String(s.cz_id)) +
+          '</td>' +
+          '<td class="preaprobados-ellipsis" title="' +
+          escapeHtml(estadoText(s)) +
+          '">' +
+          escapeHtml(estadoText(s)) +
+          '</td>' +
+          '<td>' +
+          (s.proveedor === 'elm' ? cdvBadge(null) : cdvBadge(s.resultado === 'granted' ? 'granted' : 'sin_resultado')) +
+          (s.resultado === 'granted' && s.monto_otorgado != null
+            ? ' <span class="preaprobados-muted">$ ' + escapeHtml(fmtMoney(s.monto_otorgado)) + '</span>'
+            : '') +
+          '</td>' +
+          '<td class="preaprobados-sol-elm">' +
+          solicitudElmCell(s) +
+          '</td>' +
+          '<td class="preaprobados-col-ver">' +
+          (isSel
+            ? '<span class="preaprobados-muted">Viendo</span>'
+            : '<button type="button" class="btn rechazados-cell-btn" data-action="select-sol" data-cz-id="' +
+              escapeHtml(String(s.cz_id)) +
+              '">Ver</button>') +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="table-wrap"><table class="ga4-table preaprobados-sol-table"><thead><tr>' +
+      '<th>Fecha</th><th>Solicitud</th><th>Estado CZ</th><th>CDV</th><th>ELM</th><th></th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>'
+    );
+  }
+
+  function summaryItem(label, valueHtml) {
+    return '<div><div class="ad-modal-label">' + escapeHtml(label) + '</div><div>' + valueHtml + '</div></div>';
+  }
+
+  function selectedSolicitudHtml() {
+    if (state.detailLoading) return '<p class="preaprobados-muted">Cargando solicitud…</p>';
+    if (state.detailError) return '<p class="mcl-error">' + escapeHtml(state.detailError) + '</p>';
     const d = state.detail;
+    if (!d) return '';
     const hist = (d.historico || [])
       .map(function (h) {
         return (
@@ -18613,25 +18653,13 @@ init();
         );
       })
       .join('');
-    modalRoot.innerHTML =
-      '<div class="ad-modal-backdrop" data-action="close-modal">' +
-      '<div class="ad-modal preaprobados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle preaprobado">' +
-      '<div class="preaprobados-modal-header">' +
-      '<h2>Detalle · ' +
-      escapeHtml(String(d.cz_id)) +
-      '</h2>' +
-      '<button type="button" class="btn" data-action="close-modal">Cerrar</button>' +
-      '</div>' +
-      '<section><h3>Persona</h3><dl class="preaprobados-dl">' +
-      dlRow('Nombre', [d.nombre, d.apellido].filter(Boolean).join(' ') || '—') +
-      dlRow('CI', d.ci != null ? String(d.ci) : '—') +
-      dlRow('Email', d.email || '—') +
-      '</dl></section>' +
+    return (
       '<section><h3>Solicitud</h3><dl class="preaprobados-dl">' +
       dlRow('cz_id', String(d.cz_id)) +
       dlRow('Ingreso cohorte', fmtDate(d.cohort_entered_at)) +
       dlRow('fecha_reg', fmtDate(d.fecha_reg)) +
       dlRow('lrw_id', d.lrw_id || '—') +
+      dlRow('Email', d.email || '—') +
       '</dl></section>' +
       '<section><h3>Resultado</h3><dl class="preaprobados-dl">' +
       dlRow(
@@ -18640,15 +18668,8 @@ init();
       ) +
       (d.proveedor === 'elm'
         ? ''
-        : dlRow(
-            'Resultado CDV',
-            d.resultado === 'granted' ? 'GRANTED CDV' : 'Sin resultado',
-          )) +
-      dlRow(
-        'Estado actual',
-        (d.estado_id != null ? String(d.estado_id) : '—') +
-          (d.estado_label ? ' · ' + d.estado_label : ''),
-      ) +
+        : dlRow('Resultado CDV', d.resultado === 'granted' ? 'Otorgado CDV' : 'Sin resultado')) +
+      dlRow('Estado actual', estadoText(d)) +
       dlRow('Monto otorgado', fmtMoney(d.monto_otorgado)) +
       '</dl></section>' +
       renderElmMemberSection(d) +
@@ -18666,7 +18687,68 @@ init();
           hist +
           '</tbody></table></div>'
         : '<p class="mcl-empty">Sin eventos en JANUS.</p>') +
-      '</section></div></div>';
+      '</section>'
+    );
+  }
+
+  function renderDetailModal() {
+    const g = state.group;
+    if (!g) {
+      modalRoot.innerHTML = '';
+      return;
+    }
+    const sols = solicitudesOf(g);
+    const msg = state.elmSendMessage;
+    const ciMsg =
+      msg && findSolicitud(g, msg.czId)
+        ? '<div class="rechazados-elm-msg is-' +
+          escapeHtml(msg.tone) +
+          '">Solicitud ' +
+          escapeHtml(String(msg.czId)) +
+          ': ' +
+          escapeHtml(msg.text) +
+          '</div>'
+        : '';
+    modalRoot.innerHTML =
+      '<div class="ad-modal-backdrop" data-action="close-modal">' +
+      '<div class="ad-modal rechazados-detail-modal preaprobados-detail-modal" role="dialog" aria-modal="true" aria-label="Detalle preaprobado">' +
+      '<div class="ad-modal-header">' +
+      '<h3 class="ad-modal-title">Detalle' +
+      (g.ci != null ? ' · CI ' + escapeHtml(String(g.ci)) : '') +
+      '</h3>' +
+      '<button type="button" class="btn" data-action="close-modal">Cerrar</button>' +
+      '</div>' +
+      '<div class="rechazados-detail-summary">' +
+      summaryItem('Nombre', escapeHtml(clientName(g))) +
+      summaryItem('CI', escapeHtml(g.ci != null ? String(g.ci) : '—')) +
+      summaryItem('Solicitudes', escapeHtml(String(sols.length))) +
+      summaryItem('Estado CDV', cdvBadge(g.cdv_status)) +
+      summaryItem('Estado ELM', elmStatusCell(g)) +
+      summaryItem('Monto otorgado CDV', escapeHtml(fmtMoney(g.monto_otorgado))) +
+      '</div>' +
+      ciMsg +
+      '<div class="ad-modal-block"><div class="ad-modal-label">Solicitudes en Preaprobados (' +
+      escapeHtml(String(sols.length)) +
+      ')</div>' +
+      (state.groupLoading ? '<p class="preaprobados-muted">Actualizando solicitudes de la CI…</p>' : '') +
+      (state.groupError ? '<p class="mcl-error">' + escapeHtml(state.groupError) + '</p>' : '') +
+      solicitudesTableHtml(g) +
+      '</div>' +
+      '<div class="ad-modal-block preaprobados-selected"><div class="ad-modal-label">Solicitud ' +
+      escapeHtml(String(state.elmCzId != null ? state.elmCzId : '—')) +
+      '</div>' +
+      selectedSolicitudHtml() +
+      '</div>' +
+      '</div></div>';
+  }
+
+  function rerenderDetailKeepingScroll() {
+    if (!state.group) return;
+    const modal = modalRoot.querySelector('.ad-modal');
+    const top = modal ? modal.scrollTop : 0;
+    renderDetailModal();
+    const next = modalRoot.querySelector('.ad-modal');
+    if (next) next.scrollTop = top;
   }
 
   function dlRow(label, value) {
@@ -18679,11 +18761,24 @@ init();
     );
   }
 
+  function rememberEstadoLabels(rows) {
+    let added = false;
+    (rows || []).forEach(function (g) {
+      solicitudesOf(g).forEach(function (s) {
+        const id = Number(s.estado_id);
+        if (id >= 1 && id <= 16 && s.estado_label && state.estadoLabels[id] !== s.estado_label) {
+          state.estadoLabels[id] = s.estado_label;
+          added = true;
+        }
+      });
+    });
+    return added;
+  }
+
   async function loadList() {
     state.loading = true;
     state.error = null;
     setStatus('Cargando…', false);
-    renderFilters();
     renderTable();
     try {
       const res = await fetch(API + '/preaprobados?' + buildQuery(), {
@@ -18714,10 +18809,15 @@ init();
         return;
       }
       state.payload = data.data;
+      const totalCi = data.data.total || 0;
+      const totalSol = data.data.total_solicitudes != null ? data.data.total_solicitudes : totalCi;
       setStatus(
-        String(data.data.total || 0) + ' preaprobado(s) en cohorte',
+        totalCi + ' CI · ' + totalSol + ' solicitud' + (totalSol === 1 ? '' : 'es') + ' en la cohorte',
         false,
       );
+      if (rememberEstadoLabels(data.data.rows) && !filtersEl.contains(document.activeElement)) {
+        renderFilters();
+      }
       renderKpis();
       renderTable();
     } catch (_err) {
@@ -18731,19 +18831,20 @@ init();
     }
   }
 
-  async function openDetail(czId) {
-    state.detailLoading = true;
-    state.detailError = null;
+  /** Selected solicitud of the open CI: its CDV detail, history and ELM status. */
+  async function selectSolicitud(czId) {
+    const id = Number(czId);
     state.detail = null;
+    state.detailError = null;
+    state.detailLoading = true;
     state.elm = null;
     state.elmError = null;
     state.elmLoading = false;
-    state.elmCzId = czId;
-    if (elmResolver) elmResolver.reset();
-    renderDetailModal();
+    state.elmCzId = id;
+    rerenderDetailKeepingScroll();
     try {
       const res = await fetch(
-        API + '/preaprobados/' + encodeURIComponent(czId),
+        API + '/preaprobados/' + encodeURIComponent(id),
         {
           headers: { Accept: 'application/json' },
           credentials: 'same-origin',
@@ -18752,31 +18853,63 @@ init();
       const data = await res.json().catch(function () {
         return {};
       });
+      if (state.elmCzId !== id) return;
       if (!res.ok || !data.ok) {
         state.detailError = (data && data.error) || 'Error al cargar detalle';
-        state.detail = null;
       } else {
         state.detail = data.data;
       }
     } catch (_err) {
+      if (state.elmCzId !== id) return;
       state.detailError = 'No se pudo conectar.';
-      state.detail = null;
-    } finally {
-      state.detailLoading = false;
-      renderDetailModal();
     }
-    if (state.detail) {
-      loadElmStatus(czId);
-      if (elmResolver) elmResolver.load();
-    }
+    state.detailLoading = false;
+    if (state.detail) loadElmStatus(id);
+    else rerenderDetailKeepingScroll();
   }
 
-  function preaprobadoRow(czId) {
-    const rows = (state.payload && state.payload.rows) || [];
-    for (let i = 0; i < rows.length; i += 1) {
-      if (String(rows[i].cz_id) === String(czId)) return rows[i];
+  /** Re-reads every Preaprobados solicitud of the open CI (no list filters) with fresh ELM cells. */
+  async function refreshGroup() {
+    const g = state.group;
+    if (!g || g.ci == null) return;
+    const ci = g.ci;
+    state.groupLoading = true;
+    state.groupError = null;
+    rerenderDetailKeepingScroll();
+    try {
+      const res = await fetch(API + '/preaprobados/ci/' + encodeURIComponent(ci), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!state.group || state.group.ci !== ci) return;
+      if (res.ok && data.ok && data.data) {
+        state.group = data.data;
+      } else if (res.status !== 404) {
+        state.groupError = (data && data.error) || 'No se pudieron actualizar las solicitudes de la CI';
+      }
+    } catch (_err) {
+      if (!state.group || state.group.ci !== ci) return;
+      state.groupError = 'No se pudieron actualizar las solicitudes de la CI';
     }
-    return null;
+    state.groupLoading = false;
+    if (state.elmCzId != null && !findSolicitud(state.group, state.elmCzId)) {
+      selectSolicitud(focusSolicitud(state.group).cz_id);
+      return;
+    }
+    rerenderDetailKeepingScroll();
+  }
+
+  /** CI detail: opens with the list row, then reads every solicitud of the CI. */
+  function openGroup(row) {
+    closeModal();
+    state.group = row;
+    const focus = focusSolicitud(row);
+    selectSolicitud(focus ? focus.cz_id : row.cz_id);
+    refreshGroup();
+    if (elmResolver) elmResolver.load();
   }
 
   /**
@@ -18786,12 +18919,12 @@ init();
   async function postPreaprobadoElmSend(czId, btn) {
     const ElmUi = window.ElmUiHelpers;
     if (!ElmUi || !czId || state.elmSendingCzId) return;
-    const row = preaprobadoRow(czId);
+    const g = state.group;
     const notice = btn ? btn.getAttribute('data-elm-notice') : null;
     const ok = window.confirm(
       '¿Enviar la solicitud ' +
         czId +
-        (row && row.ci != null ? ' (CI ' + row.ci + ', ' + clientName(row) + ')' : '') +
+        (g && g.ci != null ? ' (CI ' + g.ci + ', ' + clientName(g) + ')' : '') +
         ' a ELM?\n\n' +
         'Se envían a ELM los datos de esta solicitud. Se ejecuta la evaluación inicial (S1) y, si es ' +
         'favorable, la derivación a ventas de ELM (S2). Una derivación no es un préstamo otorgado.\n\n' +
@@ -18822,54 +18955,75 @@ init();
     } finally {
       state.elmSendingCzId = null;
     }
-    state.elmSendMessage = { czId: czId, tone: message.tone, text: message.text };
-    await loadList();
+    state.elmSendMessage = { ci: g ? g.ci : null, czId: czId, tone: message.tone, text: message.text };
+    loadList();
+    if (state.group && g && state.group.ci === g.ci) {
+      await refreshGroup();
+      if (Number(state.elmCzId) === Number(czId)) loadElmStatus(state.elmCzId);
+    }
+  }
+
+  function applyFilters() {
+    state.elmSendMessage = null;
+    state.offset = 0;
+    loadList();
   }
 
   filtersEl.addEventListener('click', function (ev) {
     const t = ev.target;
-    if (!t) return;
-    state.elmSendMessage = null;
-    const periodBtn = t.closest && t.closest('[data-period]');
+    if (!t || !t.closest) return;
+    const periodBtn = t.closest('[data-period]');
     if (periodBtn) {
       state.period = periodBtn.getAttribute('data-period');
-      state.offset = 0;
       renderFilters();
-      if (state.period !== 'custom') loadList();
+      applyFilters();
       return;
     }
-    const resBtn = t.closest && t.closest('[data-resultado]');
-    if (resBtn) {
-      state.resultado = resBtn.getAttribute('data-resultado');
-      state.offset = 0;
-      loadList();
-      return;
+    if (t.closest('[data-action="clear-filters"]')) {
+      state.resultado = 'all';
+      state.proveedor = 'all';
+      state.estado = '';
+      state.q = '';
+      renderFilters();
+      applyFilters();
     }
-    const provBtn = t.closest && t.closest('[data-proveedor]');
-    if (provBtn) {
-      state.proveedor = provBtn.getAttribute('data-proveedor');
-      state.offset = 0;
-      loadList();
-      return;
-    }
-    const action = t.getAttribute && t.getAttribute('data-action');
-    if (action === 'apply-custom') {
-      const fromEl = document.getElementById('preaprobados-from');
-      const toEl = document.getElementById('preaprobados-to');
-      state.fromCustom = fromEl ? fromEl.value : '';
-      state.toCustom = toEl ? toEl.value : '';
-      state.offset = 0;
-      loadList();
-      return;
-    }
-    if (action === 'search') {
-      const qEl = document.getElementById('preaprobados-q');
-      const estEl = document.getElementById('preaprobados-estado');
-      state.q = qEl ? String(qEl.value || '').trim() : '';
-      state.estado = estEl ? String(estEl.value || '') : '';
-      state.offset = 0;
-      loadList();
-    }
+  });
+
+  filtersEl.addEventListener('change', function (ev) {
+    const t = ev.target;
+    if (!t || !t.id) return;
+    if (t.id === 'preaprobados-proveedor') state.proveedor = t.value || 'all';
+    else if (t.id === 'preaprobados-resultado') state.resultado = t.value || 'all';
+    else if (t.id === 'preaprobados-estado') state.estado = t.value || '';
+    else if (t.id === 'preaprobados-from') state.fromCustom = t.value || '';
+    else if (t.id === 'preaprobados-to') state.toCustom = t.value || '';
+    else if (t.id === 'preaprobados-q') {
+      const q = String(t.value || '').trim();
+      if (q === state.q) return;
+      state.q = q;
+    } else return;
+    renderFilters();
+    applyFilters();
+  });
+
+  filtersEl.addEventListener('keydown', function (ev) {
+    const t = ev.target;
+    if (!t || t.id !== 'preaprobados-q' || ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const q = String(t.value || '').trim();
+    if (q === state.q) return;
+    state.q = q;
+    applyFilters();
+  });
+
+  filtersEl.addEventListener('search', function (ev) {
+    const t = ev.target;
+    if (!t || t.id !== 'preaprobados-q') return;
+    const q = String(t.value || '').trim();
+    if (q === state.q) return;
+    state.q = q;
+    renderFilters();
+    applyFilters();
   });
 
   resultsEl.addEventListener('click', function (ev) {
@@ -18879,11 +19033,9 @@ init();
     if (!btn) return;
     const action = btn.getAttribute('data-action');
     if (action === 'view') {
-      openDetail(btn.getAttribute('data-cz-id'));
-      return;
-    }
-    if (action === 'elm-send' && !btn.disabled) {
-      postPreaprobadoElmSend(btn.getAttribute('data-cz-id'), btn);
+      const rows = (state.payload && state.payload.rows) || [];
+      const row = rows[Number(btn.getAttribute('data-row'))];
+      if (row) openGroup(row);
       return;
     }
     if (action === 'prev-page' && !btn.disabled) {
@@ -18903,6 +19055,17 @@ init();
     // The backdrop carries data-action="close-modal" too: only a click on the backdrop itself closes.
     if (t.classList.contains('ad-modal-backdrop') || t.closest('button[data-action="close-modal"]')) {
       closeModal();
+      return;
+    }
+    const btn = t.closest('button[data-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-action');
+    if (action === 'select-sol') {
+      selectSolicitud(btn.getAttribute('data-cz-id'));
+      return;
+    }
+    if (action === 'elm-send' && !btn.disabled) {
+      postPreaprobadoElmSend(btn.getAttribute('data-cz-id'), btn);
     }
   });
 

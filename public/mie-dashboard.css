@@ -6076,77 +6076,100 @@
   }
 }
 
-/* Preaprobados V1 */
+/* Preaprobados: one row per CI, same density as Rechazados */
 #mie-dashboard-app .preaprobados-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   margin: 12px 0 8px;
 }
-#mie-dashboard-app .preaprobados-filter-row {
+#mie-dashboard-app .preaprobados-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  align-items: flex-end;
 }
-#mie-dashboard-app .preaprobados-filter-btn {
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border-radius: 999px;
-  padding: 6px 12px;
+#mie-dashboard-app .preaprobados-periods {
+  display: flex;
+  gap: 6px;
+}
+#mie-dashboard-app .preaprobados-custom-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+#mie-dashboard-app .preaprobados-custom-range .mcl-input {
+  width: auto;
+  padding: 5px 8px;
+}
+#mie-dashboard-app .preaprobados-select {
+  width: auto;
+  max-width: 230px;
+  padding: 5px 8px;
   font-size: 13px;
-  cursor: pointer;
 }
-#mie-dashboard-app .preaprobados-filter-btn.is-active {
-  background: var(--accent-info-soft);
-  color: var(--accent-info);
-  border-color: var(--accent-info);
-}
-#mie-dashboard-app .preaprobados-search-field {
-  min-width: 220px;
-  flex: 1;
+#mie-dashboard-app .preaprobados-search {
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 5px 10px;
+  font-size: 13px;
 }
 #mie-dashboard-app .preaprobados-kpis {
-  margin: 8px 0 12px;
+  margin: 8px 0 10px;
 }
 #mie-dashboard-app .preaprobados-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  #mie-dashboard-app .preaprobados-kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
 }
 #mie-dashboard-app .preaprobados-kpi-card {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
+  cursor: help;
+}
+#mie-dashboard-app .preaprobados-kpi-card.is-referred .preaprobados-kpi-value {
+  color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-kpi-card.is-granted .preaprobados-kpi-value {
+  color: #93c5fd;
 }
 #mie-dashboard-app .preaprobados-kpi-value {
   font-size: 1.25rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .preaprobados-kpi-label {
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 2px;
+  white-space: nowrap;
 }
-#mie-dashboard-app .preaprobados-in-progress {
-  display: inline-block;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--accent-info);
+#mie-dashboard-app .preaprobados-kpi-note {
+  margin: 6px 0 0;
 }
 #mie-dashboard-app .preaprobados-result {
   display: inline-block;
+  max-width: 100%;
   font-size: 0.75rem;
   padding: 2px 8px;
   border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
+/* Otorgado (CDV or ELM) blue, as every granted loan. */
 #mie-dashboard-app .preaprobados-result.is-granted {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
 }
-#mie-dashboard-app .preaprobados-result.is-sin {
+#mie-dashboard-app .preaprobados-result.is-sin,
+#mie-dashboard-app .preaprobados-result.is-none {
   background: var(--surface-2);
   color: var(--text-muted);
 }
@@ -6200,12 +6223,10 @@
   border-radius: 8px;
   text-align: left;
 }
-#mie-dashboard-app .preaprobados-kpi-scope {
-  margin: 10px 0 6px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+/* Preaprobados list: one line per row, whatever the ELM answer length. */
+#mie-dashboard-app .preaprobados-elm.is-line {
+  white-space: nowrap;
+  border-radius: 999px;
 }
 #mie-dashboard-app .preaprobados-elm-send[disabled] {
   opacity: 0.55;
@@ -6218,9 +6239,44 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
-#mie-dashboard-app .ga4-table.preaprobados-table th,
+#mie-dashboard-app #preaprobados-results .table-wrap {
+  overflow: visible;
+}
 #mie-dashboard-app .ga4-table.preaprobados-table td {
-  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-date {
+  width: 11%;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
+  width: 30%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ci {
+  width: 15%;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
+  width: 15%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
+  width: 22%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ver {
+  width: 7%;
+  text-align: center;
+}
+#mie-dashboard-app .preaprobados-sol-count {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--text-muted);
   vertical-align: middle;
 }
 #mie-dashboard-app .preaprobados-pagination {
@@ -6229,17 +6285,37 @@
   align-items: center;
   margin-top: 10px;
 }
-#mie-dashboard-app .preaprobados-detail-modal {
-  max-width: 640px;
-  max-height: 90vh;
-  overflow: auto;
+#mie-dashboard-app .preaprobados-detail-modal section h3 {
+  margin: 12px 0 6px;
+  font-size: 0.9rem;
 }
-#mie-dashboard-app .preaprobados-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+#mie-dashboard-app .preaprobados-sol-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-ellipsis {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-sol-elm {
+  max-width: 320px;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-elm-send {
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+#mie-dashboard-app .preaprobados-sol-table .rechazados-elm-blocked {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-sol-row.is-selected td {
+  background: var(--accent-info-soft);
+}
+#mie-dashboard-app .preaprobados-selected .preaprobados-dl {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 #mie-dashboard-app .preaprobados-dl {
   display: grid;
