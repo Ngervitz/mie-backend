@@ -946,7 +946,8 @@ async function main() {
     const dash = readSrc('public/mie-dashboard.js');
     assert.ok(dash.includes("kpiCard('Otorgados CDV', String(kc.otorgados_cdv)"));
     assert.ok(dash.includes("kpiCard('Otorgados ELM', String(kc.otorgados_elm)"));
-    assert.ok(dash.includes('is-granted">Otorgado CDV</span>'));
+    assert.ok(dash.includes("const text = 'Otorgado CDV' + (monto != null ? ' · $ ' + fmtMoney(monto) : '');"));
+    assert.ok(dash.includes('<span class="preaprobados-result is-granted" title="'));
     assert.ok(dash.includes("{ id: 'granted', label: 'Otorgado CDV' }"));
     assert.ok(dash.includes("'GRANTED ELM'"), 'ELM technical detail keeps its own field');
     assert.strictEqual(ElmUi.CDV_GRANTED_LABEL, 'GRANTED CDV');

@@ -319,5 +319,48 @@ test('list ELM cell: one line, never a button, Rechazados colors', () => {
   assert.ok(!html({ kind: 'referred', state: 'referred', cz_solicitud_id: 1, provider_status: '<img src=x>' }).includes('<img'), 'escaped');
 });
 
+test('CDV cohort KPIs stay per solicitud next to the per-CI KPIs', () => {
+  const out = assembleGroupedPreaprobadosList(input());
+  const cdv = solicitudesOf(out.rows).filter((s) => s.proveedor !== 'elm');
+  const granted = cdv.filter((s) => s.resultado === 'granted');
+  assert.strictEqual(out.kpis.preaprobados, cdv.length, 'per solicitud, CDV cohort only');
+  assert.strictEqual(out.kpis.granted, granted.length);
+  assert.strictEqual(out.kpis.sin_resultado, cdv.length - granted.length);
+  assert.strictEqual(out.kpis.monto_otorgado, granted.reduce((n, s) => n + Number(s.monto_otorgado || 0), 0));
+  assert.strictEqual(out.kpis.conversion, granted.length / cdv.length);
+  assert.ok(out.kpis_ci.otorgados_cdv <= out.kpis.granted, 'per CI never above per solicitud');
+});
+
+test('dashboard: CZ column, CDV amount, CDV cohort KPI section (no ELM ops panels)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dash = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.js'), 'utf8');
+  const start = dash.indexOf('(function initPreaprobados()');
+  const pre = dash.slice(start, dash.indexOf('\n})();', start));
+  assert.ok(pre.includes('<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">CZ</th>'));
+  assert.ok(/'<th class="preaprobados-col-ci">CI<\/th>' \+\s*'<th class="preaprobados-col-cz"[^']*' \+\s*'<th class="preaprobados-col-cdv">/.test(pre), 'CZ between CI and Estado CDV');
+  assert.ok(pre.includes('const s = findSolicitud(group, group.cz_id) || solicitudesOf(group)[0];'), 'row solicitud (newest listed)');
+  assert.ok(pre.includes("const title = 'Estado CZ ' + estadoText(s) + ' · solicitud ' + s.cz_id;"), 'full name in tooltip');
+  assert.ok(pre.includes('cdvBadge(row.cdv_status, row.monto_otorgado)'), 'list amount');
+  assert.ok(pre.includes("cdvBadge(s.resultado === 'granted' ? 'granted' : 'sin_resultado', s.monto_otorgado)"), 'detail amount');
+  assert.ok(pre.includes("'Otorgado CDV' + (monto != null ? ' · $ ' + fmtMoney(monto) : '')"));
+  assert.ok(pre.includes('cdvKpisHtml(data.kpis)'), 'CDV KPIs from the server CDV cohort');
+  assert.ok(pre.includes("'<div class=\"preaprobados-kpi-scope\">CDV · cohorte estado 8 '"), 'scope label');
+  for (const label of ['Monto total otorgado', 'Conversión CDV', 'Otorgadas CDV (solicitudes)', 'Sin resultado CDV (solicitudes)']) {
+    assert.ok(pre.includes("kpiCard('" + label + "'"), label);
+  }
+  for (const label of ['Preaprobados', 'Aceptados ELM', 'Otorgados CDV', 'Otorgados ELM', 'Pendientes']) {
+    assert.ok(pre.includes("kpiCard('" + label + "'") || pre.includes("'" + label + "',"), 'per-CI KPI kept: ' + label);
+  }
+  assert.ok(!pre.includes('kpis_elm') && !pre.includes('by_origin'), 'no ELM ops KPI panels');
+  const css = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.css'), 'utf8');
+  const widths = ['date', 'name', 'ci', 'cz', 'cdv', 'elm', 'ver'].map((c) => {
+    const m = css.match(new RegExp('\\.preaprobados-table \\.preaprobados-col-' + c + ' \\{\\s*width: (\\d+)%'));
+    assert.ok(m, 'width for ' + c);
+    return Number(m[1]);
+  });
+  assert.strictEqual(widths.reduce((a, b) => a + b, 0), 100, 'columns fill the table');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

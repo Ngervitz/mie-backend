@@ -18081,6 +18081,11 @@ init();
     });
   }
 
+  function fmtPct(ratio) {
+    if (ratio == null || !Number.isFinite(ratio)) return '—';
+    return (Math.round(ratio * 1000) / 10).toFixed(1) + '%';
+  }
+
   function clientName(row) {
     const parts = [];
     if (row && row.nombre) parts.push(row.nombre);
@@ -18231,12 +18236,34 @@ init();
       '</div>' +
       '<p class="preaprobados-muted preaprobados-kpi-note">Conteo por CI: una CI con varias solicitudes cuenta una vez. Aceptado ELM = ELM recibió el lead y lo asignó a Copanel; no es un préstamo otorgado.' +
       (notes.length ? ' ' + escapeHtml(notes.join(' ')) : '') +
-      '</p>';
+      '</p>' +
+      cdvKpisHtml(data.kpis);
   }
 
-  function cdvBadge(status) {
+  /** CDV cohort (estado 8) KPIs as the server computes them: per solicitud, never per CI. */
+  function cdvKpisHtml(k) {
+    if (!k) return '';
+    const base = k.preaprobados + ' solicitud' + (k.preaprobados === 1 ? '' : 'es') + ' en la cohorte CDV';
+    return (
+      '<section class="preaprobados-cdv-kpis" aria-label="CDV · cohorte estado 8">' +
+      '<div class="preaprobados-kpi-scope">CDV · cohorte estado 8 ' +
+      '<span class="preaprobados-muted">· conteo por solicitud · ' +
+      escapeHtml(base) +
+      '</span></div>' +
+      '<div class="preaprobados-kpi-grid is-cdv">' +
+      kpiCard('Monto total otorgado', '$ ' + fmtMoney(k.monto_otorgado), 'Suma del monto otorgado por CDV en las solicitudes de la cohorte estado 8 del período.', 'granted') +
+      kpiCard('Conversión CDV', fmtPct(k.conversion), 'Solicitudes otorgadas por CDV sobre el total de solicitudes de la cohorte estado 8 (' + base + ').') +
+      kpiCard('Otorgadas CDV (solicitudes)', String(k.granted), 'Solicitudes de la cohorte estado 8 con préstamo otorgado por CDV.', 'granted') +
+      kpiCard('Sin resultado CDV (solicitudes)', String(k.sin_resultado), 'Solicitudes de la cohorte estado 8 sin préstamo otorgado por CDV.') +
+      '</div></section>'
+    );
+  }
+
+  /** CDV state pill; a granted one carries the amount when CDV reported it. */
+  function cdvBadge(status, monto) {
     if (status === 'granted') {
-      return '<span class="preaprobados-result is-granted">Otorgado CDV</span>';
+      const text = 'Otorgado CDV' + (monto != null ? ' · $ ' + fmtMoney(monto) : '');
+      return '<span class="preaprobados-result is-granted" title="' + escapeHtml(text) + '">' + escapeHtml(text) + '</span>';
     }
     if (status === 'sin_resultado') {
       return '<span class="preaprobados-result is-sin">Sin resultado</span>';
@@ -18270,6 +18297,20 @@ init();
   /** Solicitud whose ELM state the row shows (server-picked: most advanced ELM result). */
   function focusSolicitud(group) {
     return findSolicitud(group, group.elm_focus_cz_id) || solicitudesOf(group)[0];
+  }
+
+  /** Current CZ state of the row's solicitud (the most recent one that lists the CI). */
+  function czStateCell(group) {
+    const s = findSolicitud(group, group.cz_id) || solicitudesOf(group)[0];
+    if (!s || s.estado_id == null) return '<td class="preaprobados-col-cz">—</td>';
+    const title = 'Estado CZ ' + estadoText(s) + ' · solicitud ' + s.cz_id;
+    return (
+      '<td class="preaprobados-col-cz" title="' +
+      escapeHtml(title) +
+      '"><span class="preaprobados-cz-state">' +
+      escapeHtml(String(s.estado_id)) +
+      '</span></td>'
+    );
   }
 
   function elmStatusCell(group) {
@@ -18351,8 +18392,9 @@ init();
               ' sol.</span>'
             : '') +
           '</td>' +
+          czStateCell(row) +
           '<td class="preaprobados-col-cdv">' +
-          cdvBadge(row.cdv_status) +
+          cdvBadge(row.cdv_status, row.monto_otorgado) +
           '</td>' +
           '<td class="preaprobados-col-elm">' +
           elmStatusCell(row) +
@@ -18375,6 +18417,7 @@ init();
       '<th class="preaprobados-col-date">Fecha</th>' +
       '<th class="preaprobados-col-name">Cliente</th>' +
       '<th class="preaprobados-col-ci">CI</th>' +
+      '<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">CZ</th>' +
       '<th class="preaprobados-col-cdv">Estado CDV</th>' +
       '<th class="preaprobados-col-elm">Estado ELM</th>' +
       '<th class="preaprobados-col-ver">Ver</th>' +
@@ -18600,10 +18643,9 @@ init();
           escapeHtml(estadoText(s)) +
           '</td>' +
           '<td>' +
-          (s.proveedor === 'elm' ? cdvBadge(null) : cdvBadge(s.resultado === 'granted' ? 'granted' : 'sin_resultado')) +
-          (s.resultado === 'granted' && s.monto_otorgado != null
-            ? ' <span class="preaprobados-muted">$ ' + escapeHtml(fmtMoney(s.monto_otorgado)) + '</span>'
-            : '') +
+          (s.proveedor === 'elm'
+            ? cdvBadge(null)
+            : cdvBadge(s.resultado === 'granted' ? 'granted' : 'sin_resultado', s.monto_otorgado)) +
           '</td>' +
           '<td class="preaprobados-sol-elm">' +
           solicitudElmCell(s) +
