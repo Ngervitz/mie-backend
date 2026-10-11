@@ -18393,9 +18393,6 @@ init();
             : '') +
           '</td>' +
           czStateCell(row) +
-          '<td class="preaprobados-col-cdv">' +
-          cdvBadge(row.cdv_status, row.monto_otorgado) +
-          '</td>' +
           '<td class="preaprobados-col-elm">' +
           elmStatusCell(row) +
           '</td>' +
@@ -18417,8 +18414,7 @@ init();
       '<th class="preaprobados-col-date">Fecha</th>' +
       '<th class="preaprobados-col-name">Cliente</th>' +
       '<th class="preaprobados-col-ci">CI</th>' +
-      '<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">CZ</th>' +
-      '<th class="preaprobados-col-cdv">Estado CDV</th>' +
+      '<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">Estado CDV</th>' +
       '<th class="preaprobados-col-elm">Estado ELM</th>' +
       '<th class="preaprobados-col-ver">Ver</th>' +
       '</tr></thead><tbody>' +
