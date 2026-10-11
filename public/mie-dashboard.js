@@ -18307,9 +18307,9 @@ init();
     return (
       '<td class="preaprobados-col-cz" title="' +
       escapeHtml(title) +
-      '"><span class="preaprobados-cz-state">' +
-      escapeHtml(String(s.estado_id)) +
-      '</span></td>'
+      '">' +
+      escapeHtml(estadoText(s)) +
+      '</td>'
     );
   }
 

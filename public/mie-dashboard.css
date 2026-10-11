@@ -6284,32 +6284,39 @@
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
-  width: 22%;
+  width: 15%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ci {
   width: 13%;
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
-  width: 6%;
-  padding-left: 4px;
-  padding-right: 4px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  cursor: help;
+  width: 19%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
-  width: 20%;
+  width: 18%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
-  width: 22%;
+  width: 18%;
+}
+/* Narrow screens: CDV and ELM states keep their room; the CZ label shortens (full text in its tooltip). */
+@media (max-width: 1279px) {
+  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
+    width: 12%;
+  }
+  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
+    width: 15%;
+  }
+  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
+    width: 20%;
+  }
+  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
+    width: 23%;
+  }
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ver {
   width: 7%;
   text-align: center;
-}
-#mie-dashboard-app .preaprobados-cz-state {
-  color: var(--text-muted);
 }
 #mie-dashboard-app .preaprobados-sol-count {
   display: inline-block;
