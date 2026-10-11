@@ -337,13 +337,14 @@ test('dashboard: CZ column, CDV amount, CDV cohort KPI section (no ELM ops panel
   const dash = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.js'), 'utf8');
   const start = dash.indexOf('(function initPreaprobados()');
   const pre = dash.slice(start, dash.indexOf('\n})();', start));
-  assert.ok(pre.includes('<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">CZ</th>'));
-  assert.ok(/'<th class="preaprobados-col-ci">CI<\/th>' \+\s*'<th class="preaprobados-col-cz"[^']*' \+\s*'<th class="preaprobados-col-cdv">/.test(pre), 'CZ between CI and Estado CDV');
+  assert.ok(pre.includes('<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">Estado CDV</th>'));
+  assert.ok(/'<th class="preaprobados-col-ci">CI<\/th>' \+\s*'<th class="preaprobados-col-cz"[^']*' \+\s*'<th class="preaprobados-col-elm">Estado ELM<\/th>'/.test(pre), '«Estado CDV» (CZ state) between CI and Estado ELM');
+  assert.ok(!pre.includes('preaprobados-col-cdv'), 'the former CDV result column is gone from the list');
+  assert.ok(/czStateCell\(row\) \+\s*'<td class="preaprobados-col-elm">'/.test(pre), 'row cells match the headers');
   assert.ok(pre.includes('const s = findSolicitud(group, group.cz_id) || solicitudesOf(group)[0];'), 'row solicitud (newest listed)');
   assert.ok(pre.includes("const title = 'Estado CZ ' + estadoText(s) + ' · solicitud ' + s.cz_id;"), 'full name in tooltip');
   assert.ok(/escapeHtml\(title\) \+\s*'">' \+\s*escapeHtml\(estadoText\(s\)\) \+\s*'<\/td>'/.test(pre), 'cell shows "id · label" as the CZ API returns it');
   assert.ok(pre.includes("return row.estado_label ? id + ' · ' + row.estado_label : id;"), 'same format as the former «Estado actual» column');
-  assert.ok(pre.includes('cdvBadge(row.cdv_status, row.monto_otorgado)'), 'list amount');
   assert.ok(pre.includes("cdvBadge(s.resultado === 'granted' ? 'granted' : 'sin_resultado', s.monto_otorgado)"), 'detail amount');
   assert.ok(pre.includes("'Otorgado CDV' + (monto != null ? ' · $ ' + fmtMoney(monto) : '')"));
   assert.ok(pre.includes('cdvKpisHtml(data.kpis)'), 'CDV KPIs from the server CDV cohort');
@@ -356,7 +357,7 @@ test('dashboard: CZ column, CDV amount, CDV cohort KPI section (no ELM ops panel
   }
   assert.ok(!pre.includes('kpis_elm') && !pre.includes('by_origin'), 'no ELM ops KPI panels');
   const css = fs.readFileSync(path.join(__dirname, '../public/mie-dashboard.css'), 'utf8');
-  const widths = ['date', 'name', 'ci', 'cz', 'cdv', 'elm', 'ver'].map((c) => {
+  const widths = ['date', 'name', 'ci', 'cz', 'elm', 'ver'].map((c) => {
     const m = css.match(new RegExp('\\.preaprobados-table \\.preaprobados-col-' + c + ' \\{\\s*width: (\\d+)%'));
     assert.ok(m, 'width for ' + c);
     return Number(m[1]);

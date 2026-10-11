@@ -6284,35 +6284,17 @@
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
-  width: 15%;
+  width: 22%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ci {
   width: 13%;
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
-  width: 19%;
-}
-#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
-  width: 18%;
+  width: 25%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
-  width: 18%;
-}
-/* Narrow screens: CDV and ELM states keep their room; the CZ label shortens (full text in its tooltip). */
-@media (max-width: 1279px) {
-  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
-    width: 12%;
-  }
-  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
-    width: 15%;
-  }
-  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cdv {
-    width: 20%;
-  }
-  #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
-    width: 23%;
-  }
+  width: 23%;
 }
 #mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ver {
   width: 7%;
