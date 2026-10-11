@@ -258,6 +258,8 @@ function createFakeElmRepo(now) {
         s2_status: result.status,
         s2_error_code: result.errorCode || null,
         s2_result_message: result.resultMessage != null ? result.resultMessage : null,
+        s2_http_status: result.httpStatus != null ? result.httpStatus : null,
+        s2_response: result.response != null ? result.response : null,
         s2_completed_at: iso(now()),
         s2_lease_expires_at: null,
         referred_at: result.status === S2.REFERRED ? iso(now()) : null,
@@ -1184,6 +1186,65 @@ test('ELM negative answers → rejected only for documented definitive texts; ot
   assert.strictEqual(job(env, 623).outcome, OUTCOME.MANUAL_REVIEW);
   assert.strictEqual(job(env, 623).reason_code, REASONS.ELM_S1_REJECTION_NOT_DEFINITIVE);
   assert.deepStrictEqual(job(env, 623).reason_detail, { result_message: 'texto no documentado' });
+});
+
+test('S2 { success: true, result: null } confirmed by ELM → referred, CZ 13, no review case, S2 sent once', async () => {
+  const env = setup();
+  const accepted = (docNumber) => ({
+    outcome: 'unknown',
+    httpStatus: 200,
+    resultMessage: null,
+    responseBody: { success: true, result: null, docNumber: docNumber },
+    errorCode: CODES.RESPONSE_UNDOCUMENTED,
+    latencyMs: 5,
+  });
+  await enqueue(env, 640, 64000000);
+  await enqueue(env, 641, 64100000);
+  env.client.script.s2.set('64000000', accepted('64000000'));
+  env.client.script.s2.set('64100000', Object.assign(accepted('64100000'), { responseBody: { success: true, result: null } }));
+  await env.mk('A').runOnce({ limit: 10 });
+  for (const czId of [640, 641]) {
+    assert.strictEqual(env.elmRepo.rows.get(czId).s2_status, S2.UNKNOWN, czId + ': stored as answered');
+    assert.strictEqual(env.elmRepo.rows.get(czId).referred_at, null, czId + ': technical row untouched');
+    assert.strictEqual(job(env, czId).outcome, OUTCOME.REFERRED, czId);
+    assert.strictEqual(job(env, czId).reason_code, REASONS.ELM_S2_REFERRED, czId);
+    assert.deepStrictEqual(job(env, czId).reason_detail, { s2_accepted: true }, czId);
+    assert.strictEqual(env.repo.czState.get(czId).projected_estado, 13, czId + ': CZ 13');
+  }
+  assert.strictEqual(env.repo.reviewCases.length, 0, 'an acceptance opens no review case');
+  assert.strictEqual(env.client.calls.s2.length, 2, 'one S2 per solicitud');
+
+  pastJobLease(env);
+  await env.mk('B').runOnce({ limit: 10 });
+  assert.strictEqual(env.client.calls.s1.length, 2, 'never re-sent');
+  assert.strictEqual(env.client.calls.s2.length, 2, 'never re-sent');
+});
+
+test('S2 unknown that is not exactly the accepted answer → manual_review elm_s2_unknown, CZ 14', async () => {
+  const env = setup();
+  const base = { outcome: 'unknown', httpStatus: 200, resultMessage: null, errorCode: CODES.RESPONSE_UNDOCUMENTED, latencyMs: 5 };
+  const cases = [
+    [650, Object.assign({}, base, { responseBody: { success: false, result: null } })],
+    [651, Object.assign({}, base, { responseBody: { success: true, result: null, extra: 1 } })],
+    [652, Object.assign({}, base, { responseBody: { success: true, result: null, docNumber: '11111111' } })],
+    [653, Object.assign({}, base, { httpStatus: 202, responseBody: { success: true, result: null } })],
+    [654, Object.assign({}, base, { errorCode: CODES.RESPONSE_UNPARSEABLE, responseBody: null })],
+    [655, { outcome: 'unknown', httpStatus: null, errorCode: CODES.HTTP_TIMEOUT }],
+    [656, () => { throw new Error('timeout after send'); }],
+    [657, Object.assign({}, base, { responseBody: { success: true } })],
+  ];
+  for (const [czId, answer] of cases) {
+    await enqueue(env, czId, czId * 100000);
+    env.client.script.s2.set(String(czId * 100000), answer);
+  }
+  await env.mk('A').runOnce({ limit: 20 });
+  for (const [czId] of cases) {
+    assert.strictEqual(job(env, czId).outcome, OUTCOME.MANUAL_REVIEW, czId + ': manual_review');
+    assert.strictEqual(job(env, czId).reason_code, REASONS.ELM_S2_UNKNOWN, czId);
+    assert.strictEqual(env.repo.czState.get(czId).projected_estado, 14, czId + ': CZ 14');
+  }
+  assert.strictEqual(env.repo.reviewCases.length, cases.length);
+  assert.strictEqual(env.client.calls.s2.length, cases.length, 'never retried');
 });
 
 test('technical_error / unknown / timeout / unmapped never become estado 3', async () => {

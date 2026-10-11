@@ -12,6 +12,8 @@
  * frozen request once; a second BCU error → manual_review. The job stays pending meanwhile.
  * A rejection is only final for documented ELM negative texts; others → manual_review. S1
  * "Repetido. Aprobado" (approved by another channel) is not a rejection either → manual_review.
+ * S2 unknown that is the answer ELM confirmed as accepted (classification.isS2Accepted, the same
+ * predicate JANUS manual uses) → referred; any other S2 unknown → manual_review.
  *
  * evaluateCiGuard: reads the other ELM processes of the same CI. It never modifies them and
  * never matches anything by CI; it only decides whether this solicitud may start a new call.
@@ -20,6 +22,7 @@
 const { S1, S2, CODES } = require('../elm/constants');
 const { technicalRetryDelaySeconds } = require('../elm/config');
 const { isService1Negative } = require('../elm/client');
+const { isS2Accepted } = require('../elm/classification');
 const {
   OUTCOME,
   REASONS,
@@ -146,7 +149,9 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
             result_message: p.s2_result_message || null,
           });
     case S2.UNKNOWN:
-      return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN);
+      return isS2Accepted(p)
+        ? final(OUTCOME.REFERRED, REASONS.ELM_S2_REFERRED, { s2_accepted: true })
+        : final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN);
     case S2.TECHNICAL_ERROR:
       return technicalDecision('s2', p, nowMs, retryPolicy);
     default:

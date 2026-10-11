@@ -390,9 +390,45 @@ const read = (p, extra) => classifyElmProcess(p, Object.assign({ nowMs: NOW }, e
     assert.ok(ids.includes(1346), 'other unknowns still are');
   });
 
-  await test('13 CDV / automatic fallback untouched: an automatic accepted shape still goes to manual review', () => {
-    const d = deriveFromProcess(accepted({ trigger_origin: 'cz_automatic', send_origin: 'cz_automatic' }), NOW, TECH_RETRY);
-    assert.deepStrictEqual([d.kind, d.outcome, d.reasonCode], ['final', FB_OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN]);
+  await test('13 automatic fallback (C1): the same accepted shape is referred (CZ 13); other unknowns stay in review', () => {
+    const auto = (over) => accepted(Object.assign({ trigger_origin: 'cz_automatic', send_origin: 'cz_automatic' }, over));
+    const d = deriveFromProcess(auto(), NOW, TECH_RETRY);
+    assert.deepStrictEqual(
+      [d.kind, d.outcome, d.reasonCode, d.detail],
+      ['final', FB_OUTCOME.REFERRED, REASONS.ELM_S2_REFERRED, { s2_accepted: true }],
+    );
+    const noDoc = deriveFromProcess(auto({ s2_response: { success: true, result: null } }), NOW, TECH_RETRY);
+    assert.strictEqual(noDoc.outcome, FB_OUTCOME.REFERRED, 'shape confirmed by ELM without docNumber');
+    for (const [ci, czId] of HISTORICAL) {
+      const h = deriveFromProcess(historicalRow(ci, czId, { trigger_origin: 'cz_automatic' }), NOW, TECH_RETRY);
+      assert.strictEqual(h.outcome, FB_OUTCOME.REFERRED, czId + ': manual and automatic agree');
+    }
+    const notAccepted = {
+      'HTTP 201': { s2_http_status: 201 },
+      'HTTP 500': { s2_http_status: 500, s2_error_code: CODES.HTTP_ERROR },
+      'HTTP missing': { s2_http_status: null },
+      'timeout': { s2_http_status: null, s2_error_code: CODES.HTTP_TIMEOUT, s2_response: null },
+      'unparseable': { s2_error_code: CODES.RESPONSE_UNPARSEABLE, s2_response: null },
+      'other error code': { s2_error_code: 'elm_transport_error' },
+      'result text stored': { s2_result_message: 'Algo nuevo', s2_response: { success: true, result: 'Algo nuevo' } },
+      'success false': { s2_response: { success: false, result: null } },
+      'success as text': { s2_response: { success: 'true', result: null } },
+      'result missing': { s2_response: { success: true } },
+      'extra key': { s2_response: { success: true, result: null, docNumber: '32392154', extra: 1 } },
+      'docNumber of another CI': { s2_response: { success: true, result: null, docNumber: '11111111' } },
+      'docNumber without CI': { ci: null },
+      'body as text': { s2_response: '{"success":true,"result":null}' },
+      'body missing': { s2_response: null },
+    };
+    for (const [name, over] of Object.entries(notAccepted)) {
+      const r = deriveFromProcess(auto(over), NOW, TECH_RETRY);
+      assert.deepStrictEqual([r.kind, r.outcome, r.reasonCode], ['final', FB_OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN], name);
+      assert.strictEqual(read(auto(over)).detail, 's2_unknown', name + ': manual reading agrees');
+    }
+    const expired = deriveFromProcess(auto({ s2_status: S2.IN_FLIGHT, s2_lease_expires_at: iso(NOW - 60000) }), NOW, TECH_RETRY);
+    assert.strictEqual(expired.kind, 'expire', 'expired lease is not an answer');
+    const s1Unknown = deriveFromProcess(auto({ s1_status: S1.UNKNOWN }), NOW, TECH_RETRY);
+    assert.deepStrictEqual([s1Unknown.outcome, s1Unknown.reasonCode], [FB_OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN], 'needs S1 favorable');
   });
 
   await test('14 UI: Aceptado green, Otorgado blue; labels and send message never call an acceptance a loan', () => {
