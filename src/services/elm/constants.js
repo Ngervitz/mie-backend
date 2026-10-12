@@ -41,8 +41,14 @@ const ENABLED_TRIGGER_ORIGINS = Object.freeze(['janus_manual']);
 const MANUAL_TRIGGER_ORIGIN = 'janus_manual';
 
 /**
- * CZ relacion_laboral codes a manual S1 sends verbatim as activityType when ELM_ACTIVITY_TYPE_MAP_JSON
- * has no entry for them. A configured mapping always wins.
+ * activityType ELM confirmed for a CZ relacion_laboral code, used by automatic and manual sends.
+ * Takes precedence over ELM_ACTIVITY_TYPE_MAP_JSON (an env entry for these codes is ignored).
+ */
+const CONFIRMED_ACTIVITY_TYPES = Object.freeze({ OTR: 'otro' });
+
+/**
+ * CZ relacion_laboral codes a manual S1 sends verbatim as activityType when neither
+ * CONFIRMED_ACTIVITY_TYPES nor ELM_ACTIVITY_TYPE_MAP_JSON has an entry for them.
  */
 const MANUAL_RAW_ACTIVITY_TYPES = Object.freeze(['OTR']);
 
@@ -188,6 +194,7 @@ module.exports = {
   TRIGGER_ORIGINS,
   ENABLED_TRIGGER_ORIGINS,
   MANUAL_TRIGGER_ORIGIN,
+  CONFIRMED_ACTIVITY_TYPES,
   MANUAL_RAW_ACTIVITY_TYPES,
   NOTICES,
   SEND_ORIGIN,

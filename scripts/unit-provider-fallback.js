@@ -1216,6 +1216,42 @@ test('S1 "Repetido. Aprobado" → rejected elm_s1_duplicate_other_channel, CZ 3,
   assert.strictEqual(env.client.calls.s1.length, 1, 'terminal: never resent');
 });
 
+test('relacion_laboral OTR → S1 activityType "otro" (env mapping ignored), never elm_config_incomplete', async () => {
+  assert.ok(!Object.prototype.hasOwnProperty.call(ELM_CONFIG.activityTypeMap, 'OTR'), 'fixture: OTR not in the env map');
+  const env = setup();
+  const otr = startBody(626, 62600000);
+  otr.applicant.relacion_laboral = 'OTR';
+  await enqueue(env, 626, 62600000, { applicant: otr.applicant });
+  await enqueue(env, 627, 62700000);
+  await env.mk('A').runOnce();
+  assert.notStrictEqual(job(env, 626).reason_code, REASONS.ELM_CONFIG_INCOMPLETE);
+  assert.notStrictEqual(job(env, 626).reason_code, CODES.ACTIVITY_TYPE_MAPPING_MISSING);
+  assert.strictEqual(job(env, 626).outcome, OUTCOME.REFERRED);
+  assert.strictEqual(env.repo.reviewCases.length, 0, 'no manual review');
+  const sent = new Map(env.client.calls.s1.map((p) => [p.docNumber, p.activityType]));
+  assert.strictEqual(sent.get('62600000'), 'otro');
+  assert.strictEqual(sent.get('62700000'), 'TEST_ACTIVITY_EPR', 'other codes keep the env mapping');
+
+  for (const envValue of ['TEST_OTR_ENV', 'OTR', 'Otro']) {
+    const elmConfig = readElmConfig({
+      ELM_ACTIVITY_TYPE_MAP_JSON: JSON.stringify({ EPR: 'TEST_ACTIVITY_EPR', OTR: envValue }),
+      ELM_DATE_OF_BIRTH_FORMAT: ELM_CONFIG.dateOfBirthFormat,
+      ELM_MOBILE_PHONE_FORMAT: ELM_CONFIG.mobilePhoneFormat,
+    });
+    assert.strictEqual(elmConfig.activityTypeMap.OTR, envValue, 'fixture: the env map carries OTR');
+    const override = setup({ elmConfig: elmConfig });
+    const otr628 = startBody(628, 62800000);
+    otr628.applicant.relacion_laboral = 'OTR';
+    await enqueue(override, 628, 62800000, { applicant: otr628.applicant });
+    await enqueue(override, 629, 62900000);
+    await override.mk('A').runOnce();
+    const got = new Map(override.client.calls.s1.map((p) => [p.docNumber, p.activityType]));
+    assert.strictEqual(got.get('62800000'), 'otro', 'env OTR=' + envValue + ' is ignored');
+    assert.strictEqual(got.get('62900000'), 'TEST_ACTIVITY_EPR', 'EPR still from the env map');
+    assert.strictEqual(job(override, 628).outcome, OUTCOME.REFERRED);
+  }
+});
+
 test('S2 { success: true, result: null } confirmed by ELM → referred, CZ 13, no review case, S2 sent once', async () => {
   const env = setup();
   const accepted = (docNumber) => ({
