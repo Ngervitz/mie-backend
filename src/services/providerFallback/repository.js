@@ -20,8 +20,9 @@ const CZ_STATE_TABLE = 'provider_cz_state';
 const STATUS_SELECT =
   'id, cz_solicitud_id, provider, exec_status, outcome, reason_code, related_cz_solicitud_id, cz_estado_id_at_start:snapshot->cz_estado_id, finalized_at, cz_delivery_status, cz_acked_at, created_at';
 
+/** The s2 answer columns (body redacted at write time) are read only by classification.isS2Accepted. */
 const CI_GUARD_SELECT =
-  'id, cz_solicitud_id, ci, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, referred_at, provider_status, disbursed_at, ops_resolved_at';
+  'id, cz_solicitud_id, ci, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, s2_http_status, s2_error_code, s2_response, s2_result_message, referred_at, provider_status, disbursed_at, ops_resolved_at';
 
 function firstRow(data) {
   if (Array.isArray(data)) return data.length ? data[0] : null;
@@ -270,5 +271,6 @@ module.exports = {
   REVIEW_TABLE,
   CZ_STATE_TABLE,
   STATUS_SELECT,
+  CI_GUARD_SELECT,
   createProviderFallbackRepository,
 };

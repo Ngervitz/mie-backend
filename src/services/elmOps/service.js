@@ -129,12 +129,13 @@ function processKind(p, nowMs) {
   return null;
 }
 
-/** Short ELM state for the queues (no bodies). */
+/** Short ELM state for the queues (no bodies). s2_accepted: technical unknown read as Aceptado ELM. */
 function elmStateOf(p, nowMs) {
   if (!p) return null;
   return {
     s1_status: effective(p.s1_status, p.s1_lease_expires_at, nowMs),
     s2_status: effective(p.s2_status, p.s2_lease_expires_at, nowMs),
+    s2_accepted: isS2Accepted(p),
     provider_status: p.provider_status || null,
     provider_status_at: p.provider_status_at || null,
     granted_elm: Boolean(p.disbursed_at),

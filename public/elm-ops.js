@@ -17,6 +17,7 @@
     s1_unknown: 'Evaluación incierta (S1)',
   });
   const S2_ACCEPTED_KIND_LABEL = 'Aceptado ELM (S2, asignado a Copanel)';
+  const S2_ACCEPTED_TECHNICAL_TEXT = 'S2 técnico: unknown · interpretado como Aceptado ELM';
   const CORRECTION_PREFIX = 'correction:';
 
   const PROCESS_RESOLUTION_LABELS = Object.freeze({
@@ -136,7 +137,7 @@
 
   function elmStateText(elm) {
     if (!elm) return '—';
-    const parts = ['S1 ' + elm.s1_status, 'S2 ' + elm.s2_status];
+    const parts = ['S1 ' + elm.s1_status, elm.s2_accepted === true ? S2_ACCEPTED_TECHNICAL_TEXT : 'S2 ' + elm.s2_status];
     if (elm.provider_status) parts.push('ELM: ' + elm.provider_status);
     if (elm.granted_elm) parts.push('Otorgado');
     return parts.join(' · ');

@@ -103,6 +103,7 @@ const { parseStartBody, snapshotToSolicitud } = require('../src/services/provide
 const { createProviderFallbackWorker } = require('../src/services/providerFallback/worker');
 const { OUTCOME, REASONS, CI_LOCK_BLOCK } = require('../src/services/providerFallback/constants');
 const { decideCiLock } = require('../src/services/providerFallback/outcome');
+const { CI_GUARD_SELECT } = require('../src/services/providerFallback/repository');
 const { parseRejectionStatuses } = require('../src/services/providerFallback/config');
 const { createProviderFallbackRouter } = require('../src/routes/providerFallback');
 const { signProviderFallbackPayload } = require('../src/lib/czProviderFallbackHmac');
@@ -721,9 +722,14 @@ function createFakeFallbackRepo(now, elmRepo) {
     },
     async listElmProcessesByCi(ci) {
       await tick();
+      const columns = CI_GUARD_SELECT.split(',').map((c) => c.trim());
       return Array.from(elmRepo.rows.values())
         .filter((p) => Number(p.ci) === Number(ci))
-        .map((p) => Object.assign({}, p, { cz_projected_estado: projected(p.cz_solicitud_id) }));
+        .map((p) => {
+          const row = { cz_projected_estado: projected(p.cz_solicitud_id) };
+          for (const c of columns) row[c] = p[c] === undefined ? null : p[c];
+          return row;
+        });
     },
     // --- C1 ---
     locks,
@@ -1218,6 +1224,36 @@ test('S2 { success: true, result: null } confirmed by ELM → referred, CZ 13, n
   await env.mk('B').runOnce({ limit: 10 });
   assert.strictEqual(env.client.calls.s1.length, 2, 'never re-sent');
   assert.strictEqual(env.client.calls.s2.length, 2, 'never re-sent');
+});
+
+test('later solicitud of a CI with an Aceptado ELM → already_referred (CZ 15), nothing sent; real unknown stays CZ 14', async () => {
+  const env = setup();
+  const base = { outcome: 'unknown', httpStatus: 200, resultMessage: null, errorCode: CODES.RESPONSE_UNDOCUMENTED, latencyMs: 5 };
+  env.client.script.s2.set('66000000', Object.assign({}, base, { responseBody: { success: true, result: null, docNumber: '66000000' } }));
+  env.client.script.s2.set('67000000', Object.assign({}, base, { responseBody: { success: false, result: null } }));
+  await enqueue(env, 660, 66000000);
+  await enqueue(env, 670, 67000000);
+  await env.mk('A').runOnce({ limit: 10 });
+  assert.strictEqual(env.repo.czState.get(660).projected_estado, 13, 'first solicitud: Aceptado ELM → CZ 13');
+  assert.strictEqual(env.repo.czState.get(670).projected_estado, 14, 'first solicitud: real unknown → CZ 14');
+  assert.strictEqual(env.repo.reviewCases.length, 1);
+
+  await enqueue(env, 661, 66000000);
+  await enqueue(env, 671, 67000000);
+  await env.mk('B').runOnce({ limit: 10 });
+  assert.strictEqual(job(env, 661).outcome, OUTCOME.ALREADY_REFERRED);
+  assert.strictEqual(job(env, 661).reason_code, REASONS.CI_ACTIVE_REFERRAL);
+  assert.strictEqual(job(env, 661).related_cz_solicitud_id, 660);
+  assert.deepStrictEqual(job(env, 661).reason_detail, { referred_at: null, provider_status: null, s2_accepted: true });
+  assert.strictEqual(env.repo.czState.get(661).projected_estado, 15, 'derivación vigente en otra solicitud');
+  assert.strictEqual(job(env, 671).outcome, OUTCOME.MANUAL_REVIEW);
+  assert.strictEqual(job(env, 671).reason_code, REASONS.CI_PRIOR_UNKNOWN);
+  assert.strictEqual(env.repo.czState.get(671).projected_estado, 14);
+  assert.deepStrictEqual(env.repo.reviewCases.map((c) => c.cz_solicitud_id).sort(), [670, 671], 'no review case for the Aceptado CI');
+  assert.deepStrictEqual(env.client.calls.s1.map((p) => p.docNumber).sort(), ['66000000', '67000000'], 'later solicitudes never sent');
+  assert.strictEqual(env.client.calls.s2.length, 2);
+  assert.strictEqual(env.elmRepo.rows.get(660).s2_status, S2.UNKNOWN, 'stored answer untouched');
+  assert.strictEqual(env.elmRepo.rows.get(660).referred_at, null);
 });
 
 test('S2 unknown that is not exactly the accepted answer → manual_review elm_s2_unknown, CZ 14', async () => {

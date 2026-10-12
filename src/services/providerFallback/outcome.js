@@ -169,9 +169,11 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
  *  3. another process of the CI has an S2 referral → already_referred (nothing is sent), whatever
  *     the provider status (no automatic expiry of an active referral);
  *  4. another process of the CI is S1 eligible waiting for S2 → manual_review.
+ * An S2 unknown that is the accepted answer (isS2Accepted) is an S2 referral (rule 3), not an
+ * unknown (rule 1); every other S2 unknown stays in rule 1.
  * The monthly send limit is enforced afterwards by elm_ci_lock_acquire (DB, atomic per CI).
  *
- * @param {object[]} processes elm_lead_processes rows with the same CI
+ * @param {object[]} processes elm_lead_processes rows with the same CI (CI_GUARD_SELECT)
  * @param {number} selfCzId
  * @param {number} nowMs
  * @returns {{ kind: 'proceed' }
@@ -201,7 +203,7 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
   for (const p of others) {
     if (
       effective(p.s1_status, p.s1_lease_expires_at, nowMs) === S1.UNKNOWN ||
-      (effective(p.s2_status, p.s2_lease_expires_at, nowMs) === S2.UNKNOWN && !closedInCz(p))
+      (effective(p.s2_status, p.s2_lease_expires_at, nowMs) === S2.UNKNOWN && !closedInCz(p) && !isS2Accepted(p))
     ) {
       return withRelated(final(OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN), p);
     }
@@ -211,14 +213,11 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
     if (p.s2_status === S2.IN_FLIGHT) return withRelated(waitUntil(p.s2_lease_expires_at), p);
   }
   for (const p of others) {
-    if (p.s2_status !== S2.REFERRED || closedInCz(p)) continue;
-    return withRelated(
-      final(OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, {
-        referred_at: p.referred_at || null,
-        provider_status: p.provider_status || null,
-      }),
-      p,
-    );
+    const accepted = isS2Accepted(p);
+    if ((p.s2_status !== S2.REFERRED && !accepted) || closedInCz(p)) continue;
+    const detail = { referred_at: p.referred_at || null, provider_status: p.provider_status || null };
+    if (accepted) detail.s2_accepted = true;
+    return withRelated(final(OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, detail), p);
   }
   for (const p of others) {
     if (p.s1_status === S1.ELIGIBLE && p.s2_status === S2.NOT_STARTED) {

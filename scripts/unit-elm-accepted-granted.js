@@ -54,8 +54,15 @@ const { computeElmKpis } = require('../src/services/elm/kpis');
 const { computeElmCell } = require('../src/services/elm/listView');
 const { isPostbackCompatible } = require('../src/services/elm/postback');
 const { PROCESS_LIST_SELECT } = require('../src/services/elm/repository');
-const { deriveFromProcess } = require('../src/services/providerFallback/outcome');
+const { PROCESS_TABLE } = require('../src/services/elm/repository');
+const { deriveFromProcess, evaluateCiGuard } = require('../src/services/providerFallback/outcome');
 const { OUTCOME: FB_OUTCOME, REASONS } = require('../src/services/providerFallback/constants');
+const {
+  CI_GUARD_SELECT,
+  CZ_STATE_TABLE,
+  createProviderFallbackRepository,
+} = require('../src/services/providerFallback/repository');
+const { CASE_PROCESS_SELECT } = require('../src/services/elmOps/repository');
 const { computeElmSurveyBlocks } = require('../src/lib/rejectedSurveyInviteElmGate');
 const { evaluateCiResendHold, HOLD } = require('../src/lib/rejectedElmResendGuard');
 const { outcomeOf, OUTCOMES } = require('../src/lib/rejectedElmSend');
@@ -68,6 +75,7 @@ const {
 const {
   processKind,
   openProcessView,
+  reviewCaseView,
   PROCESS_RESOLUTIONS,
   ACCEPTED_RESOLUTIONS,
   ACCEPTED_CORRECTIONS,
@@ -148,6 +156,58 @@ function historicalRow(ci, czId, over) {
 }
 const accepted = (over) => historicalRow(32392154, 1333, over);
 const read = (p, extra) => classifyElmProcess(p, Object.assign({ nowMs: NOW }, extra || {}));
+
+/** Row as a PostgREST select of `columns` returns it. */
+function project(row, columns) {
+  const out = {};
+  for (const c of columns.split(',').map((s) => s.trim())) out[c] = Object.prototype.hasOwnProperty.call(row, c) ? row[c] : null;
+  return out;
+}
+
+/** Supabase double for providerFallback/repository reads: applies the real select projection. */
+function fakeSelectDb(tables) {
+  return {
+    from(table) {
+      let columns = null;
+      const rows = () => (tables[table] || []).map((r) => project(r, columns));
+      const builder = {
+        select(c) {
+          columns = c;
+          return builder;
+        },
+        eq(k, v) {
+          return Promise.resolve({ data: rows().filter((r) => Number(r[k]) === Number(v)), error: null });
+        },
+        in(k, values) {
+          const wanted = values.map(Number);
+          return Promise.resolve({ data: rows().filter((r) => wanted.includes(Number(r[k]))), error: null });
+        },
+      };
+      return builder;
+    },
+    rpc(name) {
+      throw new Error('unexpected rpc in test: ' + name);
+    },
+  };
+}
+
+/** S2 unknowns that are not the accepted answer (same list as the commercial reading). */
+const NOT_ACCEPTED = {
+  'HTTP 201': { s2_http_status: 201 },
+  'HTTP 500': { s2_http_status: 500, s2_error_code: CODES.HTTP_ERROR },
+  'HTTP missing': { s2_http_status: null },
+  'timeout': { s2_http_status: null, s2_error_code: CODES.HTTP_TIMEOUT, s2_response: null },
+  'unparseable': { s2_error_code: CODES.RESPONSE_UNPARSEABLE, s2_response: null },
+  'other error code': { s2_error_code: 'elm_transport_error' },
+  'result text stored': { s2_result_message: 'Algo nuevo', s2_response: { success: true, result: 'Algo nuevo' } },
+  'success false': { s2_response: { success: false, result: null } },
+  'success as text': { s2_response: { success: 'true', result: null } },
+  'result missing': { s2_response: { success: true } },
+  'extra key': { s2_response: { success: true, result: null, docNumber: '32392154', extra: 1 } },
+  'docNumber of another CI': { s2_response: { success: true, result: null, docNumber: '11111111' } },
+  'body as text': { s2_response: '{"success":true,"result":null}' },
+  'body missing': { s2_response: null },
+};
 
 (async function main() {
   await test('1 body shape: only { success: true, result: null } (+ docNumber) is an accepted S2 body', () => {
@@ -454,7 +514,7 @@ const read = (p, extra) => classifyElmProcess(p, Object.assign({ nowMs: NOW }, e
     assert.ok(dash.includes("'Aceptados ELM',\n        String(kc.aceptados_elm),") || dash.includes("'Aceptados ELM',\r\n        String(kc.aceptados_elm),"));
     assert.ok(!dash.includes('Preaprobado ELM') && !dash.includes('Preaprobados ELM'), 'old label gone from Preaprobados');
     const html = readSrc('public/mie-dashboard.html');
-    assert.strictEqual((html.match(/\?v=20261010-preaprobados-cols/g) || []).length, 4, 'cache version bumped');
+    assert.strictEqual((html.match(/\?v=20261011-s2-technical/g) || []).length, 4, 'cache version bumped');
     const flow = new Map(ElmOpsUi.FLOW_LABELS);
     const current = new Map(ElmOpsUi.CURRENT_LABELS);
     assert.deepStrictEqual([flow.get('referred_s2'), flow.get('granted'), current.get('referred'), current.get('granted')], ['Aceptados S2 (Aceptado ELM)', 'Otorgados ELM', 'Aceptado ELM', 'Otorgado ELM']);
@@ -566,6 +626,118 @@ const read = (p, extra) => classifyElmProcess(p, Object.assign({ nowMs: NOW }, e
     const i = css.indexOf('#mie-dashboard-app .preaprobados-elm.is-closed.is-duplicate {');
     assert.ok(i >= 0);
     assert.ok(css.slice(i, css.indexOf('}', i)).includes('rgba(245, 158, 11, 0.15)'), 'amber');
+  });
+
+  await test('17 C1 CI guard: a previous Aceptado ELM is an active referral (already_referred, CZ 15); other unknowns stay uncertain', async () => {
+    const select = CI_GUARD_SELECT.split(',').map((c) => c.trim());
+    for (const k of ['ci', 's2_status', 's2_http_status', 's2_error_code', 's2_response', 's2_result_message']) {
+      assert.ok(select.includes(k), 'CI guard projection has ' + k);
+    }
+    const CI = 32392154;
+    const SELF = 1999;
+    const auto = (czId, over) =>
+      historicalRow(CI, czId, Object.assign({ trigger_origin: 'cz_automatic', send_origin: 'cz_automatic' }, over));
+    async function guardOf(processes, states) {
+      const repo = createProviderFallbackRepository(
+        fakeSelectDb({
+          [PROCESS_TABLE]: processes,
+          [CZ_STATE_TABLE]: Object.entries(states || {}).map(([cz, estado]) => ({
+            cz_solicitud_id: Number(cz),
+            projected_estado: estado,
+            last_seq: 1,
+          })),
+        }),
+      );
+      return evaluateCiGuard(await repo.listElmProcessesByCi(CI), SELF, NOW);
+    }
+    const summary = (g) => [g.kind, g.outcome, g.reasonCode, g.relatedCzId];
+
+    const active = await guardOf([auto(1436)], { 1436: 13 });
+    assert.deepStrictEqual(summary(active), ['final', FB_OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, 1436], 'automatic Aceptado in CZ 13');
+    assert.deepStrictEqual(active.detail, { referred_at: null, provider_status: null, s2_accepted: true });
+    const manual = await guardOf([accepted()]);
+    assert.deepStrictEqual(summary(manual), ['final', FB_OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, 1333], 'manual send without CZ state');
+    const noDoc = await guardOf([auto(1436, { s2_response: { success: true, result: null } })], { 1436: 13 });
+    assert.strictEqual(noDoc.outcome, FB_OUTCOME.ALREADY_REFERRED, 'shape confirmed by ELM without docNumber');
+    const withStatus = await guardOf([auto(1436, { provider_status: 'Latente' })], { 1436: 13 });
+    assert.deepStrictEqual([withStatus.outcome, withStatus.detail.provider_status], [FB_OUTCOME.ALREADY_REFERRED, 'Latente'], 'no automatic expiry');
+
+    const documented = await guardOf(
+      [auto(1500, { s2_status: S2.REFERRED, s2_error_code: null, s2_result_message: 'Lead Aprobado correctamente', s2_response: { result: 'Lead Aprobado correctamente' }, referred_at: iso(NOW - DAY) })],
+      { 1500: 13 },
+    );
+    assert.deepStrictEqual(summary(documented), ['final', FB_OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, 1500]);
+    assert.deepStrictEqual(documented.detail, { referred_at: iso(NOW - DAY), provider_status: null }, 'documented referral detail unchanged');
+
+    assert.strictEqual((await guardOf([auto(1436)], { 1436: 3 })).kind, 'proceed', 'closed: CZ 3');
+    assert.strictEqual((await guardOf([auto(1436)], { 1436: 16 })).kind, 'proceed', 'closed: CZ 16');
+    assert.strictEqual(
+      (await guardOf([auto(1436, { provider_status: 'Convertido', disbursed_at: iso(NOW - DAY) })], { 1436: 13 })).kind,
+      'proceed',
+      'closed: disbursed',
+    );
+    assert.strictEqual(
+      (await guardOf([auto(1436, { ops_resolved_at: iso(NOW), ops_resolution_code: 'provider_closed_no_loan' })], { 1436: 13 })).kind,
+      'proceed',
+      'closed: ops resolved',
+    );
+    assert.strictEqual((await guardOf([auto(SELF)], { [SELF]: 13 })).kind, 'proceed', 'own process is not another solicitud');
+
+    for (const [name, over] of Object.entries(NOT_ACCEPTED)) {
+      const g = await guardOf([auto(1436, over)], { 1436: 13 });
+      assert.deepStrictEqual(summary(g), ['final', FB_OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN, 1436], name);
+    }
+    const docWithoutCi = Object.assign(project(auto(1436), CI_GUARD_SELECT), { ci: null, cz_projected_estado: 13 });
+    assert.strictEqual(evaluateCiGuard([docWithoutCi], SELF, NOW).reasonCode, REASONS.CI_PRIOR_UNKNOWN, 'docNumber without CI');
+    const expired = await guardOf([auto(1436, { s2_status: S2.IN_FLIGHT, s2_lease_expires_at: iso(NOW - 60000) })], { 1436: 13 });
+    assert.strictEqual(expired.reasonCode, REASONS.CI_PRIOR_UNKNOWN, 'expired lease is not an answer');
+    const s1Unknown = await guardOf([auto(1436, { s1_status: S1.UNKNOWN, s2_status: S2.NOT_STARTED })]);
+    assert.strictEqual(s1Unknown.reasonCode, REASONS.CI_PRIOR_UNKNOWN);
+    const mixed = await guardOf([auto(1436), auto(1437, { s2_response: null })], { 1436: 13, 1437: 13 });
+    assert.deepStrictEqual(summary(mixed), ['final', FB_OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN, 1437], 'a real unknown of the CI still wins');
+
+    const narrow = project(auto(1436), CI_GUARD_SELECT.replace(', s2_response', ''));
+    const withoutBody = evaluateCiGuard([Object.assign(narrow, { cz_projected_estado: 13 })], SELF, NOW);
+    assert.strictEqual(withoutBody.reasonCode, REASONS.CI_PRIOR_UNKNOWN, 'without the stored answer: fail safe, never referred');
+  });
+
+  await test('18 UI: «S2 técnico: unknown · interpretado como Aceptado ELM» in the solicitud detail and ELM Ops', () => {
+    const TEXT = 'S2 técnico: unknown · interpretado como Aceptado ELM';
+    const cell = computeElmCell({ process: accepted(), nowMs: NOW });
+    const row = ElmUi.s2DetailRow(cell.s2_status, cell);
+    assert.deepStrictEqual(row, { label: 'S2 técnico', value: 'unknown · interpretado como Aceptado ELM' });
+    assert.strictEqual(row.label + ': ' + row.value, TEXT);
+    const uncertain = computeElmCell({ process: accepted({ s2_response: null }), nowMs: NOW });
+    assert.deepStrictEqual(ElmUi.s2DetailRow(uncertain.s2_status, uncertain), { label: 'S2', value: 'unknown' }, 'a real unknown stays plain');
+    const documented = computeElmCell({
+      process: accepted({ s2_status: S2.REFERRED, s2_error_code: null, s2_result_message: 'Lead Aprobado correctamente', s2_response: { result: 'Lead Aprobado correctamente' }, referred_at: iso(NOW - DAY) }),
+      nowMs: NOW,
+    });
+    assert.deepStrictEqual(ElmUi.s2DetailRow(documented.s2_status, documented), { label: 'S2', value: 'referred' });
+    assert.deepStrictEqual(ElmUi.s2DetailRow(null, null), { label: 'S2', value: '—' });
+    const dash = readSrc('public/mie-dashboard.js');
+    assert.ok(dash.includes('H.s2DetailRow(p.s2.effective_status, e.cell)'), 'detail uses the helper');
+    assert.ok(!dash.includes("dlRow('S2', p.s2.effective_status"), 'no bare technical S2 row');
+
+    const v = openProcessView(accepted(), { nowMs: NOW });
+    assert.strictEqual(v.elm.s2_accepted, true);
+    assert.strictEqual(ElmOpsUi.elmStateText(v.elm), 'S1 eligible · ' + TEXT);
+    assert.ok(ElmOpsUi.processRowHtml(v, (x) => String(x || ''), true).includes(TEXT));
+    const plain = openProcessView(accepted({ s2_response: null }), { nowMs: NOW });
+    assert.strictEqual(plain.elm.s2_accepted, false);
+    assert.strictEqual(ElmOpsUi.elmStateText(plain.elm), 'S1 eligible · S2 unknown');
+
+    const caseSelect = CASE_PROCESS_SELECT.split(',').map((c) => c.trim());
+    for (const k of ['ci', 's2_http_status', 's2_error_code', 's2_response', 's2_result_message']) {
+      assert.ok(caseSelect.includes(k), 'review case projection has ' + k);
+    }
+    const caseRow = { id: 'c-1', cz_solicitud_id: 1999, ci: 32392154, reason_code: REASONS.CI_PRIOR_UNKNOWN, priority: 'high', due_at: iso(NOW + DAY), status: 'open', version: 1, created_at: iso(NOW) };
+    const cv = reviewCaseView(caseRow, { nowMs: NOW, process: project(accepted(), CASE_PROCESS_SELECT) });
+    assert.strictEqual(cv.elm.s2_accepted, true);
+    assert.strictEqual(ElmOpsUi.elmStateText(cv.elm), 'S1 eligible · ' + TEXT);
+    const cvPlain = reviewCaseView(caseRow, { nowMs: NOW, process: project(accepted({ s2_response: null }), CASE_PROCESS_SELECT) });
+    assert.strictEqual(ElmOpsUi.elmStateText(cvPlain.elm), 'S1 eligible · S2 unknown');
+    assert.ok(!JSON.stringify([v, cv]).includes('docNumber'), 'no response body in the views');
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
