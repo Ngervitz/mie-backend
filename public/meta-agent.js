@@ -30,6 +30,9 @@
   var OWN_ENTITY_ID = 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df';
   /** Analytic window for own_ad_metrics.metric_date (gte). Change here. */
   var METRIC_LOOKBACK_DAYS = 30;
+  /** Insights conversions type for pixel event form_step_3. Not the aggregate fb_pixel_custom. */
+  var META_CPL_ACTION_TYPE = 'offsite_conversion.fb_pixel_custom.form_step_3';
+  var ACCOUNT_TIME_ZONE = 'America/Montevideo';
 
   var CONFIG_ERROR_MSG = 'Falta configuración de datasource.';
 
@@ -46,6 +49,8 @@
     auctionPressure: null,
     // Liquidity cycle: { today, history } from GET /api/liquidity-cycle/history.
     liquidityCycle: null,
+    // History list only. Starts collapsed; KPI cards stay visible.
+    liquidityListOpen: false,
     // Current BCU usura rate from GET /api/bcu-usura-rate/current.
     bcuUsuraRate: null,
   };
@@ -97,42 +102,78 @@
     return String(value);
   }
 
+  function countExactActionType(list) {
+    if (!Array.isArray(list)) return null;
+    for (var i = 0; i < list.length; i++) {
+      var action = list[i];
+      if (!action || action.action_type !== META_CPL_ACTION_TYPE) continue;
+      var n = parseFloat(action.value);
+      return isNaN(n) ? null : n;
+    }
+    return null;
+  }
+
+  /**
+   * form_step_3 count. The conversions array wins so the aggregate custom-pixel
+   * bucket in actions is not added again. Null if that exact type is absent.
+   */
+  function metaLeadCountFromInsight(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var fromConversions = countExactActionType(raw.conversions);
+    if (fromConversions !== null) return fromConversions;
+    return countExactActionType(raw.actions);
+  }
+
+  function todayMontevideoIso(now) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: ACCOUNT_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now || new Date());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isPartialMetricDay(dateStr, now) {
+    var today = todayMontevideoIso(now);
+    return !!(dateStr && today && String(dateStr) === today);
+  }
+
   /**
    * Map own_ad_metrics row → same string-keyed shape parseCSV() used to emit,
    * so findVal / buildCampList / KPIs / alerts need no changes.
    * Derived metrics (cpl, ctr, cpc) computed here from raw columns only.
    */
   function mapOwnAdMetricsToLegacyRow(row) {
-    var spendNum = parseFloat(row.spend);
     var impressionsNum = parseFloat(row.impressions);
     var clicksNum = parseFloat(row.clicks);
-    var actionsNum = parseFloat(row.actions);
-    var spend = isNaN(spendNum) ? 0 : spendNum;
     var impressions = isNaN(impressionsNum) ? 0 : impressionsNum;
     var clicks = isNaN(clicksNum) ? 0 : clicksNum;
-    var actions = isNaN(actionsNum) ? 0 : actionsNum;
+    var metaLeads = metaLeadCountFromInsight(row.raw_json);
 
-    var cpl = actions > 0 ? spend / actions : '';
     var ctr = impressions > 0 ? (clicks / impressions) * 100 : '';
     var cpc = clicks > 0 ? spend / clicks : '';
 
     var name = toCsvCompatString(row.campaign_name);
     var freq = toCsvCompatString(row.frequency);
     var spendStr = toCsvCompatString(row.spend);
-    var convStr = toCsvCompatString(row.actions);
 
     return {
       campaign_name: name,
       campana: name,
-      cpl: toCsvCompatString(cpl),
+      cpl: '',
+      meta_leads: metaLeads === null ? '' : toCsvCompatString(metaLeads),
       ctr: toCsvCompatString(ctr),
       cpc: toCsvCompatString(cpc),
       frequency: freq,
       frecuencia: freq,
       spend: spendStr,
       gasto: spendStr,
-      conversions: convStr,
-      conversiones: convStr,
+      conversions: '',
+      conversiones: '',
       impressions: toCsvCompatString(row.impressions),
       clicks: toCsvCompatString(row.clicks),
       metric_date: toCsvCompatString(row.metric_date),
@@ -333,6 +374,7 @@
         cpm: null,
         reach: null,
         frequency: null,
+        leads: null,
         qualityRanking: null,
         engagementRanking: null,
         conversionRanking: null,
@@ -343,6 +385,7 @@
     var impressions = null;
     var clicks = null;
     var reach = null;
+    var leads = null;
     var freqWeighted = 0;
     var freqWeight = 0;
     var qualityRanking = null;
@@ -356,6 +399,8 @@
       if (s !== null) spend = (spend || 0) + s;
       if (i !== null) impressions = (impressions || 0) + i;
       if (c !== null) clicks = (clicks || 0) + c;
+      var leadN = fmtN(row.meta_leads);
+      if (leadN !== null) leads = (leads || 0) + leadN;
 
       var raw = row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null;
       if (!raw) return;
@@ -398,6 +443,7 @@
       cpm: cpm,
       reach: reach,
       frequency: frequency,
+      leads: leads,
       qualityRanking: qualityRanking,
       engagementRanking: engagementRanking,
       conversionRanking: conversionRanking,
@@ -1235,44 +1281,57 @@
 
   function renderLiquidityHistory(payload) {
     var rows = payload && Array.isArray(payload.history) ? payload.history : [];
+    var open = state.liquidityListOpen === true;
+    var body;
     if (rows.length === 0) {
-      return (
-        '<section class="ma-kpi-section ma-liquidity-history">' +
-        '<h2 class="ma-kpi-section-title">Historial ciclo de liquidez (30 días)</h2>' +
-        '<div class="ma-empty">Sin registros todavía — el job diario irá llenando este historial</div>' +
-        '</section>'
-      );
+      body =
+        '<div class="ma-empty">Sin registros todavía — el job diario irá llenando este historial</div>';
+    } else {
+      body =
+        '<div class="ma-table-wrap">' +
+        '<table class="ma-table">' +
+        '<thead><tr><th>Fecha</th><th>Fase</th><th>Gasto Meta</th></tr></thead>' +
+        '<tbody>' +
+        rows
+          .map(function (r) {
+            var dateLabel = formatDateEs(r.log_date) || r.log_date || '—';
+            var spend =
+              r.meta_spend_day !== null && r.meta_spend_day !== undefined
+                ? '$' + fmt(r.meta_spend_day)
+                : '—';
+            return (
+              '<tr>' +
+              '<td>' +
+              escapeHtml(dateLabel) +
+              '</td>' +
+              '<td>' +
+              escapeHtml(liquidityPhaseLabel(r.cycle_phase)) +
+              '</td>' +
+              '<td>' +
+              escapeHtml(spend) +
+              '</td>' +
+              '</tr>'
+            );
+          })
+          .join('') +
+        '</tbody></table></div>';
     }
     return (
       '<section class="ma-kpi-section ma-liquidity-history">' +
-      '<h2 class="ma-kpi-section-title">Historial ciclo de liquidez (30 días)</h2>' +
-      '<div class="ma-table-wrap">' +
-      '<table class="ma-table">' +
-      '<thead><tr><th>Fecha</th><th>Fase</th><th>Gasto Meta</th></tr></thead>' +
-      '<tbody>' +
-      rows
-        .map(function (r) {
-          var dateLabel = formatDateEs(r.log_date) || r.log_date || '—';
-          var spend =
-            r.meta_spend_day !== null && r.meta_spend_day !== undefined
-              ? '$' + fmt(r.meta_spend_day)
-              : '—';
-          return (
-            '<tr>' +
-            '<td>' +
-            escapeHtml(dateLabel) +
-            '</td>' +
-            '<td>' +
-            escapeHtml(liquidityPhaseLabel(r.cycle_phase)) +
-            '</td>' +
-            '<td>' +
-            escapeHtml(spend) +
-            '</td>' +
-            '</tr>'
-          );
-        })
-        .join('') +
-      '</tbody></table></div></section>'
+      '<button type="button" class="ma-liquidity-toggle" data-ma-action="toggle-liquidity" aria-expanded="' +
+      (open ? 'true' : 'false') +
+      '">' +
+      '<span class="ma-kpi-section-title">Historial ciclo de liquidez (30 días)</span>' +
+      '<span class="ma-liquidity-count">' +
+      rows.length +
+      (open ? ' ▾' : ' ▸') +
+      '</span>' +
+      '</button>' +
+      '<div class="ma-liquidity-body"' +
+      (open ? '' : ' hidden') +
+      '>' +
+      body +
+      '</div></section>'
     );
   }
 
@@ -1301,8 +1360,31 @@
     var avgCPL = derived.avgCPL;
     var alertas = derived.alertas;
     var latest = derived.latest || {};
-    var latestSub = latest.date ? latest.date : 'sin datos';
-    var trends = trendsFromData(data, latest);
+    var partialDay = isPartialMetricDay(latest.date);
+    var latestSub = !latest.date
+      ? 'sin datos'
+      : partialDay
+        ? latest.date + ' · día en curso'
+        : latest.date;
+    var trends = partialDay
+      ? {
+          spend: null,
+          conversions: null,
+          cpl: null,
+          ctr: null,
+          cpc: null,
+          cpm: null,
+        }
+      : trendsFromData(data, latest);
+    var metaLeadCount =
+      latest.leads !== null && latest.leads !== undefined ? latest.leads : null;
+    var metaCpl =
+      metaLeadCount !== null &&
+      metaLeadCount > 0 &&
+      latest.spend !== null &&
+      latest.spend !== undefined
+        ? latest.spend / metaLeadCount
+        : null;
     var ev = state.nextEvents || {};
 
     var performance = [
@@ -1337,6 +1419,15 @@
         color: avgCPL !== null && avgCPL <= 1 ? '#22c55e' : '#f59e0b',
         icon: '📉',
         trend: trends.cpl,
+      },
+      {
+        label: 'CPL META',
+        val: metaCpl !== null ? '$' + fmt(metaCpl) : '—',
+        sub:
+          (metaCpl !== null ? latest.date : 'Sin datos') +
+          (partialDay ? ' · día en curso' : ''),
+        color: '#22c55e',
+        icon: '💵',
       },
       {
         label: 'CTR',
@@ -1785,6 +1876,9 @@
         var action = el.getAttribute('data-ma-action');
         if (action === 'sync' || action === 'retry') {
           loadData();
+        } else if (action === 'toggle-liquidity') {
+          state.liquidityListOpen = !state.liquidityListOpen;
+          render();
         }
       });
     });
