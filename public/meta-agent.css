@@ -248,6 +248,34 @@
   color: var(--meta-agent-muted);
 }
 
+.ma-liquidity-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.ma-liquidity-toggle .ma-kpi-section-title {
+  margin: 0;
+}
+
+.ma-liquidity-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--meta-agent-muted);
+}
+
 /* Denser Performance cards only. */
 .ma-kpi-section-performance .ma-kpi-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));

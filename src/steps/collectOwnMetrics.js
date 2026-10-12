@@ -2,13 +2,22 @@ const { randomUUID } = require('crypto');
 const supabase = require('../clients/supabase');
 const env = require('../config/env');
 const logger = require('../lib/logger');
-const { todayUtc, shiftDateUtc } = require('../activity/dates');
+const { shiftDateUtc } = require('../activity/dates');
 
 const SOURCE = 'meta_marketing_api';
 const MAX_PAGES = 100;
+const ACCOUNT_TIME_ZONE = 'America/Montevideo';
+/**
+ * Lead ad sets optimize OFFSITE_CONVERSIONS for pixel custom event form_step_3
+ * (pixel 1966482200899899). Insights reports that result on `conversions`, not as
+ * the standard `lead` action and not as the aggregate `offsite_conversion.fb_pixel_custom`.
+ * The account has no custom conversion id.
+ */
+const META_CPL_ACTION_TYPE = 'offsite_conversion.fb_pixel_custom.form_step_3';
+const UPSERT_CONFLICT = 'entity_id,campaign_id,metric_date';
 
-// Día anterior cerrado, sujeto a ajustes posteriores de atribución.
-// Prior day closed, subject to later attribution adjustments.
+// Ayer y hoy en la zona de la cuenta. El día en curso se actualiza; el anterior
+// sigue abierto a ajustes de atribución. time_increment=1 evita mezclarlos.
 
 function parseFloatOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -22,9 +31,53 @@ function parseIntOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Previous closed reporting day — same UTC date helpers as the rest of MIE. */
-function resolvePreviousClosedReportingDay() {
-  return shiftDateUtc(todayUtc(), -1);
+/** Calendar date in the ad account timezone. `now` is injectable for tests. */
+function calendarDateInZone(timeZone, now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/**
+ * Yesterday and today in America/Montevideo.
+ * At 01:30Z the UTC date is already the next day, while Uruguay is still on the previous one.
+ */
+function resolveMontevideoReportingRange(now = new Date()) {
+  const today = calendarDateInZone(ACCOUNT_TIME_ZONE, now);
+  return { since: shiftDateUtc(today, -1), until: today };
+}
+
+/** Exact action_type match. A shorter prefix such as fb_pixel_custom does not match. */
+function countExactActionType(list, actionType) {
+  if (!Array.isArray(list)) return null;
+  const hit = list.find((action) => action && action.action_type === actionType);
+  if (!hit) return null;
+  return parseFloatOrNull(hit.value);
+}
+
+/**
+ * Application Success for these campaigns is form_step_3.
+ * Prefer the conversions array. Do not add the actions array on top.
+ * Null when that exact type is absent.
+ */
+function metaApplicationSuccessCount(row) {
+  if (!row || typeof row !== 'object') return null;
+  const fromConversions = countExactActionType(row.conversions, META_CPL_ACTION_TYPE);
+  if (fromConversions !== null) return fromConversions;
+  return countExactActionType(row.actions, META_CPL_ACTION_TYPE);
+}
+
+function metaApplicationSuccessValue(row) {
+  if (!row || typeof row !== 'object') return null;
+  const fromConversionValues = countExactActionType(
+    row.conversion_values,
+    META_CPL_ACTION_TYPE,
+  );
+  if (fromConversionValues !== null) return fromConversionValues;
+  return countExactActionType(row.action_values, META_CPL_ACTION_TYPE);
 }
 
 function buildSuccessRawJson({
@@ -146,6 +199,8 @@ function buildInsightsUrl({ version, adAccountId, reportingRange, after }) {
       'clicks',
       'actions',
       'action_values',
+      'conversions',
+      'conversion_values',
       'frequency',
       'reach',
       'quality_ranking',
@@ -153,6 +208,7 @@ function buildInsightsUrl({ version, adAccountId, reportingRange, after }) {
       'conversion_rate_ranking',
       'date_start',
     ].join(','),
+    time_increment: '1',
     time_range: JSON.stringify({
       since: reportingRange.since,
       until: reportingRange.until,
@@ -260,9 +316,7 @@ async function fetchAllCampaignRows({
 }
 
 function mapRowToMetric({ row, entityId, runId }) {
-  // actions/actions_value intentionally left NULL.
-  // No production campaigns exist yet to determine the correct action_type.
-  // Revisit once real campaign data becomes available.
+  // `actions` stores only form_step_3. The original actions and conversions stay in raw_json.
   return {
     entity_id: entityId,
     run_id: runId,
@@ -273,20 +327,32 @@ function mapRowToMetric({ row, entityId, runId }) {
     impressions: parseIntOrNull(row.impressions),
     clicks: parseIntOrNull(row.clicks),
     frequency: parseFloatOrNull(row.frequency),
-    actions: null,
-    actions_value: null,
+    actions: metaApplicationSuccessCount(row),
+    actions_value: metaApplicationSuccessValue(row),
     raw_json: row,
-    created_at: new Date().toISOString(),
   };
 }
 
-async function insertMetrics(rows) {
-  if (!rows.length) return { inserted: 0 };
-  const { error } = await supabase.from('own_ad_metrics').insert(rows);
-  if (error) {
-    throw new Error(`Failed to insert own_ad_metrics: ${error.message}`);
+/** Last row wins for the same entity, campaign and date inside one Meta response. */
+function collapseMetricRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = [row.entity_id, row.campaign_id, row.metric_date].join('\u0000');
+    byKey.set(key, row);
   }
-  return { inserted: rows.length };
+  return Array.from(byKey.values());
+}
+
+async function upsertMetrics(rows) {
+  const deduped = collapseMetricRows(rows);
+  if (!deduped.length) return { upserted: 0 };
+  const { error } = await supabase.from('own_ad_metrics').upsert(deduped, {
+    onConflict: UPSERT_CONFLICT,
+  });
+  if (error) {
+    throw new Error(`Failed to upsert own_ad_metrics: ${error.message}`);
+  }
+  return { upserted: deduped.length };
 }
 
 /**
@@ -307,8 +373,8 @@ async function collectOwnMetrics(options = {}) {
     throw new Error('META_AD_ACCOUNT_ID is not configured');
   }
 
-  const reportingDate = resolvePreviousClosedReportingDay();
-  const reportingRange = { since: reportingDate, until: reportingDate };
+  const reportingRange = resolveMontevideoReportingRange();
+  const reportingDate = reportingRange.until;
 
   const { entityId, entityName } = await resolveSelfEntityId();
   const runId = randomUUID();
@@ -320,8 +386,8 @@ async function collectOwnMetrics(options = {}) {
     apiVersion,
     reportingDate,
     reportingRange,
-    // Día anterior cerrado, sujeto a ajustes posteriores de atribución.
-    note: 'Prior day closed, subject to later attribution adjustments.',
+    timeZone: ACCOUNT_TIME_ZONE,
+    note: 'Yesterday and today in America/Montevideo, one row per campaign and date.',
   });
 
   await insertRun({ runId, entityId });
@@ -345,12 +411,12 @@ async function collectOwnMetrics(options = {}) {
     const metricRows = campaignRows.map((row) =>
       mapRowToMetric({ row, entityId, runId }));
 
-    const { inserted } = await insertMetrics(metricRows);
+    const { upserted } = await upsertMetrics(metricRows);
     const successRawJson = buildSuccessRawJson({
       reportingDate,
       reportingRange,
       campaignsFound: campaignRows.length,
-      metricsInserted: inserted,
+      metricsInserted: upserted,
     });
     const finishedAt = await finishRun({
       runId,
@@ -364,19 +430,17 @@ async function collectOwnMetrics(options = {}) {
       entityId,
       entityName,
       campaignsFound: campaignRows.length,
-      rowsInserted: inserted,
+      rowsInserted: upserted,
       reportingDate,
       reportingRange,
       finishedAt,
-      // Prior day closed, subject to later attribution adjustments.
-      attributionNote:
-        'Día anterior cerrado, sujeto a ajustes posteriores de atribución.',
+      timeZone: ACCOUNT_TIME_ZONE,
     };
 
     logger.info('Meta own-metrics collect finished', {
       runId,
       campaignsFound: campaignRows.length,
-      rowsInserted: inserted,
+      rowsInserted: upserted,
       reportingDate,
       status: 'success',
     });
@@ -413,7 +477,16 @@ module.exports = {
   parseFloatOrNull,
   parseIntOrNull,
   mapRowToMetric,
-  resolvePreviousClosedReportingDay,
+  metaApplicationSuccessCount,
+  countExactActionType,
+  collapseMetricRows,
+  upsertMetrics,
+  resolveMontevideoReportingRange,
+  calendarDateInZone,
+  buildInsightsUrl,
+  ACCOUNT_TIME_ZONE,
+  META_CPL_ACTION_TYPE,
+  UPSERT_CONFLICT,
   buildSuccessRawJson,
   buildFailureRawJson,
   MAX_PAGES,
