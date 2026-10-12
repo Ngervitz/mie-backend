@@ -292,12 +292,96 @@ test('dashboard keeps performance open, marks the current day, and collapses liq
   assert.ok(js.includes('día en curso'));
   assert.ok(js.includes('partialDay'));
   assert.ok(js.includes("label: 'CPL META'"));
+  assert.ok(js.includes("label: 'CTR GENERAL'"));
+  assert.ok(js.includes("label: 'CTR ENLACE'"));
+  assert.ok(!js.includes('total acumulado'));
+  assert.ok(!js.includes('fmt(latest.spend, 0)'));
   assert.ok(js.includes('Sin datos'));
   assert.ok(js.includes('liquidityListOpen: false'));
   assert.ok(js.includes('toggle-liquidity'));
   assert.ok(js.includes('ma-kpi-section-performance'));
   assert.ok(!js.includes('toggle-performance'));
   assert.ok(js.includes('data-ma-action="toggle-liquidity"'));
+});
+
+test('performance KPIs use form_step_3, two-decimal spend, and link CTR', function () {
+  const ui = require('../public/meta-agent.js');
+  const row = ui.mapOwnAdMetricsToLegacyRow({
+    campaign_name: 'Paso 3 - Ago 2026 - Video',
+    metric_date: '2026-10-12',
+    spend: 9.11,
+    impressions: 2311,
+    clicks: 231,
+    frequency: 1.235829,
+    raw_json: {
+      quality_ranking: 'UNKNOWN',
+      engagement_rate_ranking: null,
+      conversion_rate_ranking: '',
+      actions: [
+        { action_type: 'link_click', value: '135' },
+        { action_type: 'offsite_conversion.fb_pixel_custom', value: '45' },
+        { action_type: 'landing_page_view', value: '116' },
+      ],
+      conversions: [
+        { action_type: 'offsite_conversion.fb_pixel_custom.form_step_3', value: '45' },
+      ],
+    },
+  });
+  assert.strictEqual(row.meta_leads, '45');
+  const latest = ui.computeLatestDateStats([row]);
+  assert.strictEqual(latest.date, '2026-10-12');
+  assert.strictEqual(latest.spend, 9.11);
+  assert.strictEqual(latest.leads, 45);
+  assert.strictEqual(latest.spend / latest.leads, 9.11 / 45);
+  assert.ok(Math.abs(latest.ctr - (231 / 2311) * 100) < 1e-9);
+  assert.ok(Math.abs(latest.linkCtr - (135 / 2311) * 100) < 1e-9);
+  assert.strictEqual(latest.qualityRanking, null);
+  assert.strictEqual(ui.rankingLabel('UNKNOWN'), 'Sin datos');
+  assert.strictEqual(ui.rankingLabel(null), 'Sin datos');
+  assert.strictEqual(ui.rankingLabel('  '), 'Sin datos');
+  assert.strictEqual(ui.rankingLabel('ABOVE_AVERAGE'), 'ABOVE_AVERAGE');
+
+  const html = ui.renderKpis({
+    avgCPL: null,
+    alertas: [],
+    campList: [],
+    totalGasto: 0,
+    totalConv: 999,
+    latest: latest,
+  }, [row]);
+  const period = ui.isPartialMetricDay('2026-10-12')
+    ? '2026-10-12 · día en curso'
+    : '2026-10-12';
+  assert.ok(html.includes('$9.11'));
+  assert.ok(html.includes(period));
+  assert.ok(html.includes('CTR GENERAL'));
+  assert.ok(html.includes('CTR ENLACE'));
+  assert.ok(html.includes('10.00%'));
+  assert.ok(html.includes('5.84%'));
+  assert.ok(/>\s*45\s*</.test(html));
+  assert.ok(html.includes('CPL META'));
+  assert.ok(html.includes('$0.20'));
+  assert.ok(html.includes('Sin datos'));
+  assert.ok(!html.includes('UNKNOWN'));
+  assert.ok(!html.includes('total acumulado'));
+
+  const missingLink = Object.assign({}, row, {
+    raw_json: {
+      actions: [{ action_type: 'landing_page_view', value: '116' }],
+      conversions: row.raw_json.conversions,
+    },
+  });
+  const missingStats = ui.computeLatestDateStats([missingLink]);
+  assert.strictEqual(missingStats.linkCtr, null);
+  assert.strictEqual(missingStats.leads, 45);
+  const missingHtml = ui.renderKpis({
+    avgCPL: null,
+    alertas: [],
+    latest: missingStats,
+  }, [missingLink]);
+  const linkCard = missingHtml.split('CTR ENLACE')[1].split('CPC')[0];
+  assert.ok(linkCard.includes('Sin datos'));
+  assert.ok(!linkCard.includes('%'));
 });
 
 (async function main() {

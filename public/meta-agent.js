@@ -102,11 +102,12 @@
     return String(value);
   }
 
-  function countExactActionType(list) {
+  function countExactActionType(list, actionType) {
+    var expected = actionType || META_CPL_ACTION_TYPE;
     if (!Array.isArray(list)) return null;
     for (var i = 0; i < list.length; i++) {
       var action = list[i];
-      if (!action || action.action_type !== META_CPL_ACTION_TYPE) continue;
+      if (!action || action.action_type !== expected) continue;
       var n = parseFloat(action.value);
       return isNaN(n) ? null : n;
     }
@@ -122,6 +123,12 @@
     var fromConversions = countExactActionType(raw.conversions);
     if (fromConversions !== null) return fromConversions;
     return countExactActionType(raw.actions);
+  }
+
+  /** Link clicks live only in Insights actions. Absence is null, not zero. */
+  function linkClickCountFromInsight(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return countExactActionType(raw.actions, 'link_click');
   }
 
   function todayMontevideoIso(now) {
@@ -153,9 +160,10 @@
     var impressions = isNaN(impressionsNum) ? 0 : impressionsNum;
     var clicks = isNaN(clicksNum) ? 0 : clicksNum;
     var metaLeads = metaLeadCountFromInsight(row.raw_json);
+    var spendNum = fmtN(row.spend);
 
     var ctr = impressions > 0 ? (clicks / impressions) * 100 : '';
-    var cpc = clicks > 0 ? spend / clicks : '';
+    var cpc = spendNum !== null && clicks > 0 ? spendNum / clicks : '';
 
     var name = toCsvCompatString(row.campaign_name);
     var freq = toCsvCompatString(row.frequency);
@@ -347,8 +355,10 @@
   }
 
   function rankingLabel(value) {
-    if (value === null || value === undefined || value === '') return '—';
-    return String(value);
+    if (value === null || value === undefined) return 'Sin datos';
+    var text = String(value).trim();
+    if (!text || text.toUpperCase() === 'UNKNOWN') return 'Sin datos';
+    return text;
   }
 
   /**
@@ -375,6 +385,7 @@
         reach: null,
         frequency: null,
         leads: null,
+        linkCtr: null,
         qualityRanking: null,
         engagementRanking: null,
         conversionRanking: null,
@@ -386,6 +397,8 @@
     var clicks = null;
     var reach = null;
     var leads = null;
+    var linkClicks = null;
+    var linkClicksKnown = true;
     var freqWeighted = 0;
     var freqWeight = 0;
     var qualityRanking = null;
@@ -403,6 +416,9 @@
       if (leadN !== null) leads = (leads || 0) + leadN;
 
       var raw = row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null;
+      var linkN = linkClickCountFromInsight(raw);
+      if (linkN === null) linkClicksKnown = false;
+      else linkClicks = (linkClicks || 0) + linkN;
       if (!raw) return;
       var r = fmtN(raw.reach);
       if (r !== null) reach = (reach || 0) + r;
@@ -412,14 +428,14 @@
         freqWeighted += f * w;
         freqWeight += w;
       }
-      if (!qualityRanking && raw.quality_ranking) {
-        qualityRanking = String(raw.quality_ranking);
+      if (!qualityRanking && rankingLabel(raw.quality_ranking) !== 'Sin datos') {
+        qualityRanking = rankingLabel(raw.quality_ranking);
       }
-      if (!engagementRanking && raw.engagement_rate_ranking) {
-        engagementRanking = String(raw.engagement_rate_ranking);
+      if (!engagementRanking && rankingLabel(raw.engagement_rate_ranking) !== 'Sin datos') {
+        engagementRanking = rankingLabel(raw.engagement_rate_ranking);
       }
-      if (!conversionRanking && raw.conversion_rate_ranking) {
-        conversionRanking = String(raw.conversion_rate_ranking);
+      if (!conversionRanking && rankingLabel(raw.conversion_rate_ranking) !== 'Sin datos') {
+        conversionRanking = rankingLabel(raw.conversion_rate_ranking);
       }
     });
 
@@ -434,6 +450,13 @@
         ? (spend / impressions) * 1000
         : null;
     var frequency = freqWeight > 0 ? freqWeighted / freqWeight : null;
+    var linkCtr =
+      linkClicksKnown &&
+      linkClicks !== null &&
+      impressions !== null &&
+      impressions > 0
+        ? (linkClicks / impressions) * 100
+        : null;
 
     return {
       date: latestDate,
@@ -444,6 +467,7 @@
       reach: reach,
       frequency: frequency,
       leads: leads,
+      linkCtr: linkCtr,
       qualityRanking: qualityRanking,
       engagementRanking: engagementRanking,
       conversionRanking: conversionRanking,
@@ -1392,7 +1416,7 @@
         label: 'GASTO',
         val:
           latest.spend !== null && latest.spend !== undefined
-            ? '$' + fmt(latest.spend, 0)
+            ? '$' + fmt(latest.spend)
             : '—',
         sub: latestSub,
         color: '#3b82f6',
@@ -1401,8 +1425,12 @@
       },
       {
         label: 'CONVERSIONES',
-        val: derived.totalConv ? fmt(derived.totalConv, 0) : '—',
-        sub: derived.totalConv ? 'total acumulado' : 'sin datos',
+        val:
+          metaLeadCount !== null && metaLeadCount > 0
+            ? fmt(metaLeadCount, 0)
+            : '—',
+        sub:
+          metaLeadCount !== null && metaLeadCount > 0 ? latestSub : 'Sin datos',
         color: '#22c55e',
         icon: '🎯',
         trend: trends.conversions,
@@ -1430,7 +1458,7 @@
         icon: '💵',
       },
       {
-        label: 'CTR',
+        label: 'CTR GENERAL',
         val:
           latest.ctr !== null && latest.ctr !== undefined
             ? fmt(latest.ctr) + '%'
@@ -1439,6 +1467,19 @@
         color: '#3b82f6',
         icon: '👁',
         trend: trends.ctr,
+      },
+      {
+        label: 'CTR ENLACE',
+        val:
+          latest.linkCtr !== null && latest.linkCtr !== undefined
+            ? fmt(latest.linkCtr) + '%'
+            : '—',
+        sub:
+          latest.linkCtr !== null && latest.linkCtr !== undefined
+            ? latestSub
+            : 'Sin datos',
+        color: '#0ea5e9',
+        icon: '🔗',
       },
       {
         label: 'CPC',
@@ -1493,9 +1534,9 @@
         var e = rankingLabel(latest.engagementRanking);
         var c = rankingLabel(latest.conversionRanking);
         var hasAny =
-          latest.qualityRanking ||
-          latest.engagementRanking ||
-          latest.conversionRanking;
+          rankingLabel(latest.qualityRanking) !== 'Sin datos' ||
+          rankingLabel(latest.engagementRanking) !== 'Sin datos' ||
+          rankingLabel(latest.conversionRanking) !== 'Sin datos';
         return {
           label: 'RANKING DE CALIDAD',
           val:
@@ -1505,7 +1546,7 @@
             e +
             ' · Conversión: ' +
             c,
-          sub: hasAny ? latestSub : 'sin datos',
+          sub: hasAny ? latestSub : 'Sin datos',
           color: '#a78bfa',
           icon: '🏆',
           compactValue: true,
@@ -2038,9 +2079,23 @@
     refreshTimerId = setInterval(loadData, 5 * 60 * 1000);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      mapOwnAdMetricsToLegacyRow: mapOwnAdMetricsToLegacyRow,
+      computeLatestDateStats: computeLatestDateStats,
+      rankingLabel: rankingLabel,
+      metaLeadCountFromInsight: metaLeadCountFromInsight,
+      linkClickCountFromInsight: linkClickCountFromInsight,
+      renderKpis: renderKpis,
+      isPartialMetricDay: isPartialMetricDay,
+    };
   }
 })();
