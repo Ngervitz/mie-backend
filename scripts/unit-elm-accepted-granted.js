@@ -347,7 +347,7 @@ const NOT_ACCEPTED = {
     });
     const c = read(dup);
     assert.deepStrictEqual([c.state, c.detail, c.detail_label], [COMMERCIAL.CLOSED, 's1_duplicate_other_channel', 'Duplicado · Otro canal']);
-    assert.strictEqual(blocksSurveyInvite(c), true);
+    assert.strictEqual(blocksSurveyInvite(c), false, 'closed, like any other closure');
     const cell = computeElmCell({ process: dup, nowMs: NOW });
     assert.strictEqual(ElmUi.compactCellText(cell), 'Duplicado · Otro canal');
   });
