@@ -11,7 +11,7 @@
  *                  ignored, isService1Negative), S2 answer in
  *                  DEFINITIVE_S2_REJECTION_RESULTS, a post-referral postback status configured in
  *                  ELM_POST_REFERRAL_REJECTION_STATUSES, ops provider_closed_no_loan, or CZ 3
- *                  projected for an automatic process
+ *                  projected for an automatic process (except a duplicate, see closed)
  *   referred       "Aceptado ELM": ELM received the lead and assigned it to Copanel, NOT a granted
  *                  loan. S2 referred ("Lead Aprobado correctamente"), or the S2 answer
  *                  `{ success: true, result: null }` ELM confirmed as accepted (isS2Accepted);
@@ -22,8 +22,9 @@
  *                  or S1 "Repetido. Aprobado" (s1_error_code elm_s1_duplicate_other_channel): the
  *                  client is already approved by another ELM channel, not by Copanel
  *
- * The duplicate reading holds survey invites for good (blocksSurveyInvite): the client was not
- * rejected.
+ * A C1 duplicate ends in CZ 3 (Rechazados) but keeps the closed duplicate reading: it is not an
+ * ELM credit rejection (KPIs) and, like any closed process, does not hold survey invites
+ * (blocksSurveyInvite); the survey circuit applies its usual eligibility rules.
  *
  * Unknown answers and unconfigured postback statuses never become a rejection (fail safe).
  */
@@ -206,6 +207,7 @@ function classifyElmProcess(p, options) {
   const projected = Number(opts.projectedEstado);
   const cz = p.trigger_origin === 'cz_automatic' ? STATE_BY_PROJECTED_ESTADO[projected] : null;
   if (!cz || cz.state === base.state || base.state === COMMERCIAL.GRANTED) return base;
+  if (cz.state === COMMERCIAL.REJECTED && base.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) return base;
   const open = base.state === COMMERCIAL.IN_EVALUATION || base.state === COMMERCIAL.REVIEW;
   if (cz.state === COMMERCIAL.GRANTED || cz.state === COMMERCIAL.REJECTED || open) {
     return result(cz.state, cz.detail, base.stage);
@@ -216,7 +218,6 @@ function classifyElmProcess(p, options) {
 /** True when a survey invite must wait (or never happen) because of this ELM process. */
 function blocksSurveyInvite(classification) {
   if (!classification) return false;
-  if (classification.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) return true;
   return (
     classification.state !== COMMERCIAL.REJECTED && classification.state !== COMMERCIAL.CLOSED
   );

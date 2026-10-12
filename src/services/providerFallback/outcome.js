@@ -11,7 +11,9 @@
  * S1 "BCU error" has its own fixed policy (BCU_RETRY): wait 24 h from the error, resend the same
  * frozen request once; a second BCU error → manual_review. The job stays pending meanwhile.
  * A rejection is only final for documented ELM negative texts; others → manual_review. S1
- * "Repetido. Aprobado" (approved by another channel) is not a rejection either → manual_review.
+ * "Repetido. Aprobado" (approved by another channel, nothing for Copanel to manage) → rejected
+ * elm_s1_duplicate_other_channel: CZ 3 without review. Not an ELM credit rejection: the
+ * commercial reading stays closed "Duplicado · Otro canal" (classification.js).
  * S2 unknown that is the answer ELM confirmed as accepted (classification.isS2Accepted, the same
  * predicate JANUS manual uses) → referred; any other S2 unknown → manual_review.
  *
@@ -121,7 +123,7 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
   if (p.s1_status === S1.TECHNICAL_ERROR) return technicalDecision('s1', p, nowMs, retryPolicy);
   if (p.s1_status === S1.REJECTED) {
     if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {
-      return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL, {
+      return final(OUTCOME.REJECTED, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL, {
         result_message: p.s1_result_message || null,
       });
     }

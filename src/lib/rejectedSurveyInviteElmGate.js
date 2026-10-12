@@ -6,9 +6,10 @@
  * A CI is held while any of its ELM processes is not definitively closed: in evaluation,
  * accepted ("Aceptado ELM"), granted, technical error or ambiguous result. Automatic-circuit
  * solicitudes still open in CZ (projected 12/13/14/15/16) and fallback requests not finalized
- * hold it too. A definitive ELM rejection (or an ops closure without loan) does not hold: the
- * existing circuit continues with its own episode rules (one survey per CI for life, STEP per
- * episode, attempts per campaign + cz_solicitud_id). Nothing here creates or restarts invites.
+ * hold it too. A definitive ELM rejection or a closed process (ops closure, "Duplicado · Otro
+ * canal") does not hold: the existing circuit continues with its own episode rules (one survey
+ * per CI for life, STEP per episode, attempts per campaign + cz_solicitud_id). Nothing here
+ * creates or restarts invites.
  *
  * Reads only; errors propagate so callers fail closed (no invite when ELM state is unknown).
  */

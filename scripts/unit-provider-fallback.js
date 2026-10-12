@@ -1194,6 +1194,28 @@ test('ELM negative answers → rejected only for documented definitive texts; ot
   assert.deepStrictEqual(job(env, 623).reason_detail, { result_message: 'texto no documentado' });
 });
 
+test('S1 "Repetido. Aprobado" → rejected elm_s1_duplicate_other_channel, CZ 3, no review case, no S2', async () => {
+  const env = setup();
+  await enqueue(env, 625, 62500000);
+  env.client.script.s1.set('62500000', {
+    outcome: 'duplicate_other_channel',
+    httpStatus: 200,
+    resultMessage: 'Repetido. Aprobado',
+    errorCode: CODES.S1_DUPLICATE_OTHER_CHANNEL,
+  });
+  await env.mk('A').runOnce();
+  assert.strictEqual(job(env, 625).outcome, OUTCOME.REJECTED);
+  assert.strictEqual(job(env, 625).reason_code, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL);
+  assert.deepStrictEqual(job(env, 625).reason_detail, { result_message: 'Repetido. Aprobado' });
+  assert.strictEqual(env.repo.czState.get(625).projected_estado, 3);
+  assert.strictEqual(env.repo.reviewCases.length, 0, 'no manual review');
+  assert.strictEqual(env.client.calls.s1.length, 1);
+  assert.strictEqual(env.client.calls.s2.length, 0);
+  pastJobLease(env);
+  await env.mk('B').runOnce();
+  assert.strictEqual(env.client.calls.s1.length, 1, 'terminal: never resent');
+});
+
 test('S2 { success: true, result: null } confirmed by ELM → referred, CZ 13, no review case, S2 sent once', async () => {
   const env = setup();
   const accepted = (docNumber) => ({

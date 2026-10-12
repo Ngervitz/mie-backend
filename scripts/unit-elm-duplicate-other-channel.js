@@ -4,8 +4,10 @@
  * Regression: ELM confirmed that S1 "Repetido. Aprobado" means the client is already approved by
  * ANOTHER channel (not Copanel). It is persisted as s1 rejected + s1_error_code
  * elm_s1_duplicate_other_channel (original response untouched) and read as closed
- * "Duplicado · Otro canal": no S2, no retry, no survey, never a Copanel approval / placement nor
- * a rejection. KPIs, fallback, Ops and the CI resend rules see it as a terminal process.
+ * "Duplicado · Otro canal": no S2, no retry, never a Copanel approval / placement nor an ELM
+ * credit rejection. C1 finalizes it as rejected (CZ 3, Rechazados) without review; the reading
+ * stays closed even with CZ 3 projected, and the rejected-lead survey applies its usual rules.
+ * KPIs, fallback, Ops and the CI resend rules see it as a terminal process.
  * Historical rows (1341, stored as unknown) are not reclassified.
  * Pure functions and in-memory fakes only: no network, no database.
  *
@@ -13,6 +15,8 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const envPath = require.resolve('../src/config/env');
 require.cache[envPath] = {
@@ -51,6 +55,10 @@ const { computeElmSurveyBlocks } = require('../src/lib/rejectedSurveyInviteElmGa
 const { evaluateCiResendHold } = require('../src/lib/rejectedElmResendGuard');
 const { outcomeOf, OUTCOMES } = require('../src/lib/rejectedElmSend');
 const { createElmOpsService } = require('../src/services/elmOps/service');
+const {
+  evaluateRejectedSurveyInviteEligibility,
+  REASONS: SURVEY_REASONS,
+} = require('../src/lib/rejectedSurveyInvite');
 
 let passed = 0;
 let failed = 0;
@@ -134,13 +142,13 @@ const hist1341 = () =>
     assert.ok(!PRE_RECEPTION_ERROR_CODES.includes(CODES.S1_DUPLICATE_OTHER_CHANNEL), 'never a pre-reception code');
   });
 
-  await test('2 commercial reading: closed "Duplicado · Otro canal", stage S1, survey held', () => {
+  await test('2 commercial reading: closed "Duplicado · Otro canal", stage S1, survey not held', () => {
     const c = classifyElmProcess(dup(), { nowMs: NOW });
     assert.deepStrictEqual(
       { state: c.state, detail: c.detail, detail_label: c.detail_label, stage: c.stage },
       { state: COMMERCIAL.CLOSED, detail: 's1_duplicate_other_channel', detail_label: 'Duplicado · Otro canal', stage: 's1' },
     );
-    assert.strictEqual(blocksSurveyInvite(c), true);
+    assert.strictEqual(blocksSurveyInvite(c), false);
     for (const p of [dup({ trigger_origin: 'cz_automatic' }), dup({ trigger_origin: 'janus_batch' })]) {
       assert.strictEqual(classifyElmProcess(p, { nowMs: NOW, projectedEstado: 14 }).detail, 's1_duplicate_other_channel', p.trigger_origin);
     }
@@ -164,7 +172,7 @@ const hist1341 = () =>
     assert.strictEqual(classifyElmProcess(referred(), { nowMs: NOW }).state, COMMERCIAL.REFERRED);
   });
 
-  await test('5 no retries: no retry action, fallback finalizes (manual review, never a rejection)', () => {
+  await test('5 no retries: no retry action, fallback finalizes as rejected (CZ 3) without review', () => {
     const cell = computeElmCell({
       process: dup(),
       nowMs: NOW,
@@ -177,21 +185,21 @@ const hist1341 = () =>
     for (const origin of ['janus_manual', 'cz_automatic']) {
       const d = deriveFromProcess(dup({ trigger_origin: origin }), NOW, TECH_RETRY);
       assert.strictEqual(d.kind, 'final', origin);
-      assert.strictEqual(d.outcome, FB_OUTCOME.MANUAL_REVIEW, origin);
+      assert.strictEqual(d.outcome, FB_OUTCOME.REJECTED, origin);
       assert.strictEqual(d.reasonCode, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL, origin);
       assert.deepStrictEqual(d.detail, { result_message: 'Repetido. Aprobado' }, origin);
     }
-    assert.ok(!DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL), 'DB refuses it as rejected / not_eligible');
+    assert.ok(DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL), 'finalize accepts it as rejected');
   });
 
-  await test('6 surveys: the CI is held for a duplicate, released for a definitive rejection', () => {
+  await test('6 surveys: neither a duplicate nor a definitive rejection holds the CI', () => {
     const blocks = computeElmSurveyBlocks({
       processes: [dup({ ci: 11 }), rejectedRep({ ci: 12, cz_solicitud_id: 1601 })],
       states: [],
       openRequests: [],
       nowMs: NOW,
     });
-    assert.deepStrictEqual(blocks.get(11), { cz_solicitud_id: 1600, state: 'closed', source: 'elm_process' });
+    assert.strictEqual(blocks.has(11), false);
     assert.strictEqual(blocks.has(12), false);
   });
 
@@ -256,6 +264,121 @@ const hist1341 = () =>
     assert.strictEqual(c.detail, 's1_unknown');
     assert.strictEqual(blocksSurveyInvite(c), true);
     assert.strictEqual(deriveFromProcess(hist1341(), NOW, TECH_RETRY).reasonCode, REASONS.ELM_S1_UNKNOWN);
+  });
+
+  const c1Dup = (over) => dup(Object.assign({ trigger_origin: 'cz_automatic', cz_solicitud_id: 1460, ci: 21 }, over));
+
+  await test('12 C1 duplicate keeps "Duplicado · Otro canal" with CZ 3 projected; other projections unchanged', () => {
+    for (const projectedEstado of [null, 12, 14, 3]) {
+      const c = classifyElmProcess(c1Dup(), { nowMs: NOW, projectedEstado: projectedEstado });
+      assert.deepStrictEqual(
+        [c.state, c.detail, c.detail_label],
+        [COMMERCIAL.CLOSED, 's1_duplicate_other_channel', 'Duplicado · Otro canal'],
+        'projected ' + projectedEstado,
+      );
+    }
+    const uncertain = proc({ trigger_origin: 'cz_automatic', s1_status: S1.UNKNOWN });
+    assert.strictEqual(classifyElmProcess(uncertain, { nowMs: NOW, projectedEstado: 3 }).detail, 'cz_rejected', 'CZ 3 still settles other readings');
+    assert.strictEqual(classifyElmProcess(c1Dup(), { nowMs: NOW, projectedEstado: 16 }).state, COMMERCIAL.GRANTED, 'a CZ grant still wins');
+  });
+
+  await test('13 KPIs: a C1 duplicate in CZ 3 counts as closed, never as an ELM credit rejection', () => {
+    const rows = [c1Dup(), rejectedRep({ trigger_origin: 'cz_automatic', cz_solicitud_id: 1461, ci: 22 })];
+    const k = computeElmKpis(rows, { nowMs: NOW, projectedByCz: new Map([[1460, 3], [1461, 3]]) });
+    const f = k.flow.cz_automatic;
+    assert.strictEqual(f.started, 2);
+    assert.strictEqual(f.rejected_definitive, 1, 'only the credit rejection');
+    assert.strictEqual(f.pending_or_review, 0, 'no manual review');
+    assert.strictEqual(f.referred_s2, 0);
+    assert.deepStrictEqual(k.current.cz_automatic, {
+      in_evaluation: 0, referred: 0, granted: 0, rejected: 1, review: 0, closed: 1,
+    });
+  });
+
+  await test('14 Rechazados ELM cell of a C1 duplicate in CZ 3: label, ELM answer, no retry', () => {
+    const cell = computeElmCell({
+      process: c1Dup(),
+      nowMs: NOW,
+      projectedEstado: 3,
+      allowSend: true,
+      sendReadiness: { ready: true, reasons: [] },
+      maxRetryAttempts: 3,
+    });
+    assert.strictEqual(cell.state, COMMERCIAL.CLOSED);
+    assert.strictEqual(cell.label, 'Duplicado · Otro canal');
+    assert.deepStrictEqual(cell.elm_answer, { step: 's1', message: 'Repetido. Aprobado' });
+    assert.strictEqual(cell.retry, null);
+  });
+
+  await test('15 survey gate for a C1 duplicate: held while C1 is open, released once CZ 3 is projected', () => {
+    const open = computeElmSurveyBlocks({
+      processes: [c1Dup()],
+      states: [{ cz_solicitud_id: 1460, ci: 21, projected_estado: 12 }],
+      openRequests: [{ cz_solicitud_id: 1460, ci: 21 }],
+      nowMs: NOW,
+    });
+    assert.deepStrictEqual(open.get(21), { cz_solicitud_id: 1460, state: 'cz_estado_12', source: 'cz_automatic' });
+    const finalized = computeElmSurveyBlocks({
+      processes: [c1Dup()],
+      states: [{ cz_solicitud_id: 1460, ci: 21, projected_estado: 3 }],
+      openRequests: [],
+      nowMs: NOW,
+    });
+    assert.strictEqual(finalized.has(21), false);
+  });
+
+  await test('16 survey eligibility after release: usual rules, a completed survey (lifetime per CI) still wins', () => {
+    const base = {
+      ci: 21,
+      campaignId: 7,
+      publicBaseUrlConfigured: true,
+      lastRejection: { cz_solicitud_id: 1460 },
+      solicitud: { cz_id: 1460, email: 'cliente@example.com', lrw_id: 'LRW-1460', nombre: 'Ana' },
+      hasEncuesta: false,
+      isSuppressed: false,
+      priorRecipient: null,
+      elmBlocked: false,
+    };
+    assert.strictEqual(evaluateRejectedSurveyInviteEligibility(base).reason, SURVEY_REASONS.ELIGIBLE);
+    assert.strictEqual(
+      evaluateRejectedSurveyInviteEligibility(Object.assign({}, base, { hasEncuesta: true })).reason,
+      SURVEY_REASONS.SURVEY_ALREADY_COMPLETED,
+    );
+    assert.strictEqual(
+      evaluateRejectedSurveyInviteEligibility(Object.assign({}, base, { isSuppressed: true })).reason,
+      SURVEY_REASONS.EMAIL_SUPPRESSED,
+    );
+  });
+
+  await test('17 DEFINITIVE_REJECTION_REASONS mirrors the latest provider_fallback_definitive_rejection_reasons()', () => {
+    const dir = path.join(__dirname, '..', 'migrations');
+    const re = /CREATE OR REPLACE FUNCTION public\.provider_fallback_definitive_rejection_reasons\(\)[\s\S]*?ARRAY\[([\s\S]*?)\]::text\[\]/;
+    const defs = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => re.exec(fs.readFileSync(path.join(dir, f), 'utf8')))
+      .filter(Boolean);
+    assert.ok(defs.length >= 2, 'original + duplicate migration');
+    const latest = defs[defs.length - 1][1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
+    assert.deepStrictEqual(latest.slice().sort(), DEFINITIVE_REJECTION_REASONS.slice().sort());
+    assert.ok(latest.includes(REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL));
+  });
+
+  await test('18 ELM Ops follow-up: a C1 duplicate in CZ 3 is neither open nor a rejection pending in CZ', async () => {
+    const ops = createElmOpsService({
+      repository: { czIdsWithEstado3: async () => new Set(), listOpenFallbackRequests: async () => [] },
+      elmRepository: {
+        listAllProcesses: async () => [c1Dup()],
+        getProjectedEstadosByCzIds: async () => new Map([[1460, 3]]),
+      },
+      fallbackRepository: {},
+      now: () => NOW,
+      logger: { info() {}, warn() {}, error() {} },
+      c1StaleHours: 72,
+      postReferralRejectionStatuses: [],
+    });
+    assert.deepStrictEqual(await ops.followup(50), []);
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

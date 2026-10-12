@@ -350,10 +350,10 @@ const UNDOCUMENTED_S1 = [
     assert.strictEqual(c.detail, 's1_duplicate_other_channel');
     assert.strictEqual(c.detail_label, 'Duplicado · Otro canal');
     assert.strictEqual(c.stage, 's1');
-    assert.strictEqual(blocksSurveyInvite(c), true, 'no rejected-lead survey for a client approved elsewhere');
+    assert.strictEqual(blocksSurveyInvite(c), false, 'closed: the survey circuit applies its usual rules');
     const d = deriveFromProcess(dup, NOW, null);
     assert.strictEqual(d.kind, 'final');
-    assert.strictEqual(d.outcome, FB_OUTCOME.MANUAL_REVIEW, 'fallback never turns it into a rejection (no CZ 3)');
+    assert.strictEqual(d.outcome, FB_OUTCOME.REJECTED, 'C1 ends in CZ 3 without review');
     assert.strictEqual(d.reasonCode, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL);
 
     const p1341 = proc({ cz_solicitud_id: 1341, ci: 1, s1_status: S1.UNKNOWN, s1_attempts: 1, s1_error_code: CODES.RESPONSE_UNDOCUMENTED, s1_result_message: 'Repetido. Aprobado' });
