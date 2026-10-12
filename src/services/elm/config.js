@@ -4,7 +4,8 @@
  * ELM runtime configuration (read from process.env, no defaults for business mappings).
  *
  * Business mappings are EMPTY by default so every case fails closed until ELM confirms:
- * - ELM_ACTIVITY_TYPE_MAP_JSON     CZ relacion_laboral code → ELM activityType value
+ * - ELM_ACTIVITY_TYPE_MAP_JSON     CZ relacion_laboral code → ELM activityType value (codes in
+ *                                  CONFIRMED_ACTIVITY_TYPES, constants.js, ignore this map)
  * - ELM_DATE_OF_BIRTH_FORMAT       one of DATE_OF_BIRTH_FORMATS
  * - ELM_MOBILE_PHONE_FORMAT        one of MOBILE_PHONE_FORMATS
  * `source` is not configurable: always ELM_SOURCE ('copanel'). TrackingId (S2 only) is always

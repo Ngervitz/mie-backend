@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Manual-only S1 allowances (janus_manual): relacion_laboral OTR without mapping goes verbatim as
- * activityType, an absent / invalid fecha_nacimiento leaves dateOfBirth out. The automatic circuit
+ * Manual-only S1 allowances (janus_manual): an absent / invalid fecha_nacimiento leaves dateOfBirth
+ * out. relacion_laboral OTR goes as the ELM-confirmed "otro" in both circuits. The automatic circuit
  * (cz_automatic) keeps the strict rules. ELM's own answer is stored and shown, never retried.
  *
  * NO network: sockets and global fetch are blocked; the real NetSuite client runs on a fake fetch
@@ -233,6 +233,11 @@ function createFakeRepo(sol, opts) {
 
 const silentLogger = { info() {}, warn() {}, error() {} };
 
+function configWithEnvOtr(value) {
+  const map = Object.assign(JSON.parse(ENV.ELM_ACTIVITY_TYPE_MAP_JSON), { OTR: value });
+  return readElmConfig(Object.assign({}, ENV, { ELM_ACTIVITY_TYPE_MAP_JSON: JSON.stringify(map) }));
+}
+
 function setup(sol, steps, opts) {
   const repo = createFakeRepo(sol, opts);
   const f = fakeFetch(steps || []);
@@ -240,7 +245,7 @@ function setup(sol, steps, opts) {
   const orch = createElmOrchestrator({
     repository: repo,
     client: client,
-    config: CONFIG,
+    config: (opts && opts.config) || CONFIG,
     logger: silentLogger,
     now: () => NOW_MS,
     enabledTriggerOrigins: AUTOMATIC_ORIGINS,
@@ -267,14 +272,14 @@ function test(name, fn) {
 
 // ---------------------------------------------------------------------------
 
-test('payload: manual OTR verbatim, invalid DOB omitted, exact S1 JSON; automatic strict', () => {
+test('payload: manual OTR as "otro", invalid DOB omitted, exact S1 JSON; automatic strict', () => {
   const sol = solicitud({ relacion_laboral: 'OTR', fecha_nacimiento: '0088-04-08' });
   const manual = buildService1Payload({ czId: CZ, solicitud: sol, config: CONFIG, now: NOW, manual: true });
   assert.strictEqual(manual.ok, true);
-  assert.deepStrictEqual(manual.notices, [NOTICES.ACTIVITY_TYPE_RAW, NOTICES.DATE_OF_BIRTH_OMITTED]);
+  assert.deepStrictEqual(manual.notices, [NOTICES.DATE_OF_BIRTH_OMITTED]);
   assert.strictEqual(
     JSON.stringify(manual.payload),
-    '{"activityType":"OTR","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
+    '{"activityType":"otro","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
       ELM_SOURCE +
       '"}',
   );
@@ -285,7 +290,7 @@ test('payload: manual OTR verbatim, invalid DOB omitted, exact S1 JSON; automati
   );
 
   const strict = buildService1Payload({ czId: CZ, solicitud: sol, config: CONFIG, now: NOW });
-  assert.deepStrictEqual(strict, { ok: false, code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
+  assert.deepStrictEqual(strict, { ok: false, code: CODES.DATE_OF_BIRTH_INVALID });
   const strictDob = buildService1Payload({
     czId: CZ,
     solicitud: solicitud({ fecha_nacimiento: '0088-04-08' }),
@@ -295,7 +300,7 @@ test('payload: manual OTR verbatim, invalid DOB omitted, exact S1 JSON; automati
   assert.deepStrictEqual(strictDob, { ok: false, code: CODES.DATE_OF_BIRTH_INVALID });
 });
 
-test('payload: OTR with valid DOB keeps the date; absent DOB omitted; configured mapping wins', () => {
+test('payload: OTR with valid DOB keeps the date; absent DOB omitted; OTR → "otro" over the env map', () => {
   const otr = buildService1Payload({
     czId: CZ,
     solicitud: solicitud({ relacion_laboral: 'OTR' }),
@@ -303,13 +308,15 @@ test('payload: OTR with valid DOB keeps the date; absent DOB omitted; configured
     now: NOW,
     manual: true,
   });
-  assert.deepStrictEqual(otr.notices, [NOTICES.ACTIVITY_TYPE_RAW]);
+  assert.deepStrictEqual(otr.notices, []);
   assert.strictEqual(
     JSON.stringify(otr.payload),
-    '{"activityType":"OTR","dateOfBirth":"10/7/1991","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
+    '{"activityType":"otro","dateOfBirth":"10/7/1991","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
       ELM_SOURCE +
       '"}',
   );
+  const auto = buildService1Payload({ czId: CZ, solicitud: solicitud({ relacion_laboral: 'OTR' }), config: CONFIG, now: NOW });
+  assert.deepStrictEqual(auto, Object.assign({}, otr, { ok: true }), 'automatic sends the same "otro" payload');
   const omittable = [
     { fecha_nacimiento: null, fecha_nacimiento_status: 'absent' },
     { fecha_nacimiento: null, fecha_nacimiento_status: 'impossible' },
@@ -328,15 +335,37 @@ test('payload: OTR with valid DOB keeps the date; absent DOB omitted; configured
     assert.deepStrictEqual(b.notices, [NOTICES.DATE_OF_BIRTH_OMITTED]);
     assert.strictEqual(b.payload.activityType, 'TEST_PRIVADO', 'mapped activity untouched');
   }
-  const mapped = buildService1Payload({
-    czId: CZ,
-    solicitud: solicitud({ relacion_laboral: 'OTR' }),
-    config: Object.assign({}, CONFIG, { activityTypeMap: Object.assign({}, CONFIG.activityTypeMap, { OTR: 'TEST_OTROS' }) }),
-    now: NOW,
-    manual: true,
-  });
-  assert.strictEqual(mapped.payload.activityType, 'TEST_OTROS');
-  assert.deepStrictEqual(mapped.notices, []);
+  for (const envValue of ['TEST_OTROS', 'OTR', 'Otro']) {
+    const config = configWithEnvOtr(envValue);
+    assert.strictEqual(config.activityTypeMap.OTR, envValue, 'fixture: the env map carries OTR');
+    for (const manual of [true, false]) {
+      const label = 'env OTR=' + envValue + (manual ? ' manual' : ' automatic');
+      const b = buildService1Payload({ czId: CZ, solicitud: solicitud({ relacion_laboral: 'OTR' }), config, now: NOW, manual });
+      assert.strictEqual(b.payload.activityType, 'otro', label);
+      assert.deepStrictEqual(b.notices, [], label);
+      const e = evaluateElmEligibility({ czId: CZ, solicitud: solicitud({ relacion_laboral: 'OTR' }), grantedRow: null, config, now: NOW, manual });
+      assert.deepStrictEqual([e.eligible, e.notices], [true, []], label);
+      for (const [code, value] of [['EPR', 'TEST_PRIVADO'], ['EPU', 'TEST_PUBLICO'], ['JUB', 'TEST_JUBILADO']]) {
+        const other = buildService1Payload({ czId: CZ, solicitud: solicitud({ relacion_laboral: code }), config, now: NOW, manual });
+        assert.strictEqual(other.payload.activityType, value, code + ' unchanged, ' + label);
+      }
+      assert.strictEqual(
+        buildService1Payload({ czId: CZ, solicitud: solicitud({ relacion_laboral: 'ICL' }), config, now: NOW, manual }).code,
+        CODES.ACTIVITY_TYPE_MAPPING_MISSING,
+        'unmapped ICL still blocks, ' + label,
+      );
+    }
+  }
+});
+
+test('orchestrator: manual send with an env OTR entry still sends "otro" to ELM', async () => {
+  const sol = solicitud({ relacion_laboral: 'OTR' });
+  const h = setup(sol, [ok('SCORE BAJO')], { config: configWithEnvOtr('TEST_OTROS') });
+  const out = await h.orch.sendElm(CZ, MANUAL);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(h.f.calls.length, 1);
+  assert.strictEqual(JSON.parse(s1Body(h.f.calls[0])).activityType, 'otro');
+  assert.strictEqual(h.repo.claims[0].s1Request.activityType, 'otro', 'frozen request = sent body');
 });
 
 test('payload: manual keeps every other rule (unknown code, missing fields, salary, DOB format)', () => {
@@ -389,19 +418,16 @@ test('mirror null date: underage / future / unclassified never become "omit date
   assert.ok(ElmUi.sendBlockedHint({ reason: CODES.DATE_OF_BIRTH_UNVERIFIED }).includes('sin verificar'));
 });
 
-test('eligibility: manual turns DOB / OTR into notices; default stays strict; other blockers kept', () => {
+test('eligibility: manual turns DOB into a notice, OTR is mapped; default stays strict; other blockers kept', () => {
   const sol = solicitud({ relacion_laboral: 'OTR', fecha_nacimiento: '0001-01-12' });
   const manual = evaluateElmEligibility({ czId: CZ, solicitud: sol, grantedRow: null, config: CONFIG, now: NOW, manual: true });
   assert.deepStrictEqual(manual, {
     eligible: true,
     blockers: [],
-    notices: [NOTICES.DATE_OF_BIRTH_OMITTED, NOTICES.ACTIVITY_TYPE_RAW],
+    notices: [NOTICES.DATE_OF_BIRTH_OMITTED],
   });
   const strict = evaluateElmEligibility({ czId: CZ, solicitud: sol, grantedRow: null, config: CONFIG, now: NOW });
-  assert.deepStrictEqual(
-    strict.blockers.map((b) => b.code),
-    [CODES.DATE_OF_BIRTH_INVALID, CODES.ACTIVITY_TYPE_MAPPING_MISSING],
-  );
+  assert.deepStrictEqual(strict.blockers.map((b) => b.code), [CODES.DATE_OF_BIRTH_INVALID]);
   const granted = evaluateElmEligibility({
     czId: CZ,
     solicitud: Object.assign({}, sol, { solicitudes_estados_id: 11 }),
@@ -421,7 +447,7 @@ test('orchestrator: manual 1255-like case sends exactly the expected S1 JSON onc
   const a = await auto.orch.evaluateElm(CZ, { triggerOrigin: 'cz_automatic', solicitud: sol });
   assert.strictEqual(a.ok, false);
   assert.strictEqual(a.code, CODES.DATE_OF_BIRTH_INVALID);
-  assert.deepStrictEqual(a.blockers.map((b) => b.code), [CODES.DATE_OF_BIRTH_INVALID, CODES.ACTIVITY_TYPE_MAPPING_MISSING]);
+  assert.deepStrictEqual(a.blockers.map((b) => b.code), [CODES.DATE_OF_BIRTH_INVALID]);
   assert.strictEqual(auto.f.calls.length, 0);
   assert.strictEqual(auto.repo.claims.length, 0);
 
@@ -430,7 +456,7 @@ test('orchestrator: manual 1255-like case sends exactly the expected S1 JSON onc
   assert.strictEqual(out.ok, true);
   assert.strictEqual(m.f.calls.length, 1, 'S1 only (rejected)');
   const expected =
-    '{"activityType":"OTR","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
+    '{"activityType":"otro","docNumber":"12345678","firstName":"Ana","lastName":"Prueba","salary":"30000","source":"' +
     ELM_SOURCE +
     '"}';
   assert.strictEqual(s1Body(m.f.calls[0]), expected);
@@ -566,21 +592,22 @@ test('Reintentar ELM: manual request frozen without dateOfBirth is resent as fro
   assert.strictEqual(a.f.calls.length + badFrozen.f.calls.length, 0);
 });
 
-test('list + Rechazados: OTR / invalid DOB are enabled sends with notices; UI announces them', async () => {
+test('list + Rechazados: OTR / invalid DOB are enabled sends; UI announces the omitted DOB', async () => {
   const sol = solicitud({ relacion_laboral: 'OTR', fecha_nacimiento: '0088-04-08' });
   const h = setup(sol);
   const cells = await h.listView.cellsForCzIds([CZ], { allowSend: true });
   const cell = cells.get(CZ);
   assert.strictEqual(cell.kind, 'not_sent');
   assert.strictEqual(cell.action.enabled, true);
-  assert.deepStrictEqual(cell.action.notices, [NOTICES.DATE_OF_BIRTH_OMITTED, NOTICES.ACTIVITY_TYPE_RAW]);
+  assert.deepStrictEqual(cell.action.notices, [NOTICES.DATE_OF_BIRTH_OMITTED]);
 
   const resolved = resolveRejectedSend({ rejected: [{ cz_solicitud_id: CZ, rejected_at: '2026-10-01T10:00:00Z' }], cells: cells, hold: null });
   assert.strictEqual(resolved.send.target_cz_id, CZ);
   assert.deepStrictEqual(resolved.send.candidates[0].notices, cell.action.notices);
   const html = ElmUi.rejectedSendHtml(CI, resolved.send);
   assert.ok(html.includes('data-action="elm-send"'));
-  assert.ok(html.includes('Sin fecha nac. · Actividad OTR'));
+  assert.ok(html.includes('Sin fecha nac.'));
+  assert.ok(!html.includes('Actividad OTR'), 'OTR is mapped, not sent raw');
   assert.ok(html.includes('data-elm-notice="Se envía sin fecha de nacimiento'));
 
   const held = resolveRejectedSend({

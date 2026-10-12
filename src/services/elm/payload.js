@@ -13,7 +13,13 @@
  * ELM returns as postback internal_id).
  */
 
-const { CODES, ELM_SOURCE, MANUAL_RAW_ACTIVITY_TYPES, NOTICES } = require('./constants');
+const {
+  CODES,
+  CONFIRMED_ACTIVITY_TYPES,
+  ELM_SOURCE,
+  MANUAL_RAW_ACTIVITY_TYPES,
+  NOTICES,
+} = require('./constants');
 const {
   BIRTH_DATE_STATUS,
   OMITTABLE_BIRTH_DATE_STATUSES,
@@ -163,13 +169,17 @@ function manualBirthDateDecision(solicitud, now) {
 }
 
 /**
- * activityType for a relacion_laboral: the configured mapping, or (manual only) the CZ code itself
- * when it is in MANUAL_RAW_ACTIVITY_TYPES and has no mapping.
+ * activityType for a relacion_laboral: the ELM-confirmed value (CONFIRMED_ACTIVITY_TYPES, never
+ * overridden by config), else the configured mapping, else (manual only) the CZ code itself when
+ * it is in MANUAL_RAW_ACTIVITY_TYPES.
  * @returns {{ value: string, raw: boolean } | null}
  */
 function resolveActivityType(relacionRaw, map, manual) {
   const relacion = text(relacionRaw);
   if (!relacion) return null;
+  if (Object.prototype.hasOwnProperty.call(CONFIRMED_ACTIVITY_TYPES, relacion)) {
+    return { value: CONFIRMED_ACTIVITY_TYPES[relacion], raw: false };
+  }
   const m = map || {};
   const mapped = Object.prototype.hasOwnProperty.call(m, relacion) ? text(m[relacion]) : null;
   if (mapped) return { value: mapped, raw: false };
