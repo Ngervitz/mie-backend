@@ -14381,7 +14381,28 @@ init();
     );
   }
 
-  function renderCalidad(encRow) {
+  function renderSurveyConversionCard(row) {
+    const den = row ? numOrZero(row.denominator) : 0;
+    const num = row ? numOrZero(row.numerator) : 0;
+    const ratio = num + ' / ' + den;
+    if (!row || den <= 0) {
+      return renderKpiCard(
+        '—',
+        'Conversión de encuestas · ' + (row ? ratio : 'sin cohorte'),
+        'neutral',
+      );
+    }
+    const rate = Number(row.rate);
+    const pct = Number.isFinite(rate)
+      ? rate.toLocaleString('es-UY', {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }) + ' %'
+      : '—';
+    return renderKpiCard(pct, 'Conversión de encuestas · ' + ratio, 'accent');
+  }
+
+  function renderCalidad(encRow, conversionRow) {
     const count = encRow ? numOrZero(encRow.total_encuestas) : 0;
     const scoreRaw = encRow && encRow.score_promedio;
     const scoreNum = Number(scoreRaw);
@@ -14408,6 +14429,7 @@ init();
         'accent',
       ) +
       (hasV2 ? renderKpiCard(scoreV2, '⭐ Score promedio V2 (0–27)', 'accent') : '') +
+      renderSurveyConversionCard(conversionRow) +
       '</div></section>'
     );
   }
@@ -14567,6 +14589,9 @@ init();
       const encRow = (data.encuestasByMonth || []).find(function (r) {
         return r.month === monthKey;
       });
+      const conversionRow = (data.surveyConversionByMonth || []).find(function (r) {
+        return r.month === monthKey;
+      });
       if (monthKpisEl) {
         monthKpisEl.innerHTML =
           '<section class="cz-funnel-month-summary">' +
@@ -14574,7 +14599,7 @@ init();
           escapeHtml(formatCzMonthLabel(monthKey)) +
           '</h2>' +
           resultadoNegocioHtml +
-          renderCalidad(encRow) +
+          renderCalidad(encRow, conversionRow) +
           '</section>';
       }
       resultsEl.innerHTML =
