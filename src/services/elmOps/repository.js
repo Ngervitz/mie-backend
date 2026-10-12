@@ -23,7 +23,7 @@ const OPEN_PROCESS_SELECT =
   'id, cz_solicitud_id, ci, trigger_origin, commercial_origin, created_at, updated_at, s1_status, s1_started_at, s1_lease_expires_at, s2_status, s2_http_status, s2_error_code, s2_response, s2_result_message, s2_started_at, s2_lease_expires_at, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_event_id, last_postback_at, ops_resolved_at';
 
 const CASE_PROCESS_SELECT =
-  'id, cz_solicitud_id, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_at, ops_resolution_code, ops_resolved_at';
+  'id, cz_solicitud_id, ci, s1_status, s1_lease_expires_at, s2_status, s2_http_status, s2_error_code, s2_response, s2_result_message, s2_lease_expires_at, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_at, ops_resolution_code, ops_resolved_at';
 
 const CASE_SELECT =
   'id, fallback_request_id, cz_solicitud_id, ci, elm_process_id, related_cz_solicitud_id, reason_code, priority, due_at, status, assigned_to, assigned_at, resolution_code, resolution_note, resolved_by, resolved_at, version, created_at, updated_at';
@@ -317,6 +317,7 @@ function createElmOpsRepository(supabaseOverride) {
 module.exports = {
   AUDIT_TABLE,
   OPEN_PROCESS_SELECT,
+  CASE_PROCESS_SELECT,
   CASE_SELECT,
   createElmOpsRepository,
 };

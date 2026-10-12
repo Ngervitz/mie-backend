@@ -18497,7 +18497,12 @@ init();
         if (p.s1) rows += dlRow('S1', p.s1.effective_status || '—');
         if (p.s1 && p.s1.result_message) rows += dlRow('Respuesta S1', p.s1.result_message);
         if (p.s1 && p.s1.started_at) rows += dlRow('S1 iniciado', fmtDate(p.s1.started_at));
-        if (p.s2) rows += dlRow('S2', p.s2.effective_status || '—');
+        if (p.s2) {
+          const s2Row = H
+            ? H.s2DetailRow(p.s2.effective_status, e.cell)
+            : { label: 'S2', value: p.s2.effective_status || '—' };
+          rows += dlRow(s2Row.label, s2Row.value);
+        }
         if (p.s2 && p.s2.result_message) rows += dlRow('Respuesta S2', p.s2.result_message);
         else if (e.cell && e.cell.detail === 's2_accepted') {
           rows += dlRow('Respuesta S2', 'success: true · result: null (Aceptado ELM)');

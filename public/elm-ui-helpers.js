@@ -89,6 +89,19 @@
     return ORIGIN_LABELS[origin] || (origin ? String(origin) : '—');
   }
 
+  /**
+   * S2 row of the solicitud ELM detail. An Aceptado ELM keeps the stored technical status unknown
+   * (the acceptance is read from the stored answer), so both are shown together.
+   * @param {string|null|undefined} s2Status effective technical status
+   * @param {{ detail?: string }|null|undefined} cell
+   * @returns {{ label: string, value: string }}
+   */
+  var S2_ACCEPTED_TECHNICAL_VALUE = 'unknown · interpretado como Aceptado ELM';
+  function s2DetailRow(s2Status, cell) {
+    if (cell && cell.detail === 's2_accepted') return { label: 'S2 técnico', value: S2_ACCEPTED_TECHNICAL_VALUE };
+    return { label: 'S2', value: s2Status ? String(s2Status) : '—' };
+  }
+
   var OPS_RESOLUTION_LABELS = {
     provider_closed_no_loan: 'ELM cerró el caso sin préstamo',
     provider_loan_disbursed: 'ELM otorgó el préstamo',
@@ -896,6 +909,7 @@
     ORIGIN_LABELS: ORIGIN_LABELS,
     cellLabel: cellLabel,
     originLabel: originLabel,
+    s2DetailRow: s2DetailRow,
     elmAnswerText: elmAnswerText,
     opsResolutionText: opsResolutionText,
     elmAnswerHtml: elmAnswerHtml,
