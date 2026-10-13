@@ -6,6 +6,9 @@
  * requireElmAction (active admin, human session, never cron) and are audited in the DB.
  *
  *   GET  /summary                          counts for badges/alerts
+ *   GET  /kpis?from=&to=                   ELM KPIs (flow vs current) by trigger_origin
+ *   GET  /followup                         seguimiento operativo (in evaluation / review /
+ *                                          automatic rejection not reflected in CZ / queued)
  *   GET  /processes                        active referrals + uncertain ELM results (CI blockers)
  *   POST /processes/:id/resolve            audited manual resolution (never sends, never GRANTED)
  *   GET  /review-cases?status=open|resolved
@@ -59,6 +62,24 @@ function createElmOpsRouter(opts) {
       return res.json({ ok: true, data: await svc().summary() });
     } catch (err) {
       return fail(res, 'GET elm-ops/summary failed', err);
+    }
+  });
+
+  router.get('/kpis', async function (req, res) {
+    try {
+      const data = await svc().kpis({ from: req.query.from, to: req.query.to });
+      if (!data) return res.status(400).json({ ok: false, error: 'invalid_request' });
+      return res.json({ ok: true, data: data });
+    } catch (err) {
+      return fail(res, 'GET elm-ops/kpis failed', err);
+    }
+  });
+
+  router.get('/followup', async function (req, res) {
+    try {
+      return res.json({ ok: true, items: await svc().followup(limitOf(req.query.limit)) });
+    } catch (err) {
+      return fail(res, 'GET elm-ops/followup failed', err);
     }
   });
 

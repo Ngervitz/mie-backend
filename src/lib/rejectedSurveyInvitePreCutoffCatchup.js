@@ -31,6 +31,7 @@ const {
   PRE_CUTOFF_CATCHUP_CZ_IDS,
   isAuthorizedPreCutoffCatchupCzId,
 } = require('./rejectedSurveyInvitePreCutoffCatchupIds');
+const { loadElmSurveyBlocksByCi } = require('./rejectedSurveyInviteElmGate');
 
 function normalizeEmail(email) {
   return String(email || '')
@@ -197,6 +198,14 @@ async function runPreCutoffCatchupSurveyInvite(supabase, opts) {
     }
   }
 
+  const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
+  const elmBlocks = await loadElmBlocks(
+    supabase,
+    cohort.map(function (row) {
+      return row.ci;
+    }),
+  );
+
   const campaignIds = [
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[1],
     HISTORICAL_PILOT_STEP_CAMPAIGN_IDS[2],
@@ -253,6 +262,7 @@ async function runPreCutoffCatchupSurveyInvite(supabase, opts) {
       hasEncuesta: encuestaCis.has(ci),
       isSuppressed: emailNorm ? suppressed.has(emailNorm) : false,
       priorRecipient: attemptsByStep[dueStepGuess] || null,
+      elmBlocked: elmBlocks.has(ci),
     });
 
     const decision = decideHistoricalSurveyInviteAction({

@@ -165,6 +165,81 @@
     );
   }
 
+  const KPI_SEGMENTS = Object.freeze([
+    ['total', 'Total'],
+    ['janus_manual', 'Manual (JANUS)'],
+    ['janus_batch', 'Lote (JANUS)'],
+    ['cz_automatic', 'Automático (CZ)'],
+  ]);
+
+  const FLOW_LABELS = Object.freeze([
+    ['started', 'Iniciados'],
+    ['s1_executed', 'S1 ejecutados'],
+    ['s1_favorable', 'S1 favorables'],
+    ['referred_s2', 'Derivados S2 (Preaprobado ELM)'],
+    ['rejected_definitive', 'Rechazos definitivos'],
+    ['granted', 'Otorgados ELM'],
+    ['pending_or_review', 'Pendientes / en revisión'],
+    ['distinct_ci_started', 'CI distintas iniciadas'],
+  ]);
+
+  const CURRENT_LABELS = Object.freeze([
+    ['in_evaluation', 'En evaluación'],
+    ['referred', 'Preaprobado ELM'],
+    ['granted', 'Otorgado ELM'],
+    ['rejected', 'Rechazado ELM'],
+    ['review', 'Pendiente de revisión'],
+    ['closed', 'Cerrado sin préstamo'],
+  ]);
+
+  const FOLLOWUP_KIND_LABELS = Object.freeze({
+    in_evaluation: 'En evaluación',
+    review: 'Pendiente de revisión',
+    rejected_pending_cz: 'Rechazo sin reflejo en Credizona',
+    queued: 'En cola',
+  });
+
+  function originLabel(origin) {
+    for (const s of KPI_SEGMENTS) if (s[0] === origin) return s[1];
+    return origin || '—';
+  }
+
+  /** One table: rows = indicators, columns = total + trigger origins. */
+  function kpiTableHtml(block, labels) {
+    if (!block) return '';
+    return (
+      '<table class="mcl-table elm-ops-kpi"><thead><tr><th></th>' +
+      KPI_SEGMENTS.map(function (s) { return '<th class="num">' + esc(s[1]) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      labels.map(function (l) {
+        return (
+          '<tr><td>' + esc(l[1]) + '</td>' +
+          KPI_SEGMENTS.map(function (s) {
+            const seg = block[s[0]] || {};
+            return '<td class="num">' + esc(seg[l[0]] != null ? seg[l[0]] : 0) + '</td>';
+          }).join('') +
+          '</tr>'
+        );
+      }).join('') +
+      '</tbody></table>'
+    );
+  }
+
+  function followupRowHtml(i, fmtDate) {
+    return (
+      '<tr>' +
+      '<td>' + esc(i.cz_solicitud_id) + '</td>' +
+      '<td>' + esc(i.ci || '—') + '</td>' +
+      '<td>' + esc(originLabel(i.trigger_origin)) + '</td>' +
+      '<td>' + esc(FOLLOWUP_KIND_LABELS[i.kind] || i.kind || '—') + '</td>' +
+      '<td>' + esc(i.label || '—') + '</td>' +
+      '<td>' + esc(i.provider_status || '—') + '</td>' +
+      '<td>' + esc(fmtDate(i.since)) + '</td>' +
+      '<td>' + esc(fmtAge(i.age_hours)) + '</td>' +
+      '</tr>'
+    );
+  }
+
   function caseRowHtml(c, fmtDate, canAct) {
     const flags = [];
     if (c.unassigned) flags.push('<span class="elm-ops-flag">Sin asignar</span>');
@@ -280,6 +355,8 @@
       summary: null,
       processes: [],
       cases: [],
+      kpis: null,
+      followup: [],
       assignees: null,
       canAct: false,
       error: null,
@@ -308,6 +385,31 @@
       if (alert) html += '<div class="elm-ops-alert" role="alert">' + esc(alert) + '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
       if (state.message) html += '<div class="mcl-status">' + esc(state.message) + '</div>';
+
+      if (state.kpis) {
+        html +=
+          '<details class="elm-ops-section">' +
+          '<summary>KPI ELM (todos los procesos, por origen)</summary>' +
+          '<p class="preaprobados-muted">Flujo: lo que pasó con los procesos iniciados (no baja si el estado cambia). ' +
+          'Estado actual: dónde está hoy cada proceso. Un proceso por solicitud; sin datos CDV. ' +
+          '"Derivados S2" no son préstamos otorgados.</p>' +
+          '<h4>Flujo</h4>' + kpiTableHtml(state.kpis.flow, FLOW_LABELS) +
+          '<h4>Estado actual</h4>' + kpiTableHtml(state.kpis.current, CURRENT_LABELS) +
+          '</details>';
+      }
+
+      html +=
+        '<details class="elm-ops-section"' + (state.followup.length ? ' open' : '') + '>' +
+        '<summary>Seguimiento operativo ELM (' + state.followup.length + ')</summary>' +
+        '<p class="preaprobados-muted">En evaluación (S1 favorable con S2 pendiente incluido), errores técnicos o resultados inciertos, ' +
+        'rechazos automáticos todavía no reflejados en Credizona y solicitudes en cola. No cuentan como rechazos.</p>' +
+        (state.followup.length
+          ? '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Origen</th><th>Situación</th>' +
+            '<th>Detalle</th><th>Estado ELM</th><th>Desde</th><th>Antigüedad</th></tr></thead><tbody>' +
+            state.followup.map(function (i) { return followupRowHtml(i, fmtDate); }).join('') +
+            '</tbody></table>'
+          : '<p class="preaprobados-muted">Sin casos en seguimiento.</p>') +
+        '</details>';
 
       html +=
         '<details class="elm-ops-section"' + (state.processes.length ? ' open' : '') + '>' +
@@ -354,10 +456,12 @@
     async function load() {
       state.error = null;
       try {
-        const [s, p, c] = await Promise.all([
+        const [s, p, c, k, f] = await Promise.all([
           request('GET', '/summary'),
           request('GET', '/processes'),
           request('GET', '/review-cases?status=open'),
+          request('GET', '/kpis'),
+          request('GET', '/followup'),
         ]);
         if (s.status >= 400 || p.status >= 400 || c.status >= 400) {
           state.error = 'No se pudieron cargar las colas ELM.';
@@ -366,6 +470,8 @@
           state.processes = p.data.items || [];
           state.cases = c.data.items || [];
         }
+        state.kpis = k.status === 200 ? k.data.data : null;
+        state.followup = f.status === 200 ? f.data.items || [] : [];
         if (state.assignees === null) {
           const a = await request('GET', '/assignees');
           state.canAct = a.status === 200;
@@ -478,6 +584,10 @@
     alertText,
     actionErrorText,
     elmStateText,
+    kpiTableHtml,
+    followupRowHtml,
+    FLOW_LABELS,
+    CURRENT_LABELS,
     processRowHtml,
     caseRowHtml,
     resolveProcessFormHtml,

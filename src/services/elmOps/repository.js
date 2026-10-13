@@ -253,7 +253,47 @@ function createElmOpsRepository(supabaseOverride) {
     });
   }
 
+  /** Automatic fallback requests not finalized yet (queued / running), oldest first. */
+  async function listOpenFallbackRequests(limit) {
+    const { data, error } = await db()
+      .from(FALLBACK_TABLE)
+      .select('id, cz_solicitud_id, ci, exec_status, outcome, elm_process_id, created_at')
+      .is('finalized_at', null)
+      .order('created_at', { ascending: true })
+      .limit(Math.min(limit || MAX_LIST, MAX_LIST));
+    if (error) throw rpcError(FALLBACK_TABLE + ' read', error);
+    return data || [];
+  }
+
+  /** Subset of the given solicitudes that already show CZ estado 3 in the JANUS mirror. */
+  async function czIdsWithEstado3(czIds) {
+    const ids = uniq(czIds).map(Number);
+    const out = new Set();
+    for (let i = 0; i < ids.length; i += MAX_LIST) {
+      const chunk = ids.slice(i, i + MAX_LIST);
+      const [hist, cur] = await Promise.all([
+        db()
+          .from('cz_funnel_solicitud_estados')
+          .select('cz_solicitud_id')
+          .eq('solicitudes_estados_id', 3)
+          .in('cz_solicitud_id', chunk),
+        db()
+          .from('cz_funnel_solicitudes')
+          .select('cz_id')
+          .eq('solicitudes_estados_id', 3)
+          .in('cz_id', chunk),
+      ]);
+      if (hist.error) throw rpcError('cz_funnel_solicitud_estados read', hist.error);
+      if (cur.error) throw rpcError('cz_funnel_solicitudes read', cur.error);
+      for (const r of hist.data || []) out.add(Number(r.cz_solicitud_id));
+      for (const r of cur.data || []) out.add(Number(r.cz_id));
+    }
+    return out;
+  }
+
   return {
+    listOpenFallbackRequests,
+    czIdsWithEstado3,
     listOpenProcesses,
     getProcessById,
     getProcessesByIds,

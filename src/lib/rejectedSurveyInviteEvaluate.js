@@ -34,6 +34,7 @@ const {
 const eligibilityIo = require('./rejectedSurveyInviteEligibility');
 const { materializeRejectedSurveyInvite } = require('./rejectedSurveyInviteMaterialize');
 const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken');
+const { loadElmSurveyBlocksByCi } = require('./rejectedSurveyInviteElmGate');
 
 /**
  * Pure decision given snapshot (no I/O).
@@ -50,6 +51,7 @@ const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken
  *   publicBaseUrlConfigured: boolean,
  *   normalCutoffAtMs?: number|null,
  *   normalCutoff?: { ok: boolean, ms?: number },
+ *   elmBlocked?: boolean,
  * }} input
  */
 function decideSurveyInviteSequenceAction(input) {
@@ -163,6 +165,7 @@ function decideSurveyInviteSequenceAction(input) {
     hasEncuesta: Boolean(input.hasEncuesta),
     isSuppressed: Boolean(input.isSuppressed),
     priorRecipient: priorRecipient,
+    elmBlocked: Boolean(input.elmBlocked),
   });
 
   if (!elig.eligible) {
@@ -305,6 +308,12 @@ async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
     }
   }
 
+  let elmBlocked = false;
+  if (last && solicitud) {
+    const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
+    elmBlocked = (await loadElmBlocks(supabase, [ci])).has(ci);
+  }
+
   return decideSurveyInviteSequenceAction({
     ci: ci,
     now: now,
@@ -316,6 +325,7 @@ async function evaluateSurveyInviteSequenceForCi(supabase, ciRaw, opts) {
     attemptsByStep: attemptsByStep,
     publicBaseUrlConfigured: Boolean(publicBase),
     normalCutoff: normalCutoff,
+    elmBlocked: elmBlocked,
   });
 }
 

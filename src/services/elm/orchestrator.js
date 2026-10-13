@@ -7,9 +7,13 @@
  *
  *   evaluateElm(czSolicitudId, context)        → S1
  *   referElm(czSolicitudId, context)           → S2 (only after S1 eligible)
+ *   sendElm(czSolicitudId, context)            → S1, then S2 when S1 is favorable (single button)
  *   retryElmStep(czSolicitudId, context, opts) → resend the SAME frozen request of a step in
  *                                                technical_error (DB-checked retry-safe code,
  *                                                attempt limit, expected attempt count)
+ *   retrySendElm(czSolicitudId, context, opts) → operator "Reintentar ELM": resend the SAME
+ *                                                frozen S1 that ELM provably never received
+ *                                                (pre-reception error), then S2 like sendElm
  *   getElmStatus(czSolicitudId)                → read-only view + eligibility preview
  *
  * One process per solicitud. A lost/uncertain answer ends as unknown (in_flight lease expiry),
@@ -35,6 +39,7 @@ const {
 } = require('./eligibility');
 const { redactSecrets, redactSecretText } = require('./redact');
 const { computeElmCell } = require('./listView');
+const { readPostReferralRejectionStatuses } = require('./classification');
 const defaultLogger = require('../../lib/logger');
 
 function parseCzId(raw) {
@@ -45,6 +50,15 @@ function parseCzId(raw) {
 function blocked(code, extra) {
   return Object.assign({ ok: false, code: code }, extra || {});
 }
+
+/** elm_manual_retry_s1 refusals → result codes. */
+const MANUAL_RETRY_CODES = Object.freeze({
+  not_found: CODES.PROCESS_NOT_FOUND,
+  stale: CODES.RETRY_STALE,
+  not_pre_reception: CODES.RETRY_NOT_PRE_RECEPTION,
+  attempts_exhausted: CODES.RETRY_ATTEMPTS_EXHAUSTED,
+  not_allowed: CODES.RETRY_NOT_ALLOWED,
+});
 
 function blockerOf(failure) {
   return failure.fields ? { code: failure.code, fields: failure.fields } : { code: failure.code };
@@ -221,6 +235,8 @@ function createElmOrchestrator(deps) {
   const logger = d.logger || defaultLogger;
   const now = d.now || Date.now;
   const enabledTriggerOrigins = d.enabledTriggerOrigins || ENABLED_TRIGGER_ORIGINS;
+  const postReferralStatuses =
+    d.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
 
   function snapshotOf(ctx, context) {
     if (ctx.triggerOrigin !== 'cz_automatic') return null;
@@ -476,6 +492,122 @@ function createElmOrchestrator(deps) {
     return runStep(stepName, row.id, czId, payload, ctx);
   }
 
+  /**
+   * Operator "Reintentar ELM" (janus_manual only). elm_manual_retry_s1 re-checks in one
+   * transaction that ELM never received the lead, the expected attempt count, the attempt limit
+   * and the CI lock (same rules as a first send), archives the failed attempt and puts the SAME
+   * process back in S1 in_flight. Then the frozen S1 request is sent once and, when favorable,
+   * S2 follows as in sendElm. Never used by the automatic path.
+   *
+   * @param {{ expectedAttempts: number }} opts s1_attempts the operator saw
+   */
+  async function retrySendElm(czSolicitudId, context, opts) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId == null) return blocked(CODES.INVALID_CZ_ID, { stage: 's1' });
+    const ctx = validateContext(context, enabledTriggerOrigins);
+    if (!ctx.ok) return Object.assign({ stage: 's1' }, ctx);
+    if (ctx.triggerOrigin !== 'janus_manual') return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+    const expected = Number(opts && opts.expectedAttempts);
+    if (!Number.isInteger(expected) || expected < 1) return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+
+    const gate = sendGate();
+    if (gate) return Object.assign({ stage: 's1' }, gate);
+
+    const process = await repo.getProcessByCzId(czId);
+    if (!process) return blocked(CODES.PROCESS_NOT_FOUND, { stage: 's1' });
+    const { solicitud, grantedRow } = await loadContext(czId, ctx, context);
+    const elig = evaluateElmReferEligibility({
+      czId: czId,
+      solicitud: solicitud,
+      grantedRow: grantedRow,
+      process: process,
+    });
+    if (!elig.eligible) {
+      return blocked(elig.blockers[0].code, { stage: 's1', blockers: elig.blockers });
+    }
+
+    const out = await repo.manualRetryS1({
+      czSolicitudId: czId,
+      expectedAttempts: expected,
+      maxAttempts: config.technicalRetryMaxAttempts,
+      leaseSeconds: config.inFlightLeaseSeconds,
+      actorUserId: ctx.triggeredByUserId,
+    });
+    if (out.status === 'blocked') {
+      return blocked(CODES.CI_LOCK_BLOCKED, { stage: 's1', lock: out.lock || null });
+    }
+    if (out.status !== 'retried' || !out.process) {
+      return blocked(MANUAL_RETRY_CODES[out.status] || CODES.RETRY_NOT_ALLOWED, {
+        stage: 's1',
+        reason: out.reason || null,
+      });
+    }
+    logger.info('elm manual retry started', {
+      cz_solicitud_id: czId,
+      step: 's1',
+      attempt: out.process.s1_attempts,
+      lock_status: out.lock ? out.lock.status : null,
+      trigger_origin: ctx.triggerOrigin,
+    });
+
+    const s1 = await runStep('s1', out.process.id, czId, out.process.s1_request, ctx);
+    if (!s1.ok) return Object.assign({ stage: 's1' }, s1);
+    const view = s1.process;
+    if (view.s1.effective_status !== S1.ELIGIBLE || view.s2.effective_status !== S2.NOT_STARTED) {
+      return { ok: true, stage: 's1', process: view };
+    }
+    const s2 = await referElm(czId, context);
+    if (s2.ok) return { ok: true, stage: 's2', process: s2.process };
+    return { ok: true, stage: 's1', process: view, s2_blocked: { code: s2.code } };
+  }
+
+  /**
+   * Whether a real send could run now: transport enabled and every ELM format/mapping the
+   * payload needs confirmed in config. Per-solicitud blockers are checked by eligibility.
+   * @returns {{ ready: boolean, reasons: string[] }}
+   */
+  function getSendReadiness() {
+    const reasons = [];
+    if (!client || client.enabled !== true) {
+      reasons.push((client && client.disabledReason) || CODES.SEND_DISABLED);
+    }
+    const map = (config && config.activityTypeMap) || {};
+    if (!Object.keys(map).length) reasons.push(CODES.ACTIVITY_TYPE_MAPPING_MISSING);
+    if (!config || !config.dateOfBirthFormat) reasons.push(CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
+    if (!config || !config.mobilePhoneFormat) reasons.push(CODES.MOBILEPHONE_FORMAT_UNCONFIRMED);
+    return { ready: reasons.length === 0, reasons: reasons };
+  }
+
+  /**
+   * Single operator action: S1, and S2 right after when S1 is favorable. Also resumes a process
+   * left with S1 favorable and S2 not started. Every guard of evaluateElm/referElm applies
+   * (send gate, eligibility, CI lock, one process per solicitud, atomic S2 start).
+   * S1 favorable with S2 blocked → ok with `s2_blocked` (S1 stays persisted; the next press
+   * resumes S2). Later ELM updates arrive by postback; nothing here polls ELM.
+   */
+  async function sendElm(czSolicitudId, context) {
+    const s1 = await evaluateElm(czSolicitudId, context);
+    const resumable =
+      !s1.ok &&
+      s1.code === CODES.PROCESS_EXISTS &&
+      s1.process &&
+      s1.process.s1.effective_status === S1.ELIGIBLE &&
+      s1.process.s2.effective_status === S2.NOT_STARTED;
+    if (!s1.ok && !resumable) return Object.assign({ stage: 's1' }, s1);
+
+    const view = s1.process;
+    if (view.s1.effective_status !== S1.ELIGIBLE || view.s2.effective_status !== S2.NOT_STARTED) {
+      return { ok: true, stage: 's1', process: view };
+    }
+
+    const s2 = await referElm(czSolicitudId, context);
+    if (s2.ok) return { ok: true, stage: 's2', process: s2.process };
+    if (s1.ok) {
+      return { ok: true, stage: 's1', process: view, s2_blocked: { code: s2.code } };
+    }
+    return Object.assign({ stage: 's2' }, s2, { process: s2.process || view });
+  }
+
   /** Read-only. Never writes (expired in_flight is shown as effective unknown). */
   async function getElmStatus(czSolicitudId) {
     const czId = parseCzId(czSolicitudId);
@@ -498,6 +630,19 @@ function createElmOrchestrator(deps) {
         lastPostbackMatchMethod = null;
       }
     }
+    let projectedEstado = null;
+    if (
+      process &&
+      process.trigger_origin === 'cz_automatic' &&
+      typeof repo.getProjectedEstadosByCzIds === 'function'
+    ) {
+      try {
+        const m = await repo.getProjectedEstadosByCzIds([czId]);
+        projectedEstado = m.has(czId) ? m.get(czId) : null;
+      } catch (_) {
+        projectedEstado = null;
+      }
+    }
     return {
       ok: true,
       data: {
@@ -513,13 +658,16 @@ function createElmOrchestrator(deps) {
           process: process,
           eligibility: elig,
           nowMs: now(),
+          postReferralRejectionStatuses: postReferralStatuses,
+          projectedEstado: projectedEstado,
         }),
         last_postback_match_method: lastPostbackMatchMethod,
+        send_readiness: getSendReadiness(),
       },
     };
   }
 
-  return { evaluateElm, referElm, retryElmStep, getElmStatus };
+  return { evaluateElm, referElm, sendElm, retryElmStep, retrySendElm, getElmStatus, getSendReadiness };
 }
 
 module.exports = {

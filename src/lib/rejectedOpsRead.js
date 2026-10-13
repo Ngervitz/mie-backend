@@ -373,7 +373,21 @@ function outreachByCi(outreachRows) {
   return map;
 }
 
-function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
+/** Rejected solicitudes of the CI, newest rejection first, one entry per solicitud. */
+function rejectedSolicitudesOf(sortedRej) {
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < sortedRej.length; i += 1) {
+    const id = toNum(sortedRej[i].cz_solicitud_id);
+    if (id == null || !Number.isSafeInteger(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ cz_solicitud_id: id, rejected_at: sortedRej[i].fechahora_src || null });
+  }
+  return out;
+}
+
+function formatListRow(ci, sortedRej, name, encuesta, ops, outreach) {
+  const lastRejection = sortedRej[0];
   return Object.assign(
     {
       ci: ci,
@@ -381,6 +395,7 @@ function formatListRow(ci, lastRejection, name, encuesta, ops, outreach) {
         lastRejection && lastRejection.cz_solicitud_id != null
           ? toNum(lastRejection.cz_solicitud_id)
           : null,
+      rejected_solicitudes: rejectedSolicitudesOf(sortedRej),
       nombre: name.nombre,
       apellido: name.apellido,
       rejected_at: lastRejection.fechahora_src || null,
@@ -434,7 +449,7 @@ function assembleRejectedList(input) {
     const ops = currentOpsFromLatestSnapshot(snaps, instMap);
     if (statusFilter && ops.ops_status !== statusFilter) continue;
     const outreach = formatOutreach(outreachMap.get(ci) || null, nowMs);
-    rows.push(formatListRow(ci, lastRejection, name, encuesta, ops, outreach));
+    rows.push(formatListRow(ci, sortedRej, name, encuesta, ops, outreach));
   }
 
   rows.sort(function (a, b) {

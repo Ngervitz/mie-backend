@@ -70,7 +70,7 @@ const { S1, S2, CODES, OUTCOME, ELM_SOURCE } = require('../src/services/elm/cons
 const { readElmConfig, readElmTransportConfig } = require('../src/services/elm/config');
 const { SERVICE1_KEYS, SERVICE2_KEYS, buildService1Payload, buildService2Payload } = require('../src/services/elm/payload');
 const oauth = require('../src/services/elm/oauth');
-const { createElmClient } = require('../src/services/elm/client');
+const { createElmClient, classifyService2Body } = require('../src/services/elm/client');
 const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
 const { parseElmPostback, createElmPostbackProcessor, FIELD_KEYS } = require('../src/services/elm/postback');
 
@@ -484,6 +484,65 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
   await s2rej.orch.referElm(1001, MANUAL);
   assert.strictEqual(s2rej.repo.rows.get(1001).s2_status, S2.REJECTED);
   assert.strictEqual(s2rej.repo.rows.get(1001).referred_at, null);
+});
+
+test('6b S2 success true with null or absent result is referred; a documented rejection still wins', async () => {
+  const contract = { success: true, result: null, docNumber: '1' };
+  assert.strictEqual(classifyService2Body(contract).outcome, OUTCOME.POSITIVE);
+  assert.strictEqual(classifyService2Body({ success: true }).outcome, OUTCOME.POSITIVE);
+  assert.strictEqual(classifyService2Body({ success: true, result: 'Aprobado sin canal' }).outcome, OUTCOME.NEGATIVE);
+  assert.strictEqual(classifyService2Body({ success: true, result: 'Lead Aprobado correctamente' }).outcome, OUTCOME.POSITIVE);
+  assert.strictEqual(classifyService2Body({ success: false, result: null }).outcome, OUTCOME.UNKNOWN);
+  assert.strictEqual(classifyService2Body({ result: null }).outcome, OUTCOME.UNKNOWN);
+  assert.strictEqual(classifyService2Body({ success: 'true', result: null }).outcome, OUTCOME.UNKNOWN);
+  assert.strictEqual(classifyService2Body({ success: true, result: 0 }).outcome, OUTCOME.UNKNOWN);
+
+  const cases = [
+    [{ status: 200, body: contract }, OUTCOME.POSITIVE, null],
+    [{ status: 200, body: { success: true, docNumber: '1' } }, OUTCOME.POSITIVE, null],
+    [{ status: 200, body: { success: true, result: 'Lead Aprobado correctamente' } }, OUTCOME.POSITIVE, null],
+    [{ status: 200, body: { success: true, result: 'Aprobado sin canal' } }, OUTCOME.NEGATIVE, null],
+    [{ status: 200, body: { success: false, result: null } }, OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    [{ status: 200, body: { result: null } }, OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    [{ status: 200, body: { success: 'true', result: null } }, OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    [{ status: 200, body: { success: true, result: { ok: true } } }, OUTCOME.UNKNOWN, CODES.RESPONSE_UNDOCUMENTED],
+    [{ status: 500, body: contract }, OUTCOME.UNKNOWN, CODES.HTTP_ERROR],
+  ];
+  for (const [step, outcome, code] of cases) {
+    const f = fakeFetch([step]);
+    const r = await createElmClient({ env: ENV, fetchImpl: f })['service2']({ docNumber: '1' });
+    assert.strictEqual(r.outcome, outcome, JSON.stringify(step));
+    assert.strictEqual(r.errorCode, code, JSON.stringify(step));
+    assert.strictEqual(r.sent, true);
+    assert.strictEqual(f.calls.length, 1);
+  }
+
+  const s1 = fakeFetch([{ status: 200, body: contract }]);
+  const s1r = await createElmClient({ env: ENV, fetchImpl: s1 }).service1({ docNumber: '1' });
+  assert.strictEqual(s1r.outcome, OUTCOME.UNKNOWN, 'S1 does not use the S2 success contract');
+  assert.strictEqual(s1r.errorCode, CODES.RESPONSE_UNDOCUMENTED);
+
+  const referred = orchestratorWith(fakeFetch([
+    ok('Listo para recibir datos en servicio 2'),
+    { status: 200, body: contract },
+  ]));
+  await referred.orch.evaluateElm(1001, MANUAL);
+  await referred.orch.referElm(1001, MANUAL);
+  const row = referred.repo.rows.get(1001);
+  assert.strictEqual(row.s2_status, S2.REFERRED);
+  assert.ok(row.referred_at);
+  assert.strictEqual(row.s2_result_message, null);
+  assert.deepStrictEqual(row.s2_response, contract);
+  assert.strictEqual(row.s2_error_code, null);
+
+  const rejected = orchestratorWith(fakeFetch([
+    ok('Listo para recibir datos en servicio 2'),
+    { status: 200, body: { success: true, result: 'Lead no existe' } },
+  ]));
+  await rejected.orch.evaluateElm(1001, MANUAL);
+  await rejected.orch.referElm(1001, MANUAL);
+  assert.strictEqual(rejected.repo.rows.get(1001).s2_status, S2.REJECTED);
+  assert.strictEqual(rejected.repo.rows.get(1001).referred_at, null);
 });
 
 test('7 timeout / network error / unreadable body → unknown, one request, never retried', async () => {

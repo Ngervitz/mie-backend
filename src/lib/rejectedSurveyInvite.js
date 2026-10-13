@@ -135,6 +135,7 @@ const REASONS = Object.freeze({
   PRIOR_ATTEMPT_BLOCKS: 'prior_attempt_blocks',
   CAMPAIGN_NOT_CONFIGURED: 'campaign_not_configured',
   PUBLIC_BASE_URL_MISSING: 'public_base_url_missing',
+  ELM_IN_PROGRESS: 'elm_in_progress',
 });
 
 /**
@@ -238,6 +239,7 @@ function classifyPriorRecipient(recipient) {
  *   hasEncuesta: boolean,
  *   isSuppressed: boolean,
  *   priorRecipient: object|null,
+ *   elmBlocked?: boolean,
  * }} input
  */
 function evaluateRejectedSurveyInviteEligibility(input) {
@@ -301,6 +303,17 @@ function evaluateRejectedSurveyInviteEligibility(input) {
 
   if (input.isSuppressed) {
     return Object.assign(baseResult(ci, REASONS.EMAIL_SUPPRESSED, false), {
+      cz_solicitud_id: Number(input.lastRejection.cz_solicitud_id),
+      email: email,
+      email_masked: maskEmail(email),
+      lrw_id: lrw,
+    });
+  }
+
+  // An ELM process of this CI that is pending, referred, granted or under review holds every
+  // STEP; only a definitive ELM rejection (or none) lets the existing circuit continue.
+  if (input.elmBlocked) {
+    return Object.assign(baseResult(ci, REASONS.ELM_IN_PROGRESS, false), {
       cz_solicitud_id: Number(input.lastRejection.cz_solicitud_id),
       email: email,
       email_masked: maskEmail(email),

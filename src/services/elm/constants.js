@@ -86,6 +86,11 @@ const CODES = Object.freeze({
   CLIENT_THREW: 'elm_client_threw',
   PROVIDER_BCU_ERROR: 'elm_provider_bcu_error',
   RETRY_NOT_ALLOWED: 'elm_retry_not_allowed',
+  /** Manual retry (elm_manual_retry_s1): the attempt count changed since the operator saw it. */
+  RETRY_STALE: 'elm_retry_stale',
+  /** Manual retry: ELM may have received the lead (or S1 is not a pre-reception failure). */
+  RETRY_NOT_PRE_RECEPTION: 'elm_retry_not_pre_reception',
+  RETRY_ATTEMPTS_EXHAUSTED: 'elm_retry_attempts_exhausted',
   PERSIST_FAILED: 'elm_persist_failed',
   LATE_RESULT_DISCARDED: 'elm_late_result_discarded',
   LEASE_EXPIRED: 'elm_in_flight_lease_expired',
@@ -105,6 +110,13 @@ const CODES = Object.freeze({
   POSTBACK_PROCESS_NOT_COMPATIBLE: 'elm_postback_process_not_compatible',
   POSTBACK_PERSIST_FAILED: 'elm_postback_persist_failed',
 });
+
+/**
+ * Mirrors public.elm_pre_reception_error_codes() and the HTTP check of elm_manual_retry_s1
+ * (NetSuite rejected the authentication before the RESTlet ran). Display only: the DB decides.
+ */
+const PRE_RECEPTION_ERROR_CODES = Object.freeze([CODES.HTTP_AUTH_REJECTED]);
+const PRE_RECEPTION_HTTP_STATUSES = Object.freeze([401, 403]);
 
 /** Mirrors elm_postback_events.processing_status (migrations/20261007_elm_postback_events.sql). */
 const POSTBACK_PROCESSING = Object.freeze({
@@ -129,6 +141,8 @@ module.exports = {
   ELM_SOURCE,
   OUTCOME,
   CODES,
+  PRE_RECEPTION_ERROR_CODES,
+  PRE_RECEPTION_HTTP_STATUSES,
   POSTBACK_PROCESSING,
   MATCH_METHODS,
 };

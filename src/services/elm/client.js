@@ -9,7 +9,9 @@
  *
  * Transport rules:
  *   - exactly one POST per call; the client never retries and never follows redirects;
- *   - classification only from the documented `result` texts of a 2xx JSON body;
+ *   - classification from the documented `result` texts of a 2xx JSON body;
+ *   - S2 only: HTTP 200 + boolean success true + result null or absent is a referral
+ *     (ELM contract). A documented rejection text still wins. S1 ignores success;
  *   - 401/403 = NetSuite rejected the authentication before running the RESTlet →
  *     technical_error (elm_http_auth_rejected);
  *   - timeout, network error, other non-2xx, unreadable/unparseable/undocumented body → unknown
@@ -87,6 +89,26 @@ function classifyService1Response(text) {
 
 function classifyService2Response(text) {
   return classifyResponse(text, SERVICE2_POSITIVE, SERVICE2_NEGATIVE, NO_TECHNICAL);
+}
+
+/**
+ * S2 body classification. A documented result string is decided only by the text lists, so a
+ * rejection stays a rejection even when success is true. Boolean success === true promotes the
+ * outcome to positive only when result is JSON null or the key is absent. The string "true",
+ * a non-string non-null result, and every S1 body stay on the text rules.
+ */
+function classifyService2Body(body) {
+  const message = body && typeof body.result === 'string' ? body.result : null;
+  const classified = classifyService2Response(message);
+  if (classified.outcome !== OUTCOME.UNKNOWN) return classified;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { outcome: OUTCOME.UNKNOWN, errorCode: null };
+  }
+  const resultNullOrAbsent = !Object.prototype.hasOwnProperty.call(body, 'result') || body.result === null;
+  if (body.success === true && resultNullOrAbsent) {
+    return { outcome: OUTCOME.POSITIVE, errorCode: null };
+  }
+  return { outcome: OUTCOME.UNKNOWN, errorCode: null };
 }
 
 function classifyService1Result(text) {
@@ -255,7 +277,7 @@ function createNetSuiteElmClient(deps) {
       return result(OUTCOME.UNKNOWN, Object.assign(base, { errorCode: CODES.RESPONSE_UNPARSEABLE }));
     }
     const message = typeof base.responseBody.result === 'string' ? base.responseBody.result : null;
-    const c = classify(message);
+    const c = classify === classifyService2Response ? classifyService2Body(base.responseBody) : classify(message);
     return result(
       c.outcome,
       Object.assign(base, {
@@ -312,6 +334,7 @@ module.exports = {
   SERVICE2_NEGATIVE,
   classifyService1Response,
   classifyService2Response,
+  classifyService2Body,
   classifyService1Result,
   classifyService2Result,
   createDisabledElmClient,
