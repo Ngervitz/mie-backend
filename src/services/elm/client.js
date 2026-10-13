@@ -55,6 +55,7 @@ const SERVICE1_NEGATIVE = Object.freeze([
   'BCU',
   'Repetido. rechazado',
   'No hay oferta',
+  'Mocasist',
 ]);
 /** Client already approved by another ELM channel: terminal, not Copanel approval nor rejection. */
 const SERVICE1_DUPLICATE_OTHER_CHANNEL = Object.freeze(['Repetido. Aprobado']);

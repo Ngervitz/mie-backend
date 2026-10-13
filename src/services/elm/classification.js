@@ -153,7 +153,11 @@ function fromProcess(p, opts) {
       ? result(COMMERCIAL.REJECTED, 's1_negative', 's1')
       : result(COMMERCIAL.REVIEW, 's1_rejection_not_definitive', 's1');
   }
-  if (s1 === S1.UNKNOWN) return result(COMMERCIAL.REVIEW, 's1_unknown', 's1');
+  if (s1 === S1.UNKNOWN) {
+    return isService1Negative(p.s1_result_message)
+      ? result(COMMERCIAL.REJECTED, 's1_negative', 's1')
+      : result(COMMERCIAL.REVIEW, 's1_unknown', 's1');
+  }
   if (s1 === S1.TECHNICAL_ERROR) return result(COMMERCIAL.REVIEW, 's1_technical_error', 's1');
   if (s1 === S1.IN_FLIGHT) return result(COMMERCIAL.IN_EVALUATION, 's1_in_flight', 's1');
   if (s1 === S1.ELIGIBLE) return result(COMMERCIAL.IN_EVALUATION, 's1_eligible_pending_s2', 's1');
