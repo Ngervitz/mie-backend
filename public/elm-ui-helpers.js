@@ -90,7 +90,7 @@
     var kind = cell.kind || cell.state;
     if (kind !== 'referred') return null;
     var status = cell.provider_status == null ? '' : String(cell.provider_status).trim();
-    return status ? 'Aceptado · ' + status : 'Aceptado';
+    return status ? 'Aceptado - ' + status : 'Aceptado';
   }
 
   function cellLabel(cell) {
@@ -771,7 +771,16 @@
     } else if (member) {
       var granted = member.state === 'granted';
       cls = granted ? 'is-granted' : 'is-referred';
-      text = granted ? COMPACT_STATE_LABELS.granted : COMPACT_STATE_LABELS.referred;
+      if (granted) {
+        text = COMPACT_STATE_LABELS.granted;
+      } else {
+        text =
+          elmAcceptanceLabel({
+            kind: 'referred',
+            state: 'referred',
+            provider_status: member.provider_status,
+          }) || COMPACT_STATE_LABELS.referred;
+      }
       parts = [member.detail_label || member.label || (granted ? ELM_GRANTED_LABEL : 'Aceptado ELM')];
     } else if (cell && (cell.kind === 'not_sent' || cell.kind === 'not_sendable')) {
       cls = 'is-' + cell.kind;

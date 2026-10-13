@@ -487,8 +487,7 @@ test('3 historical manual → later grant (Otorgado ELM, still Rechazados, not P
   assert.strictEqual(classify(p).state, 'granted');
   const s = summarizeCiElm({ ci: p.ci, focusCzIds: [1002], processes: [p], nowMs: NOW });
   assert.strictEqual(s.cells.get(1002).label, 'Otorgado ELM');
-  assert.ok(ElmUi.rejectedRowElmHtml({ available: true, cell: s.cells.get(1002) }).includes('Otorgado'));
-  assert.ok(!ElmUi.rejectedRowElmHtml({ available: true, cell: s.cells.get(1002) }).includes('Aceptado · Convertido'));
+  assert.ok(ElmUi.rejectedRowElmHtml({ available: true, cell: s.cells.get(1002) }).includes('>Otorgado<'));
   assert.strictEqual(buildElmCohortByCzId({ processes: [p], nowMs: NOW }).size, 0);
   assert.ok(s.ci_active, 'granted CI does not get new sends');
 });
@@ -1481,7 +1480,9 @@ test('33 single send circuit: legacy S1/S2 routes removed, both screens share el
   const dash = read('public/mie-dashboard.js');
   assert.ok(dash.includes("API + '/preaprobados/' + encodeURIComponent(czId) + '/elm/send'"));
   assert.ok(/action === 'elm-send' && !btn\.disabled\) \{\s*postPreaprobadoElmSend\(btn\.getAttribute\('data-cz-id'\), btn\)/.test(dash));
-  assert.ok(dash.includes("'ELM · automático (CZ)'") && dash.includes("'ELM · manual (JANUS)'"), 'KPIs by origin shown');
+  assert.ok(dash.includes('const kc = data && data.kpis_ci;'), 'five KPIs per CI');
+  assert.ok(dash.includes('cdvKpisHtml(data.kpis)'), 'CDV cohort KPI section');
+  assert.ok(!dash.includes('elmOriginKpis'), 'no extra ELM KPI panels by origin');
   assert.ok(!/ELM_CLIENT_ENABLED\s*=\s*true/.test(read('src/services/elm/config.js')));
   const unset = sendHarness([], { env: { ELM_CLIENT_ENABLED: undefined } }).orch.getSendReadiness();
   assert.strictEqual(unset.ready, false, 'ELM stays off unless explicitly enabled');

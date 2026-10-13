@@ -3,6 +3,10 @@
 /**
  * Preaprobados CZ/CDV V1 — observation list/detail.
  * Mount: app.use('/preaprobados', requireDashboardPermission('preaprobados'), router)
+ *
+ *   GET /           one row per CI (preaprobadosCiGroups.js) + KPIs
+ *   GET /ci/:ci     every Preaprobados solicitud of one CI, with its ELM cell
+ *   GET /:czId      one solicitud (CDV result, ELM membership, history)
  */
 
 const express = require('express');
@@ -20,10 +24,15 @@ const {
 const {
   parseProveedorQuery,
   parseCombinedResultadoQuery,
-  assembleCombinedPreaprobadosList,
   fetchElmCohortBundle,
   fetchElmCohortDetail,
 } = require('../lib/preaprobadosElmCohort');
+const {
+  parseCiParam,
+  assembleGroupedPreaprobadosList,
+  refreshElmFocus,
+  solicitudesOf,
+} = require('../lib/preaprobadosCiGroups');
 const { attachPreaprobadosElmSendHolds } = require('../lib/preaprobadosElmSend');
 const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
 const { createElmOpsRouter } = require('./elmOps');
@@ -73,8 +82,45 @@ async function fetchElmCohortSoft(cdvCohortIds) {
     logger.warn('GET /preaprobados elm cohort unavailable', {
       error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
     });
-    return { available: false, elmCohort: new Map(), elmSolicitudRows: [], elmHistoricoRows: [] };
+    return {
+      available: false,
+      elmCohort: new Map(),
+      elmSolicitudRows: [],
+      elmHistoricoRows: [],
+    };
   }
+}
+
+/**
+ * Grouped list: CDV cohort + ELM members (unchanged rules), one group per CI, paged by CI. ELM
+ * cells and send holds are attached to every solicitud of the page's groups.
+ */
+async function loadGroupedList(filters) {
+  const bundle = await fetchPreaprobadosListBundle(supabase);
+  const cdvCohortIds = new Set(
+    buildCohortByCzId(bundle.estado8Rows, bundle.currentEstado8Solicitudes).keys(),
+  );
+  const elm = await fetchElmCohortSoft(cdvCohortIds);
+  const assembled = assembleGroupedPreaprobadosList(
+    Object.assign(
+      {
+        estado8Rows: bundle.estado8Rows,
+        currentEstado8Solicitudes: bundle.currentEstado8Solicitudes,
+        solicitudRows: bundle.solicitudRows,
+        grantedRows: bundle.grantedRows,
+        historicoRows: bundle.historicoRows,
+        elmCohort: elm.elmCohort,
+        elmSolicitudRows: elm.elmSolicitudRows,
+        elmHistoricoRows: elm.elmHistoricoRows,
+      },
+      filters,
+    ),
+  );
+  const solicitudes = solicitudesOf(assembled.rows);
+  await attachElmCells(solicitudes, getElmListView(), logger, { allowSend: true });
+  await attachPreaprobadosElmSendHolds(solicitudes, { supabase: supabase, logger: logger });
+  refreshElmFocus(assembled.rows);
+  return { assembled: assembled, elmAvailable: elm.available };
 }
 
 router.use('/elm-ops', createElmOpsRouter());
@@ -121,20 +167,7 @@ router.get('/', async function getPreaprobadosList(req, res) {
       : null;
 
   try {
-    const bundle = await fetchPreaprobadosListBundle(supabase);
-    const cdvCohortIds = new Set(
-      buildCohortByCzId(bundle.estado8Rows, bundle.currentEstado8Solicitudes).keys(),
-    );
-    const elm = await fetchElmCohortSoft(cdvCohortIds);
-    const assembled = assembleCombinedPreaprobadosList({
-      estado8Rows: bundle.estado8Rows,
-      currentEstado8Solicitudes: bundle.currentEstado8Solicitudes,
-      solicitudRows: bundle.solicitudRows,
-      grantedRows: bundle.grantedRows,
-      historicoRows: bundle.historicoRows,
-      elmCohort: elm.elmCohort,
-      elmSolicitudRows: elm.elmSolicitudRows,
-      elmHistoricoRows: elm.elmHistoricoRows,
+    const out = await loadGroupedList({
       from: fromP.value,
       to: toP.value,
       estado: estadoP.value,
@@ -145,23 +178,51 @@ router.get('/', async function getPreaprobadosList(req, res) {
       limit: pageP.limit,
       offset: pageP.offset,
     });
-    await attachElmCells(assembled.rows, getElmListView(), logger, { allowSend: true });
-    await attachPreaprobadosElmSendHolds(assembled.rows, { supabase: supabase, logger: logger });
+    const assembled = out.assembled;
     return res.json({
       ok: true,
       data: {
+        grouped_by: 'ci',
         cohort: assembled.cohort,
         kpis: assembled.kpis,
         kpis_elm: assembled.kpis_elm,
-        elm_available: elm.available,
+        kpis_ci: assembled.kpis_ci,
+        elm_available: out.elmAvailable,
         rows: assembled.rows,
         total: assembled.total,
+        total_solicitudes: assembled.total_solicitudes,
         limit: assembled.limit,
         offset: assembled.offset,
       },
     });
   } catch (err) {
     logger.error('GET /preaprobados failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      error: err && err.message ? err.message : 'Internal error',
+    });
+  }
+});
+
+/**
+ * One CI: every Preaprobados solicitud of the CI (no period / state filters), with the ELM cell
+ * of each one ("Enviar a ELM" enabled or held server-side). Same membership as the list.
+ */
+router.get('/ci/:ci', async function getPreaprobadosCi(req, res) {
+  const ciP = parseCiParam(req.params && req.params.ci);
+  if (!ciP.ok) {
+    return res.status(400).json({ error: 'CI inválida' });
+  }
+  try {
+    const out = await loadGroupedList({ ci: ciP.value, limit: 1, offset: 0 });
+    const group = out.assembled.rows[0];
+    if (!group) {
+      return res.status(404).json({ error: 'No encontrado' });
+    }
+    return res.json({ ok: true, data: Object.assign({ elm_available: out.elmAvailable }, group) });
+  } catch (err) {
+    logger.error('GET /preaprobados/ci/:ci failed', {
       error: err && err.message ? err.message : 'unknown',
     });
     return res.status(500).json({

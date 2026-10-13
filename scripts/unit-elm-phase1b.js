@@ -805,8 +805,8 @@ async function main() {
     assert.strictEqual(broken[0].elm.kind, 'unavailable');
     assert.strictEqual(broken[0].resultado, 'granted');
     const route = readSrc('src/routes/preaprobados.js');
-    assert.ok(/await attachElmCells\(assembled\.rows, getElmListView\(\), logger, \{ allowSend: true \}\)/.test(route));
-    assert.ok(/await attachPreaprobadosElmSendHolds\(assembled\.rows, /.test(route), 'list buttons held by the CI guard');
+    assert.ok(/await attachElmCells\(solicitudes, getElmListView\(\), logger, \{ allowSend: true \}\)/.test(route));
+    assert.ok(/await attachPreaprobadosElmSendHolds\(solicitudes, /.test(route), 'list buttons held by the CI guard');
   });
 
   await test('#19 "Enviar a ELM" only where allowed, enabled only when ready + eligible; not sendable → no button', async () => {
@@ -883,8 +883,8 @@ async function main() {
     assert.strictEqual(st.label, 'Preaprobado ELM');
     assert.strictEqual(st.provider_status, 'Pendiente de Doc');
     const sth = ElmUi.elmCellHtml(st);
-    assert.strictEqual(ElmUi.cellLabel(st), 'Aceptado · Pendiente de Doc');
-    assert.ok(sth.includes('Aceptado · Pendiente de Doc'));
+    assert.strictEqual(ElmUi.cellLabel(st), 'Aceptado - Pendiente de Doc');
+    assert.ok(sth.includes('Aceptado - Pendiente de Doc'));
     assert.ok(!sth.includes('Preaprobado ELM'));
     assert.ok(!sth.includes('Otorgado'));
 
@@ -909,13 +909,20 @@ async function main() {
     assert.ok(ElmUi.elmCellHtml(r).includes('>Aceptado<'));
     assert.ok(!ElmUi.elmCellHtml(r).includes('Otorgado'));
     const aprobado = computeElmCell({ process: proc({ cz_solicitud_id: 1, provider_status: 'Aprobado' }), nowMs });
-    assert.strictEqual(ElmUi.cellLabel(aprobado), 'Aceptado · Aprobado');
+    assert.strictEqual(ElmUi.cellLabel(aprobado), 'Aceptado - Aprobado');
     const gestionado = computeElmCell({ process: proc({ cz_solicitud_id: 1, provider_status: 'Gestionado' }), nowMs });
-    assert.strictEqual(ElmUi.cellLabel(gestionado), 'Aceptado · Gestionado');
+    assert.strictEqual(ElmUi.cellLabel(gestionado), 'Aceptado - Gestionado');
     const gestionadoHtml = ElmUi.elmCellHtml(gestionado);
-    assert.ok(gestionadoHtml.includes('>Aceptado · Gestionado<'));
-    assert.ok(gestionadoHtml.includes('Aceptado · Gestionado'));
-    assert.ok(ElmUi.rejectedRowElmHtml({ available: true, cell: gestionado }).includes('>Aceptado · Gestionado<'));
+    assert.ok(gestionadoHtml.includes('>Aceptado - Gestionado<'));
+    assert.ok(gestionadoHtml.includes('Aceptado - Gestionado'));
+    assert.ok(ElmUi.rejectedRowElmHtml({ available: true, cell: gestionado }).includes('>Aceptado - Gestionado<'));
+    const sol1333 = computeElmCell({
+      process: proc({ cz_solicitud_id: 1333, provider_status: 'Gestionado' }),
+      nowMs,
+    });
+    assert.strictEqual(sol1333.kind, 'referred');
+    const rej1333 = ElmUi.rejectedRowElmHtml({ available: true, cell: sol1333 });
+    assert.ok(rej1333.includes('>Aceptado - Gestionado<') && rej1333.includes('is-referred'), rej1333);
     const unk = computeElmCell({ process: proc({ cz_solicitud_id: 1, s2_status: 'unknown', provider_status: 'Gestionado' }), nowMs });
     assert.strictEqual(unk.kind, 'review');
     assert.strictEqual(unk.granted_elm, false);
@@ -927,12 +934,13 @@ async function main() {
     assert.ok(!xss.includes('<img'));
   });
 
-  await test('#23 GRANTED CDV and GRANTED ELM stay separate sources', async () => {
+  await test('#23 CDV and ELM otorgamiento stay separate in Preaprobados (kpis_ci + CDV section)', async () => {
     const dash = readSrc('public/mie-dashboard.js');
-    assert.ok(dash.includes("kpiCard('GRANTED CDV'"));
-    assert.ok(dash.includes('is-granted">GRANTED CDV</span>'));
-    assert.ok(dash.includes("{ id: 'granted', label: 'GRANTED CDV' }"));
-    assert.ok(dash.includes("'GRANTED ELM'"));
+    assert.ok(dash.includes('data.kpis_ci'));
+    assert.ok(dash.includes("kpiCard('Otorgados CDV'"));
+    assert.ok(dash.includes("kpiCard('Otorgados ELM'"));
+    assert.ok(dash.includes('cdvKpisHtml(data.kpis)'));
+    assert.ok(!dash.includes('elmOriginKpis'));
     assert.strictEqual(ElmUi.CDV_GRANTED_LABEL, 'GRANTED CDV');
     const row = { cz_id: 5, resultado: 'granted', monto_otorgado: 1000 };
     const view = {

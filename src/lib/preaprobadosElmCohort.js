@@ -85,7 +85,7 @@ function parseProveedorQuery(raw) {
  */
 function parseCombinedResultadoQuery(raw) {
   const s = raw == null ? '' : String(raw).trim().toLowerCase();
-  if (s === 'elm_preaprobado' || s === 'elm_referred') {
+  if (s === 'elm_aceptado' || s === 'elm_preaprobado' || s === 'elm_referred') {
     return { ok: true, cdv: null, elm: COMMERCIAL.REFERRED };
   }
   if (s === 'elm_otorgado' || s === 'elm_granted') {
