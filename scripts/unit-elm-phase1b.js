@@ -897,9 +897,9 @@ async function main() {
     assert.strictEqual(g.granted_elm, true);
     assert.strictEqual(g.provider_status, 'Convertido');
     const gh = ElmUi.elmCellHtml(g);
-    assert.ok(gh.includes('>Aceptado · Convertido<'));
+    assert.ok(gh.includes('>Otorgado ELM<'));
     assert.ok(gh.includes('is-granted'));
-    assert.ok(!gh.includes('Otorgado'));
+    assert.ok(gh.includes('Estado ELM: Convertido'));
 
     const r = computeElmCell({ process: proc({ cz_solicitud_id: 1 }), nowMs });
     assert.strictEqual(r.kind, 'referred');
@@ -914,7 +914,7 @@ async function main() {
     assert.strictEqual(ElmUi.cellLabel(gestionado), 'Aceptado · Gestionado');
     const gestionadoHtml = ElmUi.elmCellHtml(gestionado);
     assert.ok(gestionadoHtml.includes('>Aceptado · Gestionado<'));
-    assert.ok(gestionadoHtml.includes('title="Aceptado · Gestionado'));
+    assert.ok(gestionadoHtml.includes('Aceptado · Gestionado'));
     assert.ok(ElmUi.rejectedRowElmHtml({ available: true, cell: gestionado }).includes('>Aceptado · Gestionado<'));
     const unk = computeElmCell({ process: proc({ cz_solicitud_id: 1, s2_status: 'unknown', provider_status: 'Gestionado' }), nowMs });
     assert.strictEqual(unk.kind, 'review');

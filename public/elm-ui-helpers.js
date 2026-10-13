@@ -4,8 +4,8 @@
  * Pure ELM UI helpers (browser + Node unit tests). No DOM / no fetch.
  * Renders the ELM cell computed server-side (src/services/elm/listView.js).
  * GRANTED CDV and GRANTED ELM are separate sources and are never merged here.
- * S2 accepted (referred, or later granted) is shown as "Aceptado" plus the raw provider_status.
- * That text is not a granted loan and does not reclassify any other state.
+ * "Aceptado ELM" (lead received and assigned to Copanel, green) is never presented as a granted
+ * loan; "Otorgado ELM" (blue) needs a confirmed disbursement.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -33,6 +33,9 @@
     elm_solicitud_not_in_preaprobados: 'La solicitud no figura en la cohorte CDV de Preaprobados.',
     elm_cdv_granted: 'La solicitud tiene un préstamo CDV otorgado.',
     elm_missing_required_fields: 'Faltan datos obligatorios de la solicitud.',
+    elm_date_of_birth_invalid: 'Fecha de nacimiento inválida.',
+    elm_date_of_birth_unverified:
+      'Fecha de nacimiento sin verificar: se habilita después de la próxima sincronización con Credizona.',
     elm_trigger_origin_not_enabled: 'Envío manual a ELM no habilitado.',
     elm_persist_failed: 'No se pudo guardar el resultado ELM; queda para revisión.',
     elm_solicitud_not_found: 'Solicitud no encontrada en el funnel CZ.',
@@ -42,6 +45,15 @@
       'No se puede reintentar: no está probado que ELM no haya recibido la solicitud.',
     elm_retry_attempts_exhausted: 'Se agotaron los intentos técnicos de esta solicitud.',
     elm_retry_not_allowed: 'Reintento ELM no permitido para este proceso.',
+  };
+  /** Manual S1 allowances (listView action.notices): what will be sent differently. */
+  var NOTICE_TEXTS = {
+    elm_date_of_birth_omitted: 'Se envía sin fecha de nacimiento: el dato de Credizona no es válido.',
+    elm_activity_type_raw: 'Actividad enviada con el código original de Credizona (OTR).',
+  };
+  var NOTICE_SHORT = {
+    elm_date_of_birth_omitted: 'Sin fecha nac.',
+    elm_activity_type_raw: 'Actividad OTR',
   };
   var CI_HOLD_REASONS = [
     'elm_ci_active',
@@ -68,22 +80,22 @@
   }
 
   /**
-   * Visible ELM status for an already-accepted S2 (referred, or granted after it).
-   * Uses the persisted provider_status text as stored. Returns null for every other state.
+   * Visible ELM status for S2 referred (accepted lead). Uses persisted provider_status when present.
+   * Null for every other commercial state (including granted: shown as Otorgado / Otorgado ELM).
    * @param {object|null|undefined} cell
    * @returns {string|null}
    */
   function elmAcceptanceLabel(cell) {
-    if (!cell) return null;
+    if (!cell || cell.granted_elm === true) return null;
     var kind = cell.kind || cell.state;
-    var accepted = kind === 'referred' || kind === 'granted' || cell.granted_elm === true;
-    if (!accepted) return null;
+    if (kind !== 'referred') return null;
     var status = cell.provider_status == null ? '' : String(cell.provider_status).trim();
     return status ? 'Aceptado · ' + status : 'Aceptado';
   }
 
   function cellLabel(cell) {
     if (!cell) return '—';
+    if (cell.granted_elm === true) return ELM_GRANTED_LABEL;
     var accepted = elmAcceptanceLabel(cell);
     if (accepted) return accepted;
     return cell.label ? String(cell.label) : '—';
@@ -93,16 +105,160 @@
     return ORIGIN_LABELS[origin] || (origin ? String(origin) : '—');
   }
 
-  function cellTitle(cell) {
+  /**
+   * S2 row of the solicitud ELM detail. An Aceptado ELM keeps the stored technical status unknown
+   * (the acceptance is read from the stored answer), so both are shown together.
+   * @param {string|null|undefined} s2Status effective technical status
+   * @param {{ detail?: string }|null|undefined} cell
+   * @returns {{ label: string, value: string }}
+   */
+  var S2_ACCEPTED_TECHNICAL_VALUE = 'unknown · interpretado como Aceptado ELM';
+  function s2DetailRow(s2Status, cell) {
+    if (cell && cell.detail === 's2_accepted') return { label: 'S2 técnico', value: S2_ACCEPTED_TECHNICAL_VALUE };
+    return { label: 'S2', value: s2Status ? String(s2Status) : '—' };
+  }
+
+  var OPS_RESOLUTION_LABELS = {
+    provider_closed_no_loan: 'ELM cerró el caso sin préstamo',
+    provider_loan_disbursed: 'ELM otorgó el préstamo',
+    customer_withdrew: 'El cliente desistió',
+    provider_confirmed_not_received: 'ELM confirmó que no recibió el lead',
+    provider_confirmed_no_referral: 'ELM confirmó que no hubo derivación',
+    other: 'Otro (ver nota en ELM Ops)',
+  };
+
+  /**
+   * ELM's original answer (`elm_answer` of a cell or process summary). "Motivo ELM" for an open
+   * rejection, "Resultado original ELM" once ELM Ops closed the process, "Respuesta ELM" otherwise.
+   * `withStep` adds (S1)/(S2).
+   * @param {{ elm_answer?: { step?: string, message?: string }|null, state?: string|null,
+   *   ops_resolution?: object|null }|null|undefined} item
+   * @param {boolean} [withStep]
+   * @returns {string} plain text, '' when there is no answer
+   */
+  function elmAnswerText(item, withStep) {
+    var answer = item && item.elm_answer;
+    if (!answer || typeof answer.message !== 'string' || !answer.message) return '';
+    var step = answer.step === 's1' || answer.step === 's2' ? answer.step.toUpperCase() : '';
+    var prefix = item.ops_resolution
+      ? 'Resultado original ELM'
+      : item.state === 'rejected'
+        ? 'Motivo ELM'
+        : 'Respuesta ELM';
+    return prefix + (withStep && step ? ' (' + step + ')' : '') + ': ' + answer.message;
+  }
+
+  /** Administrative closure from ELM Ops (`ops_resolution`), '' when there is none. */
+  function opsResolutionText(item) {
+    var r = item && item.ops_resolution;
+    if (!r) return '';
+    var code = r.code ? String(r.code) : '';
+    var date = shortDate(r.resolved_at);
+    return (
+      'Resolución ELM Ops: ' +
+      (OPS_RESOLUTION_LABELS[code] || code || 'sin código') +
+      (date ? ' (' + date + ')' : '')
+    );
+  }
+
+  /** 'full' (CI detail): ELM's answer with its step, then the ELM Ops resolution if any. */
+  function elmAnswerHtml(item, mode) {
+    if (mode !== 'full') return '';
     var parts = [];
-    var accepted = elmAcceptanceLabel(cell);
-    if (accepted) parts.push(accepted);
-    else if (cell.provider_status) parts.push('Estado ELM: ' + cell.provider_status);
+    var text = elmAnswerText(item, true);
+    if (text) parts.push('<span class="elm-answer" title="' + esc(text) + '">' + esc(text) + '</span>');
+    var resolution = opsResolutionText(item);
+    if (resolution) parts.push('<span class="elm-answer elm-ops-resolution">' + esc(resolution) + '</span>');
+    return parts.join('');
+  }
+
+  var COMPACT_STATE_LABELS = {
+    in_evaluation: 'En evaluación',
+    referred: 'Aceptado',
+    granted: 'Otorgado',
+    rejected: 'Rechazado',
+    review: 'En revisión',
+    closed: 'Cerrado',
+  };
+  var COMPACT_DETAIL_LABELS = {
+    s1_unknown: 'Incierto',
+    s2_unknown: 'Incierto',
+    s1_rejection_not_definitive: 'Incierto',
+    s2_rejection_not_definitive: 'Incierto',
+    s1_technical_error: 'Error técnico',
+    s2_technical_error: 'Error técnico',
+    s1_duplicate_other_channel: 'Duplicado · Otro canal',
+    cz_already_referred: 'Derivado en otra sol.',
+    post_referral_status: 'Rechazado · Tras derivación',
+    ops_closed_no_loan: 'Rechazado · Sin préstamo',
+    ops_customer_withdrew: 'Cerrado · Desistió',
+    ops_provider_confirmed_not_received: 'Cerrado · No recibido',
+    ops_provider_confirmed_no_referral: 'Cerrado · Sin derivación',
+    ops_other: 'Cerrado · Ver nota',
+  };
+
+  /**
+   * Visible reason: ELM's answer without a bare "Rechazado" the state already says
+   * ("Repetido. Rechazado" → "Repetido"); every other sentence is kept
+   * ("Repetido. Aprobado" stays "Repetido. Aprobado"). The original text stays in the data,
+   * the tooltip and the CI detail.
+   */
+  function compactReason(message) {
+    var parts = String(message || '')
+      .split(/[.;]+/)
+      .map(function (s) {
+        return s.trim();
+      })
+      .filter(function (s) {
+        return s && !/^rechazad[oa]$/i.test(s);
+      });
+    return parts.join('. ');
+  }
+
+  /**
+   * One-line Rechazados label: "Rechazado · Repetido", "Incierto · Repetido", "Aceptado".
+   * Cells without an ELM process keep their label ("Sin enviar", "No enviable", …).
+   */
+  function compactCellText(item) {
+    if (!item) return '—';
+    if (item.granted_elm === true) return COMPACT_STATE_LABELS.granted;
+    var accepted = elmAcceptanceLabel(item);
+    if (accepted) return accepted;
+    var base = COMPACT_DETAIL_LABELS[item.detail] || COMPACT_STATE_LABELS[item.state];
+    if (!base) return cellLabel(item);
+    var reason =
+      item.ops_resolution || base.indexOf(' · ') >= 0 ? '' : compactReason(item.elm_answer && item.elm_answer.message);
+    return reason ? base + ' · ' + reason : base;
+  }
+
+  /** Color modifiers on top of is-<state>: granted (blue), duplicate from another channel (amber). */
+  function stateModifierClasses(item) {
+    return (
+      (item.granted_elm === true ? ' is-granted' : '') +
+      (item.detail === 's1_duplicate_other_channel' ? ' is-duplicate' : '')
+    );
+  }
+
+  function cellTitleParts(cell) {
+    var parts = [];
+    if (cell.provider_status) parts.push('Estado ELM: ' + cell.provider_status);
     if (cell.trigger_origin) parts.push('Origen: ' + originLabel(cell.trigger_origin));
     if (cell.kind === 'not_sendable' && cell.action && cell.action.reason) {
       parts.push(BLOCKED_MESSAGES[cell.action.reason] || cell.action.reason);
     }
+    return parts;
+  }
+
+  function titleAttr(parts) {
     return parts.length ? ' title="' + esc(parts.join(' · ')) + '"' : '';
+  }
+
+  /** Tooltip of a compact label: full ELM label and original answer, then the usual details. */
+  function compactTitleParts(item) {
+    var parts = [cellLabel(item)];
+    var answer = elmAnswerText(item, true);
+    if (answer) parts.push(answer);
+    return parts;
   }
 
   /**
@@ -179,13 +335,72 @@
     }
   }
 
+  /** Rechazados picker button once a solicitud is chosen (the picker row has no "Sol. N" of its own). */
+  function rejectedSendLabel(czId) {
+    return 'Enviar sol. ' + Number(czId);
+  }
+
+  /** Rechazados picker button while no solicitud is chosen (disabled). */
+  var REJECTED_PICK_LABEL = 'Seleccionar solicitud';
+
+  /**
+   * One row of the Rechazados ELM grid: "Sol. N" in the fixed-width left column (empty for a
+   * continuation row), state / result / hold / button in the right one.
+   */
+  function gridRowHtml(czId, valueHtml) {
+    var id = Number(czId);
+    return (
+      '<span class="rechazados-elm-target">' +
+      (id > 0 ? 'Sol. ' + esc(id) : '') +
+      '</span><span class="rechazados-elm-value">' +
+      valueHtml +
+      '</span>'
+    );
+  }
+
+  function gridHtml(rows) {
+    return '<div class="rechazados-elm-grid">' + rows.join('') + '</div>';
+  }
+
+  function knownNotices(notices) {
+    return (Array.isArray(notices) ? notices : []).filter(function (n) {
+      return Object.prototype.hasOwnProperty.call(NOTICE_TEXTS, n);
+    });
+  }
+
+  /** Operator-facing text of the manual S1 allowances, '' when there are none. */
+  function sendNoticeText(notices) {
+    return knownNotices(notices)
+      .map(function (n) {
+        return NOTICE_TEXTS[n];
+      })
+      .join(' ');
+  }
+
+  function sendNoticeShort(notices) {
+    return knownNotices(notices)
+      .map(function (n) {
+        return NOTICE_SHORT[n];
+      })
+      .join(' · ');
+  }
+
+  function sendNoticeHtml(notices) {
+    var short = sendNoticeShort(notices);
+    if (!short) return '';
+    return '<span class="preaprobados-elm-notice" title="' + esc(sendNoticeText(notices)) + '">' + esc(short) + '</span>';
+  }
+
   function sendButtonHtml(czId, opts) {
     var o = opts || {};
     var attrs = ' data-action="elm-send" data-cz-id="' + esc(czId) + '"';
     if (o.ci) attrs += ' data-ci="' + esc(o.ci) + '"';
     var date = shortDate(o.rejectedAt);
     if (date) attrs += ' data-rejected-at="' + esc(date) + '"';
-    var title = 'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM';
+    var notice = sendNoticeText(o.notices);
+    if (notice) attrs += ' data-elm-notice="' + esc(notice) + '"';
+    var title =
+      'Enviar la solicitud ' + czId + (date ? ' (rechazada ' + date + ')' : '') + ' a ELM' + (notice ? '. ' + notice : '');
     return (
       '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send' +
       (o.extraClass ? ' ' + o.extraClass : '') +
@@ -193,8 +408,49 @@
       attrs +
       ' title="' +
       esc(title) +
-      '">Enviar a ELM</button>'
+      '">' +
+      esc(o.label || 'Enviar a ELM') +
+      '</button>' +
+      sendNoticeHtml(o.notices)
     );
+  }
+
+  /**
+   * Rechazados: a solicitud without ELM process whose send is held. Grey text, never a button;
+   * the reason goes in the tooltip and the availability date is shown when there is one.
+   * List grid (czIds given; "Sol. N" is in the left column): "Envío desde 08/11" or "Sin enviar".
+   * CI detail (no czIds, the row already names the solicitud): "Sin enviar · disponible desde 08/11/2026".
+   * @param {number[]} czIds the held solicitud
+   * @param {string} hint
+   * @param {string|null|undefined} until
+   */
+  function blockedUnsentHtml(czIds, hint, until) {
+    var ids = (czIds || []).map(Number).filter(function (n) {
+      return n > 0;
+    });
+    var date = shortDate(until);
+    var text;
+    var title = hint;
+    if (ids.length) {
+      text = date ? 'Envío desde ' + date.slice(0, 5) : 'Sin enviar';
+      title = 'Sin enviar (sol. ' + ids.join(', ') + '). ' + hint;
+    } else {
+      text = 'Sin enviar' + (date ? ' · disponible desde ' + date : '');
+    }
+    return '<span class="rechazados-elm-blocked" title="' + esc(title) + '">' + esc(text) + '</span>';
+  }
+
+  function candidateHint(c, send) {
+    return sendBlockedHint({
+      reasons: c.reasons,
+      reason: c.reason,
+      hint: c.hint,
+      hold: (send && send.hold) || { until: c.until },
+    });
+  }
+
+  function candidateUntil(c, send) {
+    return c.until || (send && send.hold && send.hold.until) || null;
   }
 
   function disabledSendButtonHtml(title, extraClass) {
@@ -220,99 +476,148 @@
     if (action.show === true) {
       var czId = Number(cell.cz_solicitud_id);
       if (action.enabled === true && czId > 0) {
-        return sendButtonHtml(czId, opts);
+        return sendButtonHtml(czId, Object.assign({}, opts, { notices: action.notices }));
       }
       return disabledSendButtonHtml(sendBlockedHint(action));
     }
+    var o = opts || {};
+    var compact = o.compact === true;
     var kind = /^[a-z0-9_]+$/.test(String(cell.kind || '')) ? String(cell.kind) : 'unknown';
     var label =
       '<span class="preaprobados-elm is-' +
       kind +
-      (cell.granted_elm === true ? ' is-granted' : '') +
+      stateModifierClasses(cell) +
+      (compact ? ' is-compact' : '') +
       '"' +
-      cellTitle(cell) +
+      titleAttr(compact ? compactTitleParts(cell).concat(cellTitleParts(cell)) : cellTitleParts(cell)) +
       '>' +
-      esc(cellLabel(cell)) +
+      esc(compact ? compactCellText(cell) : cellLabel(cell)) +
       '</span>';
-    var o = opts || {};
+    var answer = compact ? '' : elmAnswerHtml(cell, o.answer);
     if (cell.retry && cell.retry.show === true && o.retryCi != null) {
       var retry = Object.assign({ cz_solicitud_id: cell.cz_solicitud_id }, cell.retry);
-      return '<div class="rechazados-elm-stack">' + label + retryButtonHtml(retry, o.retryCi) + '</div>';
+      return '<div class="rechazados-elm-stack">' + label + answer + retryButtonHtml(retry, o.retryCi) + '</div>';
     }
-    return label;
+    return answer ? '<div class="rechazados-elm-stack">' + label + answer + '</div>' : label;
   }
 
   /**
-   * Rechazados list send control (`elm.send` from the server). One sendable solicitud: button
-   * bound to it, with the solicitud number shown. Several: a picker and a button that stays
-   * disabled until one is chosen (the dashboard binds data-cz-id on change). None sendable:
-   * disabled button with the reason as tooltip.
+   * Rechazados CI detail, one cell per rejected solicitud (the row already shows its number).
+   * Not sent and enabled: "Enviar a ELM" bound to it. Not sent and held: grey text with the reason
+   * as tooltip, never a button. With an ELM process: same as elmCellHtml (state, answer, retry).
+   * @param {object|null|undefined} cell
+   * @param {{ rejectedAt?: string, retryCi?: number|string, answer?: string }} [opts]
    */
-  function rejectedSendHtml(ci, send) {
-    if (!send || send.available !== true) return '<span class="preaprobados-elm is-unavailable">—</span>';
+  function rejectedDetailCellHtml(cell, opts) {
+    var action = (cell && cell.action) || {};
+    if (cell && cell.kind === 'not_sent' && action.show === true) {
+      var czId = Number(cell.cz_solicitud_id);
+      if (action.enabled === true && czId > 0) {
+        return sendButtonHtml(czId, { rejectedAt: opts && opts.rejectedAt, notices: action.notices });
+      }
+      return blockedUnsentHtml([], sendBlockedHint(action), action.hold && action.hold.until);
+    }
+    return elmCellHtml(cell, opts);
+  }
+
+  /**
+   * Rechazados list send controls (`elm.send` from the server) as grid rows, one per solicitud
+   * without ELM process. Held: grey text, never a button. One enabled: "Enviar a ELM" bound to it.
+   * Several enabled: a picker and a button that stays disabled until one is chosen (the
+   * dashboard binds data-cz-id and the label on change).
+   */
+  function rejectedSendRows(ci, send) {
+    if (!send || send.available !== true) return [gridRowHtml(null, '<span class="preaprobados-elm is-unavailable">—</span>')];
     var candidates = Array.isArray(send.candidates) ? send.candidates : [];
     if (!candidates.length) {
       if (send.not_sendable) {
         var reason = send.not_sendable.reason;
-        return (
-          '<span class="preaprobados-elm is-not_sendable" title="' +
-          esc('Solicitud ' + send.not_sendable.cz_solicitud_id + ' · ' + (BLOCKED_MESSAGES[reason] || reason || 'No enviable')) +
-          '">No enviable</span>'
-        );
+        return [
+          gridRowHtml(
+            send.not_sendable.cz_solicitud_id,
+            '<span class="preaprobados-elm is-not_sendable is-compact" title="' +
+              esc('Solicitud ' + send.not_sendable.cz_solicitud_id + ' · ' + (BLOCKED_MESSAGES[reason] || reason || 'No enviable')) +
+              '">No enviable</span>',
+          ),
+        ];
       }
-      return '<span class="preaprobados-elm is-none">—</span>';
+      return [gridRowHtml(null, '<span class="preaprobados-elm is-none">—</span>')];
     }
     var enabled = candidates.filter(function (c) {
       return c.enabled === true;
     });
-    if (!enabled.length) {
-      var first = candidates[0];
-      return disabledSendButtonHtml(
-        sendBlockedHint({ reasons: first.reasons, reason: first.reason, hint: first.hint, hold: send.hold || { until: first.until } }),
-        'rechazados-elm-send',
-      );
-    }
+    return (enabled.length ? [enabledSendRowHtml(ci, send, enabled)] : []).concat(blockedCandidateRows(send, candidates));
+  }
+
+  /** Same controls as rejectedSendRows, wrapped in the grid. */
+  function rejectedSendHtml(ci, send) {
+    return gridHtml(rejectedSendRows(ci, send));
+  }
+
+  /** Held candidates, one row each, input order kept; the reason is in the tooltip. */
+  function blockedCandidateRows(send, candidates) {
+    return candidates
+      .filter(function (c) {
+        return c.enabled !== true;
+      })
+      .map(function (c) {
+        var id = Number(c.cz_solicitud_id);
+        return gridRowHtml(id, blockedUnsentHtml([id], candidateHint(c, send), candidateUntil(c, send)));
+      });
+  }
+
+  function enabledSendRowHtml(ci, send, enabled) {
     var targetId = Number(send.target_cz_id);
     if (send.needs_selection !== true && enabled.length === 1 && targetId === Number(enabled[0].cz_solicitud_id)) {
-      return (
-        '<div class="rechazados-elm-action">' +
-        sendButtonHtml(targetId, { ci: ci, rejectedAt: enabled[0].rejected_at, extraClass: 'rechazados-elm-send' }) +
-        '<span class="rechazados-elm-target">Sol. ' +
-        esc(targetId) +
-        '</span></div>'
+      return gridRowHtml(
+        targetId,
+        sendButtonHtml(targetId, {
+          ci: ci,
+          rejectedAt: enabled[0].rejected_at,
+          extraClass: 'rechazados-elm-send',
+          notices: enabled[0].notices,
+        }),
       );
     }
     var options = enabled
       .map(function (c) {
         var id = Number(c.cz_solicitud_id);
         var date = shortDate(c.rejected_at);
+        var notice = sendNoticeText(c.notices);
+        var short = sendNoticeShort(c.notices);
         return (
           '<option value="' +
           esc(id) +
           '" data-rejected-at="' +
           esc(date) +
-          '">Sol. ' +
+          '"' +
+          (notice ? ' data-elm-notice="' + esc(notice) + '"' : '') +
+          '>Sol. ' +
           esc(id) +
           (date ? ' · ' + esc(date) : '') +
+          (short ? ' · ' + esc(short) : '') +
           '</option>'
         );
       })
       .join('');
-    return (
+    return gridRowHtml(
+      null,
       '<div class="rechazados-elm-action is-pick">' +
-      '<select class="rechazados-elm-pick" data-elm-pick="1" data-ci="' +
-      esc(ci) +
-      '" aria-label="Solicitud a enviar a ELM" title="' +
-      esc(enabled.length + ' solicitudes enviables: elegí cuál enviar') +
-      '"><option value="">Elegir sol. (' +
-      enabled.length +
-      ')</option>' +
-      options +
-      '</select>' +
-      '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send rechazados-elm-send" data-action="elm-send" data-ci="' +
-      esc(ci) +
-      '" data-needs-pick="1" disabled aria-disabled="true" title="Elegí primero la solicitud a enviar">Enviar a ELM</button>' +
-      '</div>'
+        '<select class="rechazados-elm-pick" data-elm-pick="1" data-ci="' +
+        esc(ci) +
+        '" aria-label="Solicitud a enviar a ELM" title="' +
+        esc(enabled.length + ' solicitudes enviables: elegí cuál enviar') +
+        '"><option value="">Elegir sol. (' +
+        enabled.length +
+        ')</option>' +
+        options +
+        '</select>' +
+        '<button type="button" class="btn preaprobados-cell-btn preaprobados-elm-send rechazados-elm-send" data-action="elm-send" data-ci="' +
+        esc(ci) +
+        '" data-needs-pick="1" disabled aria-disabled="true" title="Elegí primero la solicitud a enviar">' +
+        REJECTED_PICK_LABEL +
+        '</button>' +
+        '</div>',
     );
   }
 
@@ -346,66 +651,199 @@
     );
   }
 
-  /** Rechazados: "Reintentar ELM" controls (`elm.send.retry_candidates`), '' when none. */
-  function rejectedRetryHtml(ci, send) {
-    var list = send && send.available === true && Array.isArray(send.retry_candidates) ? send.retry_candidates : [];
-    if (!list.length) return '';
-    return list
-      .map(function (c) {
-        return (
-          '<div class="rechazados-elm-action">' +
-          retryButtonHtml(c, ci) +
-          '<span class="rechazados-elm-target">Sol. ' +
-          esc(Number(c.cz_solicitud_id)) +
-          '</span></div>'
-        );
-      })
-      .join('');
+  function retryCandidatesOf(send) {
+    return send && send.available === true && Array.isArray(send.retry_candidates) ? send.retry_candidates : [];
   }
 
-  function historyHtml(elm) {
-    if (elm.cell) return elmCellHtml(elm.cell);
-    var other = elm.other_processes && elm.other_processes[0];
-    if (!other) return '';
+  function retryRowHtml(c, ci) {
+    return gridRowHtml(c.cz_solicitud_id, retryButtonHtml(c, ci));
+  }
+
+  /** Rechazados: "Reintentar ELM" controls (`elm.send.retry_candidates`) as a grid, '' when none. */
+  function rejectedRetryHtml(ci, send) {
+    var rows = retryCandidatesOf(send).map(function (c) {
+      return retryRowHtml(c, ci);
+    });
+    return rows.length ? gridHtml(rows) : '';
+  }
+
+  /** Compact state + result pill of one ELM process; full label and original answer in the tooltip. */
+  function processPillHtml(item) {
+    var kind = String(item.kind || item.state || '');
+    kind = /^[a-z0-9_]+$/.test(kind) ? kind : 'unknown';
+    var text = compactCellText(item);
     return (
       '<span class="preaprobados-elm is-' +
-      esc(/^[a-z0-9_]+$/.test(String(other.state || '')) ? other.state : 'unknown') +
-      ' is-other" title="' +
-      esc('Solicitud ' + other.cz_solicitud_id + ' · ' + originLabel(other.trigger_origin)) +
-      '">' +
-      esc(elmAcceptanceLabel(other) || other.label || '—') +
-      ' (otra sol.)</span>'
+      kind +
+      stateModifierClasses(item) +
+      ' is-compact' +
+      (text.indexOf('. ') >= 0 ? ' is-wrap' : '') +
+      '"' +
+      titleAttr(compactTitleParts(item).concat(cellTitleParts(item))) +
+      '>' +
+      esc(text) +
+      '</span>'
     );
   }
 
   /**
-   * Rechazados list: ELM history of the CI (the row's solicitud, else another one) and, when a
-   * rejected solicitud without its own process exists, the send control under it (enabled or
-   * disabled with the reason, decided server-side).
+   * Every ELM process of the CI (the row's solicitud first) as grid rows, each followed by its own
+   * "Reintentar ELM" row when the server offers it. Retry candidates without a process follow.
+   */
+  function processRows(elm, ci) {
+    var items = (elm.cell ? [elm.cell] : []).concat(Array.isArray(elm.other_processes) ? elm.other_processes : []);
+    var retries = ci != null ? retryCandidatesOf(elm.send).slice() : [];
+    var rows = [];
+    items.forEach(function (item) {
+      var id = Number(item.cz_solicitud_id);
+      rows.push(gridRowHtml(id, processPillHtml(item)));
+      for (var i = retries.length - 1; i >= 0; i -= 1) {
+        if (Number(retries[i].cz_solicitud_id) === id) {
+          rows.push(gridRowHtml(null, retryButtonHtml(retries[i], ci)));
+          retries.splice(i, 1);
+        }
+      }
+    });
+    return rows.concat(
+      retries.map(function (c) {
+        return retryRowHtml(c, ci);
+      }),
+    );
+  }
+
+  /**
+   * CI detail, ELM processes of solicitudes outside the rejections table: same grid as the list,
+   * "Sol. N" then the compact state, then origin and ELM's answer (truncated, full in tooltip).
+   */
+  function rejectedOtherProcessesHtml(processes) {
+    var rows = (Array.isArray(processes) ? processes : []).map(function (p) {
+      var note = [originLabel(p.trigger_origin)];
+      if (p.elm_answer) note.push(elmAnswerText(p, true));
+      if (p.ops_resolution) note.push(opsResolutionText(p));
+      var noteText = note.join(' · ');
+      return gridRowHtml(
+        p.cz_solicitud_id,
+        '<span class="rechazados-elm-detail-line">' +
+          processPillHtml(p) +
+          '<span class="rechazados-elm-note" title="' +
+          esc(noteText) +
+          '">' +
+          esc(noteText) +
+          '</span></span>',
+      );
+    });
+    return rows.length ? gridHtml(rows) : '';
+  }
+
+  function isProcessCell(cell) {
+    var kind = cell && cell.kind;
+    return Boolean(kind) && kind !== 'not_sent' && kind !== 'not_sendable' && kind !== 'unavailable';
+  }
+
+  function lineTextOf(cell) {
+    if (isProcessCell(cell)) return compactCellText(cell);
+    if (cell && cell.kind === 'not_sent') return 'Sin enviar';
+    if (cell && cell.kind === 'not_sendable') return 'No enviable';
+    return '—';
+  }
+
+  /**
+   * Preaprobados list (one row per CI): the CI's ELM state as one pill that never wraps and is
+   * never a button (sends and resolutions live in the CI detail). Same labels and colors as
+   * Rechazados. Without ELM cells (read failed) the ELM membership is shown (Aceptado / Otorgado).
+   * The other solicitudes of the CI are listed in the tooltip.
+   * @param {object|null|undefined} cell ELM cell of the solicitud the row shows
+   * @param {{ czId?: number|string, member?: { state?: string, label?: string,
+   *   detail_label?: string }|null, others?: Array<{ cz_id: number|string, elm?: object }> }} [opts]
+   * @returns {string}
+   */
+  function preaprobadosElmStatusHtml(cell, opts) {
+    var o = opts || {};
+    var member = o.member && (o.member.state === 'referred' || o.member.state === 'granted') ? o.member : null;
+    var cls;
+    var text;
+    var parts;
+    if (isProcessCell(cell)) {
+      var kind = /^[a-z0-9_]+$/.test(String(cell.kind)) ? String(cell.kind) : 'unknown';
+      cls = 'is-' + kind + stateModifierClasses(cell);
+      text = compactCellText(cell);
+      parts = compactTitleParts(cell).concat(cellTitleParts(cell));
+    } else if (member) {
+      var granted = member.state === 'granted';
+      cls = granted ? 'is-granted' : 'is-referred';
+      text = granted ? COMPACT_STATE_LABELS.granted : COMPACT_STATE_LABELS.referred;
+      parts = [member.detail_label || member.label || (granted ? ELM_GRANTED_LABEL : 'Aceptado ELM')];
+    } else if (cell && (cell.kind === 'not_sent' || cell.kind === 'not_sendable')) {
+      cls = 'is-' + cell.kind;
+      text = lineTextOf(cell);
+      parts = cellTitleParts(cell);
+    } else {
+      return '<span class="preaprobados-elm is-none is-compact is-line">—</span>';
+    }
+    if (Number(o.czId) > 0) parts.unshift('Sol. ' + Number(o.czId));
+    var title = parts.join(' · ');
+    var others = (Array.isArray(o.others) ? o.others : [])
+      .filter(function (s) {
+        return s && Number(s.cz_id) > 0;
+      })
+      .map(function (s) {
+        return 'Sol. ' + Number(s.cz_id) + ': ' + lineTextOf(s.elm);
+      });
+    if (others.length) title += '\nOtras solicitudes de la CI:\n' + others.join('\n');
+    return (
+      '<span class="preaprobados-elm ' +
+      cls +
+      ' is-compact is-line" title="' +
+      esc(title) +
+      '">' +
+      esc(text) +
+      '</span>'
+    );
+  }
+
+  /**
+   * List-row `elm` rebuilt from the CI detail block (GET /rechazados/:ci), so one row can be
+   * refreshed after a send without reloading the list. Same data as the list builds: the row's
+   * solicitud process as `cell`, every other process of the CI in `other_processes`, same `send`.
+   * @param {object|null|undefined} detailElm `elm` of the CI detail
+   * @param {number|string|null} focusCzId the row's solicitud (latest rejection)
+   */
+  function rejectedListElmFromDetail(detailElm, focusCzId) {
+    var d = detailElm || {};
+    if (d.available !== true) return { available: false };
+    var focus = Number(focusCzId);
+    var cell = null;
+    var others = [];
+    (Array.isArray(d.solicitudes) ? d.solicitudes : []).forEach(function (s) {
+      if (!isProcessCell(s && s.cell)) return;
+      if (Number(s.cz_solicitud_id) === focus && !cell) cell = s.cell;
+      else others.push(s.cell);
+    });
+    return {
+      available: true,
+      cell: cell,
+      other_processes: others.concat(Array.isArray(d.other_processes) ? d.other_processes : []),
+      ci_active: d.ci_active || null,
+      send: d.send || { available: false },
+    };
+  }
+
+  /**
+   * Rechazados list (one row per CI): a two-column grid, one row per solicitud. Left "Sol. N"
+   * (fixed width, so every table row lines up); right the state and result of a sent solicitud
+   * (never a send button), or for one without ELM process "Enviar a ELM" when the server enabled
+   * the send and grey text with the reason when it is held.
    */
   function rejectedRowElmHtml(elm, ci) {
     if (!elm || elm.available !== true) {
-      return '<span class="preaprobados-elm is-unavailable">—</span>';
+      return gridHtml([gridRowHtml(null, '<span class="preaprobados-elm is-unavailable">—</span>')]);
     }
-    var history = historyHtml(elm);
+    var rows = processRows(elm, ci);
     var send = elm.send;
     var offered = send && send.available === true && Array.isArray(send.candidates) && send.candidates.length > 0;
-    var retry = ci != null ? rejectedRetryHtml(ci, send) : '';
-    if (history) {
-      if ((!offered || ci == null) && !retry) return history;
-      return (
-        '<div class="rechazados-elm-stack">' +
-        history +
-        retry +
-        (offered && ci != null ? rejectedSendHtml(ci, send) : '') +
-        '</div>'
-      );
-    }
-    if (retry) {
-      return '<div class="rechazados-elm-stack">' + retry + (offered ? rejectedSendHtml(ci, send) : '') + '</div>';
-    }
-    if (send && ci != null) return rejectedSendHtml(ci, send);
-    return '<span class="preaprobados-elm is-none">—</span>';
+    if (ci != null && send && (offered || !rows.length)) rows = rows.concat(rejectedSendRows(ci, send));
+    if (!rows.length) rows.push(gridRowHtml(null, '<span class="preaprobados-elm is-none">—</span>'));
+    return gridHtml(rows);
   }
 
   /**
@@ -426,15 +864,20 @@
           '.',
       };
     }
+    var answer = elmAnswerText(b.cell, true);
+    var answerSuffix = answer ? ' ' + answer + '.' : '';
     switch (b.outcome) {
       case 's1_rejected':
-        return { tone: 'warn', text: 'ELM rechazó la solicitud en la evaluación inicial (S1). Queda como Rechazado ELM.' };
+        return {
+          tone: 'warn',
+          text: 'ELM rechazó la solicitud en la evaluación inicial (S1). Queda como Rechazado ELM.' + answerSuffix,
+        };
       case 'rejected':
-        return { tone: 'warn', text: 'ELM rechazó la solicitud (Rechazado ELM).' };
+        return { tone: 'warn', text: 'ELM rechazó la solicitud (Rechazado ELM).' + answerSuffix };
       case 'referred':
         return {
           tone: 'ok',
-          text: 'Preaprobado ELM: S1 favorable y derivado a ventas de ELM (S2). No es un préstamo otorgado.',
+          text: 'Aceptado ELM: S1 favorable y ELM recibió el lead y lo asignó a Copanel (S2). No es un préstamo otorgado.',
         };
       case 'granted':
         return { tone: 'ok', text: 'Otorgado ELM: ELM confirmó el desembolso.' };
@@ -450,11 +893,22 @@
         }
         return { tone: 'warn', text: 'En evaluación ELM: resultado pendiente.' };
       case 'technical_error':
-        return { tone: 'error', text: 'Error técnico ELM: queda pendiente de revisión (no es un rechazo).' };
+        return {
+          tone: 'error',
+          text: 'Error técnico ELM: queda pendiente de revisión (no es un rechazo).' + answerSuffix,
+        };
       case 'review':
-        return { tone: 'warn', text: 'Resultado ELM incierto: queda pendiente de revisión (no es un rechazo).' };
+        return {
+          tone: 'warn',
+          text: 'Resultado ELM incierto: queda pendiente de revisión (no es un rechazo).' + answerSuffix,
+        };
       case 'closed':
         return { tone: 'warn', text: 'Proceso ELM cerrado sin préstamo.' };
+      case 'duplicate_other_channel':
+        return {
+          tone: 'warn',
+          text: 'Duplicado · Otro canal: ELM informa que el cliente ya está aprobado por otro canal. No hay derivación por Copanel.',
+        };
       default:
         if (CI_HOLD_REASONS.indexOf(code) >= 0) {
           return { tone: 'warn', text: 'No se envió a ELM. ' + ciHoldText(code, b) };
@@ -474,14 +928,28 @@
     cellLabel: cellLabel,
     elmAcceptanceLabel: elmAcceptanceLabel,
     originLabel: originLabel,
+    s2DetailRow: s2DetailRow,
+    elmAnswerText: elmAnswerText,
+    opsResolutionText: opsResolutionText,
+    elmAnswerHtml: elmAnswerHtml,
+    sendNoticeText: sendNoticeText,
+    compactReason: compactReason,
+    compactCellText: compactCellText,
     sendBlockedHint: sendBlockedHint,
     ciHoldText: ciHoldText,
     shortDate: shortDate,
     elmCellHtml: elmCellHtml,
+    processPillHtml: processPillHtml,
+    preaprobadosElmStatusHtml: preaprobadosElmStatusHtml,
+    rejectedDetailCellHtml: rejectedDetailCellHtml,
+    rejectedSendLabel: rejectedSendLabel,
+    REJECTED_PICK_LABEL: REJECTED_PICK_LABEL,
+    rejectedListElmFromDetail: rejectedListElmFromDetail,
     rejectedSendHtml: rejectedSendHtml,
     retryButtonHtml: retryButtonHtml,
     rejectedRetryHtml: rejectedRetryHtml,
     rejectedRowElmHtml: rejectedRowElmHtml,
+    rejectedOtherProcessesHtml: rejectedOtherProcessesHtml,
     sendResultMessage: sendResultMessage,
   };
 });

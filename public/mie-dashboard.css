@@ -5285,7 +5285,7 @@
   font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-name {
-  width: 22%;
+  width: 15%;
   text-align: left;
   overflow: hidden;
 }
@@ -5404,8 +5404,10 @@
   line-height: 1.2;
 }
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-elm {
-  width: 12%;
-  text-align: center;
+  width: 19%;
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: left;
   white-space: normal;
   line-height: 1.25;
 }
@@ -5419,21 +5421,99 @@
 #mie-dashboard-app .rechazados-elm-action {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
+  width: 100%;
   min-width: 0;
 }
-#mie-dashboard-app .rechazados-elm-send {
+#mie-dashboard-app .rechazados-elm-send,
+#mie-dashboard-app .rechazados-elm-retry {
   white-space: nowrap;
   font-size: 0.78rem;
   padding: 3px 8px;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #mie-dashboard-app .rechazados-elm-target {
   font-size: 0.72rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* Two columns with the same widths in every table row: "Sol. N" | state, hold or button. */
+#mie-dashboard-app .rechazados-elm-grid {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  grid-auto-rows: minmax(1.25rem, auto);
+  column-gap: 4px;
+  row-gap: 2px;
+  align-items: center;
+  justify-items: start;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+#mie-dashboard-app .rechazados-elm-grid > .rechazados-elm-target {
+  justify-self: stretch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .rechazados-elm-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+#mie-dashboard-app .rechazados-elm-value > * {
+  min-width: 0;
+  max-width: 100%;
+}
+#mie-dashboard-app .rechazados-elm-detail-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#mie-dashboard-app .rechazados-elm-detail-line > .preaprobados-elm {
+  flex: none;
+}
+#mie-dashboard-app .rechazados-elm-note {
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .rechazados-detail-modal .rechazados-elm-stack {
+  align-items: flex-start;
+}
+#mie-dashboard-app .rechazados-detail-modal .elm-answer {
+  text-align: left;
+}
+#mie-dashboard-app .rechazados-elm-blocked {
+  display: block;
+  max-width: 100%;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+#mie-dashboard-app .rechazados-detail-modal .rechazados-elm-blocked {
+  white-space: normal;
+}
+#mie-dashboard-app .elm-answer {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 #mie-dashboard-app .rechazados-elm-pick {
   width: 100%;
@@ -5996,77 +6076,132 @@
   }
 }
 
-/* Preaprobados V1 */
+/* Preaprobados: one row per CI, same density as Rechazados */
 #mie-dashboard-app .preaprobados-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   margin: 12px 0 8px;
 }
-#mie-dashboard-app .preaprobados-filter-row {
+#mie-dashboard-app .preaprobados-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  align-items: flex-end;
 }
-#mie-dashboard-app .preaprobados-filter-btn {
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border-radius: 999px;
-  padding: 6px 12px;
+#mie-dashboard-app .preaprobados-periods {
+  display: flex;
+  gap: 6px;
+}
+#mie-dashboard-app .preaprobados-custom-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+#mie-dashboard-app .preaprobados-custom-range .mcl-input {
+  width: auto;
+  padding: 5px 8px;
+}
+#mie-dashboard-app .preaprobados-select {
+  width: auto;
+  max-width: 230px;
+  padding: 5px 8px;
   font-size: 13px;
-  cursor: pointer;
 }
-#mie-dashboard-app .preaprobados-filter-btn.is-active {
-  background: var(--accent-info-soft);
-  color: var(--accent-info);
-  border-color: var(--accent-info);
-}
-#mie-dashboard-app .preaprobados-search-field {
-  min-width: 220px;
-  flex: 1;
+#mie-dashboard-app .preaprobados-search {
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 5px 10px;
+  font-size: 13px;
 }
 #mie-dashboard-app .preaprobados-kpis {
-  margin: 8px 0 12px;
+  margin: 8px 0 10px;
 }
 #mie-dashboard-app .preaprobados-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  #mie-dashboard-app .preaprobados-kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
 }
 #mie-dashboard-app .preaprobados-kpi-card {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
+  cursor: help;
+}
+#mie-dashboard-app .preaprobados-kpi-card.is-referred .preaprobados-kpi-value {
+  color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-kpi-card.is-granted .preaprobados-kpi-value {
+  color: #93c5fd;
 }
 #mie-dashboard-app .preaprobados-kpi-value {
   font-size: 1.25rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 #mie-dashboard-app .preaprobados-kpi-label {
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 2px;
+  white-space: nowrap;
 }
-#mie-dashboard-app .preaprobados-in-progress {
-  display: inline-block;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--accent-info);
+#mie-dashboard-app .preaprobados-kpi-note {
+  margin: 6px 0 0;
+}
+/* CDV cohort (estado 8), per solicitud: kept apart from the per-CI KPIs above. */
+#mie-dashboard-app .preaprobados-cdv-kpis {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+#mie-dashboard-app .preaprobados-kpi-scope {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-kpi-scope .preaprobados-muted {
+  font-weight: 400;
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv .preaprobados-kpi-card {
+  padding: 5px 12px;
+}
+#mie-dashboard-app .preaprobados-kpi-grid.is-cdv .preaprobados-kpi-value {
+  font-size: 1rem;
+}
+@media (max-width: 720px) {
+  #mie-dashboard-app .preaprobados-kpi-grid.is-cdv {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 #mie-dashboard-app .preaprobados-result {
   display: inline-block;
+  max-width: 100%;
   font-size: 0.75rem;
   padding: 2px 8px;
   border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
+/* Otorgado (CDV or ELM) blue, as every granted loan. */
 #mie-dashboard-app .preaprobados-result.is-granted {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
 }
-#mie-dashboard-app .preaprobados-result.is-sin {
+#mie-dashboard-app .preaprobados-result.is-sin,
+#mie-dashboard-app .preaprobados-result.is-none {
   background: var(--surface-2);
   color: var(--text-muted);
 }
@@ -6078,18 +6213,16 @@
   background: var(--surface-2);
   color: var(--text-muted);
 }
-#mie-dashboard-app .preaprobados-elm.is-granted {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
+/* ELM: Aceptado (lead received, assigned to Copanel) green; Otorgado (confirmed disbursement) blue. */
 #mie-dashboard-app .preaprobados-elm.is-referred,
 #mie-dashboard-app .preaprobados-result.is-referred-elm {
-  background: rgba(59, 130, 246, 0.15);
-  color: #93c5fd;
-}
-#mie-dashboard-app .preaprobados-result.is-granted-elm {
   background: rgba(34, 197, 94, 0.15);
   color: #4ade80;
+}
+#mie-dashboard-app .preaprobados-elm.is-granted,
+#mie-dashboard-app .preaprobados-result.is-granted-elm {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
 }
 #mie-dashboard-app .preaprobados-elm.is-rejected {
   background: rgba(239, 68, 68, 0.12);
@@ -6100,23 +6233,82 @@
   background: rgba(234, 179, 8, 0.12);
   color: #fde68a;
 }
+/* "Duplicado · Otro canal": closed, not a rejection nor a Copanel approval. */
+#mie-dashboard-app .preaprobados-elm.is-closed.is-duplicate {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
 #mie-dashboard-app .preaprobados-elm.is-other {
   font-style: italic;
 }
-#mie-dashboard-app .preaprobados-kpi-scope {
-  margin: 10px 0 6px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+#mie-dashboard-app .preaprobados-elm.is-compact {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.3;
+}
+/* Multi-sentence ELM answer ("Repetido. Aprobado"): wraps instead of hiding its last word. */
+#mie-dashboard-app .preaprobados-elm.is-compact.is-wrap {
+  white-space: normal;
+  border-radius: 8px;
+  text-align: left;
+}
+/* Preaprobados list: one line per row, whatever the ELM answer length. */
+#mie-dashboard-app .preaprobados-elm.is-line {
+  white-space: nowrap;
+  border-radius: 999px;
 }
 #mie-dashboard-app .preaprobados-elm-send[disabled] {
   opacity: 0.55;
   cursor: not-allowed;
 }
-#mie-dashboard-app .ga4-table.preaprobados-table th,
+#mie-dashboard-app .preaprobados-elm-notice {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+#mie-dashboard-app #preaprobados-results .table-wrap {
+  overflow: visible;
+}
 #mie-dashboard-app .ga4-table.preaprobados-table td {
-  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-date {
+  width: 10%;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-name {
+  width: 22%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ci {
+  width: 13%;
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-cz {
+  width: 25%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-elm {
+  width: 23%;
+}
+#mie-dashboard-app .ga4-table.preaprobados-table .preaprobados-col-ver {
+  width: 7%;
+  text-align: center;
+}
+#mie-dashboard-app .preaprobados-sol-count {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--text-muted);
   vertical-align: middle;
 }
 #mie-dashboard-app .preaprobados-pagination {
@@ -6125,17 +6317,37 @@
   align-items: center;
   margin-top: 10px;
 }
-#mie-dashboard-app .preaprobados-detail-modal {
-  max-width: 640px;
-  max-height: 90vh;
-  overflow: auto;
+#mie-dashboard-app .preaprobados-detail-modal section h3 {
+  margin: 12px 0 6px;
+  font-size: 0.9rem;
 }
-#mie-dashboard-app .preaprobados-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+#mie-dashboard-app .preaprobados-sol-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-ellipsis {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-sol-elm {
+  max-width: 320px;
+}
+#mie-dashboard-app .preaprobados-sol-table .preaprobados-elm-send {
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+#mie-dashboard-app .preaprobados-sol-table .rechazados-elm-blocked {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mie-dashboard-app .preaprobados-sol-row.is-selected td {
+  background: var(--accent-info-soft);
+}
+#mie-dashboard-app .preaprobados-selected .preaprobados-dl {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 #mie-dashboard-app .preaprobados-dl {
   display: grid;
@@ -6155,37 +6367,15 @@
   color: var(--text-muted);
 }
 
-#mie-dashboard-app .elm-ops {
-  margin: 12px 0;
-}
-
-#mie-dashboard-app .elm-ops-section {
+#mie-dashboard-app .elm-resolve {
   margin: 8px 0;
-}
-
-#mie-dashboard-app .elm-ops-section > summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-#mie-dashboard-app .elm-ops-alert {
-  margin: 8px 0;
-  padding: 8px 12px;
-  border: 1px solid #d97706;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(217, 119, 6, 0.1);
 }
 
-#mie-dashboard-app .elm-ops-flag {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  background: rgba(217, 119, 6, 0.15);
-}
-
-#mie-dashboard-app .elm-ops-flag-danger {
-  background: rgba(220, 38, 38, 0.15);
+#mie-dashboard-app .elm-resolve-head {
+  margin-bottom: 6px;
 }
 
 #mie-dashboard-app .elm-ops-form {

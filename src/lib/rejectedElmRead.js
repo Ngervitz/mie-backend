@@ -31,11 +31,14 @@ function processSummary(p, cell) {
     process_id: p.id || null,
     trigger_origin: p.trigger_origin || null,
     created_at: p.created_at || null,
+    kind: cell.kind,
     state: cell.state,
     label: cell.label,
     detail: cell.detail,
     provider_status: p.provider_status || null,
     granted_elm: Boolean(p.disbursed_at),
+    elm_answer: cell.elm_answer || null,
+    ops_resolution: cell.ops_resolution || null,
   };
 }
 
