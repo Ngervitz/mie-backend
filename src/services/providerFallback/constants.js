@@ -68,6 +68,11 @@ const REASONS = Object.freeze({
   /** C1: ELM negative answer not confirmed as a definitive rejection (e.g. "Aprobado sin canal"). */
   ELM_S1_REJECTION_NOT_DEFINITIVE: 'elm_s1_rejection_not_definitive',
   ELM_S2_REJECTION_NOT_DEFINITIVE: 'elm_s2_rejection_not_definitive',
+  /**
+   * S1 "Repetido. Aprobado": already approved by another ELM channel. C1 ends in CZ 3 without
+   * review; never an ELM credit rejection (commercial reading closed "Duplicado · Otro canal").
+   */
+  ELM_S1_DUPLICATE_OTHER_CHANNEL: 'elm_s1_duplicate_other_channel',
   /** C1: a rejected / not_eligible decision without a definitive reason (safety net). */
   REJECTION_NOT_CONFIRMED: 'rejection_not_confirmed',
   NOT_STARTED_EXHAUSTED: 'not_started_attempts_exhausted',
@@ -133,6 +138,7 @@ const DEFINITIVE_REJECTION_REASONS = Object.freeze([
   'elm_date_of_birth_invalid',
   'elm_mobilephone_invalid',
   'elm_salary_invalid',
+  'elm_s1_duplicate_other_channel',
 ]);
 
 /** ELM Servicio 2 negative texts that are a definitive rejection (invalid applicant data). */

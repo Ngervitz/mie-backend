@@ -10,7 +10,12 @@
  * otherwise → manual_review with a specific reason. Never a rejection.
  * S1 "BCU error" has its own fixed policy (BCU_RETRY): wait 24 h from the error, resend the same
  * frozen request once; a second BCU error → manual_review. The job stays pending meanwhile.
- * A rejection is only final for documented ELM negative texts; others → manual_review.
+ * A rejection is only final for documented ELM negative texts; others → manual_review. S1
+ * "Repetido. Aprobado" (approved by another channel, nothing for Copanel to manage) → rejected
+ * elm_s1_duplicate_other_channel: CZ 3 without review. Not an ELM credit rejection: the
+ * commercial reading stays closed "Duplicado · Otro canal" (classification.js).
+ * S2 unknown that is the answer ELM confirmed as accepted (classification.isS2Accepted, the same
+ * predicate JANUS manual uses) → referred; any other S2 unknown → manual_review.
  *
  * evaluateCiGuard: reads the other ELM processes of the same CI. It never modifies them and
  * never matches anything by CI; it only decides whether this solicitud may start a new call.
@@ -18,7 +23,8 @@
 
 const { S1, S2, CODES } = require('../elm/constants');
 const { technicalRetryDelaySeconds } = require('../elm/config');
-const { SERVICE1_NEGATIVE } = require('../elm/client');
+const { isService1Negative } = require('../elm/client');
+const { isS2Accepted } = require('../elm/classification');
 const {
   OUTCOME,
   REASONS,
@@ -116,7 +122,12 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
   if (p.s1_status === S1.UNKNOWN) return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN);
   if (p.s1_status === S1.TECHNICAL_ERROR) return technicalDecision('s1', p, nowMs, retryPolicy);
   if (p.s1_status === S1.REJECTED) {
-    return SERVICE1_NEGATIVE.includes(p.s1_result_message)
+    if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {
+      return final(OUTCOME.REJECTED, REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL, {
+        result_message: p.s1_result_message || null,
+      });
+    }
+    return isService1Negative(p.s1_result_message)
       ? final(OUTCOME.REJECTED, REASONS.ELM_S1_REJECTED)
       : final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_REJECTION_NOT_DEFINITIVE, {
           result_message: p.s1_result_message || null,
@@ -140,7 +151,9 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
             result_message: p.s2_result_message || null,
           });
     case S2.UNKNOWN:
-      return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN);
+      return isS2Accepted(p)
+        ? final(OUTCOME.REFERRED, REASONS.ELM_S2_REFERRED, { s2_accepted: true })
+        : final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN);
     case S2.TECHNICAL_ERROR:
       return technicalDecision('s2', p, nowMs, retryPolicy);
     default:
@@ -158,9 +171,11 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
  *  3. another process of the CI has an S2 referral → already_referred (nothing is sent), whatever
  *     the provider status (no automatic expiry of an active referral);
  *  4. another process of the CI is S1 eligible waiting for S2 → manual_review.
+ * An S2 unknown that is the accepted answer (isS2Accepted) is an S2 referral (rule 3), not an
+ * unknown (rule 1); every other S2 unknown stays in rule 1.
  * The monthly send limit is enforced afterwards by elm_ci_lock_acquire (DB, atomic per CI).
  *
- * @param {object[]} processes elm_lead_processes rows with the same CI
+ * @param {object[]} processes elm_lead_processes rows with the same CI (CI_GUARD_SELECT)
  * @param {number} selfCzId
  * @param {number} nowMs
  * @returns {{ kind: 'proceed' }
@@ -190,7 +205,7 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
   for (const p of others) {
     if (
       effective(p.s1_status, p.s1_lease_expires_at, nowMs) === S1.UNKNOWN ||
-      (effective(p.s2_status, p.s2_lease_expires_at, nowMs) === S2.UNKNOWN && !closedInCz(p))
+      (effective(p.s2_status, p.s2_lease_expires_at, nowMs) === S2.UNKNOWN && !closedInCz(p) && !isS2Accepted(p))
     ) {
       return withRelated(final(OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN), p);
     }
@@ -200,14 +215,11 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
     if (p.s2_status === S2.IN_FLIGHT) return withRelated(waitUntil(p.s2_lease_expires_at), p);
   }
   for (const p of others) {
-    if (p.s2_status !== S2.REFERRED || closedInCz(p)) continue;
-    return withRelated(
-      final(OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, {
-        referred_at: p.referred_at || null,
-        provider_status: p.provider_status || null,
-      }),
-      p,
-    );
+    const accepted = isS2Accepted(p);
+    if ((p.s2_status !== S2.REFERRED && !accepted) || closedInCz(p)) continue;
+    const detail = { referred_at: p.referred_at || null, provider_status: p.provider_status || null };
+    if (accepted) detail.s2_accepted = true;
+    return withRelated(final(OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, detail), p);
   }
   for (const p of others) {
     if (p.s1_status === S1.ELIGIBLE && p.s2_status === S2.NOT_STARTED) {

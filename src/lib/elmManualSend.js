@@ -19,6 +19,7 @@
  */
 
 const { CODES } = require('../services/elm/constants');
+const { DUPLICATE_OTHER_CHANNEL_DETAIL } = require('../services/elm/classification');
 
 const OUTCOMES = Object.freeze({
   S1_REJECTED: 's1_rejected',
@@ -29,6 +30,7 @@ const OUTCOMES = Object.freeze({
   TECHNICAL_ERROR: 'technical_error',
   REVIEW: 'review',
   CLOSED: 'closed',
+  DUPLICATE_OTHER_CHANNEL: 'duplicate_other_channel',
   BLOCKED: 'blocked',
 });
 
@@ -73,7 +75,9 @@ function outcomeOf(cell) {
     case 'in_evaluation':
       return OUTCOMES.PENDING;
     case 'closed':
-      return OUTCOMES.CLOSED;
+      return cell.detail === DUPLICATE_OTHER_CHANNEL_DETAIL
+        ? OUTCOMES.DUPLICATE_OTHER_CHANNEL
+        : OUTCOMES.CLOSED;
     default:
       return /technical_error/.test(String(cell.detail || ''))
         ? OUTCOMES.TECHNICAL_ERROR

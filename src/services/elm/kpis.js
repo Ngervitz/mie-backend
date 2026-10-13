@@ -7,11 +7,12 @@
  * only update it, so counting rows never double counts.
  *
  *   flow     what happened to the processes started in the window (created_at), even if the
- *            state changed later: started, S1 executed, S1 favorable, derivados S2, definitive
+ *            state changed later: started, S1 executed, S1 favorable, aceptados S2, definitive
  *            rejections, confirmed grants (disbursed_at).
  *   current  where those processes are now (commercial state, src/services/elm/classification.js).
  *
- * "Derivados S2" are referrals ELM accepted (Preaprobado ELM), not credit approvals.
+ * "Aceptados S2" (referred_s2) are leads ELM received and assigned to Copanel (Aceptado ELM),
+ * not credit approvals; a later grant still counts there and in `granted`.
  */
 
 const { TRIGGER_ORIGINS } = require('./constants');

@@ -172,20 +172,58 @@ async function fetchCzPage(path, since, opts = {}) {
 }
 
 /**
+ * ISO cursor one second earlier (UTC, no millis), or null if unparseable.
+ * CZ filters `updated > since` at second precision, so since = tip - 1s
+ * re-reads every row sharing the tip second.
+ * @param {string} since
+ * @returns {string|null}
+ */
+function overlapSince(since) {
+  const ms = Date.parse(String(since || ''));
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms - 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/**
  * Paginate until hasMore=false or safety limits.
+ *
+ * boundaryOverlap: request each next page from nextSince - 1s and dedupe by
+ * item.id, so rows sharing the page-boundary second are not skipped by CZ's
+ * strict `updated > since`. Returned items are unique by id (last fetch wins).
+ * resumeSince is the since to pass on a follow-up call to continue a partial run.
+ *
  * @param {string} path
  * @param {string|null} initialSince
- * @param {{ maxPages?: number, timeoutMs?: number }} [opts] timeoutMs applies per page
+ * @param {{ maxPages?: number, timeoutMs?: number, boundaryOverlap?: boolean }} [opts]
+ *   timeoutMs applies per page
  */
 async function fetchAllCzPages(path, initialSince, opts = {}) {
   const maxPages = opts.maxPages != null ? opts.maxPages : MAX_PAGES_PER_RUN;
+  const boundaryOverlap = opts.boundaryOverlap === true;
   let since = initialSince || INITIAL_SINCE;
   let pages = 0;
   let itemsFetched = 0;
+  let boundaryStalls = 0;
   /** @type {object[]} */
   const allItems = [];
+  /** @type {Map<string, number>} */
+  const indexById = new Map();
   let lastNextSince = null;
   let hasMore = true;
+
+  function collect(item) {
+    if (!boundaryOverlap || !item || item.id == null) {
+      allItems.push(item);
+      return;
+    }
+    const key = String(item.id);
+    if (indexById.has(key)) {
+      allItems[indexById.get(key)] = item;
+      return;
+    }
+    indexById.set(key, allItems.length);
+    allItems.push(item);
+  }
 
   while (hasMore) {
     if (pages >= maxPages) {
@@ -194,6 +232,8 @@ async function fetchAllCzPages(path, initialSince, opts = {}) {
         pagesFetched: pages,
         itemsFetched,
         nextSince: lastNextSince || since,
+        resumeSince: since,
+        boundaryStalls,
         hitPageLimit: true,
         incomplete: true,
       };
@@ -202,25 +242,33 @@ async function fetchAllCzPages(path, initialSince, opts = {}) {
     const page = await fetchCzPage(path, since, { timeoutMs: opts.timeoutMs });
     pages += 1;
     itemsFetched += page.items.length;
-    for (const item of page.items) allItems.push(item);
+    for (const item of page.items) collect(item);
+
+    hasMore = page.hasMore === true;
 
     if (page.nextSince) {
+      lastNextSince = page.nextSince;
+      if (boundaryOverlap && hasMore) {
+        const overlapped = overlapSince(page.nextSince);
+        if (overlapped && overlapped !== since) {
+          since = overlapped;
+          continue;
+        }
+        // Whole page inside one second (>= page size rows share it):
+        // overlap cannot progress, fall back to strict nextSince.
+        boundaryStalls += 1;
+      }
       if (page.nextSince === since) {
         // Cursor did not advance — stop to avoid infinite loop.
         hasMore = false;
-        lastNextSince = page.nextSince;
         break;
       }
-      lastNextSince = page.nextSince;
       since = page.nextSince;
     } else {
       lastNextSince = since;
       hasMore = false;
       break;
     }
-
-    hasMore = page.hasMore === true;
-    if (!page.nextSince) hasMore = false;
   }
 
   return {
@@ -228,6 +276,8 @@ async function fetchAllCzPages(path, initialSince, opts = {}) {
     pagesFetched: pages,
     itemsFetched,
     nextSince: lastNextSince,
+    resumeSince: null,
+    boundaryStalls,
     hitPageLimit: false,
     incomplete: false,
   };
@@ -241,4 +291,5 @@ module.exports = {
   getCzApiBearerTokenDiagnostic,
   fetchCzPage,
   fetchAllCzPages,
+  overlapSince,
 };

@@ -233,6 +233,7 @@ function computeElmCell(input) {
         reason: reason,
         reasons: reasons,
         blockers: codes,
+        notices: Array.isArray(input.eligibility.notices) ? input.eligibility.notices.slice() : [],
         hint: enabled ? null : SEND_PENDING_HINT,
       },
     },

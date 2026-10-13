@@ -45,6 +45,10 @@ const ELM_SOURCE = 'copanel';
 const OUTCOME = Object.freeze({
   POSITIVE: 'positive',
   NEGATIVE: 'negative',
+  /**
+   * Terminal without S2; persisted as s1 rejected + CODES.S1_DUPLICATE_OTHER_CHANNEL.
+   */
+  DUPLICATE_OTHER_CHANNEL: 'duplicate_other_channel',
   UNKNOWN: 'unknown',
   TECHNICAL_ERROR: 'technical_error',
   NOT_SENT: 'not_sent',
@@ -62,6 +66,8 @@ const CODES = Object.freeze({
   RESPONSE_READ_FAILED: 'elm_response_read_failed',
   RESPONSE_UNPARSEABLE: 'elm_response_unparseable',
   RESPONSE_UNDOCUMENTED: 'elm_response_undocumented',
+  /** s1_error_code of OUTCOME.DUPLICATE_OTHER_CHANNEL (s1_result_message keeps ELM's text). */
+  S1_DUPLICATE_OTHER_CHANNEL: 'elm_s1_duplicate_other_channel',
   INVALID_CZ_ID: 'elm_invalid_cz_id',
   INVALID_CONTEXT: 'elm_invalid_context',
   TRIGGER_ORIGIN_NOT_ENABLED: 'elm_trigger_origin_not_enabled',

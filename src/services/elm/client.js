@@ -56,6 +56,24 @@ const SERVICE1_NEGATIVE = Object.freeze([
   'Repetido. rechazado',
   'No hay oferta',
 ]);
+/** Client already approved by another ELM channel: terminal, not Copanel approval nor rejection. */
+const SERVICE1_DUPLICATE_OTHER_CHANNEL = Object.freeze(['Repetido. Aprobado']);
+const SERVICE1_DUPLICATE_KEYS = new Set(
+  SERVICE1_DUPLICATE_OTHER_CHANNEL.map(function (s) {
+    return s.trim().toLowerCase();
+  }),
+);
+const SERVICE1_NEGATIVE_KEYS = new Set(
+  SERVICE1_NEGATIVE.map(function (s) {
+    return s.trim().toLowerCase();
+  }),
+);
+
+/** Persisted / received S1 text is a documented definitive rejection (case-insensitive). */
+function isService1Negative(text) {
+  return typeof text === 'string' && SERVICE1_NEGATIVE_KEYS.has(text.trim().toLowerCase());
+}
+
 /** Explicit non-credit answers: result text → errorCode stored with technical_error. */
 const SERVICE1_TECHNICAL = Object.freeze({
   'BCU error': CODES.PROVIDER_BCU_ERROR,
@@ -82,8 +100,15 @@ function classifyResponse(text, positives, negatives, technical) {
   return { outcome: OUTCOME.UNKNOWN, errorCode: null };
 }
 
+function isService1DuplicateOtherChannel(text) {
+  return typeof text === 'string' && SERVICE1_DUPLICATE_KEYS.has(text.trim().toLowerCase());
+}
+
 /** Undocumented text → unknown (never treated as success or rejection). */
 function classifyService1Response(text) {
+  if (isService1DuplicateOtherChannel(text)) {
+    return { outcome: OUTCOME.DUPLICATE_OTHER_CHANNEL, errorCode: CODES.S1_DUPLICATE_OTHER_CHANNEL };
+  }
   return classifyResponse(text, SERVICE1_POSITIVE, SERVICE1_NEGATIVE, SERVICE1_TECHNICAL);
 }
 
@@ -329,7 +354,10 @@ function createElmClient(options) {
 module.exports = {
   SERVICE1_POSITIVE,
   SERVICE1_NEGATIVE,
+  SERVICE1_DUPLICATE_OTHER_CHANNEL,
   SERVICE1_TECHNICAL,
+  isService1DuplicateOtherChannel,
+  isService1Negative,
   SERVICE2_POSITIVE,
   SERVICE2_NEGATIVE,
   classifyService1Response,

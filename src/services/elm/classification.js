@@ -19,8 +19,8 @@
  * Unknown answers and unconfigured postback statuses never become a rejection (fail safe).
  */
 
-const { S1, S2 } = require('./constants');
-const { SERVICE1_NEGATIVE } = require('./client');
+const { S1, S2, CODES } = require('./constants');
+const { isService1Negative } = require('./client');
 const { normalizeProviderStatus } = require('./providerStatus');
 const { DEFINITIVE_S2_REJECTION_RESULTS } = require('../providerFallback/constants');
 
@@ -32,6 +32,8 @@ const COMMERCIAL = Object.freeze({
   REVIEW: 'review',
   CLOSED: 'closed',
 });
+
+const DUPLICATE_OTHER_CHANNEL_DETAIL = 's1_duplicate_other_channel';
 
 const COMMERCIAL_LABELS = Object.freeze({
   in_evaluation: 'En evaluación ELM',
@@ -68,6 +70,7 @@ const DETAIL_LABELS = Object.freeze({
   ops_provider_confirmed_not_received: 'Cerrado ELM: ELM no recibió el lead',
   ops_provider_confirmed_no_referral: 'Cerrado ELM: sin derivación',
   ops_other: 'Cerrado ELM (ver nota)',
+  [DUPLICATE_OTHER_CHANNEL_DETAIL]: 'Duplicado · Otro canal',
   cz_already_referred: 'Derivación vigente en otra solicitud',
 });
 
@@ -143,7 +146,10 @@ function fromProcess(p, opts) {
   if (s2 === S2.IN_FLIGHT) return result(COMMERCIAL.IN_EVALUATION, 's2_in_flight', 's2');
 
   if (s1 === S1.REJECTED) {
-    return textIn(SERVICE1_NEGATIVE, p.s1_result_message)
+    if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {
+      return result(COMMERCIAL.CLOSED, DUPLICATE_OTHER_CHANNEL_DETAIL, 's1');
+    }
+    return isService1Negative(p.s1_result_message)
       ? result(COMMERCIAL.REJECTED, 's1_negative', 's1')
       : result(COMMERCIAL.REVIEW, 's1_rejection_not_definitive', 's1');
   }
@@ -170,6 +176,7 @@ function classifyElmProcess(p, options) {
   const projected = Number(opts.projectedEstado);
   const cz = p.trigger_origin === 'cz_automatic' ? STATE_BY_PROJECTED_ESTADO[projected] : null;
   if (!cz || cz.state === base.state || base.state === COMMERCIAL.GRANTED) return base;
+  if (cz.state === COMMERCIAL.REJECTED && base.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) return base;
   const open = base.state === COMMERCIAL.IN_EVALUATION || base.state === COMMERCIAL.REVIEW;
   if (cz.state === COMMERCIAL.GRANTED || cz.state === COMMERCIAL.REJECTED || open) {
     return result(cz.state, cz.detail, base.stage);
@@ -198,6 +205,7 @@ module.exports = {
   COMMERCIAL,
   COMMERCIAL_LABELS,
   DETAIL_LABELS,
+  DUPLICATE_OTHER_CHANNEL_DETAIL,
   STATE_BY_PROJECTED_ESTADO,
   classifyElmProcess,
   blocksSurveyInvite,

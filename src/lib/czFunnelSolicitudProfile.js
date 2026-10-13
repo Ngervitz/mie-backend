@@ -6,6 +6,8 @@
  * No I/O. No Credizona changes.
  */
 
+const { normalizeBirthDate, classifyBirthDate } = require('./birthDate');
+
 /**
  * Digits-only celular text from API number/string. Empty → null.
  * Does not invent E.164; stores what CZ returns after their own limpiarCelular.
@@ -39,35 +41,26 @@ function nullableSalario(raw) {
 /**
  * Parse CZ fecha_nacimiento to YYYY-MM-DD or null.
  * Accepts "YYYY-MM-DD" or datetime-ish strings; stores date-only.
+ * Dates that are not a valid date of birth (birthDate.js: calendar + age 18-100) → null.
  * @param {unknown} raw
+ * @param {Date} [now]
  * @returns {string|null}
  */
-function parseCzDateOnly(raw) {
-  if (raw == null || raw === '') return null;
-  const s = String(raw).trim();
-  if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  // Validate calendar date via UTC Date.
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  if (
-    dt.getUTCFullYear() !== y ||
-    dt.getUTCMonth() !== mo - 1 ||
-    dt.getUTCDate() !== d
-  ) {
-    return null;
-  }
-  return (
-    String(y).padStart(4, '0') +
-    '-' +
-    String(mo).padStart(2, '0') +
-    '-' +
-    String(d).padStart(2, '0')
-  );
+function parseCzDateOnly(raw, now) {
+  return normalizeBirthDate(raw, now);
+}
+
+/**
+ * Why fecha_nacimiento is stored as it is (birthDate.js BIRTH_DATE_STATUS). The stored date is
+ * null for every invalid value, so this keeps a minor's date apart from an impossible one.
+ * Null when the API item has no fecha_nacimiento key (nothing to classify).
+ * @param {object} src API item
+ * @param {Date} [now]
+ * @returns {string|null}
+ */
+function birthDateStatusOf(src, now) {
+  if (!src || !Object.prototype.hasOwnProperty.call(src, 'fecha_nacimiento')) return null;
+  return classifyBirthDate(src.fecha_nacimiento, now);
 }
 
 /**
@@ -87,15 +80,17 @@ function nullableTrimmedText(raw) {
  *   celular: string|null,
  *   salario: number|null,
  *   fecha_nacimiento: string|null,
+ *   fecha_nacimiento_status: string|null,
  *   relacion_laboral: string|null
  * }}
  */
-function mapSolicitudProfileFields(item) {
+function mapSolicitudProfileFields(item, now) {
   const src = item && typeof item === 'object' ? item : {};
   return {
     celular: nullableCelular(src.celular),
     salario: nullableSalario(src.salario),
-    fecha_nacimiento: parseCzDateOnly(src.fecha_nacimiento),
+    fecha_nacimiento: parseCzDateOnly(src.fecha_nacimiento, now),
+    fecha_nacimiento_status: birthDateStatusOf(src, now),
     relacion_laboral: nullableTrimmedText(src.relacion_laboral),
   };
 }
@@ -143,6 +138,7 @@ module.exports = {
   nullableCelular,
   nullableSalario,
   parseCzDateOnly,
+  birthDateStatusOf,
   mapSolicitudProfileFields,
   resolveLatestCelularByCi,
 };
