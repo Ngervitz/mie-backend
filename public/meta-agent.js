@@ -91,12 +91,12 @@
 
   /** Chromatic convention for performance / campaigns / ads (CSS vars in meta-agent.css). */
   var MA_METRIC_COLOR = {
-    spend: 'var(--meta-agent-amber-text)',
+    spend: 'var(--meta-agent-amber-bright)',
     conv: 'var(--meta-agent-green-bright)',
     cpl: 'var(--meta-agent-green-bright)',
-    ctr: 'var(--meta-agent-blue-deep)',
+    ctr: 'var(--meta-agent-blue-bright)',
     cpc: 'var(--meta-agent-violet)',
-    cpm: 'var(--meta-agent-amber-text)',
+    cpm: 'var(--meta-agent-amber-bright)',
     neutral: 'var(--meta-agent-text)',
     muted: 'var(--meta-agent-muted)',
   };

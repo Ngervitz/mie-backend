@@ -21,6 +21,8 @@
   --meta-agent-green-border: #2a2f3a;
   --meta-agent-green-text: #5a9a72;
   --meta-agent-green-bright: #22c55e;
+  --meta-agent-blue-bright: #3b82f6;
+  --meta-agent-amber-bright: #f59e0b;
   --meta-agent-amber: #b0894a;
   --meta-agent-red: #a66b6b;
   --meta-agent-red-soft: rgba(166, 107, 107, 0.15);
@@ -944,7 +946,7 @@
 /* Semantic metric tones: text via inline color in JS; fills only on spark bars */
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-spend,
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpm {
-  background: var(--meta-agent-amber-text);
+  background: var(--meta-agent-amber-bright);
 }
 
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-conv,
@@ -953,7 +955,7 @@
 }
 
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-ctr {
-  background: var(--meta-agent-blue-deep);
+  background: var(--meta-agent-blue-bright);
 }
 
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpc {
