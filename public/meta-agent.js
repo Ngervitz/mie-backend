@@ -92,8 +92,8 @@
   /** Chromatic convention for performance / campaigns / ads (CSS vars in meta-agent.css). */
   var MA_METRIC_COLOR = {
     spend: 'var(--meta-agent-amber-text)',
-    conv: 'var(--meta-agent-green-text)',
-    cpl: 'var(--meta-agent-green-text)',
+    conv: 'var(--meta-agent-green-bright)',
+    cpl: 'var(--meta-agent-green-bright)',
     ctr: 'var(--meta-agent-blue-deep)',
     cpc: 'var(--meta-agent-violet)',
     cpm: 'var(--meta-agent-amber-text)',
@@ -2314,9 +2314,7 @@
             '<div class="ma-metric-label">' +
             escapeHtml(m.label) +
             '</div>' +
-            '<div class="ma-mv ma-ad-metric-val ' +
-            metricToneClass(tone, m.val) +
-            '" style="color:' +
+            '<div class="ma-mv ma-ad-metric-val" style="color:' +
             valColor +
             '">' +
             escapeHtml(m.val) +
@@ -2467,9 +2465,7 @@
                   '<div class="ma-metric-label">' +
                   escapeHtml(m.label) +
                   '</div>' +
-                  '<div class="ma-mv ma-metric-val ' +
-                  metricToneClass(tone, m.val) +
-                  '" style="color:' +
+                  '<div class="ma-mv ma-metric-val" style="color:' +
                   valColor +
                   '">' +
                   escapeHtml(m.val) +

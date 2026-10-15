@@ -20,6 +20,7 @@
   --meta-agent-green-soft: rgba(90, 154, 114, 0.15);
   --meta-agent-green-border: #2a2f3a;
   --meta-agent-green-text: #5a9a72;
+  --meta-agent-green-bright: #22c55e;
   --meta-agent-amber: #b0894a;
   --meta-agent-red: #a66b6b;
   --meta-agent-red-soft: rgba(166, 107, 107, 0.15);
@@ -940,45 +941,23 @@
   font-size: 16px;
 }
 
-/* Semantic metric tones (values + spark bars only) */
-#meta-ads-root .ma-metric-tone-spend,
-#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-spend {
-  color: var(--meta-agent-amber-text);
+/* Semantic metric tones: text via inline color in JS; fills only on spark bars */
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-spend,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpm {
   background: var(--meta-agent-amber-text);
 }
 
-#meta-ads-root .ma-metric-tone-conv,
-#meta-ads-root .ma-metric-tone-cpl,
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-conv,
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpl {
-  color: var(--meta-agent-green-text);
-  background: var(--meta-agent-green-text);
+  background: var(--meta-agent-green-bright);
 }
 
-#meta-ads-root .ma-metric-tone-ctr,
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-ctr {
-  color: var(--meta-agent-blue-deep);
   background: var(--meta-agent-blue-deep);
 }
 
-#meta-ads-root .ma-metric-tone-cpc,
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpc {
-  color: var(--meta-agent-violet);
   background: var(--meta-agent-violet);
-}
-
-#meta-ads-root .ma-metric-tone-cpm,
-#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpm {
-  color: var(--meta-agent-amber-text);
-  background: var(--meta-agent-amber-text);
-}
-
-#meta-ads-root .ma-metric-tone-neutral {
-  color: var(--meta-agent-text);
-}
-
-#meta-ads-root .ma-metric-tone-muted {
-  color: var(--meta-agent-muted);
 }
 
 #meta-ads-root .ma-sparkbar-fill.ma-metric-tone-neutral {
