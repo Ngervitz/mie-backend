@@ -525,7 +525,7 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   const page = readSrc('public/mie-dashboard.html');
   assert.ok(page.indexOf('elm-ops.js') > page.indexOf('elm-ui-helpers.js'));
   assert.ok(page.indexOf('elm-ops.js') < page.indexOf('mie-dashboard.js'));
-  assert.ok(page.includes('id="elm-ops-root"'));
+  assert.ok(!page.includes('id="elm-ops-root"'), 'ELM Ops panel hidden from Preaprobados landing');
 });
 
 test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, never resolved by precedence', async () => {

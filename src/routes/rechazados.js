@@ -72,10 +72,12 @@ const { sendRejectedToElm, retryRejectedElm } = require('../lib/rejectedElmSend'
 const { loadCiResendHold } = require('../lib/rejectedElmResendGuard');
 const { requireElmAction } = require('../middleware/requireElmAction');
 const {
-  isC1PendingListStatus,
-  loadC1PendingListRows,
+  loadAndMergeC1FollowupRows,
+  loadC1FollowupCzIdsForCi,
+  fetchProjectedStatesForCi,
+  assembleC1FollowupDetail,
+  appendC1FollowupToDetailRejections,
 } = require('../lib/rejectedC1PendingRead');
-const { findUserById, userHasSectionPermission } = require('../services/dashboardUsers');
 
 const router = express.Router();
 
@@ -100,14 +102,18 @@ function getElmListView() {
 
 async function loadRejectedCzIds(ci) {
   const detail = assembleRejectedDetail(await fetchRejectedDetailBundle(supabase, ci));
-  if (!detail) return null;
-  return detail.rejections
-    .map(function (r) {
-      return Number(r.cz_solicitud_id);
-    })
-    .filter(function (n) {
-      return Number.isSafeInteger(n) && n > 0;
-    });
+  const fromRejections = detail
+    ? detail.rejections
+        .map(function (r) {
+          return Number(r.cz_solicitud_id);
+        })
+        .filter(function (n) {
+          return Number.isSafeInteger(n) && n > 0;
+        })
+    : [];
+  const fromC1 = await loadC1FollowupCzIdsForCi(supabase, ci);
+  const merged = Array.from(new Set(fromRejections.concat(fromC1)));
+  return merged.length ? merged : null;
 }
 
 const bcuUpload = multer({
@@ -163,57 +169,7 @@ function sendWriteError(res, err) {
   return res.status(status).json({ error: message });
 }
 
-/** Whether this session may open Preaprobados / ELM Ops (read); resolve still requires admin. */
-async function resolveElmOpsNavigationAccess(req) {
-  if (req.dashboardAuthViaCron) {
-    return { can_open_preaprobados: true, can_resolve_elm_ops: false };
-  }
-  const userId = req.dashboardUserId;
-  if (!userId) {
-    return { can_open_preaprobados: false, can_resolve_elm_ops: false };
-  }
-  const user = await findUserById(userId);
-  if (!user || !user.active) {
-    return { can_open_preaprobados: false, can_resolve_elm_ops: false };
-  }
-  if (user.is_admin === true) {
-    return { can_open_preaprobados: true, can_resolve_elm_ops: true };
-  }
-  const canOpen = await userHasSectionPermission(userId, 'preaprobados');
-  return { can_open_preaprobados: canOpen, can_resolve_elm_ops: false };
-}
-
 router.get('/', async function getRechazadosList(req, res) {
-  const rawStatus = req.query && req.query.status;
-  if (isC1PendingListStatus(rawStatus)) {
-    try {
-      const [c1_pending_rows, elmOpsNav] = await Promise.all([
-        loadC1PendingListRows(supabase, {
-          listView: getElmListView(),
-        }),
-        resolveElmOpsNavigationAccess(req),
-      ]);
-      return res.json({
-        ok: true,
-        data: {
-          rows: [],
-          c1_pending_rows: c1_pending_rows,
-          mi_deuda_optin_available: false,
-          elm_available: true,
-          list_mode: 'c1_pending_elm',
-          elm_ops_navigation: elmOpsNav,
-        },
-      });
-    } catch (err) {
-      logger.error('GET /rechazados c1_pending_elm failed', {
-        error: err && err.message ? err.message : 'unknown',
-      });
-      return res.status(500).json({
-        error: err && err.message ? err.message : 'Internal error',
-      });
-    }
-  }
-
   const parsed = parseStatusQuery(req.query && req.query.status);
   if (!parsed.ok) {
     return res.status(400).json({ error: 'status inválido' });
@@ -243,7 +199,13 @@ router.get('/', async function getRechazadosList(req, res) {
     if (!optin.available) {
       logger.warn('GET /rechazados mi_deuda_optin unavailable', { code: optin.error_code });
     }
-    const elmAvailable = await attachElmToRejectedRows(optin.rows, {
+    const displayRows = await loadAndMergeC1FollowupRows(supabase, optin.rows, {
+      snapshotRows: bundle.snapshotRows,
+      institutionRows: bundle.institutionRows,
+      outreachRows: bundle.outreachRows,
+      statusFilter: parsed.status,
+    });
+    const elmAvailable = await attachElmToRejectedRows(displayRows, {
       supabase: supabase,
       listView: getElmListView(),
       logger: logger,
@@ -251,7 +213,7 @@ router.get('/', async function getRechazadosList(req, res) {
     return res.json({
       ok: true,
       data: {
-        rows: optin.rows,
+        rows: displayRows,
         mi_deuda_optin_available: optin.available,
         elm_available: elmAvailable,
       },
@@ -804,20 +766,35 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
 
   try {
     const bundle = await fetchRejectedDetailBundle(supabase, ci);
-    const detail = assembleRejectedDetail(bundle);
+    const c1States = await fetchProjectedStatesForCi(supabase, ci);
+    let detail = assembleRejectedDetail(bundle);
+    if (!detail) {
+      detail = assembleC1FollowupDetail(bundle, c1States);
+    } else {
+      appendC1FollowupToDetailRejections(detail, c1States, bundle);
+    }
     if (!detail) {
       return res.status(404).json({ error: 'No encontrado' });
     }
-    const surveyDecision = await evaluateSurveyInviteSequenceForCi(
-      supabase,
-      ci,
-    );
-    detail.survey_invite = {
-      reason: surveyDecision.result,
-      eligible: surveyDecision.action === 'materialize',
-      email_masked: surveyDecision.email_masked,
-      due_step: surveyDecision.due_step,
-    };
+    if (detail.c1_followup_only === true) {
+      detail.survey_invite = {
+        reason: 'c1_followup_only',
+        eligible: false,
+        email_masked: null,
+        due_step: null,
+      };
+    } else {
+      const surveyDecision = await evaluateSurveyInviteSequenceForCi(
+        supabase,
+        ci,
+      );
+      detail.survey_invite = {
+        reason: surveyDecision.result,
+        eligible: surveyDecision.action === 'materialize',
+        email_masked: surveyDecision.email_masked,
+        due_step: surveyDecision.due_step,
+      };
+    }
     detail.mi_deuda_optin = await loadMiDeudaOptinDetail(supabase, ci, {
       loadCatalog: loadCreditorCatalog,
     });

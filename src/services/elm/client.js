@@ -110,6 +110,16 @@ function classifyService1Response(text) {
   if (isService1DuplicateOtherChannel(text)) {
     return { outcome: OUTCOME.DUPLICATE_OTHER_CHANNEL, errorCode: CODES.S1_DUPLICATE_OTHER_CHANNEL };
   }
+  if (typeof text !== 'string') {
+    return { outcome: OUTCOME.UNKNOWN, errorCode: null };
+  }
+  const s = text.trim();
+  if (SERVICE1_POSITIVE.includes(s)) {
+    return { outcome: OUTCOME.POSITIVE, errorCode: null };
+  }
+  if (isService1Negative(text)) {
+    return { outcome: OUTCOME.NEGATIVE, errorCode: null };
+  }
   return classifyResponse(text, SERVICE1_POSITIVE, SERVICE1_NEGATIVE, SERVICE1_TECHNICAL);
 }
 

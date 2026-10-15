@@ -5,7 +5,9 @@
  *
  * deriveFromProcess: the ELM process row (elm_lead_processes) is the only source of truth about
  * external calls. in_flight = a call may have been sent → wait for its lease, then unknown.
- * unknown is never retried → manual_review. technical_error is retried only when its error code
+ * unknown is never retried → manual_review, except when s1_result_message is a documented S1
+ * negative (same predicate as client.js / classification.js) → rejected. technical_error is retried
+ * only when its error code
  * is configured as proven side-effect free, below the attempt limit and after the backoff;
  * otherwise → manual_review with a specific reason. Never a rejection.
  * S1 "BCU error" has its own fixed policy (BCU_RETRY): wait 24 h from the error, resend the same
@@ -119,7 +121,14 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
   if (p.s1_status === S1.IN_FLIGHT) {
     return isExpired(p.s1_lease_expires_at, nowMs) ? { kind: 'expire' } : waitUntil(p.s1_lease_expires_at);
   }
-  if (p.s1_status === S1.UNKNOWN) return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN);
+  if (p.s1_status === S1.UNKNOWN) {
+    if (isService1Negative(p.s1_result_message)) {
+      return final(OUTCOME.REJECTED, REASONS.ELM_S1_REJECTED, {
+        result_message: p.s1_result_message || null,
+      });
+    }
+    return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_S1_UNKNOWN);
+  }
   if (p.s1_status === S1.TECHNICAL_ERROR) return technicalDecision('s1', p, nowMs, retryPolicy);
   if (p.s1_status === S1.REJECTED) {
     if (p.s1_error_code === CODES.S1_DUPLICATE_OTHER_CHANNEL) {

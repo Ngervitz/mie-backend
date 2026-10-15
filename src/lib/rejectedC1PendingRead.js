@@ -1,32 +1,27 @@
 'use strict';
 
 /**
- * C1 solicitudes with open projected CZ estado (12 / 14 / 15) for Rechazados «Pendientes ELM».
- * Not part of rejectedUniverseByCi (estado 3 only). No survey / BCU / outreach assembly here.
+ * C1 solicitudes with open projected CZ estado (12 / 13 / 14 / 15) merged into Rechazados
+ * for display and ELM follow-up only. Not part of rejectedUniverseByCi (estado 3).
  */
 
-const { OUTCOME } = require('../services/providerFallback/constants');
+const {
+  listOpsForRejectedDisplay,
+  sortSnapshotsDesc,
+  sortEncuestas,
+  encuestaScoreMeta,
+  formatSnapshot,
+  institutionsBySnapshotId,
+} = require('./rejectedOpsRead');
+const { formatOutreach } = require('./rejectedOutreach');
+const { loanPurposeOf } = require('./czSurveyVersion');
 
-/** Query ?status= for the Pendientes ELM filter (not an ops_status). */
-const C1_PENDING_LIST_STATUS = 'c1_pending_elm';
-
-const C1_PENDING_PROJECTED_ESTADOS = Object.freeze([12, 14, 15]);
-
-const PROJECTED_ESTADO_LABELS = Object.freeze({
-  12: 'Evaluando alternativa (12)',
-  14: 'Alternativa en revisión (14)',
-  15: 'Derivación vigente en otra solicitud (15)',
-});
+/** Open projected estados shown in Rechazados (display merge only). */
+const C1_DISPLAY_PROJECTED_ESTADOS = Object.freeze([12, 13, 14, 15]);
 
 const PAGE_SIZE = 1000;
 
 const SOLICITUD_SELECT = 'cz_id, ci, nombre, apellido, fecha_reg, solicitudes_estados_id, updated_at_src';
-
-const FALLBACK_SELECT =
-  'cz_solicitud_id, outcome, reason_code, exec_status, finalized_at, created_at';
-
-const REVIEW_SELECT =
-  'id, fallback_request_id, cz_solicitud_id, ci, reason_code, status, created_at';
 
 function rpcError(name, error) {
   return new Error(name + ' failed: ' + String((error && error.message) || error));
@@ -55,110 +50,162 @@ function cmpTsDescNullsLast(a, b) {
   return 0;
 }
 
-function projectedEstadoLabel(estado) {
-  const n = Number(estado);
-  return PROJECTED_ESTADO_LABELS[n] || 'Estado CZ ' + String(estado);
+function solicitudesById(rows) {
+  const map = new Map();
+  for (let i = 0; i < (rows || []).length; i += 1) {
+    const row = rows[i];
+    const id = toNum(row && row.cz_id);
+    if (id != null) map.set(id, row);
+  }
+  return map;
 }
 
-function reviewReasonLabel(row, fallback) {
-  if (nonemptyText(row && row.reason_code)) return row.reason_code;
-  if (fallback && nonemptyText(fallback.reason_code)) return fallback.reason_code;
-  return null;
+function hasPersonName(sol) {
+  return Boolean(nonemptyText(sol && sol.nombre) || nonemptyText(sol && sol.apellido));
 }
 
-/**
- * @param {unknown} raw
- * @returns {boolean}
- */
-function isC1PendingListStatus(raw) {
-  if (raw == null) return false;
-  return String(raw).trim() === C1_PENDING_LIST_STATUS;
-}
-
-/**
- * @param {{
- *   states: object[],
- *   solicitudesByCz: Map<number, object>,
- *   fallbacksByCz: Map<number, object>,
- *   reviewByCz: Map<number, object>,
- *   elmCells: Map<number, object>,
- * }} input
- * @returns {object[]}
- */
-function assembleC1PendingRows(input) {
-  const states = Array.isArray(input.states) ? input.states : [];
-  const solicitudesByCz = input.solicitudesByCz || new Map();
-  const fallbacksByCz = input.fallbacksByCz || new Map();
-  const reviewByCz = input.reviewByCz || new Map();
-  const elmCells = input.elmCells || new Map();
-
-  const rows = [];
-  for (const st of states) {
-    const czId = toNum(st && st.cz_solicitud_id);
-    const ci = toNum(st && st.ci);
-    const projected = toNum(st && st.projected_estado);
-    if (czId == null || !Number.isSafeInteger(czId) || czId <= 0) continue;
-    if (ci == null || !Number.isSafeInteger(ci) || ci <= 0) continue;
-    if (!C1_PENDING_PROJECTED_ESTADOS.includes(Number(projected))) continue;
-
-    const sol = solicitudesByCz.get(czId) || null;
-    const fallback = fallbacksByCz.get(czId) || null;
-    const review = reviewByCz.get(czId) || null;
-    const elmCell = elmCells.get(czId) || null;
-
-    const pendingAt =
-      (fallback && (fallback.finalized_at || fallback.created_at)) ||
-      (st && st.updated_at) ||
-      (sol && sol.fecha_reg) ||
-      null;
-
-    const outcome = fallback && fallback.outcome ? String(fallback.outcome) : null;
-    const openReview =
-      review && review.status === 'open' && review.id != null
-        ? {
-            case_id: review.id,
-            reason_code: review.reason_code || null,
-            status: review.status,
-          }
-        : null;
-
-    let action = null;
-    if (outcome === OUTCOME.MANUAL_REVIEW && openReview) {
-      action = {
-        kind: 'open_elm_ops',
-        review_case_id: openReview.case_id,
+function resolvePersonName(solicitudesByCz, entries) {
+  for (let i = 0; i < entries.length; i += 1) {
+    const sol = solicitudesByCz.get(entries[i].cz_solicitud_id);
+    if (hasPersonName(sol)) {
+      return {
+        nombre: nonemptyText(sol.nombre),
+        apellido: nonemptyText(sol.apellido),
       };
     }
-
-    rows.push({
-      ci: ci,
-      nombre: sol ? nonemptyText(sol.nombre) : null,
-      apellido: sol ? nonemptyText(sol.apellido) : null,
-      cz_solicitud_id: czId,
-      pending_at: pendingAt,
-      projected_estado: projected,
-      projected_estado_label: projectedEstadoLabel(projected),
-      fallback_outcome: outcome,
-      review_reason_code: reviewReasonLabel(review, fallback),
-      review: openReview,
-      elm: elmCell
-        ? {
-            state: elmCell.state || null,
-            label: elmCell.label || null,
-            detail: elmCell.detail || null,
-            kind: elmCell.kind || null,
-          }
-        : null,
-      action: action,
-    });
   }
+  return { nombre: null, apellido: null };
+}
 
-  rows.sort(function (a, b) {
-    const t = cmpTsDescNullsLast(a.pending_at, b.pending_at);
+function outreachByCi(outreachRows) {
+  const map = new Map();
+  for (let i = 0; i < (outreachRows || []).length; i += 1) {
+    const row = outreachRows[i];
+    const ci = toNum(row && row.ci);
+    if (ci == null || !Number.isSafeInteger(ci)) continue;
+    map.set(ci, row);
+  }
+  return map;
+}
+
+function sortRejectedSolicitudesDesc(list) {
+  return (list || []).slice().sort(function (a, b) {
+    const t = cmpTsDescNullsLast(a.rejected_at, b.rejected_at);
     if (t !== 0) return t;
     return Number(b.cz_solicitud_id) - Number(a.cz_solicitud_id);
   });
-  return rows;
+}
+
+function appendC1SolicitudesToRow(row, entries) {
+  const seen = new Set(
+    (row.rejected_solicitudes || []).map(function (r) {
+      return Number(r.cz_solicitud_id);
+    }),
+  );
+  const merged = (row.rejected_solicitudes || []).slice();
+  for (let i = 0; i < entries.length; i += 1) {
+    const id = entries[i].cz_solicitud_id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push({
+      cz_solicitud_id: id,
+      rejected_at: entries[i].rejected_at,
+    });
+  }
+  row.rejected_solicitudes = sortRejectedSolicitudesDesc(merged);
+}
+
+function c1PassesOpsStatusFilter(ops, statusFilter) {
+  if (!statusFilter) return true;
+  if (!ops.has_rejected_bcu_snapshot) return false;
+  return ops.ops_status === statusFilter;
+}
+
+/**
+ * @param {number} ci
+ * @param {object[]} entries
+ * @param {Map<number, object>} solicitudesByCz
+ * @param {object} ops from listOpsForRejectedDisplay
+ * @param {object} outreach
+ */
+function buildC1OnlyListRow(ci, entries, solicitudesByCz, ops, outreach) {
+  const sorted = sortRejectedSolicitudesDesc(
+    entries.map(function (e) {
+      return { cz_solicitud_id: e.cz_solicitud_id, rejected_at: e.rejected_at };
+    }),
+  );
+  const primary = sorted[0];
+  const name = resolvePersonName(solicitudesByCz, sorted);
+  return Object.assign(
+    {
+      ci: ci,
+      cz_solicitud_id: primary.cz_solicitud_id,
+      rejected_solicitudes: sorted,
+      nombre: name.nombre,
+      apellido: name.apellido,
+      rejected_at: primary.rejected_at || null,
+      score_v2: null,
+      encuesta_completed_at: null,
+      survey_version: null,
+      segmentacion_base: null,
+      worst_bcu: ops.worst_bcu,
+      ops_status: ops.ops_status,
+      next_review_on: ops.next_review_on,
+      list_origin: 'c1_elm_followup',
+    },
+    outreach,
+  );
+}
+
+function mergeC1FollowupIntoRejectedRows(estado3Rows, input) {
+  const states = Array.isArray(input.states) ? input.states : [];
+  const solicitudesByCz = input.solicitudesByCz || new Map();
+  const statusFilter = input.statusFilter || null;
+  const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
+  const outreachMap = outreachByCi(input.outreachRows || []);
+
+  const byCi = new Map();
+  for (let i = 0; i < states.length; i += 1) {
+    const st = states[i];
+    const czId = toNum(st && st.cz_solicitud_id);
+    const ci = toNum(st && st.ci);
+    const projected = toNum(st && st.projected_estado);
+    if (czId == null || ci == null || !C1_DISPLAY_PROJECTED_ESTADOS.includes(Number(projected))) {
+      continue;
+    }
+    if (!byCi.has(ci)) byCi.set(ci, []);
+    byCi.get(ci).push({
+      cz_solicitud_id: czId,
+      rejected_at: (st && st.updated_at) || null,
+    });
+  }
+
+  const merged = (estado3Rows || []).slice();
+  const rowByCi = new Map(
+    merged.map(function (row) {
+      return [Number(row.ci), row];
+    }),
+  );
+
+  for (const [ci, entries] of byCi.entries()) {
+    const sortedEntries = sortRejectedSolicitudesDesc(entries);
+    const existing = rowByCi.get(ci);
+    if (existing) {
+      appendC1SolicitudesToRow(existing, sortedEntries);
+      continue;
+    }
+    const ops = listOpsForRejectedDisplay(ci, input.snapshotRows, input.institutionRows);
+    if (!c1PassesOpsStatusFilter(ops, statusFilter)) continue;
+    const outreach = formatOutreach(outreachMap.get(ci) || null, nowMs);
+    merged.push(
+      buildC1OnlyListRow(ci, sortedEntries, solicitudesByCz, ops, outreach),
+    );
+  }
+
+  merged.sort(function (a, b) {
+    return cmpTsDescNullsLast(a.rejected_at, b.rejected_at);
+  });
+  return merged;
 }
 
 async function fetchAllProjectedStates(supabase) {
@@ -167,7 +214,7 @@ async function fetchAllProjectedStates(supabase) {
     const { data, error } = await supabase
       .from('provider_cz_state')
       .select('cz_solicitud_id, ci, projected_estado, updated_at')
-      .in('projected_estado', C1_PENDING_PROJECTED_ESTADOS.slice())
+      .in('projected_estado', C1_DISPLAY_PROJECTED_ESTADOS.slice())
       .order('updated_at', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw rpcError('provider_cz_state', error);
@@ -176,6 +223,18 @@ async function fetchAllProjectedStates(supabase) {
     if (page.length < PAGE_SIZE) break;
   }
   return out;
+}
+
+async function fetchProjectedStatesForCi(supabase, ci) {
+  const nci = Number(ci);
+  if (!Number.isSafeInteger(nci) || nci <= 0) return [];
+  const { data, error } = await supabase
+    .from('provider_cz_state')
+    .select('cz_solicitud_id, ci, projected_estado, updated_at')
+    .eq('ci', nci)
+    .in('projected_estado', C1_DISPLAY_PROJECTED_ESTADOS.slice());
+  if (error) throw rpcError('provider_cz_state', error);
+  return data || [];
 }
 
 async function fetchSolicitudesByCzIds(supabase, czIds) {
@@ -203,97 +262,180 @@ async function fetchSolicitudesByCzIds(supabase, czIds) {
   return map;
 }
 
-async function fetchFallbacksByCzIds(supabase, czIds) {
-  const ids = Array.from(
-    new Set(
-      (czIds || [])
-        .map(Number)
-        .filter(function (n) {
-          return Number.isSafeInteger(n) && n > 0;
-        }),
-    ),
-  );
-  const map = new Map();
-  if (!ids.length) return map;
-  const CHUNK = 200;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    const { data, error } = await supabase
-      .from('provider_fallback_requests')
-      .select(FALLBACK_SELECT)
-      .in('cz_solicitud_id', chunk);
-    if (error) throw rpcError('provider_fallback_requests', error);
-    for (const row of data || []) map.set(Number(row.cz_solicitud_id), row);
-  }
-  return map;
-}
-
-async function fetchOpenReviewCasesByCzIds(supabase, czIds) {
-  const ids = Array.from(
-    new Set(
-      (czIds || [])
-        .map(Number)
-        .filter(function (n) {
-          return Number.isSafeInteger(n) && n > 0;
-        }),
-    ),
-  );
-  const map = new Map();
-  if (!ids.length) return map;
-  const CHUNK = 200;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    const { data, error } = await supabase
-      .from('provider_review_cases')
-      .select(REVIEW_SELECT)
-      .eq('status', 'open')
-      .in('cz_solicitud_id', chunk);
-    if (error) throw rpcError('provider_review_cases', error);
-    for (const row of data || []) map.set(Number(row.cz_solicitud_id), row);
-  }
-  return map;
-}
-
-/**
- * @param {object} supabase
- * @param {{ listView?: { cellsForCzIds: Function } }} [deps]
- */
-async function loadC1PendingListRows(supabase, deps) {
+async function loadAndMergeC1FollowupRows(supabase, estado3Rows, opts) {
+  const options = opts || {};
   const states = await fetchAllProjectedStates(supabase);
   const czIds = states.map(function (s) {
     return Number(s.cz_solicitud_id);
   });
-  const [solicitudesByCz, fallbacksByCz, reviewByCz] = await Promise.all([
-    fetchSolicitudesByCzIds(supabase, czIds),
-    fetchFallbacksByCzIds(supabase, czIds),
-    fetchOpenReviewCasesByCzIds(supabase, czIds),
-  ]);
-
-  let elmCells = new Map();
-  const listView = deps && deps.listView;
-  if (listView && typeof listView.cellsForCzIds === 'function' && czIds.length) {
-    try {
-      elmCells = await listView.cellsForCzIds(czIds, { allowSend: false });
-    } catch (_err) {
-      elmCells = new Map();
-    }
-  }
-
-  return assembleC1PendingRows({
+  const solicitudesByCz = await fetchSolicitudesByCzIds(supabase, czIds);
+  return mergeC1FollowupIntoRejectedRows(estado3Rows, {
     states: states,
     solicitudesByCz: solicitudesByCz,
-    fallbacksByCz: fallbacksByCz,
-    reviewByCz: reviewByCz,
-    elmCells: elmCells,
+    snapshotRows: options.snapshotRows || [],
+    institutionRows: options.institutionRows || [],
+    outreachRows: options.outreachRows || [],
+    statusFilter: options.statusFilter || null,
+    nowMs: options.nowMs,
   });
 }
 
+async function loadC1FollowupCzIdsForCi(supabase, ci) {
+  const states = await fetchProjectedStatesForCi(supabase, ci);
+  return states
+    .map(function (row) {
+      return Number(row.cz_solicitud_id);
+    })
+    .filter(function (n) {
+      return Number.isSafeInteger(n) && n > 0;
+    });
+}
+
+/**
+ * Detail for CI with C1 follow-up only (no estado 3). Real encuestas/snapshots only when present.
+ * @param {object} bundle from fetchRejectedDetailBundle
+ * @param {object[]} c1States projected rows for the CI
+ * @returns {object|null}
+ */
+function assembleC1FollowupDetail(bundle, c1States) {
+  const ci = toNum(bundle && bundle.ci);
+  if (ci == null || !Array.isArray(c1States) || !c1States.length) return null;
+
+  const solById = solicitudesById(bundle.solicitudRows || []);
+  const entries = c1States
+    .map(function (st) {
+      const czId = toNum(st && st.cz_solicitud_id);
+      if (czId == null) return null;
+      const sol = solById.get(czId) || null;
+      return {
+        cz_solicitud_id: czId,
+        rejected_at: (st && st.updated_at) || null,
+        projected_estado: toNum(st && st.projected_estado),
+        solicitudes_estados_id: sol ? toNum(sol.solicitudes_estados_id) : null,
+      };
+    })
+    .filter(Boolean);
+
+  const sortedEntries = sortRejectedSolicitudesDesc(
+    entries.map(function (e) {
+      return { cz_solicitud_id: e.cz_solicitud_id, rejected_at: e.rejected_at };
+    }),
+  );
+  if (!sortedEntries.length) return null;
+
+  const solicitudesByCz = new Map();
+  for (const e of entries) {
+    const sol = solById.get(e.cz_solicitud_id);
+    if (sol) solicitudesByCz.set(e.cz_solicitud_id, sol);
+  }
+  const name = resolvePersonName(solicitudesByCz, sortedEntries);
+  const primary = sortedEntries[0];
+
+  const encuestas = sortEncuestas(bundle.encuestaRows || []);
+  const latestEncuesta = encuestas[0] || null;
+  const latestMeta = encuestaScoreMeta(latestEncuesta);
+  const ops = listOpsForRejectedDisplay(ci, bundle.snapshotRows, bundle.institutionRows);
+  const instMap = institutionsBySnapshotId(bundle.institutionRows || []);
+  const snaps = sortSnapshotsDesc(bundle.snapshotRows || []);
+  const outreachRow =
+    (bundle.outreachRows || []).find(function (r) {
+      return toNum(r && r.ci) === ci;
+    }) || null;
+
+  const rejections = sortedEntries.map(function (r) {
+    const meta = entries.find(function (e) {
+      return e.cz_solicitud_id === r.cz_solicitud_id;
+    });
+    return {
+      cz_historico_id: null,
+      cz_solicitud_id: r.cz_solicitud_id,
+      solicitudes_estados_id: meta ? meta.solicitudes_estados_id : null,
+      estado: null,
+      fechahora_src: r.rejected_at,
+      c1_projected_estado: meta ? meta.projected_estado : null,
+    };
+  });
+
+  return {
+    ci: ci,
+    nombre: name.nombre,
+    apellido: name.apellido,
+    rejected_at: primary.rejected_at || null,
+    score_v2: latestEncuesta ? toNum(latestEncuesta.score_v2) : null,
+    encuesta_completed_at: latestEncuesta ? latestEncuesta.completed_at || null : null,
+    survey_version: latestMeta.survey_version,
+    segmentacion_base: latestMeta.segmentacion_base,
+    worst_bcu: ops.worst_bcu,
+    ops_status: ops.ops_status,
+    next_review_on: ops.next_review_on,
+    outreach: formatOutreach(outreachRow, bundle.nowMs),
+    rejections: rejections,
+    encuestas: encuestas.map(function (e) {
+      const meta = encuestaScoreMeta(e);
+      return {
+        cz_id: e.cz_id,
+        score_v2: toNum(e.score_v2),
+        completed_at: e.completed_at || null,
+        email: e.email != null ? e.email : null,
+        survey_version: meta.survey_version,
+        segmentacion_base: meta.segmentacion_base,
+        loan_purpose: loanPurposeOf(e),
+      };
+    }),
+    snapshots: snaps.map(function (s) {
+      return formatSnapshot(s, instMap, true);
+    }),
+    list_origin: 'c1_elm_followup',
+    c1_followup_only: true,
+  };
+}
+
+/**
+ * @param {object} detail assembled rejected detail (estado 3)
+ * @param {object[]} c1States
+ * @param {object} bundle
+ */
+function appendC1FollowupToDetailRejections(detail, c1States, bundle) {
+  if (!detail || !Array.isArray(c1States) || !c1States.length) return detail;
+  const solById = solicitudesById(bundle.solicitudRows || []);
+  const seen = new Set(
+    (detail.rejections || []).map(function (r) {
+      return Number(r.cz_solicitud_id);
+    }),
+  );
+  const extra = [];
+  for (let i = 0; i < c1States.length; i += 1) {
+    const st = c1States[i];
+    const czId = toNum(st && st.cz_solicitud_id);
+    if (czId == null || seen.has(czId)) continue;
+    seen.add(czId);
+    const sol = solById.get(czId) || null;
+    extra.push({
+      cz_historico_id: null,
+      cz_solicitud_id: czId,
+      solicitudes_estados_id: sol ? toNum(sol.solicitudes_estados_id) : null,
+      estado: null,
+      fechahora_src: (st && st.updated_at) || null,
+      c1_projected_estado: toNum(st && st.projected_estado),
+    });
+  }
+  if (!extra.length) return detail;
+  detail.rejections = (detail.rejections || [])
+    .concat(extra)
+    .sort(function (a, b) {
+      return cmpTsDescNullsLast(a.fechahora_src, b.fechahora_src);
+    });
+  return detail;
+}
+
 module.exports = {
-  C1_PENDING_LIST_STATUS,
-  C1_PENDING_PROJECTED_ESTADOS,
-  PROJECTED_ESTADO_LABELS,
-  isC1PendingListStatus,
-  assembleC1PendingRows,
-  loadC1PendingListRows,
-  projectedEstadoLabel,
+  C1_DISPLAY_PROJECTED_ESTADOS,
+  mergeC1FollowupIntoRejectedRows,
+  loadAndMergeC1FollowupRows,
+  loadC1FollowupCzIdsForCi,
+  fetchAllProjectedStates,
+  fetchProjectedStatesForCi,
+  fetchSolicitudesByCzIds,
+  assembleC1FollowupDetail,
+  appendC1FollowupToDetailRejections,
 };

@@ -817,6 +817,38 @@ function buildCreatedSnapshotResponse(snapshot, institutionRows) {
   };
 }
 
+function listOpsForCi(ci, snapshotRows, institutionRows) {
+  const nci = toNum(ci);
+  const snaps = sortSnapshotsDesc(
+    (snapshotRows || []).filter(function (s) {
+      return toNum(s && s.ci) === nci;
+    }),
+  );
+  const instMap = institutionsBySnapshotId(institutionRows || []);
+  return currentOpsFromLatestSnapshot(snaps, instMap);
+}
+
+/** BCU ops for display: C1-only rows without a snapshot do not inherit bcu_pending. */
+function listOpsForRejectedDisplay(ci, snapshotRows, institutionRows) {
+  const nci = toNum(ci);
+  const snaps = sortSnapshotsDesc(
+    (snapshotRows || []).filter(function (s) {
+      return toNum(s && s.ci) === nci;
+    }),
+  );
+  if (!snaps.length) {
+    return {
+      worst_bcu: null,
+      ops_status: null,
+      next_review_on: null,
+      has_rejected_bcu_snapshot: false,
+    };
+  }
+  return Object.assign(listOpsForCi(ci, snapshotRows, institutionRows), {
+    has_rejected_bcu_snapshot: true,
+  });
+}
+
 module.exports = {
   REJECTED_ESTADO_ID,
   ALLOWED_OPS_STATUS,
@@ -825,6 +857,10 @@ module.exports = {
   sortEncuestas,
   sortSnapshotsDesc,
   sortInstitutions,
+  encuestaScoreMeta,
+  institutionsBySnapshotId,
+  listOpsForCi,
+  listOpsForRejectedDisplay,
   assembleRejectedList,
   assembleRejectedDetail,
   rejectedUniverseByCi,

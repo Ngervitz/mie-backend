@@ -19,8 +19,8 @@
  * Unknown answers and unconfigured postback statuses never become a rejection (fail safe).
  */
 
-const { S1, S2, CODES } = require('./constants');
-const { isService1Negative } = require('./client');
+const { S1, S2, CODES, OUTCOME } = require('./constants');
+const { isService1Negative, classifyService2Body, classifyService2Result } = require('./client');
 const { normalizeProviderStatus } = require('./providerStatus');
 const { DEFINITIVE_S2_REJECTION_RESULTS } = require('../providerFallback/constants');
 
@@ -205,6 +205,24 @@ function readPostReferralRejectionStatuses() {
   }
 }
 
+/**
+ * True when persisted S2 evidence is a referral under the same rules as the forward parser
+ * (client.classifyService2Body / classifyService2Result). Used by the fallback worker and CI
+ * guard for rows still stored as s2 unknown after lease expiry.
+ *
+ * @param {object|null|undefined} p elm_lead_processes row (s2_result_message and/or s2_response)
+ */
+function isS2Accepted(p) {
+  if (!p) return false;
+  if (p.s2_status === S2.REFERRED) return true;
+  if (classifyService2Result(p.s2_result_message) === OUTCOME.POSITIVE) return true;
+  const body = p.s2_response;
+  if (body != null && typeof body === 'object' && !Array.isArray(body)) {
+    return classifyService2Body(body).outcome === OUTCOME.POSITIVE;
+  }
+  return false;
+}
+
 module.exports = {
   COMMERCIAL,
   COMMERCIAL_LABELS,
@@ -214,4 +232,5 @@ module.exports = {
   classifyElmProcess,
   blocksSurveyInvite,
   readPostReferralRejectionStatuses,
+  isS2Accepted,
 };

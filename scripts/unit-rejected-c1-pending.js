@@ -1,43 +1,40 @@
 'use strict';
 
 /**
- * Regression: C1 pending (12/14/15) must not enter rejected universe or survey path.
+ * C1 follow-up merged into Rechazados display; surveys universe unchanged.
  * Run: node scripts/unit-rejected-c1-pending.js
  */
 
 const assert = require('assert');
-const { OUTCOME } = require('../src/services/providerFallback/constants');
+const { OPS_STATUS } = require('../src/lib/rejectedOps');
 const {
   assembleRejectedList,
   rejectedUniverseByCi,
+  listOpsForRejectedDisplay,
 } = require('../src/lib/rejectedOpsRead');
 const {
   REASONS,
   evaluateRejectedSurveyInviteEligibility,
 } = require('../src/lib/rejectedSurveyInvite');
 const {
-  C1_PENDING_LIST_STATUS,
-  C1_PENDING_PROJECTED_ESTADOS,
-  isC1PendingListStatus,
-  assembleC1PendingRows,
+  C1_DISPLAY_PROJECTED_ESTADOS,
+  mergeC1FollowupIntoRejectedRows,
+  assembleC1FollowupDetail,
+  appendC1FollowupToDetailRejections,
 } = require('../src/lib/rejectedC1PendingRead');
+const { classifyElmProcess } = require('../src/services/elm/classification');
+const { computeElmCell } = require('../src/services/elm/listView');
+const { resolveRejectedSend } = require('../src/lib/rejectedElmRead');
+const { S1, S2 } = require('../src/services/elm/constants');
+const { classifyService1Result } = require('../src/services/elm/client');
+const { OUTCOME } = require('../src/services/elm/constants');
+const { deriveFromProcess } = require('../src/services/providerFallback/outcome');
+const {
+  OUTCOME: FALLBACK_OUTCOME,
+  REASONS: FALLBACK_REASONS,
+} = require('../src/services/providerFallback/constants');
 
-assert.strictEqual(C1_PENDING_LIST_STATUS, 'c1_pending_elm');
-assert.strictEqual(isC1PendingListStatus('c1_pending_elm'), true);
-assert.strictEqual(isC1PendingListStatus('bcu_pending'), false);
-assert.deepStrictEqual(C1_PENDING_PROJECTED_ESTADOS, [12, 14, 15]);
-assert.ok(!C1_PENDING_PROJECTED_ESTADOS.includes(13), 'estado 13 (derivación activa) excluded');
-
-const excluded13 = assembleC1PendingRows({
-  states: [
-    { cz_solicitud_id: 2000, ci: 999, projected_estado: 13, updated_at: '2026-01-01T00:00:00.000Z' },
-  ],
-  solicitudesByCz: new Map(),
-  fallbacksByCz: new Map(),
-  reviewByCz: new Map(),
-  elmCells: new Map(),
-});
-assert.strictEqual(excluded13.length, 0);
+assert.deepStrictEqual(C1_DISPLAY_PROJECTED_ESTADOS, [12, 13, 14, 15]);
 
 const ciElm = 40129799;
 const czPending = 1508;
@@ -74,18 +71,18 @@ const solPending = {
   lrw_id: 'lrw-1',
 };
 
-const uni = rejectedUniverseByCi(historicoC1Path, [solPending]);
-assert.strictEqual(uni.has(ciElm), false, 'C1 path 1→12→14 must not enter rejected universe');
-
-const rejectedList = assembleRejectedList({
-  estadoRows: historicoC1Path,
-  solicitudRows: [solPending],
-  encuestaRows: [],
-  snapshotRows: [],
-  institutionRows: [],
-  status: null,
-});
-assert.strictEqual(rejectedList.length, 0, 'assembleRejectedList must ignore C1-only CIs');
+assert.strictEqual(rejectedUniverseByCi(historicoC1Path, [solPending]).has(ciElm), false);
+assert.strictEqual(
+  assembleRejectedList({
+    estadoRows: historicoC1Path,
+    solicitudRows: [solPending],
+    encuestaRows: [],
+    snapshotRows: [],
+    institutionRows: [],
+    status: null,
+  }).length,
+  0,
+);
 
 const survey = evaluateRejectedSurveyInviteEligibility({
   ci: ciElm,
@@ -100,73 +97,162 @@ const survey = evaluateRejectedSurveyInviteEligibility({
 assert.strictEqual(survey.eligible, false);
 assert.strictEqual(survey.reason, REASONS.NO_CURRENT_REJECTION);
 
-const c1Rows = assembleC1PendingRows({
+const opsNoSnap = listOpsForRejectedDisplay(ciElm, [], []);
+assert.strictEqual(opsNoSnap.ops_status, null);
+assert.strictEqual(opsNoSnap.has_rejected_bcu_snapshot, false);
+
+const mergedAll = mergeC1FollowupIntoRejectedRows([], {
   states: [
+    { cz_solicitud_id: czPending, ci: ciElm, projected_estado: 14, updated_at: '2026-07-01T11:00:00.000Z' },
+    { cz_solicitud_id: 2001, ci: 88888888, projected_estado: 13, updated_at: '2026-07-01T12:00:00.000Z' },
+  ],
+  solicitudesByCz: new Map([
+    [czPending, solPending],
+    [2001, { cz_id: 2001, ci: 88888888, nombre: 'A', apellido: 'B', solicitudes_estados_id: 13 }],
+  ]),
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [],
+  statusFilter: null,
+});
+assert.strictEqual(mergedAll.length, 2);
+assert.strictEqual(mergedAll[0].ops_status, null);
+
+const mergedBcuFilter = mergeC1FollowupIntoRejectedRows([], {
+  states: [{ cz_solicitud_id: czPending, ci: ciElm, projected_estado: 14, updated_at: '2026-07-01T11:00:00.000Z' }],
+  solicitudesByCz: new Map([[czPending, solPending]]),
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [],
+  statusFilter: OPS_STATUS.BCU_PENDING,
+});
+assert.strictEqual(mergedBcuFilter.length, 0, 'C1 without BCU snapshot must not match bcu_pending filter');
+
+const bundle = {
+  ci: ciElm,
+  solicitudRows: [solPending],
+  encuestaRows: [],
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [],
+};
+const c1States = [{ cz_solicitud_id: czPending, ci: ciElm, projected_estado: 14, updated_at: '2026-07-01T11:00:00.000Z' }];
+const detail = assembleC1FollowupDetail(bundle, c1States);
+assert.ok(detail);
+assert.strictEqual(detail.c1_followup_only, true);
+assert.strictEqual(detail.rejections.length, 1);
+assert.strictEqual(detail.snapshots.length, 0);
+assert.strictEqual(detail.encuestas.length, 0);
+
+assert.strictEqual(classifyService1Result('Repetido. Rechazado'), OUTCOME.NEGATIVE);
+const classified1508 = classifyElmProcess(
+  {
+    s1_status: S1.UNKNOWN,
+    s2_status: S2.NOT_STARTED,
+    s1_result_message: 'Repetido. Rechazado',
+    s1_error_code: 'elm_response_undocumented',
+    trigger_origin: 'cz_automatic',
+    id: 'proc-1508',
+    cz_solicitud_id: 1508,
+  },
+  { projectedEstado: 14, nowMs: Date.now() },
+);
+assert.strictEqual(classified1508.state, 'rejected');
+assert.strictEqual(classified1508.detail, 's1_negative');
+
+const fallbackNowMs = Date.parse('2026-10-14T12:00:00.000Z');
+const proc1508 = {
+  s1_status: S1.UNKNOWN,
+  s2_status: S2.NOT_STARTED,
+  s1_result_message: 'Repetido. Rechazado',
+  s1_error_code: 'elm_response_undocumented',
+};
+const derived1508 = deriveFromProcess(proc1508, fallbackNowMs, null);
+assert.strictEqual(derived1508.kind, 'final');
+assert.strictEqual(derived1508.outcome, FALLBACK_OUTCOME.REJECTED);
+assert.strictEqual(derived1508.reasonCode, FALLBACK_REASONS.ELM_S1_REJECTED);
+assert.strictEqual(derived1508.detail.result_message, 'Repetido. Rechazado');
+
+const derivedUncertain = deriveFromProcess(
+  {
+    s1_status: S1.UNKNOWN,
+    s2_status: S2.NOT_STARTED,
+    s1_result_message: null,
+    s1_error_code: 'HTTP_TIMEOUT',
+  },
+  fallbackNowMs,
+  null,
+);
+assert.strictEqual(derivedUncertain.outcome, FALLBACK_OUTCOME.MANUAL_REVIEW);
+assert.strictEqual(derivedUncertain.reasonCode, FALLBACK_REASONS.ELM_S1_UNKNOWN);
+
+const derived1341 = deriveFromProcess(
+  {
+    s1_status: S1.UNKNOWN,
+    s2_status: S2.NOT_STARTED,
+    s1_result_message: 'Repetido. Aprobado',
+    s1_error_code: 'elm_response_undocumented',
+  },
+  fallbackNowMs,
+  null,
+);
+assert.strictEqual(derived1341.reasonCode, FALLBACK_REASONS.ELM_S1_UNKNOWN);
+
+const cell1508 = computeElmCell({
+  process: {
+    id: 'proc-1508',
+    cz_solicitud_id: 1508,
+    s1_status: S1.UNKNOWN,
+    s2_status: S2.NOT_STARTED,
+    s1_result_message: 'Repetido. Rechazado',
+    s1_error_code: 'elm_response_undocumented',
+    trigger_origin: 'cz_automatic',
+  },
+  allowSend: true,
+  sendReadiness: { ready: true, reasons: [] },
+  nowMs: Date.now(),
+  projectedEstado: 14,
+});
+assert.strictEqual(cell1508.state, 'rejected');
+assert.strictEqual(cell1508.action.show, false, 'existing process: no send button');
+
+const cells = new Map([
+  [
+    9101,
     {
-      cz_solicitud_id: czPending,
-      ci: ciElm,
-      projected_estado: 14,
-      updated_at: '2026-07-01T11:00:00.000Z',
+      kind: 'not_sent',
+      action: { show: true, enabled: true, reasons: [] },
     },
   ],
-  solicitudesByCz: new Map([[czPending, solPending]]),
-  fallbacksByCz: new Map([
-    [
-      czPending,
-      {
-        cz_solicitud_id: czPending,
-        outcome: OUTCOME.MANUAL_REVIEW,
-        reason_code: 'elm_s1_unknown',
-        finalized_at: '2026-07-01T11:00:00.000Z',
-      },
-    ],
-  ]),
-  reviewByCz: new Map([
-    [
-      czPending,
-      {
-        id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-        cz_solicitud_id: czPending,
-        reason_code: 'elm_s1_unknown',
-        status: 'open',
-      },
-    ],
-  ]),
-  elmCells: new Map([
-    [
-      czPending,
-      {
-        kind: 'process',
-        state: 's1_unknown',
-        label: 'S1 incierto',
-        detail: 'Esperando revisión',
-      },
-    ],
-  ]),
-});
-
-assert.strictEqual(c1Rows.length, 1);
-assert.strictEqual(c1Rows[0].ci, ciElm);
-assert.strictEqual(c1Rows[0].cz_solicitud_id, czPending);
-assert.strictEqual(c1Rows[0].projected_estado, 14);
-assert.ok(c1Rows[0].action);
-assert.strictEqual(c1Rows[0].action.kind, 'open_elm_ops');
-assert.strictEqual(
-  c1Rows[0].action.review_case_id,
-  'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-);
-
-const noAction = assembleC1PendingRows({
-  states: [
-    { cz_solicitud_id: 99, ci: 111, projected_estado: 12, updated_at: '2026-01-01T00:00:00.000Z' },
+  [
+    9102,
+    {
+      kind: 'not_sent',
+      action: { show: true, enabled: true, reasons: [] },
+    },
   ],
-  solicitudesByCz: new Map(),
-  fallbacksByCz: new Map([
-    [99, { outcome: OUTCOME.REJECTED, reason_code: 'x', finalized_at: '2026-01-01T00:00:00.000Z' }],
-  ]),
-  reviewByCz: new Map(),
-  elmCells: new Map(),
+]);
+const resolved = resolveRejectedSend({
+  rejected: [
+    { cz_solicitud_id: 9102, rejected_at: '2026-10-05T10:00:00.000Z' },
+    { cz_solicitud_id: 9101, rejected_at: '2026-08-20T10:00:00.000Z' },
+  ],
+  cells: cells,
+  hold: null,
 });
-assert.strictEqual(noAction[0].action, null);
+assert.strictEqual(resolved.send.needs_selection, true);
+assert.strictEqual(resolved.send.target_cz_id, null);
+assert.deepStrictEqual(resolved.send.selectable_cz_ids, [9102, 9101]);
+assert.strictEqual(resolved.solicitudes.length, 2);
+assert.strictEqual(resolved.solicitudes[0].cz_solicitud_id, 9102);
+assert.strictEqual(resolved.solicitudes[0].cell.action.enabled, true);
+assert.strictEqual(resolved.solicitudes[1].cz_solicitud_id, 9101);
+
+const mixedDetail = {
+  ci: ciElm,
+  rejections: [{ cz_historico_id: 1, cz_solicitud_id: 900, solicitudes_estados_id: 3, fechahora_src: '2026-06-01T00:00:00.000Z' }],
+};
+appendC1FollowupToDetailRejections(mixedDetail, c1States, bundle);
+assert.strictEqual(mixedDetail.rejections.length, 2);
 
 console.log('OK unit-rejected-c1-pending');

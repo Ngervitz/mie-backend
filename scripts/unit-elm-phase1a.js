@@ -166,6 +166,7 @@ const {
   classifyService1Response,
   classifyService2Result,
 } = require('../src/services/elm/client');
+const { isS2Accepted } = require('../src/services/elm/classification');
 const { ELM_SOURCE } = require('../src/services/elm/constants');
 const { redactSecrets, redactSecretText } = require('../src/services/elm/redact');
 const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
@@ -479,6 +480,8 @@ async function runAll() {
   await test('classification: exact documented texts only; anything else unknown', async () => {
     assert.strictEqual(classifyService1Result('Listo para recibir datos en servicio 2'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService1Result('Repetido. rechazado'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('Repetido. Rechazado'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('REPETIDO. RECHAZADO'), OUTCOME.NEGATIVE);
     assert.strictEqual(classifyService1Result('BCU'), OUTCOME.NEGATIVE);
     // "BCU error" is an explicit non-credit answer: technical_error, never a rejection.
     assert.strictEqual(classifyService1Result('BCU error'), OUTCOME.TECHNICAL_ERROR);
@@ -490,6 +493,62 @@ async function runAll() {
     assert.strictEqual(classifyService2Result('Lead Aprobado correctamente'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService2Result('Aprobado sin canal'), OUTCOME.NEGATIVE);
     assert.strictEqual(classifyService2Result(undefined), OUTCOME.UNKNOWN);
+  });
+
+  await test('isS2Accepted: referred, documented accept/reject texts, success-true body, unknown', async () => {
+    assert.strictEqual(typeof isS2Accepted, 'function');
+    assert.strictEqual(isS2Accepted({ s2_status: S2.REFERRED }), true);
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_result_message: 'Lead Aprobado correctamente',
+      }),
+      true,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_response: { success: true, result: null },
+      }),
+      true,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_response: { success: true },
+      }),
+      true,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.REJECTED,
+        s2_result_message: 'Documento no válido',
+      }),
+      false,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_result_message: 'Aprobado sin canal',
+      }),
+      false,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_response: { success: true, result: 'Aprobado sin canal' },
+      }),
+      false,
+    );
+    assert.strictEqual(
+      isS2Accepted({
+        s2_status: S2.UNKNOWN,
+        s2_result_message: 'texto no documentado',
+        s2_response: { success: false, result: null },
+      }),
+      false,
+    );
+    assert.strictEqual(isS2Accepted(null), false);
   });
 
   // --- eligibility --------------------------------------------------------
