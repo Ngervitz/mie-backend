@@ -89,6 +89,55 @@
     return isNaN(n) ? null : n;
   }
 
+  /** Chromatic convention for performance / campaigns / ads (CSS vars in meta-agent.css). */
+  var MA_METRIC_COLOR = {
+    spend: 'var(--meta-agent-amber-text)',
+    conv: 'var(--meta-agent-green-text)',
+    cpl: 'var(--meta-agent-green-text)',
+    ctr: 'var(--meta-agent-blue-deep)',
+    cpc: 'var(--meta-agent-violet)',
+    cpm: 'var(--meta-agent-amber-text)',
+    neutral: 'var(--meta-agent-text)',
+    muted: 'var(--meta-agent-muted)',
+  };
+
+  function isMetricNoData(val) {
+    if (val === null || val === undefined) return true;
+    var s = String(val).trim();
+    if (!s || s === '—' || s === '-') return true;
+    if (/^sin (datos|conversiones)/i.test(s)) return true;
+    return false;
+  }
+
+  function metricToneForLabel(label) {
+    var u = String(label || '').toUpperCase();
+    if (u.indexOf('GASTO') >= 0) return 'spend';
+    if (u.indexOf('CONV') >= 0) return 'conv';
+    if (u.indexOf('CPL') >= 0) return 'cpl';
+    if (u.indexOf('CTR') >= 0) return 'ctr';
+    if (u.indexOf('CPC') >= 0) return 'cpc';
+    if (u.indexOf('CPM') >= 0) return 'cpm';
+    if (
+      u.indexOf('IMPRES') >= 0 ||
+      u.indexOf('ALCANCE') >= 0 ||
+      u.indexOf('FREC') >= 0 ||
+      u.indexOf('CLIC') >= 0
+    ) {
+      return 'neutral';
+    }
+    return 'neutral';
+  }
+
+  function metricColor(tone, displayVal) {
+    if (isMetricNoData(displayVal)) return MA_METRIC_COLOR.muted;
+    return MA_METRIC_COLOR[tone] || MA_METRIC_COLOR.neutral;
+  }
+
+  function metricToneClass(tone, displayVal) {
+    if (isMetricNoData(displayVal)) return 'ma-metric-tone-muted';
+    return 'ma-metric-tone-' + tone;
+  }
+
   function shiftIsoDate(dateStr, deltaDays) {
     var parts = String(dateStr).split('-').map(Number);
     var dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
@@ -797,16 +846,17 @@
     return null;
   }
 
-  function sparkbarHtml(value, max, color) {
-    if (!color) color = '#3b82f6';
+  function sparkbarHtml(value, max, tone, displayVal) {
+    var toneKey = tone || 'ctr';
+    var barClass = metricToneClass(toneKey, displayVal);
     var pct = Math.min(((fmtN(value) || 0) / (fmtN(max) || 1)) * 100, 100);
     return (
       '<div class="ma-sparkbar">' +
-      '<div class="ma-sparkbar-fill" style="width:' +
+      '<div class="ma-sparkbar-fill ' +
+      barClass +
+      '" style="width:' +
       pct +
-      '%;background:' +
-      color +
-      '"></div>' +
+      '%"></div>' +
       '</div>'
     );
   }
@@ -1999,7 +2049,7 @@
             ? '$' + fmt(period.spend, 2)
             : '—',
         sub: periodSub,
-        color: '#3b82f6',
+        color: metricColor('spend', period.spend !== null && period.spend !== undefined ? '$' + fmt(period.spend, 2) : '—'),
         icon: '💰',
         trend: trends.spend,
       },
@@ -2010,7 +2060,10 @@
             ? fmt(metaLeadCount, 0)
             : '—',
         sub: 'form_step_3 reportadas por Meta',
-        color: '#22c55e',
+        color: metricColor(
+          'conv',
+          metaLeadCount !== null && metaLeadCount > 0 ? fmt(metaLeadCount, 0) : '—',
+        ),
         icon: '🎯',
         trend: trends.conversions,
       },
@@ -2028,7 +2081,14 @@
               ? 'gasto / conversiones Meta'
               : 'Sin conversiones'
             : 'Sin conversiones Meta en el período',
-        color: metaCpl !== null && metaCpl <= 1 ? '#22c55e' : '#f59e0b',
+        color: metricColor(
+          'cpl',
+          metaCpl !== null
+            ? '$' + fmt(metaCpl)
+            : metaLeadCount === 0 || metaLeadCount === null
+              ? 'Sin conversiones'
+              : '—',
+        ),
         icon: '📉',
         trend: trends.cpl,
       },
@@ -2039,7 +2099,10 @@
             ? fmt(period.ctr) + '%'
             : '—',
         sub: periodSub,
-        color: '#3b82f6',
+        color: metricColor(
+          'ctr',
+          period.ctr !== null && period.ctr !== undefined ? fmt(period.ctr) + '%' : '—',
+        ),
         icon: '👁',
         trend: trends.ctr,
       },
@@ -2050,7 +2113,10 @@
             ? '$' + fmt(period.cpc)
             : '—',
         sub: periodSub,
-        color: '#8b5cf6',
+        color: metricColor(
+          'cpc',
+          period.cpc !== null && period.cpc !== undefined ? '$' + fmt(period.cpc) : '—',
+        ),
         icon: '🖱',
         trend: trends.cpc,
       },
@@ -2061,7 +2127,10 @@
             ? '$' + fmt(period.cpm)
             : '—',
         sub: periodSub,
-        color: '#f59e0b',
+        color: metricColor(
+          'cpm',
+          period.cpm !== null && period.cpm !== undefined ? '$' + fmt(period.cpm) : '—',
+        ),
         icon: '📡',
         trend: trends.cpm,
       },
@@ -2074,7 +2143,14 @@
             ? fmt(rankingDay.reach, 0)
             : '—',
         sub: singleDay ? periodSub : '— (solo día único)',
-        color: '#38bdf8',
+        color: metricColor(
+          'neutral',
+          singleDay &&
+            rankingDay.reach !== null &&
+            rankingDay.reach !== undefined
+            ? fmt(rankingDay.reach, 0)
+            : '—',
+        ),
         icon: '📢',
       },
       {
@@ -2086,7 +2162,14 @@
             ? fmt(rankingDay.frequency)
             : '—',
         sub: singleDay ? periodSub : '— (no promediar en rango)',
-        color: '#fb7185',
+        color: metricColor(
+          'neutral',
+          singleDay &&
+            rankingDay.frequency !== null &&
+            rankingDay.frequency !== undefined
+            ? fmt(rankingDay.frequency)
+            : '—',
+        ),
         icon: '🔁',
       },
       (function () {
@@ -2107,7 +2190,12 @@
             ' · Conversión: ' +
             c,
           sub: hasAny && singleDay ? periodSub : '— (solo día único)',
-          color: '#a78bfa',
+          color: metricColor(
+            'neutral',
+            hasAny && singleDay
+              ? 'Calidad: ' + q + ' · Engagement: ' + e + ' · Conversión: ' + c
+              : '—',
+          ),
           icon: '🏆',
           compactValue: true,
         };
@@ -2219,12 +2307,18 @@
       '<div class="ma-ad-metrics">' +
       metrics
         .map(function (m) {
+          var tone = metricToneForLabel(m.label);
+          var valColor = metricColor(tone, m.val);
           return (
             '<div class="ma-ad-metric">' +
             '<div class="ma-metric-label">' +
             escapeHtml(m.label) +
             '</div>' +
-            '<div class="ma-mv ma-ad-metric-val">' +
+            '<div class="ma-mv ma-ad-metric-val ' +
+            metricToneClass(tone, m.val) +
+            '" style="color:' +
+            valColor +
+            '">' +
             escapeHtml(m.val) +
             '</div>' +
             '</div>'
@@ -2298,7 +2392,6 @@
               warn: c.cpl !== null && c.cpl > 1,
               bar: c.cpl,
               max: 5,
-              color: c.cpl !== null && c.cpl > 1 ? '#ef4444' : '#22c55e',
             },
             {
               label: 'CTR',
@@ -2306,7 +2399,6 @@
               warn: c.ctr !== null && c.ctr < 1,
               bar: c.ctr,
               max: 10,
-              color: c.ctr !== null && c.ctr < 1 ? '#f59e0b' : '#3b82f6',
             },
             {
               label: 'CPC',
@@ -2314,7 +2406,6 @@
               warn: false,
               bar: c.cpc,
               max: 5,
-              color: '#8b5cf6',
             },
             {
               label: 'GASTO',
@@ -2322,7 +2413,6 @@
               warn: false,
               bar: c.gasto,
               max: totalGasto || 1,
-              color: '#f59e0b',
             },
             {
               label: 'CONV. META',
@@ -2333,7 +2423,6 @@
               warn: false,
               bar: c.conversiones,
               max: totalConv || 1,
-              color: '#22c55e',
             },
           ];
 
@@ -2371,17 +2460,21 @@
             '<div class="ma-metrics">' +
             metrics
               .map(function (m) {
+                var tone = metricToneForLabel(m.label);
+                var valColor = metricColor(tone, m.val);
                 return (
                   '<div>' +
                   '<div class="ma-metric-label">' +
                   escapeHtml(m.label) +
                   '</div>' +
-                  '<div class="ma-mv ma-metric-val" style="color:' +
-                  (m.warn ? '#ef4444' : '#e2e8f0') +
+                  '<div class="ma-mv ma-metric-val ' +
+                  metricToneClass(tone, m.val) +
+                  '" style="color:' +
+                  valColor +
                   '">' +
                   escapeHtml(m.val) +
                   '</div>' +
-                  sparkbarHtml(m.bar, m.max, m.color) +
+                  sparkbarHtml(m.bar, m.max, tone, m.val) +
                   '</div>'
                 );
               })

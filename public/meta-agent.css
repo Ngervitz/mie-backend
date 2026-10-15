@@ -28,7 +28,8 @@
   --meta-agent-amber-soft: rgba(176, 137, 74, 0.15);
   --meta-agent-amber-border: #2a2f3a;
   --meta-agent-amber-text: #b0894a;
-  --meta-agent-purple: #5b7fad;
+  --meta-agent-purple: #8b5cf6;
+  --meta-agent-violet: #8b5cf6;
   --meta-agent-spark-track: #22262f;
   --meta-agent-maxw: 1200px;
 
@@ -937,6 +938,55 @@
 
 #meta-ads-root .ma-ad-metric-val {
   font-size: 16px;
+}
+
+/* Semantic metric tones (values + spark bars only) */
+#meta-ads-root .ma-metric-tone-spend,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-spend {
+  color: var(--meta-agent-amber-text);
+  background: var(--meta-agent-amber-text);
+}
+
+#meta-ads-root .ma-metric-tone-conv,
+#meta-ads-root .ma-metric-tone-cpl,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-conv,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpl {
+  color: var(--meta-agent-green-text);
+  background: var(--meta-agent-green-text);
+}
+
+#meta-ads-root .ma-metric-tone-ctr,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-ctr {
+  color: var(--meta-agent-blue-deep);
+  background: var(--meta-agent-blue-deep);
+}
+
+#meta-ads-root .ma-metric-tone-cpc,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpc {
+  color: var(--meta-agent-violet);
+  background: var(--meta-agent-violet);
+}
+
+#meta-ads-root .ma-metric-tone-cpm,
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-cpm {
+  color: var(--meta-agent-amber-text);
+  background: var(--meta-agent-amber-text);
+}
+
+#meta-ads-root .ma-metric-tone-neutral {
+  color: var(--meta-agent-text);
+}
+
+#meta-ads-root .ma-metric-tone-muted {
+  color: var(--meta-agent-muted);
+}
+
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-neutral {
+  background: var(--meta-agent-muted);
+}
+
+#meta-ads-root .ma-sparkbar-fill.ma-metric-tone-muted {
+  background: var(--meta-agent-spark-track);
 }
 
 #meta-ads-root .ma-ad-note {
