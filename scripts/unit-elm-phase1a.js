@@ -431,9 +431,9 @@ async function test(name, fn) {
 
 async function runAll() {
   // --- config / payload / classification ---------------------------------
-  await test('config: business mappings empty by default; lease default + clamp', async () => {
+  await test('config: confirmed OTR→Otro; other mappings env-only; lease default + clamp', async () => {
     const c = readElmConfig({});
-    assert.deepStrictEqual(c.activityTypeMap, {});
+    assert.deepStrictEqual(c.activityTypeMap, { OTR: 'Otro' });
     assert.strictEqual(c.sourceBrandByBase, undefined);
     assert.strictEqual(c.s1InternalIdField, undefined);
     assert.deepStrictEqual(c.retrySafeErrorCodes, []);

@@ -19,6 +19,8 @@ const { loanPurposeOf } = require('./czSurveyVersion');
 /** Open projected estados shown in Rechazados (display merge only). */
 const C1_DISPLAY_PROJECTED_ESTADOS = Object.freeze([12, 13, 14, 15]);
 
+const ELM_PROCESS_GRANTED_SELECT = 'cz_solicitud_id';
+
 const PAGE_SIZE = 1000;
 
 const SOLICITUD_SELECT = 'cz_id, ci, nombre, apellido, fecha_reg, solicitudes_estados_id, updated_at_src';
@@ -157,8 +159,63 @@ function buildC1OnlyListRow(ci, entries, solicitudesByCz, ops, outreach) {
   );
 }
 
+/**
+ * C1 display merge only: solicitudes with ELM otorgamiento confirmado (`disbursed_at`) stay out of
+ * Rechazados; same criterion as classification / provider fallback (no second commercial rule).
+ * @param {object[]} states
+ * @param {Set<number>|number[]} grantedCzIds
+ */
+function filterC1StatesExcludingElmGranted(states, grantedCzIds) {
+  const granted =
+    grantedCzIds instanceof Set
+      ? grantedCzIds
+      : new Set(
+          (grantedCzIds || [])
+            .map(Number)
+            .filter(function (n) {
+              return Number.isSafeInteger(n) && n > 0;
+            }),
+        );
+  return (states || []).filter(function (st) {
+    const id = toNum(st && st.cz_solicitud_id);
+    return id != null && !granted.has(id);
+  });
+}
+
+async function fetchElmGrantedCzIds(supabase, czIds) {
+  const ids = Array.from(
+    new Set(
+      (czIds || [])
+        .map(Number)
+        .filter(function (n) {
+          return Number.isSafeInteger(n) && n > 0;
+        }),
+    ),
+  );
+  const granted = new Set();
+  if (!ids.length) return granted;
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('elm_lead_processes')
+      .select(ELM_PROCESS_GRANTED_SELECT)
+      .in('cz_solicitud_id', chunk)
+      .not('disbursed_at', 'is', null);
+    if (error) throw rpcError('elm_lead_processes', error);
+    for (const row of data || []) {
+      const id = toNum(row && row.cz_solicitud_id);
+      if (id != null) granted.add(id);
+    }
+  }
+  return granted;
+}
+
 function mergeC1FollowupIntoRejectedRows(estado3Rows, input) {
-  const states = Array.isArray(input.states) ? input.states : [];
+  const states = filterC1StatesExcludingElmGranted(
+    Array.isArray(input.states) ? input.states : [],
+    input.grantedCzIds || null,
+  );
   const solicitudesByCz = input.solicitudesByCz || new Map();
   const statusFilter = input.statusFilter || null;
   const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
@@ -268,9 +325,11 @@ async function loadAndMergeC1FollowupRows(supabase, estado3Rows, opts) {
   const czIds = states.map(function (s) {
     return Number(s.cz_solicitud_id);
   });
+  const grantedCzIds = await fetchElmGrantedCzIds(supabase, czIds);
   const solicitudesByCz = await fetchSolicitudesByCzIds(supabase, czIds);
   return mergeC1FollowupIntoRejectedRows(estado3Rows, {
     states: states,
+    grantedCzIds: grantedCzIds,
     solicitudesByCz: solicitudesByCz,
     snapshotRows: options.snapshotRows || [],
     institutionRows: options.institutionRows || [],
@@ -282,13 +341,29 @@ async function loadAndMergeC1FollowupRows(supabase, estado3Rows, opts) {
 
 async function loadC1FollowupCzIdsForCi(supabase, ci) {
   const states = await fetchProjectedStatesForCi(supabase, ci);
-  return states
+  const czIds = states.map(function (row) {
+    return Number(row.cz_solicitud_id);
+  });
+  const grantedCzIds = await fetchElmGrantedCzIds(supabase, czIds);
+  return filterC1StatesExcludingElmGranted(states, grantedCzIds)
     .map(function (row) {
       return Number(row.cz_solicitud_id);
     })
     .filter(function (n) {
       return Number.isSafeInteger(n) && n > 0;
     });
+}
+
+/** Projected C1 rows for display/detail, minus ELM-granted solicitudes. */
+async function loadC1FollowupStatesForCi(supabase, ci) {
+  const states = await fetchProjectedStatesForCi(supabase, ci);
+  const grantedCzIds = await fetchElmGrantedCzIds(
+    supabase,
+    states.map(function (s) {
+      return Number(s.cz_solicitud_id);
+    }),
+  );
+  return filterC1StatesExcludingElmGranted(states, grantedCzIds);
 }
 
 /**
@@ -430,9 +505,12 @@ function appendC1FollowupToDetailRejections(detail, c1States, bundle) {
 
 module.exports = {
   C1_DISPLAY_PROJECTED_ESTADOS,
+  filterC1StatesExcludingElmGranted,
+  fetchElmGrantedCzIds,
   mergeC1FollowupIntoRejectedRows,
   loadAndMergeC1FollowupRows,
   loadC1FollowupCzIdsForCi,
+  loadC1FollowupStatesForCi,
   fetchAllProjectedStates,
   fetchProjectedStatesForCi,
   fetchSolicitudesByCzIds,

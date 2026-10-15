@@ -74,7 +74,7 @@ const { requireElmAction } = require('../middleware/requireElmAction');
 const {
   loadAndMergeC1FollowupRows,
   loadC1FollowupCzIdsForCi,
-  fetchProjectedStatesForCi,
+  loadC1FollowupStatesForCi,
   assembleC1FollowupDetail,
   appendC1FollowupToDetailRejections,
 } = require('../lib/rejectedC1PendingRead');
@@ -766,7 +766,7 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
 
   try {
     const bundle = await fetchRejectedDetailBundle(supabase, ci);
-    const c1States = await fetchProjectedStatesForCi(supabase, ci);
+    const c1States = await loadC1FollowupStatesForCi(supabase, ci);
     let detail = assembleRejectedDetail(bundle);
     if (!detail) {
       detail = assembleC1FollowupDetail(bundle, c1States);

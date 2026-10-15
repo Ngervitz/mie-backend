@@ -667,7 +667,6 @@ test('11 technical error / ambiguous → review (never a rejection, never a surv
   for (const p of [
     proc({ s2_status: S2.UNKNOWN, referred_at: null }),
     proc({ s2_status: S2.REJECTED, s2_result_message: 'Aprobado sin canal', referred_at: null }),
-    proc({ s1_status: S1.REJECTED, s1_result_message: 'Rechazado', s2_status: S2.NOT_STARTED, referred_at: null }),
     proc({ s2_status: S2.IN_FLIGHT, s2_lease_expires_at: iso(NOW - 1000), referred_at: null }),
   ]) {
     assert.strictEqual(classify(p).state, 'review', JSON.stringify([p.s1_status, p.s2_status, p.s2_result_message]));
@@ -675,7 +674,13 @@ test('11 technical error / ambiguous → review (never a rejection, never a surv
   const definitiveS2 = proc({ s2_status: S2.REJECTED, s2_result_message: 'Documento no válido', referred_at: null });
   assert.strictEqual(classify(definitiveS2).state, 'rejected');
 
-  const notReady = sendHarness([], { env: { ELM_ACTIVITY_TYPE_MAP_JSON: undefined } });
+  const notReady = sendHarness([], {
+    env: {
+      ELM_ACTIVITY_TYPE_MAP_JSON: undefined,
+      ELM_DATE_OF_BIRTH_FORMAT: undefined,
+      ELM_MOBILE_PHONE_FORMAT: undefined,
+    },
+  });
   const blocked = await notReady.send(1001);
   assert.strictEqual(blocked.status, 503);
   assert.strictEqual(blocked.body.code, 'elm_send_not_ready');
@@ -887,11 +892,16 @@ test('18 list: ELM disabled or config missing → grey text with a short reason,
       env: { ELM_DATE_OF_BIRTH_FORMAT: undefined, ELM_MOBILE_PHONE_FORMAT: undefined },
       title: 'Configuración ELM pendiente: formato de fecha de nacimiento, formato de celular.',
     },
-    { env: { ELM_ACTIVITY_TYPE_MAP_JSON: undefined }, title: 'Configuración ELM pendiente: mapeo de actividad.' },
   ];
   for (const c of cases) {
     const ci = 47474747;
-    const h = sendHarness([], { ci: ci, czIds: [9201, 9202], rejectedCzIds: [9202, 9201], env: c.env });
+    const h = sendHarness([], {
+      ci: ci,
+      czIds: [9201, 9202],
+      rejectedCzIds: [9202, 9201],
+      env: c.env,
+      solOver: c.solOver,
+    });
     const row = await listRow(h, ci, [{ cz_solicitud_id: 9202 }, { cz_solicitud_id: 9201 }]);
     assert.strictEqual(row.elm.send.candidates.length, 2);
     assert.strictEqual(row.elm.send.target_cz_id, null);

@@ -50,6 +50,14 @@ const DATE_OF_BIRTH_FORMATS = Object.freeze([
 /** uy_local_0 → 09XXXXXXX ; uy_598 → 5989XXXXXXX */
 const MOBILE_PHONE_FORMATS = Object.freeze(['uy_local_0', 'uy_598']);
 
+/**
+ * CZ → ELM activityType values confirmed with ELM. `ELM_ACTIVITY_TYPE_MAP_JSON` overrides these keys.
+ * Other relations stay env-only until confirmed.
+ */
+const CONFIRMED_ELM_ACTIVITY_TYPE_MAP = Object.freeze({
+  OTR: 'Otro',
+});
+
 function positiveInt(raw, fallback) {
   if (raw == null || String(raw).trim() === '') return fallback;
   const n = Number(String(raw).trim());
@@ -115,10 +123,14 @@ function readElmConfig(source) {
     Math.max(requestedLease, minLease),
     MAX_LEASE_SECONDS,
   );
+  const activityFromEnv = parseStringMap(env.ELM_ACTIVITY_TYPE_MAP_JSON);
+  const activityTypeMap = Object.freeze(
+    Object.assign({}, CONFIRMED_ELM_ACTIVITY_TYPE_MAP, activityFromEnv),
+  );
   return Object.freeze({
     httpTimeoutMs: httpTimeoutMs,
     inFlightLeaseSeconds: inFlightLeaseSeconds,
-    activityTypeMap: parseStringMap(env.ELM_ACTIVITY_TYPE_MAP_JSON),
+    activityTypeMap: activityTypeMap,
     dateOfBirthFormat: oneOf(env.ELM_DATE_OF_BIRTH_FORMAT, DATE_OF_BIRTH_FORMATS),
     mobilePhoneFormat: oneOf(env.ELM_MOBILE_PHONE_FORMAT, MOBILE_PHONE_FORMATS),
     retrySafeErrorCodes: codeList(env.ELM_RETRY_SAFE_ERROR_CODES),
@@ -242,6 +254,7 @@ module.exports = {
   LEASE_MARGIN_SECONDS,
   DATE_OF_BIRTH_FORMATS,
   MOBILE_PHONE_FORMATS,
+  CONFIRMED_ELM_ACTIVITY_TYPE_MAP,
   parseStringMap,
   readElmConfig,
   technicalRetryDelaySeconds,

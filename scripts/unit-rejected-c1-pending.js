@@ -18,10 +18,14 @@ const {
 } = require('../src/lib/rejectedSurveyInvite');
 const {
   C1_DISPLAY_PROJECTED_ESTADOS,
+  filterC1StatesExcludingElmGranted,
   mergeC1FollowupIntoRejectedRows,
   assembleC1FollowupDetail,
   appendC1FollowupToDetailRejections,
 } = require('../src/lib/rejectedC1PendingRead');
+const { readElmConfig } = require('../src/services/elm/config');
+const { evaluateElmEligibility } = require('../src/services/elm/eligibility');
+const { buildService1Payload } = require('../src/services/elm/payload');
 const { classifyElmProcess } = require('../src/services/elm/classification');
 const { computeElmCell } = require('../src/services/elm/listView');
 const { resolveRejectedSend } = require('../src/lib/rejectedElmRead');
@@ -117,6 +121,102 @@ const mergedAll = mergeC1FollowupIntoRejectedRows([], {
 });
 assert.strictEqual(mergedAll.length, 2);
 assert.strictEqual(mergedAll[0].ops_status, null);
+
+const ciGranted = 43482685;
+const czGranted = 1475;
+const czOpen13 = 2001;
+const mergedGrantedExcluded = mergeC1FollowupIntoRejectedRows([], {
+  states: [
+    { cz_solicitud_id: czGranted, ci: ciGranted, projected_estado: 13, updated_at: '2026-10-12T18:54:23Z' },
+    { cz_solicitud_id: czOpen13, ci: 88888888, projected_estado: 13, updated_at: '2026-07-01T12:00:00.000Z' },
+  ],
+  grantedCzIds: new Set([czGranted]),
+  solicitudesByCz: new Map([
+    [czGranted, { cz_id: czGranted, ci: ciGranted, nombre: 'S', apellido: 'F', solicitudes_estados_id: 13 }],
+    [czOpen13, { cz_id: czOpen13, ci: 88888888, nombre: 'A', apellido: 'B', solicitudes_estados_id: 13 }],
+  ]),
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [],
+  statusFilter: null,
+});
+assert.strictEqual(
+  mergedGrantedExcluded.some(function (r) {
+    return Number(r.ci) === ciGranted;
+  }),
+  false,
+  'ELM-granted C1 solicitud must not add a Rechazados row',
+);
+assert.strictEqual(mergedGrantedExcluded.length, 1);
+assert.strictEqual(mergedGrantedExcluded[0].ci, 88888888);
+
+const ciMixed = 55555555;
+const czMixedGranted = 3001;
+const czMixedOpen = 3002;
+const mergedMixedCi = mergeC1FollowupIntoRejectedRows([], {
+  states: [
+    { cz_solicitud_id: czMixedGranted, ci: ciMixed, projected_estado: 13, updated_at: '2026-10-01T00:00:00.000Z' },
+    { cz_solicitud_id: czMixedOpen, ci: ciMixed, projected_estado: 14, updated_at: '2026-10-02T00:00:00.000Z' },
+  ],
+  grantedCzIds: new Set([czMixedGranted]),
+  solicitudesByCz: new Map([
+    [czMixedGranted, { cz_id: czMixedGranted, ci: ciMixed, nombre: 'G', apellido: '1', solicitudes_estados_id: 13 }],
+    [czMixedOpen, { cz_id: czMixedOpen, ci: ciMixed, nombre: 'O', apellido: '2', solicitudes_estados_id: 14 }],
+  ]),
+  snapshotRows: [],
+  institutionRows: [],
+  outreachRows: [],
+  statusFilter: null,
+});
+assert.strictEqual(mergedMixedCi.length, 1);
+assert.strictEqual(mergedMixedCi[0].ci, ciMixed);
+assert.deepStrictEqual(
+  mergedMixedCi[0].rejected_solicitudes.map(function (r) {
+    return r.cz_solicitud_id;
+  }),
+  [czMixedOpen],
+);
+
+assert.deepStrictEqual(
+  filterC1StatesExcludingElmGranted(
+    [
+      { cz_solicitud_id: 12, projected_estado: 12 },
+      { cz_solicitud_id: 13, projected_estado: 13 },
+      { cz_solicitud_id: 14, projected_estado: 14 },
+      { cz_solicitud_id: 15, projected_estado: 15 },
+    ],
+    new Set([13]),
+  ).map(function (s) {
+    return s.cz_solicitud_id;
+  }),
+  [12, 14, 15],
+);
+
+const sol1504 = {
+  cz_id: 1504,
+  ci: 42423903,
+  nombre: 'Andrea',
+  apellido: 'Villar',
+  email: 'andrea.cantera25@gmail.com',
+  celular: '59892973500',
+  salario: '13000',
+  fecha_nacimiento: '1977-10-18',
+  relacion_laboral: 'OTR',
+};
+const cfg = readElmConfig({});
+assert.strictEqual(cfg.activityTypeMap.OTR, 'Otro');
+const elig1504 = evaluateElmEligibility({ czId: 1504, solicitud: sol1504, grantedRow: null, config: cfg });
+assert.ok(
+  !elig1504.blockers.some(function (b) {
+    return b.code === 'elm_activity_type_mapping_missing';
+  }),
+  'OTR must map to Otro',
+);
+const payload1504 = buildService1Payload({ czId: 1504, solicitud: sol1504, config: cfg });
+assert.strictEqual(payload1504.ok, false, 'other ELM format env still required for full S1 payload');
+if (!payload1504.ok) {
+  assert.notStrictEqual(payload1504.code, 'elm_activity_type_mapping_missing');
+}
 
 const mergedBcuFilter = mergeC1FollowupIntoRejectedRows([], {
   states: [{ cz_solicitud_id: czPending, ci: ciElm, projected_estado: 14, updated_at: '2026-07-01T11:00:00.000Z' }],
