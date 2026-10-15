@@ -71,6 +71,11 @@ const {
 const { sendRejectedToElm, retryRejectedElm } = require('../lib/rejectedElmSend');
 const { loadCiResendHold } = require('../lib/rejectedElmResendGuard');
 const { requireElmAction } = require('../middleware/requireElmAction');
+const {
+  isC1PendingListStatus,
+  loadC1PendingListRows,
+} = require('../lib/rejectedC1PendingRead');
+const { findUserById, userHasSectionPermission } = require('../services/dashboardUsers');
 
 const router = express.Router();
 
@@ -158,7 +163,57 @@ function sendWriteError(res, err) {
   return res.status(status).json({ error: message });
 }
 
+/** Whether this session may open Preaprobados / ELM Ops (read); resolve still requires admin. */
+async function resolveElmOpsNavigationAccess(req) {
+  if (req.dashboardAuthViaCron) {
+    return { can_open_preaprobados: true, can_resolve_elm_ops: false };
+  }
+  const userId = req.dashboardUserId;
+  if (!userId) {
+    return { can_open_preaprobados: false, can_resolve_elm_ops: false };
+  }
+  const user = await findUserById(userId);
+  if (!user || !user.active) {
+    return { can_open_preaprobados: false, can_resolve_elm_ops: false };
+  }
+  if (user.is_admin === true) {
+    return { can_open_preaprobados: true, can_resolve_elm_ops: true };
+  }
+  const canOpen = await userHasSectionPermission(userId, 'preaprobados');
+  return { can_open_preaprobados: canOpen, can_resolve_elm_ops: false };
+}
+
 router.get('/', async function getRechazadosList(req, res) {
+  const rawStatus = req.query && req.query.status;
+  if (isC1PendingListStatus(rawStatus)) {
+    try {
+      const [c1_pending_rows, elmOpsNav] = await Promise.all([
+        loadC1PendingListRows(supabase, {
+          listView: getElmListView(),
+        }),
+        resolveElmOpsNavigationAccess(req),
+      ]);
+      return res.json({
+        ok: true,
+        data: {
+          rows: [],
+          c1_pending_rows: c1_pending_rows,
+          mi_deuda_optin_available: false,
+          elm_available: true,
+          list_mode: 'c1_pending_elm',
+          elm_ops_navigation: elmOpsNav,
+        },
+      });
+    } catch (err) {
+      logger.error('GET /rechazados c1_pending_elm failed', {
+        error: err && err.message ? err.message : 'unknown',
+      });
+      return res.status(500).json({
+        error: err && err.message ? err.message : 'Internal error',
+      });
+    }
+  }
+
   const parsed = parseStatusQuery(req.query && req.query.status);
   if (!parsed.ok) {
     return res.status(400).json({ error: 'status inválido' });

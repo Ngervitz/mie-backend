@@ -130,6 +130,16 @@ function createElmOpsRepository(supabaseOverride) {
     return data || [];
   }
 
+  async function getReviewCaseById(id) {
+    const { data, error } = await db()
+      .from(REVIEW_TABLE)
+      .select(CASE_SELECT)
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw rpcError(REVIEW_TABLE + ' read', error);
+    return data || null;
+  }
+
   async function getUsersByIds(ids) {
     const list = uniq(ids);
     const out = new Map();
@@ -300,6 +310,7 @@ function createElmOpsRepository(supabaseOverride) {
     getPostbackEventsByIds,
     listBlockedByRelated,
     listReviewCases,
+    getReviewCaseById,
     getUsersByIds,
     listAssignableUsers,
     countOpenProcesses,

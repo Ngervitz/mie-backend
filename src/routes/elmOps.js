@@ -12,6 +12,7 @@
  *   GET  /processes                        active referrals + uncertain ELM results (CI blockers)
  *   POST /processes/:id/resolve            audited manual resolution (never sends, never GRANTED)
  *   GET  /review-cases?status=open|resolved
+ *   GET  /review-cases/:id                 single open/resolved case (deep-link)
  *   POST /review-cases/:id/assign          { expected_version, assignee_user_id|null }
  *   POST /review-cases/:id/triage          { expected_version, priority, due_at }
  *   POST /review-cases/:id/resolve         { expected_version, resolution_code, note,
@@ -105,6 +106,18 @@ function createElmOpsRouter(opts) {
       return res.json({ ok: true, items: items });
     } catch (err) {
       return fail(res, 'GET elm-ops/review-cases failed', err);
+    }
+  });
+
+  router.get('/review-cases/:id', async function (req, res) {
+    try {
+      const item = await svc().getReviewCase(req.params.id);
+      if (!item) {
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+      return res.json({ ok: true, item: item });
+    } catch (err) {
+      return fail(res, 'GET elm-ops/review-cases/:id failed', err);
     }
   });
 

@@ -688,14 +688,17 @@
         '</details>';
 
       html +=
-        '<details class="elm-ops-section"' + (state.cases.length ? ' open' : '') + '>' +
+        '<details class="elm-ops-section" id="elm-ops-review-cases"' + (state.cases.length ? ' open' : '') + '>' +
         '<summary>Revisión manual ELM (' + state.cases.length + ')</summary>' +
         (state.cases.length
           ? '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Motivo</th><th>Ingreso</th>' +
             '<th>Antigüedad</th><th>Estado ELM</th><th>Responsable</th><th>Prioridad</th><th>Vence</th><th></th></tr></thead><tbody>' +
             state.cases.map(function (c) {
               let row = caseRowHtml(c, fmtDate, state.canAct);
-              if (state.openForm && state.openForm.id === c.id) {
+              if (
+                state.openForm &&
+                String(state.openForm.id) === String(c.id)
+              ) {
                 const f = state.openForm.kind;
                 const form =
                   f === 'assign' ? assignFormHtml(c, state.assignees) :
@@ -744,7 +747,9 @@
       return state.processes.find(function (p) { return p.process_id === id; });
     }
     function findCase(id) {
-      return state.cases.find(function (c) { return c.id === id; });
+      return state.cases.find(function (c) {
+        return String(c.id) === String(id);
+      });
     }
 
     async function submit(kind, form) {
@@ -826,7 +831,36 @@
       });
     });
 
-    return { load: load };
+    async function openReviewCase(caseId) {
+      const id = caseId == null ? '' : String(caseId).trim();
+      if (!id) return;
+      state.message = null;
+      state.error = null;
+      await load();
+      let c = findCase(id);
+      if (!c) {
+        const one = await request('GET', '/review-cases/' + encodeURIComponent(id));
+        if (one.status === 200 && one.data && one.data.item) {
+          const item = one.data.item;
+          if (!findCase(item.id)) state.cases.push(item);
+          c = item;
+        }
+      }
+      if (!c) {
+        state.error = 'No se encontró el caso de revisión en ELM Ops.';
+        render();
+        return;
+      }
+      state.openForm = { kind: 'resolve-case', id: String(c.id) };
+      render();
+      const section = root.querySelector('#elm-ops-review-cases');
+      if (section) {
+        section.open = true;
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    return { load: load, openReviewCase: openReviewCase };
   }
 
   return {

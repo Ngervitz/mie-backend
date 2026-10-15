@@ -1777,6 +1777,13 @@
         activate(name);
       };
 
+      window.__dashboardCanAccess = function (sectionKey) {
+        return canAccess(sectionKey);
+      };
+      window.__dashboardIsAdmin = function () {
+        return isAdminUser === true;
+      };
+
       tabs.forEach(function (btn) {
         btn.addEventListener('click', function () {
           activate(btn.getAttribute('data-dashboard-tab'));

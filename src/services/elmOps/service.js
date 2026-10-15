@@ -298,6 +298,25 @@ function createElmOpsService(deps) {
     });
   }
 
+  async function getReviewCase(caseId) {
+    const row = await repo.getReviewCaseById(caseId);
+    if (!row) return null;
+    const nowMs = now();
+    const [processes, users] = await Promise.all([
+      repo.getProcessesByIds(row.elm_process_id ? [row.elm_process_id] : []),
+      repo.getUsersByIds(
+        [row.assigned_to, row.resolved_by].filter(function (id) {
+          return id != null && id !== '';
+        }),
+      ),
+    ]);
+    return reviewCaseView(row, {
+      nowMs: nowMs,
+      process: row.elm_process_id ? processes.get(row.elm_process_id) || null : null,
+      users: users,
+    });
+  }
+
   async function summary() {
     const [openProcesses, alerts] = await Promise.all([
       repo.countOpenProcesses(),
@@ -565,6 +584,7 @@ function createElmOpsService(deps) {
   return {
     listOpenProcesses,
     listReviewCases,
+    getReviewCase,
     summary,
     resolveProcess,
     assignReviewCase,

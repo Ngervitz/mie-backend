@@ -21,6 +21,7 @@
 
   var FILTERS = Object.freeze([
     { key: null, label: 'Todos' },
+    { key: 'c1_pending_elm', label: 'Pendientes ELM' },
     { key: 'bcu_pending', label: 'BCU pendiente' },
     { key: 'retry_eligible', label: 'Elegible retry' },
     { key: 'reconsultable', label: 'Reconsultable' },

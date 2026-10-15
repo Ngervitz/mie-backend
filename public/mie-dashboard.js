@@ -14691,6 +14691,8 @@ init();
 
   const API = typeof API_BASE === 'string' ? API_BASE : '';
 
+  const C1_PENDING_FILTER = 'c1_pending_elm';
+
   const elmResolver =
     typeof ElmOps !== 'undefined' && ElmOps.createProcessResolver
       ? ElmOps.createProcessResolver({
@@ -14708,6 +14710,8 @@ init();
     statusFilter: null,
     loading: false,
     rows: [],
+    c1PendingRows: [],
+    elmOpsNav: { can_open_preaprobados: false, can_resolve_elm_ops: false },
     listError: null,
     detail: null,
     detailLoading: false,
@@ -15026,6 +15030,124 @@ init();
     }).join('');
   }
 
+  function c1PendingReasonLabel(code) {
+    if (window.ElmOps && typeof window.ElmOps.reasonLabel === 'function') {
+      return window.ElmOps.reasonLabel(code);
+    }
+    return code == null || code === '' ? '—' : String(code);
+  }
+
+  function canOpenElmOpsFromRechazados() {
+    if (typeof window.__dashboardCanAccess === 'function') {
+      return window.__dashboardCanAccess('preaprobados') === true;
+    }
+    return state.elmOpsNav.can_open_preaprobados === true;
+  }
+
+  function c1PendingElmOpsActionCell(row) {
+    const hasCase =
+      row.action &&
+      row.action.kind === 'open_elm_ops' &&
+      row.action.review_case_id;
+    if (!hasCase) {
+      return '<span class="rechazados-muted">—</span>';
+    }
+    if (!canOpenElmOpsFromRechazados()) {
+      return (
+        '<span class="rechazados-muted" title="Requiere permiso de sección Preaprobados">' +
+        'Requiere Preaprobados</span>'
+      );
+    }
+    const resolveHint =
+      state.elmOpsNav.can_resolve_elm_ops === false &&
+      typeof window.__dashboardIsAdmin === 'function' &&
+      window.__dashboardIsAdmin() !== true
+        ? ' title="Podés ver el caso en ELM Ops; resolver requiere administrador"'
+        : '';
+    return (
+      '<button type="button" class="btn rechazados-cell-btn" data-action="open-elm-ops" data-review-case-id="' +
+      escapeHtml(String(row.action.review_case_id)) +
+      '"' +
+      resolveHint +
+      '>Gestionar en ELM Ops</button>'
+    );
+  }
+
+  function renderC1PendingList() {
+    const list = state.c1PendingRows || [];
+    if (!list.length) {
+      resultsEl.innerHTML =
+        '<div class="mcl-empty">Sin solicitudes C1 pendientes en ELM</div>';
+      return;
+    }
+    const body = list
+      .map(function (row) {
+        const name = H.formatPersonName(row.nombre, row.apellido);
+        const dateCell = H.formatRejectedAtDateCell(row.pending_at);
+        const elmLabel =
+          row.elm && row.elm.label
+            ? row.elm.label
+            : row.elm && row.elm.state
+              ? String(row.elm.state)
+              : '—';
+        const elmDetail =
+          row.elm && row.elm.detail ? String(row.elm.detail) : '';
+        const action = c1PendingElmOpsActionCell(row);
+        return (
+          '<tr>' +
+          '<td class="rechazados-col-ci">' +
+          escapeHtml(String(row.ci)) +
+          '</td>' +
+          '<td class="rechazados-col-name" title="' +
+          escapeHtml(name) +
+          '"><span class="rechazados-name-text">' +
+          escapeHtml(name) +
+          '</span></td>' +
+          '<td class="rechazados-col-date"' +
+          (dateCell.title
+            ? ' title="' + escapeHtml(dateCell.title) + '"'
+            : '') +
+          '>' +
+          escapeHtml(dateCell.text) +
+          '</td>' +
+          '<td class="rechazados-col-ci">' +
+          escapeHtml(String(row.cz_solicitud_id)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(row.projected_estado_label || '—') +
+          '</td>' +
+          '<td class="rechazados-col-elm" title="' +
+          escapeHtml(elmDetail) +
+          '">' +
+          escapeHtml(elmLabel) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(c1PendingReasonLabel(row.review_reason_code)) +
+          '</td>' +
+          '<td>' +
+          action +
+          '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    resultsEl.innerHTML =
+      '<p class="rechazados-muted rechazados-c1-pending-hint">Solicitudes C1 pendientes (estados proyectados 12, 14 o 15). No incluye derivaciones activas (13). No forman parte del universo de rechazados (estado 3) ni reciben encuesta desde esta bandeja.</p>' +
+      '<div class="table-wrap"><table class="ga4-table rechazados-table rechazados-c1-pending-table">' +
+      '<thead><tr>' +
+      '<th class="rechazados-col-ci">CI</th>' +
+      '<th class="rechazados-col-name">Nombre</th>' +
+      '<th class="rechazados-col-date">Fecha</th>' +
+      '<th>Solicitud CZ</th>' +
+      '<th>Estado CZ (proyectado)</th>' +
+      '<th class="rechazados-col-elm">Estado ELM</th>' +
+      '<th>Motivo revisión</th>' +
+      '<th>Acción</th>' +
+      '</tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>';
+  }
+
   function renderList() {
     renderFilters();
     if (state.loading) {
@@ -15039,6 +15161,11 @@ init();
         '</div>';
       return;
     }
+    if (state.statusFilter === C1_PENDING_FILTER) {
+      renderC1PendingList();
+      return;
+    }
+    state.c1PendingRows = [];
     if (!state.rows.length) {
       resultsEl.innerHTML =
         '<div class="mcl-empty">Sin resultados</div>';
@@ -16769,6 +16896,7 @@ init();
       });
       if (!res.ok) {
         state.rows = [];
+        state.c1PendingRows = [];
         state.listError =
           (data && data.error) || 'No se pudo cargar el listado';
         state.loading = false;
@@ -16776,16 +16904,23 @@ init();
         renderList();
         return;
       }
-      const rows =
-        data && data.data && Array.isArray(data.data.rows)
-          ? data.data.rows
-          : [];
+      const payload = data && data.data ? data.data : {};
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
       state.rows = rows;
+      state.c1PendingRows = Array.isArray(payload.c1_pending_rows)
+        ? payload.c1_pending_rows
+        : [];
+      state.elmOpsNav =
+        payload.elm_ops_navigation &&
+        typeof payload.elm_ops_navigation === 'object'
+          ? payload.elm_ops_navigation
+          : state.elmOpsNav;
       state.loading = false;
-      setStatus(
-        rows.length ? String(rows.length) + ' resultado(s)' : '',
-        false,
-      );
+      const count =
+        state.statusFilter === C1_PENDING_FILTER
+          ? state.c1PendingRows.length
+          : rows.length;
+      setStatus(count ? String(count) + ' resultado(s)' : '', false);
       try {
         renderList();
       } catch (renderErr) {
@@ -17451,6 +17586,17 @@ init();
       : null;
     if (!btn || btn.disabled) return;
     const action = btn.getAttribute('data-action');
+    if (action === 'open-elm-ops') {
+      const caseId = btn.getAttribute('data-review-case-id');
+      if (!canOpenElmOpsFromRechazados()) {
+        setStatus('Requiere permiso de sección Preaprobados para ELM Ops.', true);
+        return;
+      }
+      if (caseId && typeof window.__openElmOpsReviewCase === 'function') {
+        window.__openElmOpsReviewCase(caseId);
+      }
+      return;
+    }
     const ci = btn.getAttribute('data-ci');
     if (!ci) return;
     if (action === 'view-ci') {
@@ -19155,15 +19301,40 @@ init();
     });
   }
 
+  const elmOpsRoot = document.getElementById('elm-ops-root');
+  const elmOps =
+    elmOpsRoot && typeof ElmOps !== 'undefined'
+      ? ElmOps.mount({ root: elmOpsRoot, api: API, fmtDate: fmtDate })
+      : null;
+
   if (reloadBtn) {
     reloadBtn.addEventListener('click', function () {
       state.offset = 0;
       loadList();
+      if (elmOps) elmOps.load();
     });
   }
 
   window.__openPreaprobados = function () {
     renderFilters();
     loadList();
+    if (elmOps) elmOps.load();
+  };
+
+  window.__openElmOpsReviewCase = function (caseId) {
+    if (
+      typeof window.__dashboardCanAccess === 'function' &&
+      !window.__dashboardCanAccess('preaprobados')
+    ) {
+      return;
+    }
+    if (typeof window.__activateDashboardTab === 'function') {
+      window.__activateDashboardTab('preaprobados');
+    }
+    if (elmOps && typeof elmOps.openReviewCase === 'function') {
+      elmOps.openReviewCase(caseId).catch(function () {
+        /* ignore */
+      });
+    }
   };
 })();
