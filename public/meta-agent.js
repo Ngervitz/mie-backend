@@ -42,6 +42,10 @@
     error: null,
     tab: 'campaigns',
     lastUpdate: null,
+    /** today | yesterday | 7d | 30d | custom — America/Montevideo calendar dates */
+    periodPreset: '7d',
+    customFrom: '',
+    customTo: '',
     configMissing: false,
     // Read-only economic calendar card; null fields render "Sin datos".
     nextEvents: { nextHoliday: null, nextBpsPayment: null },
@@ -78,6 +82,310 @@
   function fmtN(val) {
     var n = parseFloat(val);
     return isNaN(n) ? null : n;
+  }
+
+  function shiftIsoDate(dateStr, deltaDays) {
+    var parts = String(dateStr).split('-').map(Number);
+    var dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    dt.setUTCDate(dt.getUTCDate() + deltaDays);
+    return dt.toISOString().split('T')[0];
+  }
+
+  function calendarDateInZone(now) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: ACCOUNT_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now || new Date());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isValidDateOnly(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+  }
+
+  /**
+   * Resolve inclusive [from, to] metric_date bounds for the selected preset (UY).
+   */
+  function resolvePeriodRange(preset, customFrom, customTo, now) {
+    var today = calendarDateInZone(now);
+    if (!today) {
+      return { from: null, to: null, preset: preset || '7d' };
+    }
+    var p = preset || '7d';
+    var from = today;
+    var to = today;
+    if (p === 'today') {
+      from = today;
+      to = today;
+    } else if (p === 'yesterday') {
+      from = shiftIsoDate(today, -1);
+      to = from;
+    } else if (p === '30d') {
+      from = shiftIsoDate(today, -29);
+      to = today;
+    } else if (p === 'custom') {
+      var cf = isValidDateOnly(customFrom) ? String(customFrom) : null;
+      var ct = isValidDateOnly(customTo) ? String(customTo) : null;
+      if (cf && ct) {
+        from = cf <= ct ? cf : ct;
+        to = cf <= ct ? ct : cf;
+      } else {
+        from = shiftIsoDate(today, -6);
+        to = today;
+        p = '7d';
+      }
+    } else {
+      from = shiftIsoDate(today, -6);
+      to = today;
+      p = '7d';
+    }
+    return { from: from, to: to, preset: p };
+  }
+
+  function enumerateInclusiveDates(from, to) {
+    var out = [];
+    if (!from || !to || from > to) return out;
+    var cur = from;
+    while (cur <= to) {
+      out.push(cur);
+      cur = shiftIsoDate(cur, 1);
+    }
+    return out;
+  }
+
+  function filterRowsByMetricDate(rows, from, to) {
+    if (!from || !to) return rows || [];
+    return (rows || []).filter(function (row) {
+      var d = row.metric_date || '';
+      return d && d >= from && d <= to;
+    });
+  }
+
+  /** DISTINCT ON (campaign_id, metric_date) — keep newest created_at per key. */
+  function dedupeRowsByCampaignDate(rows) {
+    var byKey = {};
+    (rows || []).forEach(function (row) {
+      var cid =
+        row.campaign_id != null && String(row.campaign_id) !== ''
+          ? String(row.campaign_id)
+          : String(row.campaign_name || row.campana || '');
+      var d = row.metric_date || '';
+      var key = cid + '\u0000' + d;
+      var created = row.created_at != null ? String(row.created_at) : '';
+      if (!byKey[key] || created > (byKey[key].created_at || '')) {
+        byKey[key] = row;
+      }
+    });
+    return Object.keys(byKey).map(function (k) {
+      return byKey[k];
+    });
+  }
+
+  function metaLeadsFromRow(row) {
+    if (!row) return null;
+    if (row.meta_leads !== '' && row.meta_leads != null) {
+      var fromCol = fmtN(row.meta_leads);
+      if (fromCol !== null) return fromCol;
+    }
+    return metaLeadCountFromInsight(row.raw_json);
+  }
+
+  function aggregateAccountPeriod(rows) {
+    var spend = 0;
+    var impressions = 0;
+    var clicks = 0;
+    var leads = 0;
+    var hasSpend = false;
+    var hasImpressions = false;
+    var hasClicks = false;
+    var hasLeads = false;
+
+    (rows || []).forEach(function (row) {
+      var s = fmtN(row.spend != null ? row.spend : row.gasto);
+      var i = fmtN(row.impressions);
+      var c = fmtN(row.clicks);
+      var l = metaLeadsFromRow(row);
+      if (s !== null) {
+        spend += s;
+        hasSpend = true;
+      }
+      if (i !== null) {
+        impressions += i;
+        hasImpressions = true;
+      }
+      if (c !== null) {
+        clicks += c;
+        hasClicks = true;
+      }
+      if (l !== null) {
+        leads += l;
+        hasLeads = true;
+      }
+    });
+
+    var spendOut = hasSpend ? spend : null;
+    var impressionsOut = hasImpressions ? impressions : null;
+    var clicksOut = hasClicks ? clicks : null;
+    var leadsOut = hasLeads ? leads : null;
+
+    var ctr =
+      impressionsOut !== null && impressionsOut > 0 && clicksOut !== null
+        ? (clicksOut / impressionsOut) * 100
+        : null;
+    var cpc =
+      clicksOut !== null && clicksOut > 0 && spendOut !== null
+        ? spendOut / clicksOut
+        : null;
+    var cpm =
+      impressionsOut !== null && impressionsOut > 0 && spendOut !== null
+        ? (spendOut / impressionsOut) * 1000
+        : null;
+    var cpl =
+      leadsOut !== null && leadsOut > 0 && spendOut !== null
+        ? spendOut / leadsOut
+        : null;
+
+    return {
+      spend: spendOut,
+      impressions: impressionsOut,
+      clicks: clicksOut,
+      leads: leadsOut,
+      ctr: ctr,
+      cpc: cpc,
+      cpm: cpm,
+      cpl: cpl,
+      reach: null,
+      frequency: null,
+      qualityRanking: null,
+      engagementRanking: null,
+      conversionRanking: null,
+      date: null,
+    };
+  }
+
+  function buildCampListByCampaignId(rows) {
+    var campaigns = {};
+    (rows || []).forEach(function (row) {
+      var cid =
+        row.campaign_id != null && String(row.campaign_id) !== ''
+          ? String(row.campaign_id)
+          : '__unknown__';
+      if (!campaigns[cid]) {
+        campaigns[cid] = {
+          campaign_id: cid === '__unknown__' ? null : cid,
+          name: findVal(row, 'campana', 'campaign') || 'Sin nombre',
+          rowDays: {},
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          leads: 0,
+          hasSpend: false,
+          hasImpressions: false,
+          hasClicks: false,
+          hasLeads: false,
+        };
+      }
+      var c = campaigns[cid];
+      var d = row.metric_date || '';
+      if (d) c.rowDays[d] = true;
+      var s = fmtN(row.spend != null ? row.spend : row.gasto);
+      var i = fmtN(row.impressions);
+      var cl = fmtN(row.clicks);
+      var l = metaLeadsFromRow(row);
+      if (s !== null) {
+        c.spend += s;
+        c.hasSpend = true;
+      }
+      if (i !== null) {
+        c.impressions += i;
+        c.hasImpressions = true;
+      }
+      if (cl !== null) {
+        c.clicks += cl;
+        c.hasClicks = true;
+      }
+      if (l !== null) {
+        c.leads += l;
+        c.hasLeads = true;
+      }
+    });
+
+    return Object.keys(campaigns).map(function (key) {
+      var c = campaigns[key];
+      var gasto = c.hasSpend ? c.spend : null;
+      var impressions = c.hasImpressions ? c.impressions : null;
+      var clicks = c.hasClicks ? c.clicks : null;
+      var conversiones = c.hasLeads ? c.leads : null;
+      var ctr =
+        impressions !== null && impressions > 0 && clicks !== null
+          ? (clicks / impressions) * 100
+          : null;
+      var cpc =
+        clicks !== null && clicks > 0 && gasto !== null ? gasto / clicks : null;
+      var cpl =
+        conversiones !== null && conversiones > 0 && gasto !== null
+          ? gasto / conversiones
+          : null;
+      var dias = Object.keys(c.rowDays).length;
+      return {
+        campaign_id: c.campaign_id,
+        name: c.name,
+        dias: dias,
+        gasto: gasto,
+        conversiones: conversiones,
+        cpl: cpl,
+        cplSinConversiones: !(conversiones !== null && conversiones > 0),
+        ctr: ctr,
+        cpc: cpc,
+        frecuencia: null,
+      };
+    });
+  }
+
+  function computeDatasetDateBounds(rows) {
+    var minD = null;
+    var maxD = null;
+    (rows || []).forEach(function (row) {
+      var d = row.metric_date || '';
+      if (!d) return;
+      if (!minD || d < minD) minD = d;
+      if (!maxD || d > maxD) maxD = d;
+    });
+    return { minDate: minD, maxDate: maxD };
+  }
+
+  function computeCoverage(filteredRows, range, allRows) {
+    var from = range.from;
+    var to = range.to;
+    var expectedDays = enumerateInclusiveDates(from, to);
+    var datesWithAnyRow = {};
+    (filteredRows || []).forEach(function (row) {
+      var d = row.metric_date || '';
+      if (d) datesWithAnyRow[d] = true;
+    });
+    var present = expectedDays.filter(function (d) {
+      return !!datesWithAnyRow[d];
+    });
+    var bounds = computeDatasetDateBounds(allRows);
+    var today = calendarDateInZone();
+    var includesPartialToday =
+      !!today && to === today && expectedDays.indexOf(today) >= 0;
+    return {
+      from: from,
+      to: to,
+      expectedDayCount: expectedDays.length,
+      presentDayCount: present.length,
+      missingDayCount: expectedDays.length - present.length,
+      datasetMinDate: bounds.minDate,
+      datasetMaxDate: bounds.maxDate,
+      includesPartialToday: includesPartialToday,
+      isComplete: present.length === expectedDays.length && !includesPartialToday,
+    };
   }
 
   function resolveDatasourceConfig() {
@@ -163,6 +471,8 @@
     var spendStr = toCsvCompatString(row.spend);
 
     return {
+      campaign_id:
+        row.campaign_id != null ? toCsvCompatString(row.campaign_id) : '',
       campaign_name: name,
       campana: name,
       cpl: '',
@@ -178,19 +488,16 @@
       impressions: toCsvCompatString(row.impressions),
       clicks: toCsvCompatString(row.clicks),
       metric_date: toCsvCompatString(row.metric_date),
+      created_at: toCsvCompatString(row.created_at),
       raw_json:
         row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null,
     };
   }
 
-  function lookbackStartDateIso() {
-    var d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - METRIC_LOOKBACK_DAYS);
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1).padStart(2, '0');
-    var day = String(d.getDate()).padStart(2, '0');
-    return y + '-' + m + '-' + day;
+  function lookbackStartDateIso(now) {
+    var today = calendarDateInZone(now);
+    if (!today) return null;
+    return shiftIsoDate(today, -METRIC_LOOKBACK_DAYS);
   }
 
   /**
@@ -294,54 +601,9 @@
     return arr.length ? arr.reduce(function (a, b) { return a + b; }, 0) : null;
   }
 
-  function buildCampList(data) {
-    var campaigns = {};
-    data.forEach(function (row) {
-      var name = findVal(row, 'campana', 'campaign') || 'Sin nombre';
-      if (!campaigns[name]) {
-        campaigns[name] = {
-          name: name,
-          cpl: [],
-          ctr: [],
-          cpc: [],
-          frecuencia: [],
-          gasto: [],
-          conversiones: [],
-          dias: 0,
-        };
-      }
-      campaigns[name].dias++;
-      function add(arr) {
-        var keys = Array.prototype.slice.call(arguments, 1);
-        var v = findVal.apply(null, [row].concat(keys));
-        if (v !== null && !isNaN(v)) arr.push(v);
-      }
-      add(campaigns[name].cpl, 'cpl');
-      add(campaigns[name].ctr, 'ctr');
-      add(campaigns[name].cpc, 'cpc');
-      add(campaigns[name].frecuencia, 'frecuencia', 'frequency');
-      add(campaigns[name].gasto, 'gasto', 'spend');
-      add(campaigns[name].conversiones, 'conversiones', 'conversions');
-    });
-
-    return Object.values(campaigns).map(function (c) {
-      return {
-        name: c.name,
-        dias: c.dias,
-        cpl: avg(c.cpl),
-        ctr: avg(c.ctr),
-        cpc: avg(c.cpc),
-        frecuencia: avg(c.frecuencia),
-        gasto: sum(c.gasto),
-        conversiones: sum(c.conversiones),
-      };
-    });
-  }
-
-  /** Alert thresholds (identical to App.jsx): frecuencia > 4.5 | cpl > 1.5 | ctr < 1 */
+  /** Alert thresholds: cpl > 1.5 | ctr < 1 (frequency omitted for multi-day ranges). */
   function campaignHasAlert(c) {
     return (
-      (c.frecuencia !== null && c.frecuencia > 4.5) ||
       (c.cpl !== null && c.cpl > 1.5) ||
       (c.ctr !== null && c.ctr < 1)
     );
@@ -400,7 +662,7 @@
       if (s !== null) spend = (spend || 0) + s;
       if (i !== null) impressions = (impressions || 0) + i;
       if (c !== null) clicks = (clicks || 0) + c;
-      var leadN = fmtN(row.meta_leads);
+      var leadN = metaLeadsFromRow(row);
       if (leadN !== null) leads = (leads || 0) + leadN;
 
       var raw = row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null;
@@ -451,22 +713,41 @@
     };
   }
 
-  function computeDerived(data) {
-    var campList = buildCampList(data);
-    var totalGasto = campList.reduce(function (a, c) { return a + (c.gasto || 0); }, 0);
-    var totalConv = campList.reduce(function (a, c) { return a + (c.conversiones || 0); }, 0);
-    var cplVals = campList.filter(function (c) { return c.cpl !== null; });
-    var avgCPL = cplVals.length
-      ? cplVals.reduce(function (a, c) { return a + c.cpl; }, 0) / cplVals.length
-      : null;
+  function computeDerived(allData) {
+    var range = resolvePeriodRange(
+      state.periodPreset,
+      state.customFrom,
+      state.customTo,
+    );
+    var filtered = filterRowsByMetricDate(allData || [], range.from, range.to);
+    var deduped = dedupeRowsByCampaignDate(filtered);
+    var campList = buildCampListByCampaignId(deduped);
+    var period = aggregateAccountPeriod(deduped);
+    var coverage = computeCoverage(deduped, range, allData || []);
+    var totalGasto =
+      period.spend !== null && period.spend !== undefined ? period.spend : 0;
+    var totalConv =
+      period.leads !== null && period.leads !== undefined ? period.leads : 0;
+    var avgCPL = period.cpl;
     var alertas = campList.filter(campaignHasAlert);
+    var singleDay = range.from === range.to;
+    var latest = singleDay
+      ? computeLatestDateStats(deduped)
+      : period;
+    if (singleDay && latest.date) {
+      period.date = latest.date;
+    }
     return {
       campList: campList,
       totalGasto: totalGasto,
       totalConv: totalConv,
       avgCPL: avgCPL,
       alertas: alertas,
-      latest: computeLatestDateStats(data),
+      latest: latest,
+      period: period,
+      range: range,
+      coverage: coverage,
+      filteredRows: deduped,
     };
   }
 
@@ -1357,86 +1638,179 @@
     };
   }
 
+  function renderPeriodBar(derived) {
+    var range = derived.range || {};
+    var cov = derived.coverage || {};
+    var rangeLabel =
+      formatRangeEs(range.from, range.to) ||
+      (range.from && range.to
+        ? range.from + ' – ' + range.to
+        : 'Período no definido');
+    var datasetLine = '—';
+    if (cov.datasetMinDate && cov.datasetMaxDate) {
+      datasetLine =
+        formatRangeEs(cov.datasetMinDate, cov.datasetMaxDate) ||
+        cov.datasetMinDate + ' – ' + cov.datasetMaxDate;
+    }
+    var syncLine =
+      cov.expectedDayCount != null
+        ? cov.presentDayCount +
+          '/' +
+          cov.expectedDayCount +
+          ' días con datos Meta en el período'
+        : '';
+    var warnClass =
+      cov.missingDayCount > 0 || cov.includesPartialToday
+        ? ' ma-coverage-warn'
+        : '';
+    var warnBits = [];
+    if (cov.missingDayCount > 0) {
+      warnBits.push(
+        'Faltan ' +
+          cov.missingDayCount +
+          ' día(s) de sync dentro del período seleccionado',
+      );
+    }
+    if (cov.includesPartialToday) {
+      warnBits.push('Hoy puede estar incompleto hasta el próximo sync');
+    }
+    if (!cov.datasetMinDate) {
+      warnBits.push('Sin filas en own_ad_metrics para este rango cargado');
+    }
+
+    var preset = state.periodPreset || '7d';
+    function btn(id, label) {
+      var active = preset === id ? ' active' : '';
+      return (
+        '<button type="button" class="ma-period-btn' +
+        active +
+        '" data-ma-period="' +
+        id +
+        '">' +
+        escapeHtml(label) +
+        '</button>'
+      );
+    }
+
+    return (
+      '<div class="ma-period-bar">' +
+      '<div class="ma-period-presets">' +
+      btn('today', 'Hoy') +
+      btn('yesterday', 'Ayer') +
+      btn('7d', 'Últimos 7 días') +
+      btn('30d', 'Últimos 30 días') +
+      btn('custom', 'Personalizado') +
+      '</div>' +
+      (preset === 'custom'
+        ? '<div class="ma-period-custom">' +
+          '<label>Desde <input type="date" class="ma-period-input" data-ma-period-from value="' +
+          escapeHtml(state.customFrom || range.from || '') +
+          '" /></label>' +
+          '<label>Hasta <input type="date" class="ma-period-input" data-ma-period-to value="' +
+          escapeHtml(state.customTo || range.to || '') +
+          '" /></label>' +
+          '<button type="button" class="ma-btn ma-period-apply" data-ma-action="apply-period">Aplicar</button>' +
+          '</div>'
+        : '') +
+      '<div class="ma-period-summary">' +
+      '<strong>Período:</strong> ' +
+      escapeHtml(rangeLabel) +
+      ' <span class="ma-period-tz">(America/Montevideo)</span>' +
+      '</div>' +
+      '<div class="ma-period-summary">' +
+      '<strong>Datos cargados (own_ad_metrics):</strong> ' +
+      escapeHtml(datasetLine) +
+      (syncLine ? ' · ' + escapeHtml(syncLine) : '') +
+      '</div>' +
+      (warnBits.length
+        ? '<div class="ma-coverage-banner' +
+          warnClass +
+          '">' +
+          escapeHtml(warnBits.join(' · ')) +
+          '</div>'
+        : '') +
+      '<p class="ma-period-note">Conversiones = evento Meta form_step_3 (pixel). No son solicitudes Credizona.</p>' +
+      '</div>'
+    );
+  }
+
   function renderKpis(derived, data) {
     var avgCPL = derived.avgCPL;
     var alertas = derived.alertas;
-    var latest = derived.latest || {};
-    var partialDay = isPartialMetricDay(latest.date);
-    var latestSub = !latest.date
-      ? 'sin datos'
-      : partialDay
-        ? latest.date + ' · día en curso'
-        : latest.date;
-    var trends = partialDay
-      ? {
-          spend: null,
-          conversions: null,
-          cpl: null,
-          ctr: null,
-          cpc: null,
-          cpm: null,
-        }
-      : trendsFromData(data, latest);
+    var period = derived.period || derived.latest || {};
+    var range = derived.range || {};
+    var singleDay = range.from && range.to && range.from === range.to;
+    var partialDay =
+      singleDay && isPartialMetricDay(period.date || range.to);
+    var periodSub =
+      formatRangeEs(range.from, range.to) ||
+      (range.from && range.to ? range.from + ' – ' + range.to : 'sin datos');
+    if (partialDay) periodSub += ' · día en curso';
+    var trends =
+      singleDay && !partialDay
+        ? trendsFromData(data, period)
+        : {
+            spend: null,
+            conversions: null,
+            cpl: null,
+            ctr: null,
+            cpc: null,
+            cpm: null,
+          };
     var metaLeadCount =
-      latest.leads !== null && latest.leads !== undefined ? latest.leads : null;
-    var metaCpl =
-      metaLeadCount !== null &&
-      metaLeadCount > 0 &&
-      latest.spend !== null &&
-      latest.spend !== undefined
-        ? latest.spend / metaLeadCount
-        : null;
+      period.leads !== null && period.leads !== undefined ? period.leads : null;
+    var metaCpl = avgCPL;
+    var rankingDay = singleDay ? period : computeLatestDateStats(data || []);
     var ev = state.nextEvents || {};
 
     var performance = [
       {
         label: 'GASTO',
         val:
-          latest.spend !== null && latest.spend !== undefined
-            ? '$' + fmt(latest.spend, 0)
+          period.spend !== null && period.spend !== undefined
+            ? '$' + fmt(period.spend, 2)
             : '—',
-        sub: latestSub,
+        sub: periodSub,
         color: '#3b82f6',
         icon: '💰',
         trend: trends.spend,
       },
       {
-        label: 'CONVERSIONES',
-        val: derived.totalConv ? fmt(derived.totalConv, 0) : '—',
-        sub: derived.totalConv ? 'total acumulado' : 'sin datos',
+        label: 'CONVERSIONES META',
+        val:
+          metaLeadCount !== null && metaLeadCount > 0
+            ? fmt(metaLeadCount, 0)
+            : '—',
+        sub: 'form_step_3 reportadas por Meta',
         color: '#22c55e',
         icon: '🎯',
         trend: trends.conversions,
       },
       {
-        label: 'CPL PROMEDIO',
-        val: avgCPL !== null ? '$' + fmt(avgCPL) : '—',
+        label: 'CPL META',
+        val:
+          metaCpl !== null
+            ? '$' + fmt(metaCpl)
+            : metaLeadCount === 0 || metaLeadCount === null
+              ? 'Sin conversiones'
+              : '—',
         sub:
-          avgCPL === null
-            ? 'sin datos'
-            : avgCPL <= 1
-              ? '✓ Bajo objetivo'
-              : '⚠ Sobre objetivo',
-        color: avgCPL !== null && avgCPL <= 1 ? '#22c55e' : '#f59e0b',
+          metaCpl !== null
+            ? metaLeadCount > 0
+              ? 'gasto / conversiones Meta'
+              : 'Sin conversiones'
+            : 'Sin conversiones Meta en el período',
+        color: metaCpl !== null && metaCpl <= 1 ? '#22c55e' : '#f59e0b',
         icon: '📉',
         trend: trends.cpl,
       },
       {
-        label: 'CPL META',
-        val: metaCpl !== null ? '$' + fmt(metaCpl) : '—',
-        sub:
-          (metaCpl !== null ? latest.date : 'Sin datos') +
-          (partialDay ? ' · día en curso' : ''),
-        color: '#22c55e',
-        icon: '💵',
-      },
-      {
         label: 'CTR',
         val:
-          latest.ctr !== null && latest.ctr !== undefined
-            ? fmt(latest.ctr) + '%'
+          period.ctr !== null && period.ctr !== undefined
+            ? fmt(period.ctr) + '%'
             : '—',
-        sub: latestSub,
+        sub: periodSub,
         color: '#3b82f6',
         icon: '👁',
         trend: trends.ctr,
@@ -1444,10 +1818,10 @@
       {
         label: 'CPC',
         val:
-          latest.cpc !== null && latest.cpc !== undefined
-            ? '$' + fmt(latest.cpc)
+          period.cpc !== null && period.cpc !== undefined
+            ? '$' + fmt(period.cpc)
             : '—',
-        sub: latestSub,
+        sub: periodSub,
         color: '#8b5cf6',
         icon: '🖱',
         trend: trends.cpc,
@@ -1455,10 +1829,10 @@
       {
         label: 'CPM',
         val:
-          latest.cpm !== null && latest.cpm !== undefined
-            ? '$' + fmt(latest.cpm)
+          period.cpm !== null && period.cpm !== undefined
+            ? '$' + fmt(period.cpm)
             : '—',
-        sub: latestSub,
+        sub: periodSub,
         color: '#f59e0b',
         icon: '📡',
         trend: trends.cpm,
@@ -1466,37 +1840,35 @@
       {
         label: 'ALCANCE',
         val:
-          latest.reach !== null && latest.reach !== undefined
-            ? fmt(latest.reach, 0)
+          singleDay &&
+          rankingDay.reach !== null &&
+          rankingDay.reach !== undefined
+            ? fmt(rankingDay.reach, 0)
             : '—',
-        sub:
-          latest.reach !== null && latest.reach !== undefined
-            ? latestSub
-            : 'sin datos',
+        sub: singleDay ? periodSub : '— (solo día único)',
         color: '#38bdf8',
         icon: '📢',
       },
       {
         label: 'FRECUENCIA',
         val:
-          latest.frequency !== null && latest.frequency !== undefined
-            ? fmt(latest.frequency)
+          singleDay &&
+          rankingDay.frequency !== null &&
+          rankingDay.frequency !== undefined
+            ? fmt(rankingDay.frequency)
             : '—',
-        sub:
-          latest.frequency !== null && latest.frequency !== undefined
-            ? latestSub
-            : 'sin datos',
+        sub: singleDay ? periodSub : '— (no promediar en rango)',
         color: '#fb7185',
         icon: '🔁',
       },
       (function () {
-        var q = rankingLabel(latest.qualityRanking);
-        var e = rankingLabel(latest.engagementRanking);
-        var c = rankingLabel(latest.conversionRanking);
+        var q = rankingLabel(rankingDay.qualityRanking);
+        var e = rankingLabel(rankingDay.engagementRanking);
+        var c = rankingLabel(rankingDay.conversionRanking);
         var hasAny =
-          latest.qualityRanking ||
-          latest.engagementRanking ||
-          latest.conversionRanking;
+          rankingDay.qualityRanking ||
+          rankingDay.engagementRanking ||
+          rankingDay.conversionRanking;
         return {
           label: 'RANKING DE CALIDAD',
           val:
@@ -1506,7 +1878,7 @@
             e +
             ' · Conversión: ' +
             c,
-          sub: hasAny ? latestSub : 'sin datos',
+          sub: hasAny && singleDay ? periodSub : '— (solo día único)',
           color: '#a78bfa',
           icon: '🏆',
           compactValue: true,
@@ -1586,8 +1958,12 @@
           var hasAlert = campaignHasAlert(c);
           var metrics = [
             {
-              label: 'CPL',
-              val: c.cpl !== null ? '$' + fmt(c.cpl) : '—',
+              label: 'CPL META',
+              val: c.cplSinConversiones
+                ? 'Sin conversiones'
+                : c.cpl !== null
+                  ? '$' + fmt(c.cpl)
+                  : '—',
               warn: c.cpl !== null && c.cpl > 1,
               bar: c.cpl,
               max: 5,
@@ -1610,14 +1986,6 @@
               color: '#8b5cf6',
             },
             {
-              label: 'FREC.',
-              val: c.frecuencia !== null ? fmt(c.frecuencia, 1) : '—',
-              warn: c.frecuencia !== null && c.frecuencia > 4.5,
-              bar: c.frecuencia,
-              max: 10,
-              color: c.frecuencia !== null && c.frecuencia > 4.5 ? '#ef4444' : '#22c55e',
-            },
-            {
               label: 'GASTO',
               val: c.gasto !== null ? '$' + fmt(c.gasto, 0) : '—',
               warn: false,
@@ -1626,8 +1994,11 @@
               color: '#f59e0b',
             },
             {
-              label: 'CONV.',
-              val: c.conversiones !== null ? fmt(c.conversiones, 0) : '—',
+              label: 'CONV. META',
+              val:
+                c.conversiones !== null && c.conversiones > 0
+                  ? fmt(c.conversiones, 0)
+                  : 'Sin conversiones',
               warn: false,
               bar: c.conversiones,
               max: totalConv || 1,
@@ -1645,12 +2016,16 @@
             '<span class="ma-camp-name">' +
             escapeHtml(c.name) +
             '</span>' +
+            (c.campaign_id
+              ? '<span class="ma-camp-id">ID ' + escapeHtml(c.campaign_id) + '</span>'
+              : '') +
             (hasAlert ? '<span class="ma-ab">⚠ ALERTA</span>' : '') +
             '</div>' +
             '<div class="ma-dias">' +
             c.dias +
             ' DÍA' +
             (c.dias !== 1 ? 'S' : '') +
+            ' CON DATOS' +
             '</div>' +
             '</div>' +
             '<div class="ma-metrics">' +
@@ -1835,7 +2210,8 @@
 
     return (
       '<div class="ma-body">' +
-      renderKpis(derived, state.data) +
+      renderPeriodBar(derived) +
+      renderKpis(derived, derived.filteredRows || state.data) +
       renderSubTabs(derived.alertas.length) +
       tabContent +
       renderFooter(state.data) +
@@ -1880,7 +2256,30 @@
         } else if (action === 'toggle-liquidity') {
           state.liquidityListOpen = !state.liquidityListOpen;
           render();
+        } else if (action === 'apply-period') {
+          var fromEl = root.querySelector('[data-ma-period-from]');
+          var toEl = root.querySelector('[data-ma-period-to]');
+          state.customFrom = fromEl ? fromEl.value : '';
+          state.customTo = toEl ? toEl.value : '';
+          state.periodPreset = 'custom';
+          render();
         }
+      });
+    });
+
+    root.querySelectorAll('[data-ma-period]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var preset = el.getAttribute('data-ma-period');
+        if (!preset) return;
+        state.periodPreset = preset;
+        if (preset !== 'custom') {
+          render();
+          return;
+        }
+        var range = resolvePeriodRange('7d', '', '');
+        if (!state.customFrom) state.customFrom = range.from;
+        if (!state.customTo) state.customTo = range.to;
+        render();
       });
     });
 
@@ -2039,9 +2438,46 @@
     refreshTimerId = setInterval(loadData, 5 * 60 * 1000);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      mapOwnAdMetricsToLegacyRow: mapOwnAdMetricsToLegacyRow,
+      resolvePeriodRange: resolvePeriodRange,
+      filterRowsByMetricDate: filterRowsByMetricDate,
+      dedupeRowsByCampaignDate: dedupeRowsByCampaignDate,
+      buildCampListByCampaignId: buildCampListByCampaignId,
+      aggregateAccountPeriod: aggregateAccountPeriod,
+      computeCoverage: computeCoverage,
+      computeDerivedForState: function (data, preset, customFrom, customTo) {
+        var prev = {
+          periodPreset: state.periodPreset,
+          customFrom: state.customFrom,
+          customTo: state.customTo,
+        };
+        state.periodPreset = preset;
+        state.customFrom = customFrom || '';
+        state.customTo = customTo || '';
+        var out = computeDerived(data);
+        state.periodPreset = prev.periodPreset;
+        state.customFrom = prev.customFrom;
+        state.customTo = prev.customTo;
+        return out;
+      },
+      metaLeadCountFromInsight: metaLeadCountFromInsight,
+      lookbackStartDateIso: lookbackStartDateIso,
+      computeLatestDateStats: computeLatestDateStats,
+      calendarDateInZone: calendarDateInZone,
+      shiftIsoDate: shiftIsoDate,
+      METRIC_LOOKBACK_DAYS: METRIC_LOOKBACK_DAYS,
+      fmtN: fmtN,
+      ACCOUNT_TIME_ZONE: ACCOUNT_TIME_ZONE,
+    };
+  }
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   }
 })();
