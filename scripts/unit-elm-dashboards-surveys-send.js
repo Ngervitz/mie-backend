@@ -314,8 +314,8 @@ function sendHarness(steps, opts) {
   });
   const readRows = async () => ({
     processes: [...repo.rows.values()],
-    states: [],
-    openRequests: [],
+    states: o.states || [],
+    openRequests: o.openRequests || [],
     locks: o.locks === undefined ? [] : o.locks,
   });
   const deps = {
@@ -1120,6 +1120,55 @@ test('24 history + several eligible new solicitudes → explicit selection', asy
   });
   assert.strictEqual(pure.solicitudes.length, 1, 'duplicate rejections of one solicitud are one candidate');
   assert.strictEqual(pure.send.target_cz_id, 1);
+});
+
+test('24b list: C1 projected 12–15 on the only solicitud without ELM process → send enabled (UI = POST guard)', async () => {
+  for (const projected of [12, 13, 14, 15]) {
+    const ci = 49200000 + projected;
+    const cz = 9800 + projected;
+    const h = sendHarness(
+      [okResult('Listo para recibir datos en servicio 2'), okResult('Lead Aprobado correctamente')],
+      { ci: ci, czIds: [cz], rejectedCzIds: [cz], states: [{ ci: ci, cz_solicitud_id: cz, projected_estado: projected }] },
+    );
+    const row = await listRow(h, ci, [{ cz_solicitud_id: cz, rejected_at: '2026-10-06T10:00:00.000Z' }]);
+    assert.strictEqual(row.elm.send.hold, null, 'projected ' + projected);
+    assert.strictEqual(row.elm.send.candidates[0].enabled, true, 'projected ' + projected);
+    assert.strictEqual(row.elm.send.target_cz_id, cz, 'projected ' + projected);
+    const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+    assert.ok(html.includes('data-action="elm-send"') && html.includes('data-cz-id="' + cz + '"'), 'projected ' + projected);
+    const out = await h.send(cz);
+    assert.strictEqual(out.body.outcome, OUTCOMES.REFERRED, 'projected ' + projected);
+    assert.strictEqual(h.fetchImpl.calls.length, 2, 'projected ' + projected);
+    h.fetchImpl.calls.length = 0;
+    h.repo.rows.clear();
+  }
+});
+
+test('24c list: open C1 projection on another solicitud still blocks send', async () => {
+  const ci = 49209999;
+  const openCz = 9810;
+  const sendCz = 9811;
+  const h = sendHarness([], {
+    ci: ci,
+    czIds: [openCz, sendCz],
+    rejectedCzIds: [sendCz, openCz],
+    states: [{ ci: ci, cz_solicitud_id: openCz, projected_estado: 15 }],
+  });
+  const row = await listRow(h, ci, [{ cz_solicitud_id: sendCz }, { cz_solicitud_id: openCz }]);
+  const sendCand = row.elm.send.candidates.find(function (c) {
+    return c.cz_solicitud_id === sendCz;
+  });
+  const openCand = row.elm.send.candidates.find(function (c) {
+    return c.cz_solicitud_id === openCz;
+  });
+  assert.strictEqual(sendCand.enabled, false);
+  assert.strictEqual(openCand.enabled, true, 'C1-open solicitud is sendable on itself');
+  assert.strictEqual(row.elm.send.target_cz_id, openCz);
+  const html = ElmUi.rejectedRowElmHtml(row.elm, row.ci);
+  assert.ok(html.includes('data-cz-id="' + openCz + '"'));
+  const out = await h.send(sendCz);
+  assert.strictEqual(out.status, 409);
+  assert.strictEqual(out.body.code, CI_ACTIVE_REASON);
 });
 
 test('25 list: fail-soft (state without send view; whole column unavailable only if ELM rows fail)', async () => {

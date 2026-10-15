@@ -11,9 +11,10 @@
  * survey circuit is held by the ELM gate meanwhile and resumes on a definitive ELM rejection.
  *
  * `ci_active` (survey-gate meaning: any ELM process not definitively closed, granted included) is
- * informative. Whether a new solicitud of the CI can be sent is `send.hold`, from
- * rejectedElmResendGuard (same rule as the send endpoint): the ELM history stays visible and the
- * button is offered next to it when another rejected solicitud is eligible.
+ * informative. Whether a new solicitud of the CI can be sent uses `sendHoldOf` /
+ * rejectedElmResendGuard with that solicitud as target (same rule as POST send): a solicitud is
+ * never held only by its own projected CZ estado; `send.hold` summarizes when every candidate
+ * is disabled.
  */
 
 const { computeElmCell } = require('../services/elm/listView');
@@ -169,19 +170,23 @@ function holdSendForActiveCi(cell, ciActive) {
  * "Reintentar ELM" candidates are the rejected solicitudes whose own process failed before ELM
  * received the lead (`cell.retry`); their CI hold excludes that own process (`retryHold`).
  * @param {{ rejected: Array<{ cz_solicitud_id: number, rejected_at?: string|null }>,
- *   cells: Map<number, object>, hold: object|null,
+ *   cells: Map<number, object>,
+ *   sendHold?: (czId: number) => object|null,
+ *   hold?: object|null,
  *   retryHold?: (czId: number) => object|null }} input
  */
 function resolveRejectedSend(input) {
   const cells = (input && input.cells) || new Map();
-  const ciHold = markRetryPending((input && input.hold) || null, cells);
+  const sendHoldFn = (input && input.sendHold) || null;
+  const globalHold = (input && input.hold) || null;
   const retryHold = (input && input.retryHold) || null;
   const solicitudes = [];
   const candidates = [];
   const retryCandidates = [];
   let notSendable = null;
   for (const r of uniqueRejected(input && input.rejected)) {
-    let cell = holdSend(cells.get(r.cz_solicitud_id) || null, ciHold);
+    const rowHold = sendHoldFn ? sendHoldFn(r.cz_solicitud_id) : globalHold;
+    let cell = holdSend(cells.get(r.cz_solicitud_id) || null, rowHold);
     if (cell && cell.retry && cell.retry.show === true) {
       cell = holdRetry(cell, retryHold ? retryHold(r.cz_solicitud_id) : null);
       retryCandidates.push({
@@ -206,6 +211,7 @@ function resolveRejectedSend(input) {
         reasons: cell.action.reasons || (cell.action.reason ? [cell.action.reason] : []),
         hint: cell.action.hint || null,
         until: (cell.action.hold && cell.action.hold.until) || null,
+        hold: (cell.action && cell.action.hold) || null,
         notices: cell.action.notices || [],
       });
     } else if (cell.kind === 'not_sendable' && !notSendable) {
@@ -218,6 +224,13 @@ function resolveRejectedSend(input) {
   const enabled = candidates.filter(function (c) {
     return c.enabled;
   });
+  const sendHoldSummary =
+    enabled.length > 0
+      ? null
+      : markRetryPending(
+          (candidates.length && candidates[0].hold) || globalHold || null,
+          cells,
+        );
   return {
     solicitudes: solicitudes,
     send: {
@@ -229,7 +242,7 @@ function resolveRejectedSend(input) {
       target_cz_id: enabled.length === 1 ? enabled[0].cz_solicitud_id : null,
       needs_selection: enabled.length > 1,
       not_sendable: candidates.length ? null : notSendable,
-      hold: ciHold,
+      hold: sendHoldSummary,
       retry_candidates: retryCandidates,
     },
   };
@@ -281,17 +294,20 @@ function retryHoldOf(ci, rows, nowMs, postReferral) {
   };
 }
 
-function ciHoldOf(ci, rows, nowMs, postReferral) {
-  return evaluateCiResendHold({
-    ci: ci,
-    czSolicitudId: null,
-    processes: rows.processes,
-    states: rows.states,
-    openRequests: rows.openRequests,
-    locks: rows.locks,
-    nowMs: nowMs,
-    postReferralRejectionStatuses: postReferral,
-  });
+/** Per-solicitud send hold (same rule as loadCiResendHold / POST send). */
+function sendHoldOf(ci, rows, nowMs, postReferral) {
+  return function (czId) {
+    return evaluateCiResendHold({
+      ci: ci,
+      czSolicitudId: czId,
+      processes: rows.processes,
+      states: rows.states,
+      openRequests: rows.openRequests,
+      locks: rows.locks,
+      nowMs: nowMs,
+      postReferralRejectionStatuses: postReferral,
+    });
+  };
 }
 
 /**
@@ -383,7 +399,7 @@ async function attachElmToRejectedRows(rows, deps) {
         ? resolveRejectedSend({
             rejected: rejectedByRow[i],
             cells: cells,
-            hold: ciHoldOf(ci, own, nowMs, postReferral),
+            sendHold: sendHoldOf(ci, own, nowMs, postReferral),
             retryHold: retryHoldOf(ci, own, nowMs, postReferral),
           }).send
         : { available: false },
@@ -425,7 +441,7 @@ async function loadRejectedDetailElm(supabase, detail, deps) {
     const resolved = resolveRejectedSend({
       rejected: rejected,
       cells: cells,
-      hold: ciHoldOf(ci, rows, nowMs, postReferral),
+      sendHold: sendHoldOf(ci, rows, nowMs, postReferral),
       retryHold: retryHoldOf(ci, rows, nowMs, postReferral),
     });
     return {
@@ -454,5 +470,6 @@ module.exports = {
   holdSend,
   holdSendForActiveCi,
   resolveRejectedSend,
+  sendHoldOf,
   loadRejectedDetailElm,
 };

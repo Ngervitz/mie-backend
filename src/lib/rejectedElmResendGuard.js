@@ -100,7 +100,9 @@ function hold(reason, relatedCzId, until) {
  * Pure.
  * @param {{
  *   ci: number,
- *   czSolicitudId?: number|null,   target; null = any new solicitud of the CI (list / detail)
+ *   czSolicitudId?: number|null,   send target solicitud; always set for send buttons and POST
+ *                                  (own projected CZ estado is never a blocker). null = CI-wide
+ *                                  check only (includes open projections on every solicitud).
  *   processes: object[]|undefined,
  *   states?: object[],
  *   openRequests?: object[],

@@ -73,7 +73,7 @@ const { createElmClient } = require('../src/services/elm/client');
 const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
 const { createElmListView, computeElmCell } = require('../src/services/elm/listView');
 const { retryRejectedElm, sendRejectedToElm } = require('../src/lib/rejectedElmSend');
-const { resolveRejectedSend } = require('../src/lib/rejectedElmRead');
+const { resolveRejectedSend, sendHoldOf } = require('../src/lib/rejectedElmRead');
 const { evaluateCiResendHold, loadCiResendHold, HOLD } = require('../src/lib/rejectedElmResendGuard');
 const { deriveFromProcess } = require('../src/services/providerFallback/outcome');
 const { OUTCOME, REASONS } = require('../src/services/providerFallback/constants');
@@ -772,6 +772,136 @@ test('UI: result messages for retry refusals', () => {
     assert.strictEqual(m.tone, 'warn');
     assert.ok(!m.text.includes('Código:'), code + ' has a message');
   }
+});
+
+// --- CI resend guard: own projected CZ estado must not block send alone -----------------------
+
+function elmRowsFixture(states, processes, locks) {
+  return {
+    processes: processes || [],
+    states: states || [],
+    openRequests: [],
+    locks: locks == null ? [] : locks,
+  };
+}
+
+function notSentSendCell(czId) {
+  return {
+    kind: 'not_sent',
+    cz_solicitud_id: czId,
+    action: { show: true, enabled: true, reason: null, reasons: [] },
+  };
+}
+
+test('send hold: own projected CZ estados 12–15 without ELM process do not block', () => {
+  const ci = 42423903;
+  const cz = 1504;
+  for (const projected of [12, 13, 14, 15]) {
+    const rows = elmRowsFixture([{ ci: ci, cz_solicitud_id: cz, projected_estado: projected }], []);
+    const holdFor = sendHoldOf(ci, rows, NOW, []);
+    assert.strictEqual(holdFor(cz), null, 'projected ' + projected);
+    assert.strictEqual(
+      evaluateCiResendHold({
+        ci: ci,
+        czSolicitudId: cz,
+        processes: rows.processes,
+        states: rows.states,
+        openRequests: rows.openRequests,
+        locks: rows.locks,
+        nowMs: NOW,
+      }),
+      null,
+      'projected ' + projected,
+    );
+    const resolved = resolveRejectedSend({
+      rejected: [{ cz_solicitud_id: cz }],
+      cells: new Map([[cz, notSentSendCell(cz)]]),
+      sendHold: holdFor,
+    });
+    assert.strictEqual(resolved.send.candidates[0].enabled, true, 'projected ' + projected);
+    assert.strictEqual(resolved.send.hold, null, 'projected ' + projected);
+  }
+});
+
+test('send hold: another solicitud with open projection still blocks', () => {
+  const ci = 42423904;
+  const sendCz = 1505;
+  const otherCz = 1506;
+  const rows = elmRowsFixture(
+    [
+      { ci: ci, cz_solicitud_id: sendCz, projected_estado: 3 },
+      { ci: ci, cz_solicitud_id: otherCz, projected_estado: 14 },
+    ],
+    [],
+  );
+  const holdFor = sendHoldOf(ci, rows, NOW, []);
+  const hold = holdFor(sendCz);
+  assert.ok(hold && hold.reason === HOLD.ACTIVE);
+  assert.strictEqual(hold.related_cz_solicitud_id, otherCz);
+  const resolved = resolveRejectedSend({
+    rejected: [{ cz_solicitud_id: sendCz }, { cz_solicitud_id: otherCz }],
+    cells: new Map([
+      [sendCz, notSentSendCell(sendCz)],
+      [otherCz, notSentSendCell(otherCz)],
+    ]),
+    sendHold: holdFor,
+  });
+  const sendCand = resolved.send.candidates.find(function (c) {
+    return c.cz_solicitud_id === sendCz;
+  });
+  const otherCand = resolved.send.candidates.find(function (c) {
+    return c.cz_solicitud_id === otherCz;
+  });
+  assert.strictEqual(sendCand.enabled, false);
+  assert.strictEqual(otherCand.enabled, true, 'open projection on self does not block that solicitud');
+  assert.strictEqual(resolved.send.hold, null);
+  assert.strictEqual(resolved.send.target_cz_id, otherCz);
+});
+
+test('send hold: open C1 projection on a third solicitud blocks every other rejected candidate', () => {
+  const ci = 42423905;
+  const blockedA = 1510;
+  const blockedB = 1511;
+  const openOther = 1512;
+  const rows = elmRowsFixture([{ ci: ci, cz_solicitud_id: openOther, projected_estado: 13 }], []);
+  const holdFor = sendHoldOf(ci, rows, NOW, []);
+  assert.strictEqual(holdFor(blockedA).related_cz_solicitud_id, openOther);
+  assert.strictEqual(holdFor(blockedB).related_cz_solicitud_id, openOther);
+  const resolved = resolveRejectedSend({
+    rejected: [{ cz_solicitud_id: blockedA }, { cz_solicitud_id: blockedB }],
+    cells: new Map([
+      [blockedA, notSentSendCell(blockedA)],
+      [blockedB, notSentSendCell(blockedB)],
+    ]),
+    sendHold: holdFor,
+  });
+  assert.ok(
+    resolved.send.candidates.every(function (c) {
+      return c.enabled === false;
+    }),
+  );
+  assert.strictEqual(resolved.send.hold.reason, HOLD.ACTIVE);
+  assert.strictEqual(resolved.send.target_cz_id, null);
+});
+
+test('send hold: active ELM process on another solicitud still blocks (unchanged)', () => {
+  const ci = 42423906;
+  const sendCz = 1520;
+  const otherCz = 1521;
+  const otherInFlight = {
+    id: 'proc-other',
+    cz_solicitud_id: otherCz,
+    ci: ci,
+    trigger_origin: 'janus_manual',
+    created_at: iso(NOW - DAY),
+    s1_status: S1.IN_FLIGHT,
+    s1_started_at: iso(NOW - 1000),
+    s1_lease_expires_at: iso(NOW + 60000),
+    s2_status: S2.NOT_STARTED,
+  };
+  const rows = elmRowsFixture([], [otherInFlight]);
+  const hold = sendHoldOf(ci, rows, NOW, [])(sendCz);
+  assert.ok(hold && hold.reason === HOLD.ACTIVE && hold.related_cz_solicitud_id === otherCz);
 });
 
 // --- Automatic path unchanged ------------------------------------------------------------------
