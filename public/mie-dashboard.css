@@ -6395,6 +6395,17 @@
   border: 1px dashed var(--border);
   border-radius: 8px;
 }
+#mie-dashboard-app .elm-ops-admin-slot .btn {
+  margin: 4px 6px 0 0;
+}
+#mie-dashboard-app .elm-ops-confirm {
+  display: block;
+  margin: 8px 0;
+  font-size: 0.9rem;
+}
+#mie-dashboard-app .elm-ops-reconcile {
+  margin: 0 0 8px;
+}
 #mie-dashboard-app .elm-ops-head {
   margin-bottom: 12px;
 }

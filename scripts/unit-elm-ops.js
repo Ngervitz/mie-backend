@@ -58,11 +58,13 @@ const {
   classifyOpportunity,
   filterOpportunities,
   SITUATIONS,
+  S1_SUBCLASS,
 } = require('../src/services/elmOps/opportunityClassify');
+const { createGestionActions } = require('../src/services/elmOps/gestionActions');
 const { createElmOpsRouter } = require('../src/routes/elmOps');
+const { CODES } = require('../src/services/elm/constants');
 const { requireElmAction } = require('../src/middleware/requireElmAction');
 const { parseElmPostback } = require('../src/services/elm/postback');
-const { CODES } = require('../src/services/elm/constants');
 const ElmOpsUi = require('../public/elm-ops.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -111,6 +113,12 @@ function fakeOpsRepo(state) {
     },
     async getProcessById(id) {
       return state.processes.find((p) => p.id === id) || null;
+    },
+    async getProcessByCzId(czId) {
+      return state.processes.find((p) => Number(p.cz_solicitud_id) === Number(czId)) || null;
+    },
+    async getOpenReviewCaseByCzId(czId) {
+      return (state.cases || []).find((c) => Number(c.cz_solicitud_id) === Number(czId) && c.status !== 'resolved') || null;
     },
     async getProcessesByIds(ids) {
       const m = new Map();
@@ -472,6 +480,15 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/c1/conflicts')).status, 200);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/opportunities')).status, 200);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/gestion')).status, 200);
+    const closeCron = await call(cronServer, 'POST', '/preaprobados/elm-ops/gestion/1939/close-reject', {
+      confirm: true, note: NOTE, expected_version: 1,
+    });
+    assert.strictEqual(closeCron.status, 403);
+    assert.strictEqual(closeCron.body.code, 'elm_cron_forbidden');
+    const retryCron = await call(cronServer, 'POST', '/preaprobados/elm-ops/gestion/1939/retry-s1', {
+      confirm: true, expected_attempts: 1,
+    });
+    assert.strictEqual(retryCron.status, 403);
     const cr = await call(cronServer, 'POST', '/preaprobados/elm-ops/c1/conflicts/' + CONFLICT_ID + '/resolve', { note: NOTE });
     assert.strictEqual(cr.status, 403, 'conflict resolution needs the action gate');
     assert.strictEqual(repo.calls.filter((c) => c[0] === 'c1ConflictResolve').length, 0);
@@ -593,8 +610,8 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   assert.ok(/SECTION_ORDER = \[[\s\S]*?'preaprobados',\s*'elm-gestion'/m.test(page));
   const dash = readSrc('public/mie-dashboard.js');
   assert.ok(dash.includes('ElmOps.mount'));
-  assert.ok(dash.includes('canAct: false'));
   assert.ok(dash.includes('initGestionElm'));
+  assert.ok(!/initGestionElm[\s\S]{0,250}canAct:\s*false/.test(dash), 'Gestión probes admin via /assignees');
   assert.ok(dash.includes('__openGestionElm'));
   assert.ok(!dash.includes('ensureElmOpsTray'));
   assert.ok(!dash.includes('ensureElmRecoverableTray'));
@@ -628,7 +645,67 @@ test('classifier: commercial situations in Spanish without raw ELM codes as prim
     s1_result_message: 'Repetido. Rechazado',
   });
   assert.strictEqual(close.situation, SITUATIONS.CLOSE_REJECT);
+  assert.strictEqual(close.s1_subclass, S1_SUBCLASS.DEFINITIVE_REJECT);
   assert.ok(close.situation_label.indexOf('Cerrar rechazo') === 0);
+  assert.strictEqual(close.allowed_actions.length, 0, 'close needs an open review case in estado 14');
+
+  const uncertain = classifyOpportunity({
+    cz_solicitud_id: 1940,
+    ci: '22222223',
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    reason_code: 'elm_s1_unknown',
+    s1_result_message: null,
+    s1_error_code: 'elm_http_timeout',
+  });
+  assert.strictEqual(uncertain.situation, SITUATIONS.RECONCILE);
+  assert.strictEqual(uncertain.s1_subclass, S1_SUBCLASS.UNCERTAIN);
+  assert.deepStrictEqual(uncertain.allowed_actions, []);
+  assert.strictEqual(uncertain.next_step_key, 'reconcile');
+
+  const preRec = classifyOpportunity({
+    cz_solicitud_id: 1941,
+    ci: '22222224',
+    s1_status: 'technical_error',
+    s2_status: 'not_started',
+    s1_error_code: CODES.HTTP_AUTH_REJECTED,
+    s1_http_status: 403,
+    s1_attempts: 1,
+    trigger_origin: 'janus_manual',
+  });
+  assert.strictEqual(preRec.situation, SITUATIONS.TECH_NOT_PROCESSED);
+  assert.strictEqual(preRec.s1_subclass, S1_SUBCLASS.TECH_NOT_PROCESSED);
+  assert.strictEqual(preRec.allowed_actions.length, 1);
+  assert.strictEqual(preRec.allowed_actions[0].id, 'retry_s1');
+
+  const autoPre = classifyOpportunity({
+    cz_solicitud_id: 1942,
+    ci: '22222225',
+    s1_status: 'technical_error',
+    s2_status: 'not_started',
+    s1_error_code: CODES.HTTP_AUTH_REJECTED,
+    s1_http_status: 401,
+    s1_attempts: 1,
+    trigger_origin: 'cz_automatic',
+  });
+  assert.strictEqual(autoPre.s1_subclass, S1_SUBCLASS.TECH_NOT_PROCESSED);
+  assert.deepStrictEqual(autoPre.allowed_actions, [], 'cz_automatic cannot use elm_manual_retry_s1');
+
+  const closable = classifyOpportunity({
+    cz_solicitud_id: 1939,
+    ci: '22222222',
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    s1_result_message: 'Repetido. Rechazado',
+    review_id: CID,
+    review_version: 3,
+    projected_estado: 14,
+    process_id: PID,
+    process_updated_at: 'v1',
+  });
+  assert.strictEqual(closable.allowed_actions.length, 1);
+  assert.strictEqual(closable.allowed_actions[0].id, 'close_reject');
+  assert.ok(closable.allowed_actions[0].explanation.indexOf('Repetido. Rechazado') !== -1);
 
   const data = classifyOpportunity({
     cz_solicitud_id: 10,
@@ -966,13 +1043,15 @@ test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemb
   const elmOps = readSrc('src/routes/elmOps.js');
   assert.ok(elmOps.includes("router.get('/opportunities'"));
   assert.ok(elmOps.includes("router.get('/gestion'"));
+  assert.ok(elmOps.includes("router.post('/gestion/:czId/close-reject'"));
+  assert.ok(elmOps.includes("router.post('/gestion/:czId/retry-s1'"));
   assert.ok(!/router\.post\('\/opportunities'/.test(elmOps));
-  assert.ok(!/router\.post\('\/gestion'/.test(elmOps));
   const ui = readSrc('public/elm-ops.js');
-  assert.ok(ui.includes("request('/gestion')"));
+  assert.ok(ui.includes("request('GET', '/gestion')"));
   assert.ok(!ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable')).includes("request('/opportunities')"));
   assert.ok(ui.includes('/rechazados/elm-recoverable'));
-  assert.ok(!/method:\s*'POST'/.test(ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable'))));
+  assert.ok(ui.includes('/close-reject'));
+  assert.ok(ui.includes('/retry-s1'));
 });
 
 test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send actions', async () => {
@@ -1041,7 +1120,7 @@ test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send
   };
   const tray = ElmOpsUi.mount({ root: root, api: '', fetch: fetchFn, canAct: true });
   await tray.load();
-  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls.length, 1, 'canAct:true skips /assignees and only reads /gestion');
   assert.strictEqual(calls[0].method, 'GET');
   assert.ok(calls[0].url.includes('/preaprobados/elm-ops/gestion'));
   assert.ok(!calls[0].url.includes('/opportunities'));
@@ -1067,7 +1146,6 @@ test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-14"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-13"'));
   assert.ok(root.innerHTML.includes('Reenviar paso 2'), 'next step is copy, not a send control');
-  assert.ok(!root.innerHTML.includes('data-elm-ops-action='), 'no action buttons yet');
   assert.ok(!root.innerHTML.includes('data-elm-ops-form'));
   assert.ok(!/<form[\s>]/.test(root.innerHTML));
   assert.strictEqual(ElmOpsUi.GESTION_TAB_ENABLED, true);
@@ -1097,7 +1175,10 @@ test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send
     },
   });
   assert.ok(root.innerHTML.includes('data-elm-ops-admin-slot'));
-  assert.ok(root.innerHTML.includes('Acciones administrativas'));
+  assert.ok(
+    root.innerHTML.includes('No hay acciones administrativas') ||
+      root.innerHTML.includes('Solo un administrador'),
+  );
   const input = listeners.find((l) => l.type === 'input');
   assert.ok(input);
   input.fn({
@@ -1151,6 +1232,197 @@ test('UI stage A: Recuperables ELM GET /rechazados/elm-recoverable shows 1630', 
   assert.ok(root.innerHTML.includes('Enviar paso 2'), 'next step explains the later resume');
   assert.ok(!root.innerHTML.includes('data-elm-ops-action='), 'no action buttons yet');
   assert.ok(!/<form[\s>]/.test(root.innerHTML));
+});
+
+test('stage B actions: close only with definitive S1 + review 14; retry only pre-reception; no ELM on close', async () => {
+  const pUnknown = referredProcess({
+    cz_solicitud_id: 1939,
+    ci: 22222222,
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    s1_result_message: 'Repetido. Rechazado',
+    referred_at: null,
+    updated_at: 'v1',
+  });
+  const review = {
+    id: CID,
+    cz_solicitud_id: 1939,
+    ci: 22222222,
+    reason_code: 'elm_s1_unknown',
+    status: 'open',
+    version: 3,
+  };
+  const state = {
+    processes: [pUnknown],
+    cases: [review],
+    projected: [[1939, 14]],
+  };
+  const repo = fakeOpsRepo(state);
+  const retryCalls = [];
+  const actions = createGestionActions({
+    repository: repo,
+    elmRepository: {
+      async getProcessByCzId(czId) {
+        return state.processes.find((p) => Number(p.cz_solicitud_id) === Number(czId)) || null;
+      },
+      async getProjectedEstadosByCzIds() {
+        return new Map(state.projected);
+      },
+    },
+    retryDeps: {
+      orchestrator: {
+        getSendReadiness() { return { ready: true, reasons: [] }; },
+        async retrySendElm() {
+          retryCalls.push('retry');
+          return { ok: true, stage: 's1' };
+        },
+      },
+      listView: { async cellsForCzIds() { return new Map(); } },
+      loadCiResendHold: async () => null,
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  assert.strictEqual(
+    (await actions.closeS1AsRejected(1939, { confirm: true, note: NOTE, expected_version: 3 }, ADMIN)).status,
+    'resolved',
+  );
+  assert.strictEqual(repo.calls.filter((c) => c[0] === 'resolveCase').length, 1);
+  assert.strictEqual(repo.calls.filter((c) => c[0] === 'resolveCase')[0][1].czOutcome, 'rejected');
+  assert.strictEqual(repo.calls.filter((c) => c[0] === 'resolve').length, 1);
+  assert.strictEqual(repo.calls.filter((c) => c[0] === 'resolve')[0][1].czOutcome, 'none');
+  assert.strictEqual(
+    repo.calls.filter((c) => c[0] === 'resolve')[0][1].resolutionCode,
+    'other',
+    'other keeps monthly quota; provider_confirmed_not_received would release the month',
+  );
+  assert.deepStrictEqual(retryCalls, [], 'close never retries S1');
+
+  assert.strictEqual(
+    (await actions.closeS1AsRejected(1939, { note: NOTE, expected_version: 3 }, ADMIN)).status,
+    'confirm_required',
+  );
+  review.status = 'resolved';
+  review.version = 4;
+  assert.strictEqual(
+    (await actions.closeS1AsRejected(1939, { confirm: true, note: NOTE, expected_version: 3 }, ADMIN)).status,
+    'no_review_case',
+    'second admin cannot close an already resolved review',
+  );
+
+  const pStale = referredProcess({
+    id: '99999999-9999-4999-8999-999999999999',
+    cz_solicitud_id: 1938,
+    ci: 22222221,
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    s1_result_message: 'SCORE BAJO',
+    referred_at: null,
+    updated_at: 'v1',
+  });
+  state.processes.push(pStale);
+  state.cases.push({
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    cz_solicitud_id: 1938,
+    ci: 22222221,
+    reason_code: 'elm_s1_unknown',
+    status: 'open',
+    version: 5,
+  });
+  state.projected.push([1938, 14]);
+  assert.strictEqual(
+    (await actions.closeS1AsRejected(1938, { confirm: true, note: NOTE, expected_version: 4 }, ADMIN)).status,
+    'stale',
+    'concurrent operator with an old version is refused',
+  );
+  const src = readSrc('src/services/elmOps/gestionActions.js');
+  assert.ok(src.includes("PROCESS_UNBLOCK_RESOLUTION = 'other'"));
+  assert.ok(!/closeS1AsRejected[\s\S]*provider_confirmed_not_received/.test(src));
+
+  const timeoutProc = referredProcess({
+    id: '66666666-6666-4666-8666-666666666666',
+    cz_solicitud_id: 1940,
+    ci: 22222223,
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    s1_result_message: null,
+    s1_error_code: 'elm_http_timeout',
+    referred_at: null,
+  });
+  state.processes.push(timeoutProc);
+  state.cases.push({ id: '77777777-7777-4777-8777-777777777777', cz_solicitud_id: 1940, status: 'open', version: 1 });
+  state.projected.push([1940, 14]);
+  assert.strictEqual(
+    (await actions.closeS1AsRejected(1940, { confirm: true, note: NOTE, expected_version: 1 }, ADMIN)).status,
+    'not_definitive',
+  );
+
+  const pre = referredProcess({
+    id: '88888888-8888-4888-8888-888888888888',
+    cz_solicitud_id: 1941,
+    ci: 22222224,
+    s1_status: 'technical_error',
+    s2_status: 'not_started',
+    s1_error_code: CODES.HTTP_AUTH_REJECTED,
+    s1_http_status: 403,
+    s1_attempts: 1,
+    trigger_origin: 'janus_manual',
+    referred_at: null,
+  });
+  state.processes.push(pre);
+  const retryOk = await actions.retryS1(1941, { confirm: true, expected_attempts: 1 }, ADMIN);
+  assert.strictEqual(retryOk.status, 'retried');
+  assert.deepStrictEqual(retryCalls, ['retry']);
+
+  assert.strictEqual(
+    (await actions.retryS1(1940, { confirm: true, expected_attempts: 1 }, ADMIN)).status,
+    'retry_not_allowed',
+    'timeout unknown is not pre-reception',
+  );
+  assert.strictEqual(
+    (await actions.retryS1(1939, { confirm: true, expected_attempts: 1 }, ADMIN)).status,
+    'retry_not_allowed',
+    'definitive rejection is not retried',
+  );
+});
+
+test('UI stage B: only valid actions; uncertain shows conciliation; confirmation required', async () => {
+  const closeItem = classifyOpportunity({
+    cz_solicitud_id: 1939,
+    ci: '22222222',
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    s1_result_message: 'Repetido. Rechazado',
+    review_id: CID,
+    review_version: 3,
+    projected_estado: 14,
+    process_id: PID,
+    process_updated_at: 'v1',
+    since: '2026-10-01T12:00:00Z',
+    age_hours: 200,
+  });
+  const uncItem = classifyOpportunity({
+    cz_solicitud_id: 1940,
+    ci: '22222223',
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    reason_code: 'elm_s1_unknown',
+    since: '2026-10-02T12:00:00Z',
+    age_hours: 100,
+  });
+  const slotClose = ElmOpsUi.gestionAdminSlotHtml(closeItem, { canAct: true });
+  assert.ok(slotClose.includes('data-elm-ops-action="close_reject"'));
+  assert.ok(!slotClose.includes('data-elm-ops-action="retry_s1"'));
+  assert.ok(slotClose.includes('Cerrar como rechazado'));
+  const slotUnc = ElmOpsUi.gestionAdminSlotHtml(uncItem, { canAct: true });
+  assert.ok(slotUnc.includes('Requiere conciliación con ELM'));
+  assert.ok(!slotUnc.includes('data-elm-ops-action="close_reject"'));
+  assert.ok(!slotUnc.includes('data-elm-ops-action="retry_s1"'));
+  const form = ElmOpsUi.gestionActionFormHtml(closeItem.allowed_actions[0]);
+  assert.ok(form.includes('name="confirm"'));
+  assert.ok(form.includes('No llama a ELM') || form.includes('no envía nada a ELM'));
+  assert.ok(form.includes('name="note"'));
+  assert.ok(ElmOpsUi.actionErrorText('not_definitive').includes('definitivo'));
 });
 
 test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, never resolved by precedence', async () => {

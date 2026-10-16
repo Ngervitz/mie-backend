@@ -19179,7 +19179,6 @@ init();
   const desk = ElmOps.mount({
     root: root,
     api: API,
-    canAct: false,
   });
 
   if (reloadBtn) {

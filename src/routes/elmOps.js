@@ -20,6 +20,8 @@
  *   GET  /audit?entity_type=&entity_id=    audit trail of one entity
  *   GET  /opportunities                    unified C1/ELM operator table (read-only)
  *   GET  /gestion                          transitory Gestión ELM desk (opportunities + recoverable)
+ *   POST /gestion/:czId/close-reject       admin: close definitive S1 rejection (no ELM call)
+ *   POST /gestion/:czId/retry-s1           admin: retry same S1 only if pre-reception proven
  *   GET  /c1/active-referrals              C1 solicitudes in 13/14: age, last ELM status, stale
  *   GET  /c1/conflicts?status=open|resolved  events not emitted because they contradict CZ state
  *   POST /c1/conflicts/:id/resolve         { note } audited acknowledgement (no CZ change)
@@ -29,6 +31,7 @@ const express = require('express');
 const logger = require('../lib/logger');
 const { requireElmAction } = require('../middleware/requireElmAction');
 const { ACTION_HTTP } = require('../services/elmOps/service');
+const { GESTION_ACTION_HTTP } = require('../services/elmOps/gestionActions');
 
 function limitOf(raw) {
   const n = Number(raw);
@@ -36,15 +39,20 @@ function limitOf(raw) {
 }
 
 /**
- * @param {{ service?: object, requireAction?: Function }} [opts]
+ * @param {{ service?: object, actions?: object, requireAction?: Function }} [opts]
  */
 function createElmOpsRouter(opts) {
   const o = opts || {};
   const requireAction = o.requireAction || requireElmAction;
   let service = o.service || null;
+  let actions = o.actions || null;
   function svc() {
     if (!service) service = require('../services/elmOps/service').createElmOpsService();
     return service;
+  }
+  function act() {
+    if (!actions) actions = require('../services/elmOps/gestionActions').createGestionActions();
+    return actions;
   }
 
   function fail(res, label, err) {
@@ -53,7 +61,10 @@ function createElmOpsRouter(opts) {
   }
 
   function sendAction(res, out) {
-    const status = ACTION_HTTP[out && out.status] || 500;
+    if (out && out.http_status) {
+      return res.status(out.http_status).json(Object.assign({ ok: out.http_status === 200 }, out));
+    }
+    const status = GESTION_ACTION_HTTP[out && out.status] || ACTION_HTTP[out && out.status] || 500;
     return res.status(status).json(Object.assign({ ok: status === 200 }, out));
   }
 
@@ -152,6 +163,22 @@ function createElmOpsRouter(opts) {
       return res.json({ ok: true, items: data.items, situations: data.situations });
     } catch (err) {
       return fail(res, 'GET elm-ops/opportunities failed', err);
+    }
+  });
+
+  router.post('/gestion/:czId/close-reject', requireAction, async function (req, res) {
+    try {
+      return sendAction(res, await act().closeS1AsRejected(req.params.czId, req.body, req.elmActorUserId));
+    } catch (err) {
+      return fail(res, 'POST elm-ops/gestion/:czId/close-reject failed', err);
+    }
+  });
+
+  router.post('/gestion/:czId/retry-s1', requireAction, async function (req, res) {
+    try {
+      return sendAction(res, await act().retryS1(req.params.czId, req.body, req.elmActorUserId));
+    } catch (err) {
+      return fail(res, 'POST elm-ops/gestion/:czId/retry-s1 failed', err);
     }
   });
 

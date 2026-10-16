@@ -609,6 +609,7 @@ function createElmOpsService(deps) {
       setIf(bag, 'reason_code', c.reason_code);
       if (c.related_cz_solicitud_id != null) bag.related_cz_solicitud_id = c.related_cz_solicitud_id;
       setIf(bag, 'review_id', c.id);
+      if (c.version != null) bag.review_version = c.version;
       setIf(bag, 'since', c.created_at);
       if (c.age_hours != null) bag.age_hours = c.age_hours;
       const elm = c.elm || {};
@@ -649,6 +650,13 @@ function createElmOpsService(deps) {
         if (!p) return;
         setIf(bag, 's1_status', effective(p.s1_status, p.s1_lease_expires_at, nowMs));
         setIf(bag, 's2_status', effective(p.s2_status, p.s2_lease_expires_at, nowMs));
+        setIf(bag, 's1_result_message', p.s1_result_message);
+        setIf(bag, 's1_error_code', p.s1_error_code);
+        if (p.s1_http_status != null) bag.s1_http_status = Number(p.s1_http_status);
+        if (p.s1_attempts != null) bag.s1_attempts = Number(p.s1_attempts);
+        setIf(bag, 'trigger_origin', p.trigger_origin);
+        setIf(bag, 'process_updated_at', p.updated_at);
+        if (p.ops_resolved_at) bag.ops_resolved_at = p.ops_resolved_at;
         setIf(bag, 'provider_status', p.provider_status);
         if (p.disbursed_at) bag.granted_elm = true;
       });

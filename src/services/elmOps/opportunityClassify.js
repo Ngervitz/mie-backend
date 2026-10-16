@@ -6,9 +6,19 @@
  * Technical fields stay on the item for the detail drawer.
  */
 
+const {
+  S1_SUBCLASS,
+  S1_SUBCLASS_LABELS,
+  isS1UnknownLike,
+  classifyS1Unknown,
+  actionsForS1Unknown,
+} = require('./s1UnknownClassify');
+
 const SITUATIONS = Object.freeze({
   COMPLETE_SEND: 'complete_send',
   CLOSE_REJECT: 'close_reject',
+  RECONCILE: 'reconcile',
+  TECH_NOT_PROCESSED: 'tech_not_processed',
   NEEDS_DATA: 'needs_data',
   WAITING_OTHER: 'waiting_other',
   IN_EVALUATION: 'in_evaluation',
@@ -20,6 +30,8 @@ const SITUATIONS = Object.freeze({
 const SITUATION_LABELS = Object.freeze({
   complete_send: 'Completar envío a ELM',
   close_reject: 'Cerrar rechazo ELM',
+  reconcile: 'Requiere conciliación con ELM',
+  tech_not_processed: 'Error técnico no procesado',
   needs_data: 'Requiere datos',
   waiting_other: 'Esperando otra solicitud',
   in_evaluation: 'En evaluación',
@@ -32,6 +44,8 @@ const NEXT_STEP_LABELS = Object.freeze({
   retry_s2: 'Reenviar paso 2',
   resume_s2: 'Enviar paso 2 (después de corregir el celular)',
   close_reject: 'Cerrar como rechazo ELM',
+  retry_s1: 'Reintentar el mismo paso 1',
+  reconcile: 'Conciliar con ELM · sin reenvío',
   wait_data: 'Completar datos · sin envío',
   wait_other: 'Ver la otra solicitud de esta CI',
   wait_eval: 'Esperar evaluación',
@@ -75,7 +89,11 @@ const REASON_LABELS = Object.freeze({
   elm_s2_unknown: 'El paso 1 llegó a ELM; el paso 2 no quedó registrado',
   elm_s2_technical_error_retry_unsafe: 'El paso 2 falló por un error técnico de ELM',
   elm_s2_technical_error_retries_exhausted: 'El paso 2 agotó los reintentos técnicos',
-  elm_s1_unknown: 'ELM respondió un rechazo comercial que hay que cerrar en Credizona',
+  elm_s1_unknown: 'Resultado S1 no clasificado de forma segura: no se asume que ELM no recibió',
+  definitive_reject: 'ELM respondió un rechazo comercial definitivo',
+  tech_not_processed: 'El envío S1 falló antes de que ELM ejecutara el RESTlet',
+  uncertain: 'No sabemos si ELM recibió o procesó la solicitud',
+  pre_send_block: 'El envío no salió: hay un bloqueo previo',
   elm_config_incomplete: 'Falta el tipo de actividad laboral (OTR) para armar el envío',
   ci_prior_unknown: 'Otra solicitud de la misma persona bloquea este envío',
   elm_mobilephone_invalid: 'ELM ya tiene el paso 1; el celular local es inválido y el paso 2 no salió',
@@ -170,14 +188,37 @@ function classifyOpportunity(input) {
   } else if (reason === 'elm_config_incomplete') {
     situation = SITUATIONS.NEEDS_DATA;
     nextKey = 'wait_data';
-  } else if (reason === 'elm_s1_unknown' || (s1 === 'unknown' && (s2 === 'not_started' || !s2))) {
-    situation = SITUATIONS.CLOSE_REJECT;
-    nextKey = 'close_reject';
-    motiveCode = 'elm_s1_unknown';
+  } else if (isS1UnknownLike(src) || (s1 === 'unknown' && (s2 === 'not_started' || !s2))) {
+    const sub = classifyS1Unknown(src);
+    if (sub === S1_SUBCLASS.DEFINITIVE_REJECT) {
+      situation = SITUATIONS.CLOSE_REJECT;
+      nextKey = 'close_reject';
+      motiveCode = 'definitive_reject';
+    } else if (sub === S1_SUBCLASS.TECH_NOT_PROCESSED) {
+      situation = SITUATIONS.TECH_NOT_PROCESSED;
+      nextKey = 'retry_s1';
+      motiveCode = 'tech_not_processed';
+    } else if (sub === S1_SUBCLASS.PRE_SEND_BLOCK) {
+      situation = reason === 'ci_prior_unknown' ? SITUATIONS.WAITING_OTHER : SITUATIONS.NEEDS_DATA;
+      nextKey = reason === 'ci_prior_unknown' ? 'wait_other' : 'wait_data';
+      motiveCode = 'pre_send_block';
+    } else {
+      situation = SITUATIONS.RECONCILE;
+      nextKey = 'reconcile';
+      motiveCode = 'uncertain';
+    }
   } else if (src.followup_kind === 'queued' || src.followup_kind === 'in_evaluation') {
     situation = SITUATIONS.IN_EVALUATION;
     nextKey = 'wait_eval';
     motiveCode = src.followup_kind === 'queued' ? 'queued' : 'in_evaluation';
+  }
+
+  const s1Decision =
+    isS1UnknownLike(src) || (s1 === 'unknown' && (s2 === 'not_started' || !s2))
+      ? actionsForS1Unknown(src)
+      : null;
+  if (s1Decision && situation === SITUATIONS.TECH_NOT_PROCESSED && !s1Decision.actions.length) {
+    nextKey = 'reconcile';
   }
 
   const since = src.since || src.created_at || src.referred_at || src.started_at || null;
@@ -189,31 +230,44 @@ function classifyOpportunity(input) {
     financier: 'ELM',
     situation: situation,
     situation_label: situationLabel(situation),
+    s1_subclass: s1Decision ? s1Decision.subclass : null,
+    s1_subclass_label: s1Decision ? s1Decision.subclass_label : null,
     vintage: vintage,
     vintage_label: VINTAGE_LABELS[vintage],
     lane: lane,
     lane_label: LANE_LABELS[lane],
     attention: lane === LANES.ATTENTION,
     reason_code: motiveCode,
-    reason_label: reasonLabel(motiveCode) || src.followup_label || situationLabel(situation),
+    reason_label:
+      (s1Decision && S1_SUBCLASS_LABELS[s1Decision.subclass]) ||
+      reasonLabel(motiveCode) ||
+      src.followup_label ||
+      situationLabel(situation),
     since: since,
     age_hours: floorHours(src.age_hours),
     last_elm: lastElmText(src),
     next_step: nextStepLabel(nextKey),
     next_step_key: nextKey,
+    allowed_actions: s1Decision ? s1Decision.actions : [],
     dashboard: src.dashboard || 'preaprobados',
     related_cz_solicitud_id:
       src.related_cz_solicitud_id != null ? Number(src.related_cz_solicitud_id) : null,
     technical: {
       s1_status: s1,
       s2_status: s2,
+      s1_result_message: src.s1_result_message || null,
+      s1_error_code: src.s1_error_code || null,
+      s1_http_status: src.s1_http_status != null ? Number(src.s1_http_status) : null,
+      s1_attempts: src.s1_attempts != null ? Number(src.s1_attempts) : null,
       projected_estado: projected,
       followup_kind: src.followup_kind || null,
       review_reason: reason,
       provider_status: src.provider_status || null,
       granted_elm: src.granted_elm === true,
       process_id: src.process_id || src.elm_process_id || null,
+      process_updated_at: src.process_updated_at || src.version || null,
       review_id: src.review_id || null,
+      review_version: src.review_version != null ? Number(src.review_version) : null,
       trigger_origin: src.trigger_origin || null,
       last_event: src.last_event || null,
     },
@@ -270,6 +324,8 @@ module.exports = {
   LANE_LABELS,
   CORRECTION_CUTOVER_AT,
   GESTION_TAB_ENABLED,
+  S1_SUBCLASS,
+  S1_SUBCLASS_LABELS,
   classifyOpportunity,
   filterOpportunities,
   matchesCiQuery,

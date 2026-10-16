@@ -23,7 +23,7 @@ const OPEN_PROCESS_SELECT =
   'id, cz_solicitud_id, ci, trigger_origin, commercial_origin, created_at, updated_at, s1_status, s1_started_at, s1_lease_expires_at, s2_status, s2_started_at, s2_lease_expires_at, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_event_id, last_postback_at, ops_resolved_at';
 
 const CASE_PROCESS_SELECT =
-  'id, cz_solicitud_id, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_at, ops_resolution_code, ops_resolved_at';
+  'id, cz_solicitud_id, ci, trigger_origin, updated_at, s1_status, s1_attempts, s1_http_status, s1_error_code, s1_started_at, s1_lease_expires_at, s1_result_message, s2_status, s2_lease_expires_at, s2_result_message, referred_at, provider_status, provider_status_at, disbursed_at, last_postback_at, ops_resolution_code, ops_resolved_at';
 
 const CASE_SELECT =
   'id, fallback_request_id, cz_solicitud_id, ci, elm_process_id, related_cz_solicitud_id, reason_code, priority, due_at, status, assigned_to, assigned_at, resolution_code, resolution_note, resolved_by, resolved_at, version, created_at, updated_at';
@@ -66,6 +66,32 @@ function createElmOpsRepository(supabaseOverride) {
       .limit(Math.min(limit || MAX_LIST, MAX_LIST));
     if (error) throw rpcError(PROCESS_TABLE + ' read', error);
     return data || [];
+  }
+
+  async function getProcessByCzId(czId) {
+    const id = Number(czId);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    const { data, error } = await db()
+      .from(PROCESS_TABLE)
+      .select(CASE_PROCESS_SELECT)
+      .eq('cz_solicitud_id', id)
+      .maybeSingle();
+    if (error) throw rpcError(PROCESS_TABLE + ' read', error);
+    return data || null;
+  }
+
+  async function getOpenReviewCaseByCzId(czId) {
+    const id = Number(czId);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    const { data, error } = await db()
+      .from(REVIEW_TABLE)
+      .select(CASE_SELECT)
+      .eq('cz_solicitud_id', id)
+      .eq('status', 'open')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw rpcError(REVIEW_TABLE + ' read', error);
+    return data && data[0] ? data[0] : null;
   }
 
   async function getProcessById(id) {
@@ -313,6 +339,8 @@ function createElmOpsRepository(supabaseOverride) {
     czIdsWithEstado3,
     listOpenProcesses,
     getProcessById,
+    getProcessByCzId,
+    getOpenReviewCaseByCzId,
     getProcessesByIds,
     getPostbackEventsByIds,
     listBlockedByRelated,

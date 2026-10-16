@@ -99,6 +99,18 @@
     invalid_assignee: 'Responsable no válido.',
     invalid_request: 'Solicitud inválida.',
     not_found: 'No encontrado.',
+    confirm_required: 'Confirmá la acción antes de continuar.',
+    not_definitive: 'No hay evidencia de rechazo comercial definitivo. No se cierra.',
+    no_review_case: 'No hay un caso de revisión abierto en Credizona (estado 14) para cerrar.',
+    retry_not_allowed: 'Este caso no admite reintento: no está demostrado que ELM no haya recibido la solicitud.',
+    retry_failed: 'El reintento no se pudo completar.',
+    elm_retry_not_pre_reception: 'ELM pudo haber recibido la solicitud. No se reenvía.',
+    elm_retry_stale: 'El conteo de intentos cambió. Se recargó la mesa; revisá y volvé a intentar.',
+    elm_ci_active: 'Otra solicitud de esta CI bloquea el reenvío.',
+    elm_ci_send_in_progress: 'Hay un envío ELM en curso para esta CI.',
+    elm_ci_recent_send: 'Esta CI ya tuvo un envío ELM reciente.',
+    elm_ci_monthly_quota_used: 'Esta CI ya usó el cupo mensual de envío ELM.',
+    elm_ci_history_unverifiable: 'No se pudo verificar el historial de la CI. Sin reenvío.',
   });
 
   function esc(s) {
@@ -662,7 +674,80 @@
     return ci.indexOf(q) !== -1 || cz.indexOf(q) !== -1;
   }
 
-  function opportunityRowHtml(item, fmtDate, openId) {
+  function gestionActionFormHtml(action) {
+    if (!action) return '';
+    if (action.id === 'close_reject') {
+      return (
+        '<form class="elm-ops-form" data-elm-ops-form="close-reject">' +
+        '<p>' + esc(action.explanation) + '</p>' +
+        '<label>Nota (obligatoria) <textarea name="note" minlength="10" maxlength="2000" required></textarea></label>' +
+        '<label class="elm-ops-confirm"><input type="checkbox" name="confirm" value="1" required> ' +
+        'Confirmo que existe evidencia de rechazo definitivo de ELM y que esta acción no envía nada a ELM.</label>' +
+        '<button type="submit" class="btn">Cerrar como rechazado</button> ' +
+        '<button type="button" class="btn" data-elm-ops-action="cancel">Cancelar</button>' +
+        '</form>'
+      );
+    }
+    if (action.id === 'retry_s1') {
+      return (
+        '<form class="elm-ops-form" data-elm-ops-form="retry-s1">' +
+        '<p>' + esc(action.explanation) + '</p>' +
+        '<label class="elm-ops-confirm"><input type="checkbox" name="confirm" value="1" required> ' +
+        'Confirmo que ELM no recibió este envío y que reintento el mismo paso 1 del proceso existente. ' +
+        'No se crea otra solicitud.</label>' +
+        '<button type="submit" class="btn">Reintentar S1</button> ' +
+        '<button type="button" class="btn" data-elm-ops-action="cancel">Cancelar</button>' +
+        '</form>'
+      );
+    }
+    return '';
+  }
+
+  function gestionAdminSlotHtml(item, opts) {
+    const o = opts || {};
+    const actions = item.allowed_actions || [];
+    const subclass = item.s1_subclass;
+    const notice = o.notice;
+    let html = '<div class="elm-ops-admin-slot" data-elm-ops-admin-slot data-elm-cz="' +
+      esc(String(item.cz_solicitud_id)) + '">';
+    if (notice) {
+      html += '<div class="rechazados-elm-msg is-' + esc(notice.tone) + '">' + esc(notice.text) + '</div>';
+    }
+    if (subclass === 'uncertain') {
+      html +=
+        '<p class="elm-ops-reconcile"><strong>Requiere conciliación con ELM.</strong> ' +
+        'No sabemos si ELM recibió o procesó esta solicitud. El reenvío está bloqueado hasta resolver la incertidumbre.</p>';
+    } else if (subclass === 'tech_not_processed' && !actions.length) {
+      html +=
+        '<p class="preaprobados-muted">Hay evidencia de que ELM no ejecutó el RESTlet, ' +
+        'pero el reintento existente no aplica a este origen. Sin reenvío hasta una autorización específica.</p>';
+    }
+    if (o.canAct !== true) {
+      if (actions.length) {
+        html += '<p class="preaprobados-muted">Solo un administrador puede ejecutar estas acciones.</p>';
+      } else if (subclass !== 'uncertain' && subclass !== 'tech_not_processed') {
+        html += '<p class="preaprobados-muted">No hay acciones administrativas válidas para esta solicitud.</p>';
+      }
+      return html + '</div>';
+    }
+    if (o.openAction) {
+      const action = actions.filter(function (a) { return a.id === o.openAction; })[0];
+      html += gestionActionFormHtml(action);
+      return html + '</div>';
+    }
+    for (let i = 0; i < actions.length; i += 1) {
+      const a = actions[i];
+      html +=
+        '<button type="button" class="btn btn-sm" data-elm-ops-action="' + esc(a.id) +
+        '" title="' + esc(a.explanation) + '">' + esc(a.label) + '</button> ';
+    }
+    if (!actions.length && subclass !== 'uncertain' && subclass !== 'tech_not_processed') {
+      html += '<p class="preaprobados-muted">No hay acciones administrativas válidas para esta solicitud.</p>';
+    }
+    return html + '</div>';
+  }
+
+  function opportunityRowHtml(item, fmtDate, openId, opts) {
     const cz = String(item.cz_solicitud_id);
     const open = String(openId) === cz;
     const tech = item.technical || {};
@@ -698,16 +783,20 @@
           '<div><dt>Motivo interno</dt><dd>' + esc(tech.review_reason || tech.followup_kind || '—') + '</dd></div>' +
           '<div><dt>Estado ELM</dt><dd>' + esc(tech.provider_status || '—') + '</dd></div>' +
           '<div><dt>Origen</dt><dd>' + esc(tech.trigger_origin || '—') + '</dd></div>' +
+          (item.s1_subclass_label
+            ? '<div><dt>Clasificación S1</dt><dd>' + esc(item.s1_subclass_label) + '</dd></div>'
+            : '') +
+          (tech.s1_result_message
+            ? '<div><dt>Texto S1</dt><dd>' + esc(tech.s1_result_message) + '</dd></div>'
+            : '') +
           '</dl>' +
-          '<div class="elm-ops-admin-slot" data-elm-ops-admin-slot>' +
-          '<p class="preaprobados-muted">Acciones administrativas (reservado). ' +
-          'Esta etapa no envía a ELM ni modifica estados.</p></div>' +
+          gestionAdminSlotHtml(item, opts) +
           '</div></td></tr>'
         : '')
     );
   }
 
-  function opportunitiesTableHtml(items, fmtDate, openId) {
+  function opportunitiesTableHtml(items, fmtDate, openId, opts) {
     if (!items.length) {
       return '<p class="preaprobados-muted">No hay casos ELM con ese filtro.</p>';
     }
@@ -716,7 +805,15 @@
       '<thead><tr><th>CI</th><th>Solicitud</th><th>Origen</th><th>Carril</th><th>Situación</th><th>Motivo</th>' +
       '<th>Desde</th><th>Antigüedad</th><th>Última respuesta ELM</th><th>Próximo paso</th>' +
       '<th></th></tr></thead><tbody>' +
-      items.map(function (i) { return opportunityRowHtml(i, fmtDate, openId); }).join('') +
+      items.map(function (i) {
+        const rowOpts = opts || {};
+        const mine = String(rowOpts.openCz) === String(i.cz_solicitud_id);
+        return opportunityRowHtml(i, fmtDate, openId, {
+          canAct: rowOpts.canAct,
+          openAction: mine ? rowOpts.openAction : null,
+          notice: mine ? rowOpts.notice : null,
+        });
+      }).join('') +
       '</tbody></table></div>'
     );
   }
@@ -740,17 +837,43 @@
       render();
     });
     root.addEventListener('click', function (ev) {
-      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-elm-ops-open-detail]') : null;
-      if (!btn) return;
-      const cz = btn.getAttribute('data-elm-ops-open-detail');
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const cancel = t.closest('[data-elm-ops-action="cancel"]');
+      if (cancel && cancel.getAttribute && cancel.getAttribute('data-elm-ops-action') === 'cancel') {
+        state.openAction = null;
+        render();
+        return;
+      }
+      const actBtn = t.closest('[data-elm-ops-action]');
+      if (
+        actBtn &&
+        state.onActionClick &&
+        actBtn.getAttribute &&
+        actBtn.getAttribute('data-elm-ops-action') &&
+        actBtn.getAttribute('data-elm-ops-action') !== 'cancel'
+      ) {
+        state.onActionClick(actBtn);
+        return;
+      }
+      const btn = t.closest('[data-elm-ops-open-detail]');
+      const cz = btn && btn.getAttribute ? btn.getAttribute('data-elm-ops-open-detail') : null;
+      if (!cz) return;
       state.openId = String(state.openId) === String(cz) ? null : cz;
+      state.openAction = null;
       render();
+    });
+    root.addEventListener('submit', function (ev) {
+      const form = ev.target;
+      if (!form || !form.getAttribute || !form.getAttribute('data-elm-ops-form')) return;
+      ev.preventDefault();
+      if (state.onActionSubmit) state.onActionSubmit(form);
     });
   }
 
   /**
-   * Transitory «Gestión ELM» desk: GET /gestion only. Action cells reserved
-   * (data-elm-next) for later admin buttons; no send in this stage.
+   * Transitory «Gestión ELM» desk: GET /gestion. Admin actions (close / retry) only
+   * for the solicitudes that the backend listed as valid; one at a time; confirmation required.
    */
   function mount(opts) {
     const root = opts.root;
@@ -767,15 +890,24 @@
       vintage: '',
       lane: 'attention',
       openId: null,
+      openAction: null,
+      notice: null,
+      canAct: opts.canAct === true ? true : false,
+      busy: false,
       error: null,
       bound: false,
+      onActionClick: null,
+      onActionSubmit: null,
     };
 
-    async function request(path) {
+    async function request(method, path, body) {
       const res = await fetchFn(api + '/preaprobados/elm-ops' + path, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
+        method: method,
+        headers: body
+          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+          : { Accept: 'application/json' },
         credentials: 'same-origin',
+        body: body ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(function () {
         return {};
@@ -809,7 +941,8 @@
         '<p class="preaprobados-muted">Mesa transitoria para pendientes C1/ELM. ' +
         'Por defecto se listan solo los casos que requieren gestión. ' +
         'Seguimiento y préstamos otorgados se consultan con el filtro de carril; no son un error. ' +
-        'Lectura; no reenvía a ELM. La pestaña se puede ocultar después; el historial y las APIs permanecen.</p>' +
+        'Las acciones administrativas aparecen solo cuando hay evidencia; una solicitud a la vez, con confirmación. ' +
+        'Un resultado S1 unknown no significa que ELM no haya recibido la solicitud.</p>' +
         '</header>' +
         '<div class="elm-ops-toolbar">' +
         '<label class="elm-ops-search">CI o solicitud ' +
@@ -827,15 +960,105 @@
         '<span class="preaprobados-muted">' + vis.length + ' de ' + state.items.length + '</span>' +
         '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
-      html += opportunitiesTableHtml(vis, fmtDate, state.openId);
+      html += opportunitiesTableHtml(vis, fmtDate, state.openId, {
+        canAct: state.canAct,
+        openCz: state.openId,
+        openAction: state.openAction,
+        notice: state.notice,
+      });
       root.innerHTML = html;
       bindReadOnlyUi(root, state, render);
     }
 
+    function itemByCz(cz) {
+      return state.items.filter(function (i) {
+        return String(i.cz_solicitud_id) === String(cz);
+      })[0] || null;
+    }
+
+    state.onActionClick = function (btn) {
+      if (state.canAct !== true || state.busy) return;
+      const id = btn.getAttribute('data-elm-ops-action');
+      if (!id || id === 'cancel') return;
+      const slot = btn.closest('[data-elm-ops-admin-slot]');
+      const cz = slot && slot.getAttribute('data-elm-cz');
+      const item = itemByCz(cz);
+      if (!item || !(item.allowed_actions || []).some(function (a) { return a.id === id; })) return;
+      state.openId = String(cz);
+      state.openAction = id;
+      state.notice = null;
+      render();
+    };
+
+    state.onActionSubmit = async function (form) {
+      if (state.canAct !== true || state.busy) return;
+      const kind = form.getAttribute('data-elm-ops-form');
+      const slot = form.closest('[data-elm-ops-admin-slot]');
+      const cz = slot && slot.getAttribute('data-elm-cz');
+      const item = itemByCz(cz);
+      if (!item) return;
+      const action = (item.allowed_actions || []).filter(function (a) {
+        return (kind === 'close-reject' && a.id === 'close_reject') ||
+          (kind === 'retry-s1' && a.id === 'retry_s1');
+      })[0];
+      if (!action) return;
+      const confirmEl = form.elements.confirm;
+      if (!confirmEl || !confirmEl.checked) {
+        state.notice = { tone: 'error', text: actionErrorText('confirm_required') };
+        render();
+        return;
+      }
+      const body = { confirm: true };
+      let path = '/gestion/' + encodeURIComponent(cz);
+      if (action.id === 'close_reject') {
+        body.note = form.elements.note ? form.elements.note.value : '';
+        body.expected_version = action.expected_version;
+        if (action.expected_updated_at) body.expected_updated_at = action.expected_updated_at;
+        path += '/close-reject';
+      } else {
+        body.expected_attempts = action.expected_attempts;
+        path += '/retry-s1';
+      }
+      state.busy = true;
+      let out;
+      try {
+        out = await request('POST', path, body);
+      } catch (_) {
+        out = { status: 0, data: {} };
+      }
+      state.busy = false;
+      const status = out.data && out.data.status;
+      if (out.status === 200) {
+        state.openAction = null;
+        state.notice = {
+          tone: 'ok',
+          text: action.id === 'close_reject'
+            ? 'Rechazo registrado y auditado. No se envió nada a ELM.'
+            : 'Reintento S1 ejecutado sobre el proceso existente.',
+        };
+        await load();
+        return;
+      }
+      state.notice = {
+        tone: 'error',
+        text: out.status === 0 ? 'No se pudo conectar.' : actionErrorText(status || (out.data && out.data.code)),
+      };
+      if (status === 'stale' || status === 'already_resolved' || status === 'retry_not_allowed') {
+        state.openAction = null;
+        await load();
+      } else {
+        render();
+      }
+    };
+
     async function load() {
       state.error = null;
       try {
-        const res = await request('/gestion');
+        const reads = [request('GET', '/gestion')];
+        if (opts.canAct !== true) reads.push(request('GET', '/assignees'));
+        const out = await Promise.all(reads);
+        const res = out[0];
+        if (out[1]) state.canAct = out[1].status === 200;
         if (res.status >= 400) {
           state.error = 'No se pudo cargar Gestión ELM.';
           state.items = [];
@@ -939,6 +1162,8 @@
     mount,
     mountRecoverable,
     opportunityRowHtml,
+    gestionAdminSlotHtml,
+    gestionActionFormHtml,
     defaultFmtDate,
     GESTION_TAB_ENABLED,
   };
