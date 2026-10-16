@@ -176,6 +176,11 @@ router.get('/', async function getRechazadosList(req, res) {
       status: parsed.status,
     });
     const withInvite = await attachSurveyInviteToListRows(supabase, rows);
+    const surveyInviteAvailable =
+      withInvite.length === 0 ||
+      withInvite.every(function (r) {
+        return !(r.survey_invite && r.survey_invite.available === false);
+      });
     const withSequence = await attachSurveySequenceToListRows(
       supabase,
       withInvite,
@@ -199,6 +204,7 @@ router.get('/', async function getRechazadosList(req, res) {
         rows: optin.rows,
         mi_deuda_optin_available: optin.available,
         elm_available: elmAvailable,
+        survey_invite_available: surveyInviteAvailable,
       },
     });
   } catch (err) {

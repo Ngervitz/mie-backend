@@ -16,6 +16,11 @@ const {
 } = require('./rejectedSurveyInvite');
 const { normalizeEmail } = require('../services/email-campaigns/unsubscribeToken');
 const { loadElmSurveyBlocksByCi } = require('./rejectedSurveyInviteElmGate');
+const {
+  loadEmailSuppressionsByEmails,
+  unavailableSurveyInvite,
+} = require('./emailSuppressionsRead');
+const logger = require('./logger');
 
 function getWave1CampaignId() {
   const fromEnv =
@@ -209,13 +214,21 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
     : '';
   let isSuppressed = false;
   if (emailNorm) {
-    const { data: sup, error: supErr } = await supabase
-      .from('email_suppressions')
-      .select('id')
-      .eq('email', emailNorm)
-      .maybeSingle();
-    if (supErr) throw new Error('eligibility suppressions: ' + supErr.message);
-    isSuppressed = Boolean(sup);
+    const loaded = await loadEmailSuppressionsByEmails(supabase, [emailNorm], {
+      chunkSize: options.suppressionChunkSize,
+      retryAttempts: options.suppressionRetryAttempts,
+      retryDelayMs: options.suppressionRetryDelayMs,
+      sleep: options.sleep,
+    });
+    if (!loaded.ok) {
+      throw new Error(
+        'eligibility suppressions: ' +
+          (loaded.error && loaded.error.message
+            ? loaded.error.message
+            : 'unknown'),
+      );
+    }
+    isSuppressed = loaded.emails.has(emailNorm);
   }
 
   let priorRecipient = null;
@@ -375,18 +388,27 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     }
   }
 
-  const suppressed = new Set();
   const uniqueEmails = [...new Set(emails.filter(Boolean))];
-  if (uniqueEmails.length) {
-    const { data: supRows, error: sErr } = await supabase
-      .from('email_suppressions')
-      .select('email')
-      .in('email', uniqueEmails);
-    if (sErr) throw new Error('list survey suppressions: ' + sErr.message);
-    for (const s of supRows || []) {
-      suppressed.add(normalizeEmail(s.email));
-    }
+  const loaded = await loadEmailSuppressionsByEmails(supabase, uniqueEmails, {
+    chunkSize: opts && opts.suppressionChunkSize,
+    retryAttempts: opts && opts.suppressionRetryAttempts,
+    retryDelayMs: opts && opts.suppressionRetryDelayMs,
+    sleep: opts && opts.sleep,
+  });
+  if (!loaded.ok) {
+    logger.warn('list survey suppressions unavailable', {
+      error:
+        loaded.error && loaded.error.message
+          ? String(loaded.error.message).slice(0, 300)
+          : 'unknown',
+    });
+    return list.map(function (row) {
+      return Object.assign({}, row, {
+        survey_invite: unavailableSurveyInvite(),
+      });
+    });
   }
+  const suppressed = loaded.emails;
 
   const {
     resolveDueSurveyInviteStep,
@@ -402,6 +424,10 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     elmBlocks = await loadElmBlocks(supabase, cis);
   } catch (_) {
     elmBlocks = new Map();
+  }
+
+  function knownInvite(fields) {
+    return Object.assign({ available: true }, fields);
   }
 
   return list.map(function (row) {
@@ -420,23 +446,23 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
 
     if (!configuredStepIds.length) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: REASONS.CAMPAIGN_NOT_CONFIGURED,
           eligible: false,
           email_masked: null,
           due_step: null,
-        },
+        }),
       });
     }
 
     if (!normalCutoff.ok) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: SEQUENCE_REASONS.NORMAL_CUTOFF_NOT_CONFIGURED,
           eligible: false,
           email_masked: null,
           due_step: null,
-        },
+        }),
       });
     }
 
@@ -456,12 +482,12 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
         priorRecipient: null,
       });
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: elig.reason,
           eligible: false,
           email_masked: elig.email_masked,
           due_step: null,
-        },
+        }),
       });
     }
 
@@ -469,23 +495,23 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       isT0AtOrAfterNormalCutoff(last.fechahora_src, normalCutoff.ms) !== true
     ) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: SEQUENCE_REASONS.BEFORE_NORMAL_CUTOFF,
           eligible: false,
           email_masked: null,
           due_step: null,
-        },
+        }),
       });
     }
 
     if (dueStep == null) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: SEQUENCE_REASONS.NOT_DUE,
           eligible: false,
           email_masked: null,
           due_step: null,
-        },
+        }),
       });
     }
 
@@ -505,36 +531,36 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
 
     if (isSurveyInviteSequenceComplete(attemptsByStep)) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: SEQUENCE_REASONS.SEQUENCE_COMPLETE,
           eligible: false,
           email_masked: null,
           due_step: dueStep,
-        },
+        }),
       });
     }
 
     const dueCampaignId = stepCampaignIds[dueStep];
     if (!dueCampaignId) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: REASONS.CAMPAIGN_NOT_CONFIGURED,
           eligible: false,
           email_masked: null,
           due_step: dueStep,
-        },
+        }),
       });
     }
 
     const prev = findPreviousUnresolvedSurveyInvite(attemptsByStep, dueStep);
     if (prev) {
       return Object.assign({}, row, {
-        survey_invite: {
+        survey_invite: knownInvite({
           reason: SEQUENCE_REASONS.PREVIOUS_PENDING,
           eligible: false,
           email_masked: null,
           due_step: dueStep,
-        },
+        }),
       });
     }
 
@@ -556,12 +582,12 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
       elmBlocked: elmBlocks.has(ci),
     });
     return Object.assign({}, row, {
-      survey_invite: {
+      survey_invite: knownInvite({
         reason: elig.reason,
         eligible: elig.eligible,
         email_masked: elig.email_masked,
         due_step: dueStep,
-      },
+      }),
     });
   });
 }

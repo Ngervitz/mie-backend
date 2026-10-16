@@ -37,6 +37,9 @@ const {
 const {
   resolveNormalCutoffAt,
 } = require('../lib/rejectedSurveyInviteNormalCutoff');
+const {
+  loadEmailSuppressionsByEmails,
+} = require('../lib/emailSuppressionsRead');
 
 const JOB_NAME = 'rechazados_survey_invite_due';
 const JOB_LOCK_TTL_SECONDS = 10 * 60;
@@ -247,18 +250,29 @@ async function runRechazadosSurveyInviteDue(opts) {
       const sol = last ? solByCzId.get(Number(last.cz_solicitud_id)) : null;
       if (sol && sol.email) emails.push(normalizeEmail(sol.email));
     }
-    const suppressed = new Set();
     const uniqueEmails = [...new Set(emails.filter(Boolean))];
-    if (uniqueEmails.length) {
-      const { data: supRows, error: sErr } = await supabase
-        .from('email_suppressions')
-        .select('email')
-        .in('email', uniqueEmails);
-      if (sErr) throw new Error('job suppressions: ' + sErr.message);
-      for (const s of supRows || []) {
-        suppressed.add(normalizeEmail(s.email));
-      }
+    const loaded = await loadEmailSuppressionsByEmails(supabase, uniqueEmails, {
+      chunkSize: options.suppressionChunkSize,
+      retryAttempts: options.suppressionRetryAttempts,
+      retryDelayMs: options.suppressionRetryDelayMs,
+      sleep: options.sleep,
+    });
+    if (!loaded.ok) {
+      logger.error('rechazados_survey_invite_due fail-closed: suppressions', {
+        jobName: JOB_NAME,
+        error:
+          loaded.error && loaded.error.message
+            ? String(loaded.error.message).slice(0, 300)
+            : 'unknown',
+      });
+      throw new Error(
+        'job suppressions: ' +
+          (loaded.error && loaded.error.message
+            ? loaded.error.message
+            : 'unknown'),
+      );
     }
+    const suppressed = loaded.emails;
 
     const configuredIds = [1, 2, 3]
       .map(function (s) {

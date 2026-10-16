@@ -136,6 +136,7 @@ const REASONS = Object.freeze({
   CAMPAIGN_NOT_CONFIGURED: 'campaign_not_configured',
   PUBLIC_BASE_URL_MISSING: 'public_base_url_missing',
   ELM_IN_PROGRESS: 'elm_in_progress',
+  SUPPRESSIONS_UNAVAILABLE: 'suppressions_unavailable',
 });
 
 /**

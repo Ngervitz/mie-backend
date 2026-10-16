@@ -286,6 +286,13 @@
       invite && invite.reason != null ? String(invite.reason) : 'unknown';
     var masked =
       invite && invite.email_masked != null ? String(invite.email_masked) : '';
+    if (invite && invite.available === false) {
+      return {
+        kind: 'text',
+        label: 'N/D',
+        title: reason + (masked ? ' · ' + masked : ''),
+      };
+    }
     if (invite && invite.eligible === true) {
       return {
         kind: 'cta',
@@ -309,6 +316,7 @@
       not_due: '—',
       previous_pending: 'Pendiente',
       sequence_complete: 'Cerrado',
+      suppressions_unavailable: 'N/D',
     };
     return {
       kind: 'text',
