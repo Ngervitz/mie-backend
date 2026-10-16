@@ -155,6 +155,8 @@ const {
   buildService2Payload,
   formatDateOfBirth,
   formatMobilePhone,
+  normalizeUyMobileDigits,
+  inspectMobilePhone,
 } = require('../src/services/elm/payload');
 const {
   normalizeCommercialOrigin,
@@ -473,12 +475,51 @@ async function runAll() {
     );
     assert.strictEqual(formatDateOfBirth('1991-07-10', null).code, CODES.DATE_OF_BIRTH_FORMAT_UNCONFIRMED);
     assert.strictEqual(formatMobilePhone('59899123456', null).code, CODES.MOBILEPHONE_FORMAT_UNCONFIRMED);
-    assert.strictEqual(formatMobilePhone('59821234567', 'uy_598').code, CODES.MOBILEPHONE_INVALID);
+    assert.strictEqual(formatMobilePhone('59821234567', 'uy_598').code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    assert.strictEqual(normalizeUyMobileDigits('59899123456'), '59899123456');
+    assert.strictEqual(normalizeUyMobileDigits('099123456'), '59899123456');
+    assert.strictEqual(normalizeUyMobileDigits('99123456'), '59899123456');
+    assert.strictEqual(normalizeUyMobileDigits('0059899123456'), '59899123456');
+    assert.strictEqual(normalizeUyMobileDigits('+598 99 123 456'), '59899123456');
+    assert.strictEqual(normalizeUyMobileDigits('6955246'), null, '7 digits are never auto-corrected');
+    assert.strictEqual(normalizeUyMobileDigits('59821234567'), null, 'landline is not a mobile');
+    assert.strictEqual(normalizeUyMobileDigits('598963560552'), null, 'extra digit is not normalized');
+    assert.strictEqual(inspectMobilePhone('6955246').status, 'invalid');
+    assert.strictEqual(inspectMobilePhone('099123456').status, 'ok');
+    assert.strictEqual(formatMobilePhone('099123456', 'uy_local_0').value, '099123456');
+    assert.strictEqual(formatMobilePhone('99123456', 'uy_598').value, '59899123456');
+    assert.strictEqual(
+      buildService1Payload({
+        czId: 1001,
+        solicitud: solicitudFixture({ celular: '6955246' }),
+        config: TEST_CONFIG,
+      }).code,
+      CODES.MOBILEPHONE_NEEDS_CORRECTION,
+      'S1 is not built when the cellphone cannot be sent in S2',
+    );
+    const eligPhone = evaluateElmEligibility({
+      czId: 1001,
+      solicitud: solicitudFixture({ celular: '6955246' }),
+      grantedRow: null,
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(eligPhone.eligible, false);
+    assert.ok(eligPhone.blockers.some((b) => b.code === CODES.MOBILEPHONE_NEEDS_CORRECTION));
   });
 
   await test('classification: exact documented texts only; anything else unknown', async () => {
     assert.strictEqual(classifyService1Result('Listo para recibir datos en servicio 2'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService1Result('Repetido. rechazado'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('Repetido. Rechazado'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('REPETIDO. RECHAZADO'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('  repetido. rechazado  '), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('Repetido. Aprobado'), OUTCOME.DUPLICATE_OTHER_CHANNEL);
+    assert.strictEqual(classifyService1Result('REPETIDO. APROBADO'), OUTCOME.DUPLICATE_OTHER_CHANNEL);
+    assert.strictEqual(
+      classifyService1Result('Repetido - Rechazado'),
+      OUTCOME.UNKNOWN,
+      'hyphen is not the documented negative',
+    );
     assert.strictEqual(classifyService1Result('BCU'), OUTCOME.NEGATIVE);
     // "BCU error" is an explicit non-credit answer: technical_error, never a rejection.
     assert.strictEqual(classifyService1Result('BCU error'), OUTCOME.TECHNICAL_ERROR);
@@ -489,6 +530,7 @@ async function runAll() {
     assert.strictEqual(classifyService1Result('OK'), OUTCOME.UNKNOWN);
     assert.strictEqual(classifyService2Result('Lead Aprobado correctamente'), OUTCOME.POSITIVE);
     assert.strictEqual(classifyService2Result('Aprobado sin canal'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService2Result('Repetido. Rechazado'), OUTCOME.UNKNOWN, 'S2 stays exact match');
     assert.strictEqual(classifyService2Result(undefined), OUTCOME.UNKNOWN);
   });
 
@@ -508,6 +550,49 @@ async function runAll() {
       config: readElmConfig({}),
     });
     assert.strictEqual(p.code, CODES.ACTIVITY_TYPE_MAPPING_MISSING);
+  });
+
+  await test('OTR maps to ELM activityType otro; env override ignored; EPR still from env', async () => {
+    const otr = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture({ relacion_laboral: 'OTR' }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(otr.ok, true);
+    assert.strictEqual(otr.payload.activityType, 'otro');
+    const override = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture({ relacion_laboral: 'OTR' }),
+      config: readElmConfig({
+        ELM_ACTIVITY_TYPE_MAP_JSON: '{"EPR":"TEST_ACTIVITY_EPR","OTR":"should_not_win"}',
+        ELM_DATE_OF_BIRTH_FORMAT: 'D/M/YYYY',
+        ELM_MOBILE_PHONE_FORMAT: 'uy_local_0',
+      }),
+    });
+    assert.strictEqual(override.ok, true);
+    assert.strictEqual(override.payload.activityType, 'otro', 'confirmed OTR wins over env');
+    const epr = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture({ relacion_laboral: 'EPR' }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(epr.ok, true);
+    assert.strictEqual(epr.payload.activityType, 'TEST_ACTIVITY_EPR');
+    const eligOtr = evaluateElmEligibility({
+      czId: 1001,
+      solicitud: solicitudFixture({ relacion_laboral: 'OTR' }),
+      grantedRow: null,
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(eligOtr.eligible, true);
+    const eligEpu = evaluateElmEligibility({
+      czId: 1001,
+      solicitud: solicitudFixture({ relacion_laboral: 'EPU' }),
+      grantedRow: null,
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(eligEpu.eligible, false);
+    assert.ok(eligEpu.blockers.some((b) => b.code === CODES.ACTIVITY_TYPE_MAPPING_MISSING));
   });
 
   await test('organic lead (no base) is not blocked; commercial origin tracked apart from source', async () => {

@@ -25,6 +25,7 @@ const { S1, S2, CODES } = require('../elm/constants');
 const { technicalRetryDelaySeconds } = require('../elm/config');
 const { isService1Negative } = require('../elm/client');
 const { isS2Accepted } = require('../elm/classification');
+const { inspectMobilePhone } = require('../elm/payload');
 const {
   OUTCOME,
   REASONS,
@@ -232,12 +233,18 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
 /**
  * Orchestrator blocked codes where ELM was never called and the applicant data can never be
  * sent to ELM (the CDV rejection stands): definitive (DEFINITIVE_REJECTION_REASONS).
+ * A locally invalid cellphone is NOT here: it is correction/review, never a commercial rejection.
  */
 const NOT_ELIGIBLE_CODES = Object.freeze([
   CODES.MISSING_REQUIRED_FIELDS,
   CODES.DATE_OF_BIRTH_INVALID,
-  CODES.MOBILEPHONE_INVALID,
   CODES.SALARY_INVALID,
+]);
+
+/** Local cellphone format: CZ 14, review case, no ELM call. Includes the legacy invalid code. */
+const PHONE_CORRECTION_CODES = Object.freeze([
+  CODES.MOBILEPHONE_NEEDS_CORRECTION,
+  CODES.MOBILEPHONE_INVALID,
 ]);
 
 /** Inconsistent data (not a rejection): solicitud missing, CDV granted it, CI changed. */
@@ -274,6 +281,21 @@ const RELOAD_CODES = Object.freeze([
 ]);
 
 /**
+ * Snapshot cellphone check used by the worker before the monthly lock. Empty celular stays
+ * on the missing-fields path. Invalid after safe normalization → manual_review, no lock.
+ * @param {object|null|undefined} solicitud
+ * @returns {{ kind: 'final', outcome: string, reasonCode: string, detail: object|null }|null}
+ */
+function classifyPhoneCorrection(solicitud) {
+  const phone = inspectMobilePhone(solicitud && solicitud.celular);
+  if (phone.status !== 'invalid') return null;
+  return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION, {
+    blockers: [{ code: CODES.MOBILEPHONE_NEEDS_CORRECTION }],
+    celular_len: phone.digits.length,
+  });
+}
+
+/**
  * @param {{ code: string, blockers?: Array<{ code: string, fields?: string[] }>, lock?: object }} res
  * @returns {{ kind: 'final', outcome: string, reasonCode: string, detail: object|null }
  *   | { kind: 'wait', untilMs: null, relatedCzId: number|null }
@@ -293,6 +315,9 @@ function classifyBlocked(res) {
   });
   if (inconsistent) {
     return final(OUTCOME.MANUAL_REVIEW, inconsistent.code, { blockers: blockers });
+  }
+  if (blockers.some(function (b) { return PHONE_CORRECTION_CODES.includes(b.code); })) {
+    return final(OUTCOME.MANUAL_REVIEW, REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION, { blockers: blockers });
   }
   const dataBlocker = blockers.find(function (b) {
     return NOT_ELIGIBLE_CODES.includes(b.code);
@@ -351,8 +376,10 @@ module.exports = {
   evaluateCiGuard,
   decideCiLock,
   classifyBlocked,
+  classifyPhoneCorrection,
   NOT_ELIGIBLE_CODES,
   MANUAL_REVIEW_CODES,
   CONFIG_CODES,
+  PHONE_CORRECTION_CODES,
   NOT_STARTED_CODES,
 };

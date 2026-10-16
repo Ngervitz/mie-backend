@@ -19155,15 +19155,33 @@ init();
     });
   }
 
+  const elmOpsRoot = document.getElementById('elm-ops-root');
+  let elmOpsTray = null;
+  function ensureElmOpsTray() {
+    if (!elmOpsRoot || typeof ElmOps === 'undefined' || !ElmOps.mount) return;
+    if (!elmOpsTray) {
+      elmOpsTray = ElmOps.mount({
+        root: elmOpsRoot,
+        api: API,
+        canAct: false,
+      });
+    }
+    if (elmOpsTray && typeof elmOpsTray.load === 'function') {
+      elmOpsTray.load();
+    }
+  }
+
   if (reloadBtn) {
     reloadBtn.addEventListener('click', function () {
       state.offset = 0;
       loadList();
+      ensureElmOpsTray();
     });
   }
 
   window.__openPreaprobados = function () {
     renderFilters();
     loadList();
+    ensureElmOpsTray();
   };
 })();

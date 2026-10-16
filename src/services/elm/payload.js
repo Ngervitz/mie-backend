@@ -13,7 +13,7 @@
  * ELM returns as postback internal_id).
  */
 
-const { CODES, ELM_SOURCE } = require('./constants');
+const { CODES, ELM_SOURCE, CONFIRMED_ACTIVITY_TYPES } = require('./constants');
 
 const SERVICE1_KEYS = Object.freeze([
   'activityType',
@@ -50,6 +50,24 @@ function fail(code, extra) {
 }
 
 /**
+ * ELM activityType for a CZ relacion_laboral code. Confirmed codes (OTR → otro) win over the
+ * env map; every other code still requires ELM_ACTIVITY_TYPE_MAP_JSON.
+ * @param {unknown} relacion
+ * @param {{ activityTypeMap?: Record<string, string> }|null|undefined} config
+ * @returns {string|null}
+ */
+function resolveActivityType(relacion, config) {
+  const key = text(relacion);
+  if (!key) return null;
+  if (Object.prototype.hasOwnProperty.call(CONFIRMED_ACTIVITY_TYPES, key)) {
+    return CONFIRMED_ACTIVITY_TYPES[key];
+  }
+  const map = (config && config.activityTypeMap) || {};
+  if (!Object.prototype.hasOwnProperty.call(map, key)) return null;
+  return text(map[key]);
+}
+
+/**
  * @param {unknown} raw YYYY-MM-DD (cz_funnel_solicitudes.fecha_nacimiento)
  * @param {string|null} format
  */
@@ -78,17 +96,52 @@ function formatDateOfBirth(raw, format) {
   }
 }
 
+const UY_MOBILE_E164 = /^5989\d{7}$/;
+
 /**
- * CZ stores celular as 598XXXXXXXX (limpiarCelular). Only UY mobiles (5989 + 7 digits) accepted.
+ * Unequivocal UY-mobile digits (5989 + 7). Does not invent or drop digits.
+ * Safe forms only, aligned with Credizona `limpiarCelular` for mobiles:
+ * already 5989xxxxxxx, international 00 prefix, local 09xxxxxxx, 8 digits starting with 9.
+ * 7-digit numbers, landlines (2/4), extra digits: not normalized.
+ * @param {unknown} raw
+ * @returns {string|null} 5989 + 7 digits, or null
+ */
+function normalizeUyMobileDigits(raw) {
+  let digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (UY_MOBILE_E164.test(digits)) return digits;
+  if (/^09\d{7}$/.test(digits)) return '598' + digits.slice(1);
+  if (/^9\d{7}$/.test(digits)) return '598' + digits;
+  return null;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ status: 'empty', digits: string } | { status: 'ok', digits: string, e164: string }
+ *   | { status: 'invalid', digits: string }}
+ */
+function inspectMobilePhone(raw) {
+  const digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+  if (!digits) return { status: 'empty', digits: '' };
+  const e164 = normalizeUyMobileDigits(raw);
+  if (e164) return { status: 'ok', digits: digits, e164: e164 };
+  return { status: 'invalid', digits: digits };
+}
+
+/**
+ * Only UY mobiles (5989 + 7 digits), after safe normalization. Invalid applicant numbers
+ * are `elm_mobilephone_needs_correction` (never a commercial rejection). Unconfirmed
+ * serialization format stays a JANUS config blocker.
  * @param {unknown} raw
  * @param {string|null} format
  */
 function formatMobilePhone(raw, format) {
   if (!format) return fail(CODES.MOBILEPHONE_FORMAT_UNCONFIRMED);
-  const digits = String(raw == null ? '' : raw).replace(/\D/g, '');
-  if (!/^5989\d{7}$/.test(digits)) return fail(CODES.MOBILEPHONE_INVALID);
-  if (format === 'uy_local_0') return { ok: true, value: '0' + digits.slice(3) };
-  if (format === 'uy_598') return { ok: true, value: digits };
+  const phone = inspectMobilePhone(raw);
+  if (phone.status !== 'ok') return fail(CODES.MOBILEPHONE_NEEDS_CORRECTION);
+  if (format === 'uy_local_0') return { ok: true, value: '0' + phone.e164.slice(3) };
+  if (format === 'uy_598') return { ok: true, value: phone.e164 };
   return fail(CODES.MOBILEPHONE_FORMAT_UNCONFIRMED);
 }
 
@@ -117,14 +170,13 @@ function buildService1Payload(input) {
   const missing = missingRequiredFields(s);
   if (missing.length) return fail(CODES.MISSING_REQUIRED_FIELDS, { fields: missing });
 
+  const phone = inspectMobilePhone(s.celular);
+  if (phone.status === 'invalid') return fail(CODES.MOBILEPHONE_NEEDS_CORRECTION);
+
   const czId = positiveSafeInt(input && input.czId);
   if (czId == null) return fail(CODES.INVALID_CZ_ID);
 
-  const relacion = text(s.relacion_laboral);
-  const map = config.activityTypeMap || {};
-  const activityType = Object.prototype.hasOwnProperty.call(map, relacion)
-    ? text(map[relacion])
-    : null;
+  const activityType = resolveActivityType(s.relacion_laboral, config);
   if (!activityType) return fail(CODES.ACTIVITY_TYPE_MAPPING_MISSING);
 
   const dob = formatDateOfBirth(s.fecha_nacimiento, config.dateOfBirthFormat || null);
@@ -183,7 +235,10 @@ module.exports = {
   SERVICE2_KEYS,
   formatDateOfBirth,
   formatMobilePhone,
+  normalizeUyMobileDigits,
+  inspectMobilePhone,
   missingRequiredFields,
+  resolveActivityType,
   buildService1Payload,
   buildService2Payload,
 };

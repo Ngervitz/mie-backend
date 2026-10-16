@@ -99,6 +99,28 @@ function textIn(list, raw) {
   return typeof raw === 'string' && list.includes(raw.trim());
 }
 
+/**
+ * Stored S2 body matches public.elm_s2_success_true_null_result (historical, stricter than the
+ * forward parser): HTTP 200, elm_response_undocumented, boolean success true, result JSON null.
+ * An absent `result` key is accepted only on new responses (classifyService2Body), not here.
+ * HTTP 400 / technical_error / documented negatives never match.
+ *
+ * @param {object|null|undefined} p elm_lead_processes row
+ * @returns {boolean}
+ */
+function isS2Accepted(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (Number(p.s2_http_status) !== 200) return false;
+  if (p.s2_error_code !== CODES.RESPONSE_UNDOCUMENTED) return false;
+  if (p.s2_completed_at == null || p.s2_completed_at === '') return false;
+  const body = p.s2_response;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (!Object.prototype.hasOwnProperty.call(body, 'success')) return false;
+  if (body.success !== true) return false;
+  if (!Object.prototype.hasOwnProperty.call(body, 'result')) return false;
+  return body.result === null;
+}
+
 function result(state, detail, stage) {
   return {
     state: state,
@@ -212,6 +234,7 @@ module.exports = {
   DUPLICATE_OTHER_CHANNEL_DETAIL,
   STATE_BY_PROJECTED_ESTADO,
   classifyElmProcess,
+  isS2Accepted,
   blocksSurveyInvite,
   readPostReferralRejectionStatuses,
 };

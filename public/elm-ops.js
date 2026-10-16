@@ -1,7 +1,6 @@
 /* ELM operations (Fase 3B): active referrals / uncertain ELM results + manual review queue.
- * The dashboard uses createProcessResolver ("Resolver ELM" in the Rechazados / Preaprobados
- * solicitud detail); mount() is no longer placed on any screen. Pure helpers are exported for
- * Node tests (UMD).
+ * Preaprobados mounts the C1/ELM tray with mount() in V1 read-only mode (GET only, canAct=false).
+ * createProcessResolver ("Resolver ELM") stays in the solicitud detail; it is not the tray.
  * Every action sends the version the operator saw; the backend answers `stale` if anything
  * changed in between (postback, worker, another operator). Nothing here sends to ELM. */
 (function (root, factory) {
@@ -57,6 +56,8 @@
     elm_s1_technical_error_retries_exhausted: 'Error técnico ELM en S1: reintentos agotados',
     elm_s2_technical_error_retries_exhausted: 'Error técnico ELM en S2: reintentos agotados',
     elm_config_incomplete: 'Configuración ELM incompleta',
+    elm_mobilephone_needs_correction: 'Celular con formato inválido: pendiente de corrección (no es un rechazo comercial)',
+    elm_mobilephone_invalid: 'Celular con formato inválido: pendiente de corrección (no es un rechazo comercial)',
     ci_prior_unknown: 'Otra solicitud de la CI tiene un resultado ELM incierto',
     ci_open_elm_process: 'Otra solicitud de la CI tiene un proceso ELM abierto',
     not_started_attempts_exhausted: 'No se pudo iniciar el envío tras varios intentos',
@@ -250,6 +251,32 @@
       '<td>' + esc(i.provider_status || '—') + '</td>' +
       '<td>' + esc(fmtDate(i.since)) + '</td>' +
       '<td>' + esc(fmtAge(i.age_hours)) + '</td>' +
+      '</tr>'
+    );
+  }
+
+  function isEstado12Followup(i) {
+    return i && (i.kind === 'in_evaluation' || i.kind === 'queued');
+  }
+
+  function c1ReferralRowHtml(r, fmtDate) {
+    const ev = r.last_event;
+    const commercial = r.granted_elm
+      ? 'Otorgado ELM'
+      : (r.provider_status || r.fallback_outcome || '—');
+    const stale = r.stale
+      ? '<span class="elm-ops-flag elm-ops-flag-danger">Sin señal reciente</span>'
+      : '—';
+    return (
+      '<tr>' +
+      '<td>' + esc(r.cz_solicitud_id) + '</td>' +
+      '<td>' + esc(r.ci || '—') + '</td>' +
+      '<td>' + esc(r.projected_estado) + '</td>' +
+      '<td>' + esc(commercial) + '</td>' +
+      '<td>' + (ev ? esc((ev.type || '—') + (ev.delivery_status ? ' · ' + ev.delivery_status : '')) : 'Sin eventos') + '</td>' +
+      '<td>' + esc(fmtDate(r.referred_at || r.started_at)) + '</td>' +
+      '<td>' + esc(fmtAge(r.age_hours)) + '</td>' +
+      '<td>' + stale + '</td>' +
       '</tr>'
     );
   }
@@ -603,32 +630,33 @@
     };
   }
 
-  /** DOM wiring. @param {{ root: HTMLElement, api: string, fmtDate: Function }} opts */
+  /**
+   * C1/ELM tray in Preaprobados. V1 is strictly read-only: GET only, canAct always false,
+   * no Resolver / Asignar / Reenviar, no assignees fetch, no POST.
+   * @param {{ root: HTMLElement, api?: string, fmtDate?: Function, fetch?: Function, canAct?: boolean }} opts
+   */
   function mount(opts) {
     const root = opts.root;
     const api = opts.api || '';
     const fmtDate = opts.fmtDate || function (iso) { return iso || '—'; };
+    const fetchFn = opts.fetch || (typeof fetch === 'function' ? fetch.bind(null) : null);
     const state = {
-      summary: null,
-      processes: [],
+      eval12: [],
       cases: [],
-      kpis: null,
-      followup: [],
-      assignees: null,
+      referrals13: [],
       canAct: false,
       error: null,
-      message: null,
-      openForm: null,
     };
 
-    async function request(method, path, body) {
-      const res = await fetch(api + '/preaprobados/elm-ops' + path, {
-        method: method,
-        headers: body
-          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
-          : { Accept: 'application/json' },
+    async function request(method, path) {
+      const m = String(method || 'GET').toUpperCase();
+      if (m !== 'GET') {
+        throw new Error('elm-ops tray v1 is read-only');
+      }
+      const res = await fetchFn(api + '/preaprobados/elm-ops' + path, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
         credentials: 'same-origin',
-        body: body ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(function () {
         return {};
@@ -636,195 +664,89 @@
       return { status: res.status, data: data };
     }
 
+    function sectionHtml(id, title, count, hint, table, empty) {
+      return (
+        '<details class="elm-ops-section" id="' + esc(id) + '"' + (count ? ' open' : '') + '>' +
+        '<summary>' + esc(title) + ' (' + count + ')</summary>' +
+        '<p class="preaprobados-muted">' + esc(hint) + '</p>' +
+        (count ? table : '<p class="preaprobados-muted">' + esc(empty) + '</p>') +
+        '</details>'
+      );
+    }
+
     function render() {
-      const alert = alertText(state.summary);
-      let html = '';
-      if (alert) html += '<div class="elm-ops-alert" role="alert">' + esc(alert) + '</div>';
+      let html =
+        '<header class="elm-ops-head">' +
+        '<h2 class="elm-ops-title">Bandeja C1 / ELM</h2>' +
+        '<p class="preaprobados-muted">Solo lectura. No resuelve, no asigna y no reenvía a ELM. Independiente de la cohorte CDV de Preaprobados.</p>' +
+        '</header>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
-      if (state.message) html += '<div class="mcl-status">' + esc(state.message) + '</div>';
 
-      if (state.kpis) {
-        html +=
-          '<details class="elm-ops-section">' +
-          '<summary>KPI ELM (todos los procesos, por origen)</summary>' +
-          '<p class="preaprobados-muted">Flujo: lo que pasó con los procesos iniciados (no baja si el estado cambia). ' +
-          'Estado actual: dónde está hoy cada proceso. Un proceso por solicitud; sin datos CDV. ' +
-          '"Aceptados S2" no son préstamos otorgados: solo "Otorgados ELM" confirma el desembolso.</p>' +
-          '<h4>Flujo</h4>' + kpiTableHtml(state.kpis.flow, FLOW_LABELS) +
-          '<h4>Estado actual</h4>' + kpiTableHtml(state.kpis.current, CURRENT_LABELS) +
-          '</details>';
-      }
+      html += sectionHtml(
+        'elm-ops-estado-12',
+        'Estado 12 — En evaluación y procesos trabados',
+        state.eval12.length,
+        'Solicitudes C1 todavía en evaluación ELM y jobs automáticos en cola o trabados. No son rechazos.',
+        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Origen</th><th>Situación</th>' +
+          '<th>Detalle</th><th>Estado ELM</th><th>Desde</th><th>Antigüedad</th></tr></thead><tbody>' +
+          state.eval12.map(function (i) { return followupRowHtml(i, fmtDate); }).join('') +
+          '</tbody></table>',
+        'Sin solicitudes en evaluación ni trabadas.',
+      );
 
-      html +=
-        '<details class="elm-ops-section"' + (state.followup.length ? ' open' : '') + '>' +
-        '<summary>Seguimiento operativo ELM (' + state.followup.length + ')</summary>' +
-        '<p class="preaprobados-muted">En evaluación (S1 favorable con S2 pendiente incluido), errores técnicos o resultados inciertos, ' +
-        'rechazos automáticos todavía no reflejados en Credizona y solicitudes en cola. No cuentan como rechazos.</p>' +
-        (state.followup.length
-          ? '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Origen</th><th>Situación</th>' +
-            '<th>Detalle</th><th>Estado ELM</th><th>Desde</th><th>Antigüedad</th></tr></thead><tbody>' +
-            state.followup.map(function (i) { return followupRowHtml(i, fmtDate); }).join('') +
-            '</tbody></table>'
-          : '<p class="preaprobados-muted">Sin casos en seguimiento.</p>') +
-        '</details>';
+      html += sectionHtml(
+        'elm-ops-estado-14',
+        'Estado 14 — Revisión pendiente',
+        state.cases.length,
+        'Requieren intervención operativa. Motivo, fecha de ingreso y antigüedad. V1 no asigna ni resuelve.',
+        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Motivo</th><th>Ingreso</th>' +
+          '<th>Antigüedad</th><th>Estado ELM</th><th>Responsable</th><th>Prioridad</th><th>Vence</th><th></th></tr></thead><tbody>' +
+          state.cases.map(function (c) { return caseRowHtml(c, fmtDate, false); }).join('') +
+          '</tbody></table>',
+        'Sin revisiones pendientes.',
+      );
 
-      html +=
-        '<details class="elm-ops-section"' + (state.processes.length ? ' open' : '') + '>' +
-        '<summary>Derivaciones ELM activas y resultados inciertos (' + state.processes.length + ')</summary>' +
-        '<p class="preaprobados-muted">Mientras figuren acá, ninguna otra solicitud de la misma CI se envía a ELM. ' +
-        'No vencen solas: se cierran con una resolución manual auditada.</p>' +
-        (state.processes.length
-          ? '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Tipo</th><th>Desde</th>' +
-            '<th>Antigüedad</th><th>Estado ELM</th><th>Último evento</th><th>Solicitudes no enviadas</th><th></th></tr></thead><tbody>' +
-            state.processes.map(function (p) {
-              let row = processRowHtml(p, fmtDate, state.canAct);
-              if (state.openForm && state.openForm.id === p.process_id) {
-                row += '<tr><td colspan="9">' + resolveProcessFormHtml(p) + '</td></tr>';
-              }
-              return row;
-            }).join('') +
-            '</tbody></table>'
-          : '<p class="preaprobados-muted">Sin derivaciones activas.</p>') +
-        '</details>';
-
-      html +=
-        '<details class="elm-ops-section"' + (state.cases.length ? ' open' : '') + '>' +
-        '<summary>Revisión manual ELM (' + state.cases.length + ')</summary>' +
-        (state.cases.length
-          ? '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Motivo</th><th>Ingreso</th>' +
-            '<th>Antigüedad</th><th>Estado ELM</th><th>Responsable</th><th>Prioridad</th><th>Vence</th><th></th></tr></thead><tbody>' +
-            state.cases.map(function (c) {
-              let row = caseRowHtml(c, fmtDate, state.canAct);
-              if (state.openForm && state.openForm.id === c.id) {
-                const f = state.openForm.kind;
-                const form =
-                  f === 'assign' ? assignFormHtml(c, state.assignees) :
-                  f === 'triage' ? triageFormHtml(c) : resolveCaseFormHtml();
-                row += '<tr><td colspan="10">' + form + '</td></tr>';
-              }
-              return row;
-            }).join('') +
-            '</tbody></table>'
-          : '<p class="preaprobados-muted">Sin casos abiertos.</p>') +
-        '</details>';
+      html += sectionHtml(
+        'elm-ops-estado-13',
+        'Estado 13 — Derivados a ELM',
+        state.referrals13.length,
+        'Derivación vigente: seguimiento comercial (estado ELM, último evento, antigüedad). V1 no reenvía.',
+        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Estado CZ</th><th>Situación comercial</th>' +
+          '<th>Último evento</th><th>Desde</th><th>Antigüedad</th><th>Seguimiento</th></tr></thead><tbody>' +
+          state.referrals13.map(function (r) { return c1ReferralRowHtml(r, fmtDate); }).join('') +
+          '</tbody></table>',
+        'Sin derivaciones C1 activas.',
+      );
       root.innerHTML = html;
     }
 
     async function load() {
       state.error = null;
       try {
-        const [s, p, c, k, f] = await Promise.all([
-          request('GET', '/summary'),
-          request('GET', '/processes'),
-          request('GET', '/review-cases?status=open'),
-          request('GET', '/kpis'),
+        const [f, c, r] = await Promise.all([
           request('GET', '/followup'),
+          request('GET', '/review-cases?status=open'),
+          request('GET', '/c1/active-referrals'),
         ]);
-        if (s.status >= 400 || p.status >= 400 || c.status >= 400) {
-          state.error = 'No se pudieron cargar las colas ELM.';
+        if (f.status >= 400 || c.status >= 400 || r.status >= 400) {
+          state.error = 'No se pudieron cargar las colas C1 / ELM.';
+          state.eval12 = [];
+          state.cases = [];
+          state.referrals13 = [];
         } else {
-          state.summary = s.data.data;
-          state.processes = p.data.items || [];
+          const followup = f.data.items || [];
+          state.eval12 = followup.filter(isEstado12Followup);
           state.cases = c.data.items || [];
-        }
-        state.kpis = k.status === 200 ? k.data.data : null;
-        state.followup = f.status === 200 ? f.data.items || [] : [];
-        if (state.assignees === null) {
-          const a = await request('GET', '/assignees');
-          state.canAct = a.status === 200;
-          state.assignees = a.status === 200 ? a.data.items || [] : [];
+          const referrals = r.data.items || [];
+          state.referrals13 = referrals.filter(function (item) {
+            return Number(item.projected_estado) === 13;
+          });
         }
       } catch (_) {
-        state.error = 'No se pudieron cargar las colas ELM.';
+        state.error = 'No se pudieron cargar las colas C1 / ELM.';
       }
       render();
     }
-
-    function findProcess(id) {
-      return state.processes.find(function (p) { return p.process_id === id; });
-    }
-    function findCase(id) {
-      return state.cases.find(function (c) { return c.id === id; });
-    }
-
-    async function submit(kind, form) {
-      const fd = new FormData(form);
-      const target = state.openForm;
-      let out;
-      if (kind === 'resolve-process') {
-        const p = findProcess(target.id);
-        const choice = parseResolutionChoice(fd.get('resolution_code'));
-        out = await request('POST', '/processes/' + encodeURIComponent(target.id) + '/resolve', {
-          expected_updated_at: p ? p.version : null,
-          resolution_code: choice.resolution_code,
-          correction: choice.correction,
-          cz_outcome: fd.get('cz_outcome'),
-          note: fd.get('note'),
-        });
-      } else {
-        const c = findCase(target.id);
-        const base = { expected_version: c ? c.version : null };
-        const path = '/review-cases/' + encodeURIComponent(target.id);
-        if (kind === 'assign') {
-          out = await request('POST', path + '/assign', Object.assign(base, {
-            assignee_user_id: fd.get('assignee_user_id') || null,
-          }));
-        } else if (kind === 'triage') {
-          const local = new Date(String(fd.get('due_at') || ''));
-          out = await request('POST', path + '/triage', Object.assign(base, {
-            priority: fd.get('priority'),
-            due_at: Number.isFinite(local.getTime()) ? local.toISOString() : null,
-          }));
-        } else {
-          out = await request('POST', path + '/resolve', Object.assign(base, {
-            resolution_code: fd.get('resolution_code'),
-            cz_outcome: fd.get('cz_outcome'),
-            note: fd.get('note'),
-          }));
-        }
-      }
-      const status = out.data && out.data.status;
-      if (out.status === 200) {
-        state.openForm = null;
-        state.message = 'Acción registrada.';
-      } else {
-        state.message = null;
-        state.error = actionErrorText(status);
-        if (status === 'stale') state.openForm = null;
-      }
-      await load();
-      if (out.status !== 200) {
-        state.error = actionErrorText(status);
-        render();
-      }
-    }
-
-    root.addEventListener('click', function (ev) {
-      const btn = ev.target.closest('[data-elm-ops-action]');
-      if (!btn) return;
-      const action = btn.getAttribute('data-elm-ops-action');
-      state.message = null;
-      state.error = null;
-      if (action === 'cancel') {
-        state.openForm = null;
-      } else {
-        const pr = btn.closest('[data-process-id]');
-        const cr = btn.closest('[data-case-id]');
-        const id = pr ? pr.getAttribute('data-process-id') : cr ? cr.getAttribute('data-case-id') : null;
-        state.openForm = id ? { kind: action, id: id } : null;
-      }
-      render();
-    });
-
-    root.addEventListener('submit', function (ev) {
-      const form = ev.target.closest('[data-elm-ops-form]');
-      if (!form) return;
-      ev.preventDefault();
-      submit(form.getAttribute('data-elm-ops-form'), form).catch(function () {
-        state.error = 'No se pudo completar la acción.';
-        render();
-      });
-    });
 
     return { load: load };
   }
@@ -846,6 +768,7 @@
     processKindLabel,
     kpiTableHtml,
     followupRowHtml,
+    c1ReferralRowHtml,
     FLOW_LABELS,
     CURRENT_LABELS,
     processRowHtml,

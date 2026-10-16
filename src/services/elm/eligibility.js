@@ -21,7 +21,7 @@
 
 const { isGrantedForSolicitud } = require('../../lib/preaprobadosRead');
 const { CODES } = require('./constants');
-const { missingRequiredFields } = require('./payload');
+const { missingRequiredFields, inspectMobilePhone, resolveActivityType } = require('./payload');
 
 /**
  * Commercial origin for tracking only (never sent, never blocks). Base comes from the SMS touch
@@ -71,13 +71,14 @@ function evaluateElmEligibility(input) {
     blockers.push({ code: CODES.MISSING_REQUIRED_FIELDS, fields: missing });
   }
 
+  const phone = inspectMobilePhone(sol.celular);
+  if (phone.status === 'invalid') {
+    blockers.push({ code: CODES.MOBILEPHONE_NEEDS_CORRECTION });
+  }
+
   const relacion =
     sol.relacion_laboral == null ? '' : String(sol.relacion_laboral).trim();
-  const map = (input.config && input.config.activityTypeMap) || {};
-  if (
-    relacion &&
-    !(Object.prototype.hasOwnProperty.call(map, relacion) && String(map[relacion]).trim())
-  ) {
+  if (relacion && !resolveActivityType(relacion, input.config)) {
     blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
   }
 
@@ -99,6 +100,10 @@ function evaluateElmReferEligibility(input) {
   }
   if (input.process && Number(sol.ci) !== Number(input.process.ci)) {
     blockers.push({ code: CODES.CI_MISMATCH });
+  }
+  const phone = inspectMobilePhone(sol.celular);
+  if (phone.status === 'invalid') {
+    blockers.push({ code: CODES.MOBILEPHONE_NEEDS_CORRECTION });
   }
   return { eligible: blockers.length === 0, blockers: blockers };
 }

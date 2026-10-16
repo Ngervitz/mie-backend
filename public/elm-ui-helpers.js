@@ -33,6 +33,8 @@
     elm_solicitud_not_in_preaprobados: 'La solicitud no figura en la cohorte CDV de Preaprobados.',
     elm_cdv_granted: 'La solicitud tiene un préstamo CDV otorgado.',
     elm_missing_required_fields: 'Faltan datos obligatorios de la solicitud.',
+    elm_mobilephone_needs_correction: 'El celular no es un móvil uruguayo inequívoco: hay que corregirlo antes de enviar a ELM.',
+    elm_mobilephone_invalid: 'El celular no es un móvil uruguayo inequívoco: hay que corregirlo antes de enviar a ELM.',
     elm_date_of_birth_invalid: 'Fecha de nacimiento inválida.',
     elm_date_of_birth_unverified:
       'Fecha de nacimiento sin verificar: se habilita después de la próxima sincronización con Credizona.',

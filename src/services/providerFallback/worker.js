@@ -22,10 +22,12 @@
  * rejected / not_eligible only with a definitive reason (DEFINITIVE_REJECTION_REASONS); any
  * other is turned into manual_review here and refused by provider_fallback_finalize.
  *
- * C1: before any new external call → CI guard → monthly send lock (elm_ci_lock_acquire, atomic
- * per CI; elm_claim_process takes the same lock for every origin). A reservation is released only
- * when it is proven that no call started; otherwise finalize settles it (same transaction as the
- * outcome event). Cron runs (not kicks) also reconcile locks and, when enabled, late ELM events.
+ * C1: before any new external call → CI guard → local cellphone check → monthly send lock
+ * (elm_ci_lock_acquire, atomic per CI; elm_claim_process takes the same lock for every origin).
+ * An invalid cellphone after safe normalization is manual_review (CZ 14) without acquiring the
+ * lock and without calling ELM. A reservation is released only when it is proven that no call
+ * started; otherwise finalize settles it (same transaction as the outcome event). Cron runs
+ * (not kicks) also reconcile locks and, when enabled, late ELM events.
  */
 
 const crypto = require('crypto');
@@ -34,7 +36,7 @@ const defaultLogger = require('../../lib/logger');
 const { OUTCOME, REASONS, DEFER, DEFINITIVE_REJECTION_REASONS } = require('./constants');
 const { reviewSlaFor } = require('./config');
 const { snapshotToSolicitud } = require('./snapshot');
-const { deriveFromProcess, evaluateCiGuard, decideCiLock, classifyBlocked } = require('./outcome');
+const { deriveFromProcess, evaluateCiGuard, decideCiLock, classifyBlocked, classifyPhoneCorrection } = require('./outcome');
 
 const TRIGGER_ORIGIN = 'cz_automatic';
 const MAX_STEPS_PER_RUN = 6;
@@ -155,6 +157,8 @@ function createProviderFallbackWorker(deps) {
     if (guard.kind === 'wait') {
       return defer(job, workerId, secondsUntil(guard.untilMs), false, DEFER.CI_OTHER_IN_FLIGHT);
     }
+    const phone = classifyPhoneCorrection(snapshotToSolicitud(job.snapshot));
+    if (phone) return finalizeDecision(job, workerId, phone, elmProcessId);
     const lock = decideCiLock(
       await repo.acquireCiLock({ ci: ci, czSolicitudId: czId, fallbackRequestId: job.id }),
     );

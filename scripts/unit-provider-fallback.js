@@ -102,7 +102,8 @@ const { readProviderFallbackConfig } = require('../src/services/providerFallback
 const { parseStartBody, snapshotToSolicitud } = require('../src/services/providerFallback/snapshot');
 const { createProviderFallbackWorker } = require('../src/services/providerFallback/worker');
 const { OUTCOME, REASONS, CI_LOCK_BLOCK } = require('../src/services/providerFallback/constants');
-const { decideCiLock } = require('../src/services/providerFallback/outcome');
+const { deriveFromProcess, evaluateCiGuard, decideCiLock } = require('../src/services/providerFallback/outcome');
+const { isS2Accepted } = require('../src/services/elm/classification');
 const { parseRejectionStatuses } = require('../src/services/providerFallback/config');
 const { createProviderFallbackRouter } = require('../src/routes/providerFallback');
 const { signProviderFallbackPayload } = require('../src/lib/czProviderFallbackHmac');
@@ -961,6 +962,97 @@ function test(name, fn) {
   tests.push({ name, fn });
 }
 
+test('isS2Accepted: success-true/result-null unknown is a referral; HTTP 400 / technical / plain unknown are not', async () => {
+  const completed = iso(T0);
+  const contract = {
+    cz_solicitud_id: 201,
+    s1_status: S1.ELIGIBLE,
+    s2_status: S2.UNKNOWN,
+    s2_http_status: 200,
+    s2_error_code: CODES.RESPONSE_UNDOCUMENTED,
+    s2_completed_at: completed,
+    s2_response: { success: true, result: null },
+  };
+  assert.strictEqual(isS2Accepted(contract), true, 'SQL historical contract');
+  assert.strictEqual(isS2Accepted(null), false);
+  assert.strictEqual(
+    isS2Accepted(Object.assign({}, contract, { s2_http_status: 400, s2_error_code: CODES.HTTP_ERROR })),
+    false,
+    'HTTP 400 is never a positive S2',
+  );
+  assert.strictEqual(
+    isS2Accepted(Object.assign({}, contract, { s2_status: S2.TECHNICAL_ERROR, s2_error_code: CODES.HTTP_AUTH_REJECTED })),
+    false,
+    'technical_error does not match the undocumented-200 contract',
+  );
+  assert.strictEqual(
+    isS2Accepted(Object.assign({}, contract, { s2_response: { success: true } })),
+    false,
+    'absent result is not the historical predicate',
+  );
+  assert.strictEqual(
+    isS2Accepted(Object.assign({}, contract, { s2_response: { success: true, result: 'Aprobado sin canal' } })),
+    false,
+    'documented S2 negative is not accepted',
+  );
+  assert.strictEqual(
+    isS2Accepted(Object.assign({}, contract, { s2_response: { success: 'true', result: null } })),
+    false,
+    'string "true" is not boolean success',
+  );
+
+  const accepted = deriveFromProcess(contract, T0);
+  assert.deepStrictEqual([accepted.kind, accepted.outcome, accepted.reasonCode, accepted.detail], [
+    'final', OUTCOME.REFERRED, REASONS.ELM_S2_REFERRED, { s2_accepted: true },
+  ]);
+  const plainUnknown = deriveFromProcess(
+    Object.assign({}, contract, { s2_http_status: 400, s2_error_code: CODES.HTTP_ERROR, s2_response: { error: 'TypeError' } }),
+    T0,
+  );
+  assert.deepStrictEqual([plainUnknown.kind, plainUnknown.outcome, plainUnknown.reasonCode], [
+    'final', OUTCOME.MANUAL_REVIEW, REASONS.ELM_S2_UNKNOWN,
+  ]);
+  const alreadyReferred = deriveFromProcess(
+    Object.assign({}, contract, { s2_status: S2.REFERRED, s2_error_code: null, s2_response: { result: 'Lead Aprobado correctamente' } }),
+    T0,
+  );
+  assert.deepStrictEqual([alreadyReferred.kind, alreadyReferred.outcome, alreadyReferred.reasonCode], [
+    'final', OUTCOME.REFERRED, REASONS.ELM_S2_REFERRED,
+  ]);
+  const commercialReject = deriveFromProcess(
+    Object.assign({}, contract, { s2_status: S2.REJECTED, s2_error_code: null, s2_result_message: 'Documento no válido' }),
+    T0,
+  );
+  assert.deepStrictEqual([commercialReject.kind, commercialReject.outcome, commercialReject.reasonCode], [
+    'final', OUTCOME.REJECTED, REASONS.ELM_S2_REJECTED,
+  ]);
+
+  const guardAccepted = evaluateCiGuard([contract], 202, T0);
+  assert.deepStrictEqual(
+    [guardAccepted.kind, guardAccepted.outcome, guardAccepted.reasonCode, guardAccepted.relatedCzId, guardAccepted.detail && guardAccepted.detail.s2_accepted],
+    ['final', OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, 201, true],
+  );
+  const guardReferred = evaluateCiGuard(
+    [{ cz_solicitud_id: 201, s1_status: S1.ELIGIBLE, s2_status: S2.REFERRED, referred_at: completed }],
+    202,
+    T0,
+  );
+  assert.deepStrictEqual(
+    [guardReferred.kind, guardReferred.outcome, guardReferred.reasonCode, guardReferred.relatedCzId],
+    ['final', OUTCOME.ALREADY_REFERRED, REASONS.CI_ACTIVE_REFERRAL, 201],
+  );
+  assert.ok(!guardReferred.detail || guardReferred.detail.s2_accepted !== true, 'plain S2 referred is unchanged');
+  const guardUnknown = evaluateCiGuard(
+    [Object.assign({}, contract, { s2_http_status: 400, s2_error_code: CODES.HTTP_ERROR, s2_response: {} })],
+    202,
+    T0,
+  );
+  assert.deepStrictEqual(
+    [guardUnknown.kind, guardUnknown.outcome, guardUnknown.reasonCode, guardUnknown.relatedCzId],
+    ['final', OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN, 201],
+  );
+});
+
 test('flags default OFF; ELM client stays disabled', async () => {
   const cfg = readProviderFallbackConfig({}, ELM_CONFIG);
   assert.strictEqual(cfg.startEnabled, false);
@@ -1209,6 +1301,11 @@ test('technical_error / unknown / timeout / unmapped never become estado 3', asy
   assert.ok(!DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_S1_TECHNICAL_ERROR_RETRY_UNSAFE));
   assert.ok(!DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_S1_UNKNOWN));
   assert.ok(DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_S1_REJECTED));
+  assert.ok(!DEFINITIVE_REJECTION_REASONS.includes('elm_mobilephone_invalid'));
+  assert.ok(!DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION));
+  const sqlPhone = readSrc('migrations/20261016_c1_mobilephone_needs_correction.sql');
+  assert.ok(/ARRAY\[[\s\S]*elm_salary_invalid[\s\S]*\]/.test(sqlPhone));
+  assert.ok(!/ARRAY\[[\s\S]*elm_mobilephone_invalid[\s\S]*\]/.test(sqlPhone));
   const src = readSrc('src/services/providerFallback/outcome.js');
   assert.ok(!/default:\s*return final\(OUTCOME\.REJECTED/.test(src), 'no default rejection in the outcome rules');
 });
@@ -1248,6 +1345,65 @@ test('gates closed (cz_automatic off / send disabled): only proven not-started r
   await env2.mk('A').runOnce();
   assert.strictEqual(job(env2, 701).last_defer_reason, 'not_started:' + CODES.SEND_DISABLED);
   assert.strictEqual(env2.elmRepo.rows.size, 0);
+});
+
+test('C1 cellphone: valid / safe-normalize / invalid local format / real ELM rejection', async () => {
+  const env = setup();
+  const local = startBody(2701, 27010000);
+  local.applicant.celular = '099123456';
+  await enqueue(env, 2701, 27010000, { applicant: local.applicant });
+  const eight = startBody(2702, 27020000);
+  eight.applicant.celular = '99123456';
+  await enqueue(env, 2702, 27020000, { applicant: eight.applicant });
+  const invalid = startBody(2703, 27030000);
+  invalid.applicant.celular = '6955246';
+  await enqueue(env, 2703, 27030000, { applicant: invalid.applicant });
+  const landline = startBody(2704, 27040000);
+  landline.applicant.celular = '59821234567';
+  await enqueue(env, 2704, 27040000, { applicant: landline.applicant });
+  await enqueue(env, 2705, 27050000);
+  env.client.script.s1.set('27050000', { outcome: 'negative', httpStatus: 200, resultMessage: 'SCORE BAJO' });
+  await enqueue(env, 2706, 27060000);
+  await env.mk('A').runOnce({ limit: 10 });
+
+  assert.strictEqual(job(env, 2706).outcome, OUTCOME.REFERRED, 'already-valid 5989xxxxxxx is sent');
+  assert.strictEqual(env.client.calls.s2.find((p) => p.TrackingId === '2706').mobilephone, '099123456');
+  assert.strictEqual(job(env, 2701).outcome, OUTCOME.REFERRED, '09xxxxxxx normalizes and is sent');
+  assert.strictEqual(env.client.calls.s2.find((p) => p.TrackingId === '2701').mobilephone, '099123456');
+  assert.strictEqual(job(env, 2702).outcome, OUTCOME.REFERRED, '8 digits starting 9 normalize');
+  assert.strictEqual(env.client.calls.s2.find((p) => p.TrackingId === '2702').mobilephone, '099123456');
+
+  for (const czId of [2703, 2704]) {
+    assert.strictEqual(job(env, czId).outcome, OUTCOME.MANUAL_REVIEW, czId + ': local invalid phone is review');
+    assert.strictEqual(job(env, czId).reason_code, REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION);
+    assert.strictEqual(env.repo.czState.get(czId).projected_estado, 14);
+    assert.ok(!env.elmRepo.rows.has(czId), czId + ': ELM process never created');
+    assert.ok(
+      !env.repo.locks.some((l) => l.cz_solicitud_id === czId && (l.state === 'reserved' || l.state === 'consumed')),
+      czId + ': monthly lock never taken',
+    );
+  }
+  assert.ok(env.repo.reviewCases.some((c) => c.cz_solicitud_id === 2703 && c.reason_code === REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION && c.status === 'open'));
+  assert.ok(env.repo.reviewCases.some((c) => c.cz_solicitud_id === 2704 && c.status === 'open'));
+  assert.ok(!env.client.calls.s1.some((p) => p.docNumber === '27030000' || p.docNumber === '27040000'));
+
+  assert.strictEqual(job(env, 2705).outcome, OUTCOME.REJECTED, 'documented ELM S1 negative stays a commercial rejection');
+  assert.strictEqual(job(env, 2705).reason_code, REASONS.ELM_S1_REJECTED);
+  assert.strictEqual(env.repo.czState.get(2705).projected_estado, 3);
+
+  const sameCi = setup();
+  const bad = startBody(2710, 27100000);
+  bad.applicant.celular = '6955246';
+  await enqueue(sameCi, 2710, 27100000, { applicant: bad.applicant });
+  await sameCi.mk('A').runOnce();
+  assert.strictEqual(job(sameCi, 2710).outcome, OUTCOME.MANUAL_REVIEW);
+  const ok = startBody(2711, 27100000);
+  ok.applicant.celular = '59899123456';
+  await enqueue(sameCi, 2711, 27100000, { applicant: ok.applicant });
+  await sameCi.mk('B').runOnce();
+  assert.strictEqual(job(sameCi, 2711).outcome, OUTCOME.REFERRED, 'invalid-phone review does not consume the monthly quota');
+  assert.strictEqual(sameCi.client.calls.s1.length, 1);
+  assert.ok(!sameCi.elmRepo.rows.has(2710));
 });
 
 test('eligibility: data blockers → not_eligible; organic not blocked; unconfirmed config → manual_review', async () => {

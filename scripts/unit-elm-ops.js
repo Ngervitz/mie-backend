@@ -496,6 +496,29 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
   assert.ok(!/evaluateElm|referElm|retryElmStep|service1|service2/.test(opsSrc), 'ops never sends to ELM');
 });
 
+test('UI helpers: cellphone-correction review reason is labeled for the operator', async () => {
+  assert.ok(ElmOpsUi.reasonLabel('elm_mobilephone_needs_correction').includes('Celular'));
+  assert.ok(ElmOpsUi.reasonLabel('elm_mobilephone_needs_correction').includes('no es un rechazo comercial'));
+  const html = ElmOpsUi.caseRowHtml(
+    {
+      id: CID,
+      cz_solicitud_id: 1631,
+      ci: '52764619',
+      reason_code: 'elm_mobilephone_needs_correction',
+      created_at: '2026-10-16T12:00:00Z',
+      age_hours: 1,
+      due_at: '2026-10-17T12:00:00Z',
+      unassigned: true,
+      overdue: false,
+      assigned_to: null,
+    },
+    function () { return '—'; },
+    true,
+  );
+  assert.ok(html.includes('Celular con formato inválido'));
+  assert.ok(!html.includes('elm_mobilephone_needs_correction'), 'operator sees the label, not the raw code');
+});
+
 test('UI helpers: alert banner, escaping, no action buttons without permission', async () => {
   assert.strictEqual(ElmOpsUi.alertText({ review_unassigned: 0, review_overdue: 0 }), '');
   assert.strictEqual(
@@ -526,6 +549,116 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   assert.ok(page.indexOf('elm-ops.js') > page.indexOf('elm-ui-helpers.js'));
   assert.ok(page.indexOf('elm-ops.js') < page.indexOf('mie-dashboard.js'));
   assert.ok(page.includes('id="elm-ops-root"'));
+  assert.ok(page.indexOf('id="preaprobados-results"') < page.indexOf('id="elm-ops-root"'));
+  assert.ok(page.includes('aria-label="Bandeja C1 / ELM"'));
+  const dash = readSrc('public/mie-dashboard.js');
+  assert.ok(dash.includes('ElmOps.mount'));
+  assert.ok(dash.includes('canAct: false'));
+});
+
+test('UI v1 tray: mount loads GET followup/review-cases/active-referrals; no POST, no action buttons', async () => {
+  const calls = [];
+  const fetchFn = async (url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    calls.push({ method: method, url: String(url), body: opts && opts.body });
+    let items = [];
+    if (String(url).includes('/followup')) {
+      items = [
+        {
+          kind: 'queued',
+          cz_solicitud_id: 1490,
+          ci: '11111111',
+          trigger_origin: 'cz_automatic',
+          label: 'En cola para ELM (circuito automático)',
+          provider_status: null,
+          since: '2026-10-16T12:00:00Z',
+          age_hours: 4,
+        },
+        {
+          kind: 'review',
+          cz_solicitud_id: 1939,
+          ci: '22222222',
+          trigger_origin: 'cz_automatic',
+          label: 'Resultado incierto',
+          provider_status: null,
+          since: '2026-10-16T12:00:00Z',
+          age_hours: 2,
+        },
+      ];
+    } else if (String(url).includes('/review-cases')) {
+      items = [
+        {
+          id: CID,
+          cz_solicitud_id: 1939,
+          ci: '22222222',
+          reason_code: 'elm_s1_unknown',
+          created_at: '2026-10-16T12:00:00Z',
+          age_hours: 2,
+          due_at: null,
+          unassigned: true,
+          overdue: false,
+          assigned_to: null,
+          status: 'open',
+          elm: { s1_status: 'unknown', s2_status: 'not_started' },
+          priority: 'normal',
+        },
+      ];
+    } else if (String(url).includes('/c1/active-referrals')) {
+      items = [
+        {
+          cz_solicitud_id: 1475,
+          ci: '33333333',
+          projected_estado: 13,
+          fallback_outcome: 'referred',
+          provider_status: 'Latente',
+          referred_at: '2026-10-15T12:00:00Z',
+          started_at: '2026-10-15T12:00:00Z',
+          age_hours: 24,
+          stale: false,
+          granted_elm: false,
+          last_event: { type: 'outcome', delivery_status: 'acked' },
+        },
+        {
+          cz_solicitud_id: 1631,
+          ci: '44444444',
+          projected_estado: 14,
+          provider_status: null,
+          age_hours: 8,
+          stale: false,
+          granted_elm: false,
+        },
+      ];
+    }
+    return {
+      status: 200,
+      json: async () => ({ ok: true, items: items }),
+    };
+  };
+  const root = {
+    innerHTML: '',
+    addEventListener() {
+      throw new Error('v1 tray must not attach action listeners');
+    },
+  };
+  const tray = ElmOpsUi.mount({ root: root, api: '', fetch: fetchFn, canAct: true });
+  await tray.load();
+  assert.ok(calls.length >= 3);
+  assert.ok(calls.every((c) => c.method === 'GET'), 'tray v1 never POSTs');
+  assert.ok(calls.every((c) => c.body == null), 'GET bodies stay empty');
+  assert.ok(calls.some((c) => c.url.includes('/followup')));
+  assert.ok(calls.some((c) => c.url.includes('/review-cases')));
+  assert.ok(calls.some((c) => c.url.includes('/c1/active-referrals')));
+  assert.ok(!calls.some((c) => c.url.includes('/assignees')));
+  assert.ok(!calls.some((c) => c.url.includes('/processes')));
+  assert.ok(root.innerHTML.includes('Bandeja C1 / ELM'));
+  assert.ok(root.innerHTML.includes('Solo lectura'));
+  assert.ok(root.innerHTML.includes('1490'), 'estado 12 queued job');
+  assert.ok(root.innerHTML.includes('1939'), 'estado 14 review case');
+  assert.ok(root.innerHTML.includes('1475'), 'estado 13 active referral');
+  assert.ok(!root.innerHTML.includes('1631'), 'projected 14 stays in review-cases, not in 13');
+  assert.ok(!/Resolver|Asignar|Reenviar/.test(root.innerHTML));
+  assert.ok(!root.innerHTML.includes('data-elm-ops-action'));
+  assert.ok(!root.innerHTML.includes('data-elm-ops-form'));
 });
 
 test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, never resolved by precedence', async () => {

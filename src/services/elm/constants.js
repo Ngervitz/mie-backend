@@ -41,6 +41,15 @@ const ENABLED_TRIGGER_ORIGINS = Object.freeze(['janus_manual']);
  */
 const ELM_SOURCE = 'copanel';
 
+/**
+ * CZ relacion_laboral codes confirmed in writing by ELM. Take precedence over
+ * ELM_ACTIVITY_TYPE_MAP_JSON so an env override cannot send a different value.
+ * Other codes still require the env map.
+ */
+const CONFIRMED_ACTIVITY_TYPES = Object.freeze({
+  OTR: 'otro',
+});
+
 /** Normalized outcome returned by an ELM client call (transport-agnostic). */
 const OUTCOME = Object.freeze({
   POSITIVE: 'positive',
@@ -84,6 +93,8 @@ const CODES = Object.freeze({
   DATE_OF_BIRTH_INVALID: 'elm_date_of_birth_invalid',
   MOBILEPHONE_FORMAT_UNCONFIRMED: 'elm_mobilephone_format_unconfirmed',
   MOBILEPHONE_INVALID: 'elm_mobilephone_invalid',
+  /** Local format check: not a UY mobile after safe normalization. Never a commercial rejection. */
+  MOBILEPHONE_NEEDS_CORRECTION: 'elm_mobilephone_needs_correction',
   SALARY_INVALID: 'elm_salary_invalid',
   S1_NOT_ELIGIBLE: 'elm_s1_not_eligible',
   S2_ALREADY_STARTED: 'elm_s2_already_started',
@@ -145,6 +156,7 @@ module.exports = {
   TRIGGER_ORIGINS,
   ENABLED_TRIGGER_ORIGINS,
   ELM_SOURCE,
+  CONFIRMED_ACTIVITY_TYPES,
   OUTCOME,
   CODES,
   PRE_RECEPTION_ERROR_CODES,

@@ -6378,6 +6378,39 @@
   margin-bottom: 6px;
 }
 
+#mie-dashboard-app .elm-ops {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+#mie-dashboard-app .elm-ops-head {
+  margin-bottom: 12px;
+}
+#mie-dashboard-app .elm-ops-title {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+}
+#mie-dashboard-app .elm-ops-section {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+#mie-dashboard-app .elm-ops-section > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#mie-dashboard-app .elm-ops-flag {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+}
+#mie-dashboard-app .elm-ops-flag-danger {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
 #mie-dashboard-app .elm-ops-form {
   display: flex;
   flex-wrap: wrap;

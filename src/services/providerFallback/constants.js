@@ -73,6 +73,11 @@ const REASONS = Object.freeze({
    * review; never an ELM credit rejection (commercial reading closed "Duplicado · Otro canal").
    */
   ELM_S1_DUPLICATE_OTHER_CHANNEL: 'elm_s1_duplicate_other_channel',
+  /**
+   * C1: JANUS detected a cellphone that is not an unequivocal UY mobile. Manual review (CZ 14),
+   * never a commercial rejection. ELM is not called; the monthly lock is not taken.
+   */
+  ELM_MOBILEPHONE_NEEDS_CORRECTION: 'elm_mobilephone_needs_correction',
   /** C1: a rejected / not_eligible decision without a definitive reason (safety net). */
   REJECTION_NOT_CONFIRMED: 'rejection_not_confirmed',
   NOT_STARTED_EXHAUSTED: 'not_started_attempts_exhausted',
@@ -136,7 +141,6 @@ const DEFINITIVE_REJECTION_REASONS = Object.freeze([
   'ci_monthly_quota_used',
   'elm_missing_required_fields',
   'elm_date_of_birth_invalid',
-  'elm_mobilephone_invalid',
   'elm_salary_invalid',
   'elm_s1_duplicate_other_channel',
 ]);
