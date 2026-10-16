@@ -1304,8 +1304,13 @@ test('technical_error / unknown / timeout / unmapped never become estado 3', asy
   assert.ok(!DEFINITIVE_REJECTION_REASONS.includes('elm_mobilephone_invalid'));
   assert.ok(!DEFINITIVE_REJECTION_REASONS.includes(REASONS.ELM_MOBILEPHONE_NEEDS_CORRECTION));
   const sqlPhone = readSrc('migrations/20261016_c1_mobilephone_needs_correction.sql');
-  assert.ok(/ARRAY\[[\s\S]*elm_salary_invalid[\s\S]*\]/.test(sqlPhone));
-  assert.ok(!/ARRAY\[[\s\S]*elm_mobilephone_invalid[\s\S]*\]/.test(sqlPhone));
+  const sqlReasons = (sqlPhone.match(/ARRAY\[([\s\S]*?)\]::text\[\]/) || [])[1];
+  assert.ok(sqlReasons, 'phone migration replaces the reasons array');
+  const sqlCodes = sqlReasons.match(/'([^']+)'/g).map((s) => s.slice(1, -1)).sort();
+  assert.deepStrictEqual(sqlCodes, DEFINITIVE_REJECTION_REASONS.slice().sort());
+  assert.strictEqual(sqlCodes.length, 7);
+  assert.ok(sqlCodes.includes('elm_s1_duplicate_other_channel'));
+  assert.ok(!sqlCodes.includes('elm_mobilephone_invalid'));
   const src = readSrc('src/services/providerFallback/outcome.js');
   assert.ok(!/default:\s*return final\(OUTCOME\.REJECTED/.test(src), 'no default rejection in the outcome rules');
 });

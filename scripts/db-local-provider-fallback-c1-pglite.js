@@ -33,7 +33,17 @@ const MIGRATIONS = [
   '20261009_elm_phase3b_operations.sql',
 ];
 const MIG_C1 = MIG('20261010_provider_fallback_c1_events.sql');
+const MIG_DUP = MIG('20261015_provider_fallback_duplicate_other_channel.sql');
 const MIG_PHONE = MIG('20261016_c1_mobilephone_needs_correction.sql');
+const EXPECTED_DEFINITIVE_REASONS = [
+  'ci_monthly_quota_used',
+  'elm_date_of_birth_invalid',
+  'elm_missing_required_fields',
+  'elm_s1_duplicate_other_channel',
+  'elm_s1_rejected',
+  'elm_s2_rejected',
+  'elm_salary_invalid',
+];
 
 const STUBS = `
 CREATE ROLE anon NOLOGIN;
@@ -103,6 +113,9 @@ async function main() {
   const c1 = fs.readFileSync(MIG_C1, 'utf8');
   await db.exec(c1);
   await db.exec(c1);
+  const dupMig = fs.readFileSync(MIG_DUP, 'utf8');
+  await db.exec(dupMig);
+  await db.exec(dupMig);
   const phoneMig = fs.readFileSync(MIG_PHONE, 'utf8');
   await db.exec(phoneMig);
   await db.exec(phoneMig);
@@ -650,8 +663,12 @@ async function main() {
 
   // ------------------------------------------------------------------ cellphone format: 14 + review case without lock / quota
   const reasonsRaw = await val('SELECT public.provider_fallback_definitive_rejection_reasons() AS r', []);
-  const reasonsText = Array.isArray(reasonsRaw) ? reasonsRaw.join(',') : String(reasonsRaw);
-  assert.ok(!reasonsText.includes('elm_mobilephone_invalid'), 'SQL no longer treats local phone format as a commercial rejection');
+  const reasonsList = (Array.isArray(reasonsRaw) ? reasonsRaw : String(reasonsRaw).replace(/[{}]/g, '').split(',').filter(Boolean))
+    .map((s) => String(s).trim())
+    .sort();
+  assert.deepStrictEqual(reasonsList, EXPECTED_DEFINITIVE_REASONS, 'exactly the 7 live codes minus elm_mobilephone_invalid');
+  assert.ok(!reasonsList.includes('elm_mobilephone_invalid'));
+  assert.ok(reasonsList.includes('elm_s1_duplicate_other_channel'));
   const rPhone = await job(821, 82100001);
   await expectSqlError(
     () => finalize(rPhone.id, 'not_eligible', 'elm_mobilephone_invalid', null),
@@ -685,7 +702,13 @@ async function main() {
   await finalize(rRej.id, 'rejected', 'elm_s1_rejected', null);
   assert.strictEqual((await state(831)).projected_estado, 3, 'documented ELM S1 rejection still closes as CZ 3');
   assert.ok(!(await reviewCase(831)), 'commercial rejection does not open a review case');
-  pass('cellphone needs correction: SQL refuses not_eligible/elm_mobilephone_invalid; manual_review → 14 + review case without lock; quota free');
+  const rDup = await job(841, 84100001);
+  await finalize(rDup.id, 'rejected', 'elm_s1_duplicate_other_channel', null);
+  assert.strictEqual((await state(841)).projected_estado, 3, 'Repetido. Aprobado stays CZ 3');
+  assert.ok(!(await reviewCase(841)), 'duplicate other channel does not open a review case');
+  const dupRow = await one('SELECT outcome, reason_code FROM public.provider_fallback_requests WHERE id = $1', [rDup.id]);
+  assert.deepStrictEqual([dupRow.outcome, dupRow.reason_code], ['rejected', 'elm_s1_duplicate_other_channel']);
+  pass('cellphone needs correction: SQL refuses not_eligible/elm_mobilephone_invalid; duplicate_other_channel still rejected; manual_review → 14 + review case without lock; quota free');
 
   // ------------------------------------------------------------------ manual resolution of an active referral (13)
   const CI_Q = 90000001;

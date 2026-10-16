@@ -362,7 +362,9 @@ const hist1341 = () =>
     assert.ok(defs.length >= 2, 'original + duplicate migration');
     const latest = defs[defs.length - 1][1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
     assert.deepStrictEqual(latest.slice().sort(), DEFINITIVE_REJECTION_REASONS.slice().sort());
+    assert.strictEqual(latest.length, 7);
     assert.ok(latest.includes(REASONS.ELM_S1_DUPLICATE_OTHER_CHANNEL));
+    assert.ok(!latest.includes('elm_mobilephone_invalid'), 'phone format is no longer a definitive rejection');
   });
 
   await test('18 ELM Ops follow-up: a C1 duplicate in CZ 3 is neither open nor a rejection pending in CZ', async () => {
