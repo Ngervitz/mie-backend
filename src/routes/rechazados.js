@@ -218,6 +218,26 @@ router.get('/', async function getRechazadosList(req, res) {
 });
 
 /**
+ * Stage A — recoverable C1 strip (read-only). Registered before GET /:ci.
+ * Does not change GET / list cohort or KPIs.
+ */
+router.get('/elm-recoverable', async function getElmRecoverable(req, res) {
+  try {
+    const { createElmOpsService } = require('../services/elmOps/service');
+    const data = await createElmOpsService().recoverable({
+      limit: 200,
+      ci: req.query && req.query.ci,
+    });
+    return res.json({ ok: true, items: data.items, situations: data.situations });
+  } catch (err) {
+    logger.error('GET /rechazados/elm-recoverable failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+/**
  * Mi Deuda Stage 1D — canonical bags (read-only).
  * Auth: mount requireDashboardPermission('rechazados').
  * Registered before GET /:ci so "mi-deuda" is not parsed as CI.

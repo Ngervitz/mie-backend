@@ -54,6 +54,11 @@ const {
   PROCESS_RESOLUTIONS,
   ACTION_HTTP,
 } = require('../src/services/elmOps/service');
+const {
+  classifyOpportunity,
+  filterOpportunities,
+  SITUATIONS,
+} = require('../src/services/elmOps/opportunityClassify');
 const { createElmOpsRouter } = require('../src/routes/elmOps');
 const { requireElmAction } = require('../src/middleware/requireElmAction');
 const { parseElmPostback } = require('../src/services/elm/postback');
@@ -107,8 +112,14 @@ function fakeOpsRepo(state) {
     async getProcessById(id) {
       return state.processes.find((p) => p.id === id) || null;
     },
-    async getProcessesByIds() {
-      return new Map();
+    async getProcessesByIds(ids) {
+      const m = new Map();
+      const wanted = new Set((ids || []).filter(Boolean));
+      if (!wanted.size) return m;
+      (state.processes || []).forEach((p) => {
+        if (wanted.has(p.id)) m.set(p.id, p);
+      });
+      return m;
     },
     async getPostbackEventsByIds(ids) {
       calls.push(['events', ids.length]);
@@ -153,6 +164,15 @@ function fakeOpsRepo(state) {
       calls.push(['c1Referrals', staleHours, limit]);
       return state.c1Referrals || [];
     },
+    async listOpenFallbackRequests() {
+      return state.queued || [];
+    },
+    async listPhoneInvalidFinalized() {
+      return state.phoneInvalid || [];
+    },
+    async czIdsWithEstado3(ids) {
+      return new Set((state.estado3 || ids || []).map(Number));
+    },
     async listCzConflicts(status, limit) {
       calls.push(['c1Conflicts', status, limit]);
       return (state.conflicts || []).filter((c) => c.status === status);
@@ -173,6 +193,12 @@ function setup(state) {
       const p = state.processes.find((x) => x.cz_solicitud_id === czId);
       Object.assign(p, { s1_status: p.s1_status === 'in_flight' ? 'unknown' : p.s1_status, s1_lease_expires_at: null, updated_at: 'v2' });
       return Object.assign({}, p);
+    },
+    async listAllProcesses() {
+      return state.allProcesses || [];
+    },
+    async getProjectedEstadosByCzIds() {
+      return new Map(state.projected || []);
     },
   };
   const fallbackRepository = {
@@ -444,6 +470,7 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/assignees')).status, 403);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/c1/active-referrals')).status, 200);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/c1/conflicts')).status, 200);
+    assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/opportunities')).status, 200);
     const cr = await call(cronServer, 'POST', '/preaprobados/elm-ops/c1/conflicts/' + CONFLICT_ID + '/resolve', { note: NOTE });
     assert.strictEqual(cr.status, 403, 'conflict resolution needs the action gate');
     assert.strictEqual(repo.calls.filter((c) => c[0] === 'c1ConflictResolve').length, 0);
@@ -491,6 +518,8 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
   assert.ok(pre.indexOf("router.use('/elm-ops', createElmOpsRouter())") < pre.indexOf("router.get('/:czId'"));
   const { resolveSectionForPath } = require('../src/middleware/dashboardSections');
   assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/processes'), 'preaprobados');
+  assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/opportunities'), 'preaprobados');
+  assert.strictEqual(resolveSectionForPath('/rechazados/elm-recoverable'), 'rechazados');
   const opsSrc = readSrc('src/services/elmOps/repository.js') + readSrc('src/services/elmOps/service.js');
   assert.ok(!/\.from\([^)]*\)\s*\.(insert|update|delete|upsert)\(/.test(opsSrc), 'no direct writes');
   assert.ok(!/evaluateElm|referElm|retryElmStep|service1|service2/.test(opsSrc), 'ops never sends to ELM');
@@ -550,115 +579,381 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   assert.ok(page.indexOf('elm-ops.js') < page.indexOf('mie-dashboard.js'));
   assert.ok(page.includes('id="elm-ops-root"'));
   assert.ok(page.indexOf('id="preaprobados-results"') < page.indexOf('id="elm-ops-root"'));
-  assert.ok(page.includes('aria-label="Bandeja C1 / ELM"'));
+  assert.ok(page.includes('aria-label="Oportunidades ELM"'));
+  assert.ok(page.includes('aria-label="Recuperables ELM"'));
+  assert.ok(page.indexOf('id="rechazados-results"') < page.indexOf('id="elm-recoverable-root"'));
   const dash = readSrc('public/mie-dashboard.js');
   assert.ok(dash.includes('ElmOps.mount'));
   assert.ok(dash.includes('canAct: false'));
+  assert.ok(dash.includes('ElmOps.mountRecoverable'));
+  assert.ok(dash.includes('ensureElmRecoverableTray'));
 });
 
-test('UI v1 tray: mount loads GET followup/review-cases/active-referrals; no POST, no action buttons', async () => {
+test('classifier: commercial situations in Spanish without raw ELM codes as primary text', () => {
+  const send = classifyOpportunity({
+    cz_solicitud_id: 1912,
+    ci: '18165244',
+    s1_status: 'eligible',
+    s2_status: 'technical_error',
+    reason_code: 'elm_s2_technical_error_retry_unsafe',
+    s1_result_message: 'TypeError: Cannot read properties of undefined (reading \'trackingId\')',
+    age_hours: 72.9,
+  });
+  assert.strictEqual(send.situation, SITUATIONS.COMPLETE_SEND);
+  assert.strictEqual(send.situation_label, 'Completar envío a ELM');
+  assert.strictEqual(send.next_step_key, 'retry_s2');
+  assert.strictEqual(send.age_hours, 72, 'age floors decimal hours');
+  assert.ok(send.last_elm.includes('trackingId'));
+
+  const close = classifyOpportunity({
+    cz_solicitud_id: 1939,
+    ci: '22222222',
+    s1_status: 'unknown',
+    s2_status: 'not_started',
+    reason_code: 'elm_s1_unknown',
+    s1_result_message: 'Repetido. Rechazado',
+  });
+  assert.strictEqual(close.situation, SITUATIONS.CLOSE_REJECT);
+  assert.ok(close.situation_label.indexOf('Cerrar rechazo') === 0);
+
+  const data = classifyOpportunity({
+    cz_solicitud_id: 10,
+    ci: '1',
+    reason_code: 'elm_config_incomplete',
+  });
+  assert.strictEqual(data.situation, SITUATIONS.NEEDS_DATA);
+
+  const wait = classifyOpportunity({
+    cz_solicitud_id: 11,
+    ci: '1',
+    reason_code: 'ci_prior_unknown',
+    related_cz_solicitud_id: 1912,
+  });
+  assert.strictEqual(wait.situation, SITUATIONS.WAITING_OTHER);
+  assert.strictEqual(wait.related_cz_solicitud_id, 1912);
+
+  const follow = classifyOpportunity({
+    cz_solicitud_id: 1475,
+    ci: '33333333',
+    projected_estado: 13,
+    s2_status: 'referred',
+    provider_status: 'Latente',
+  });
+  assert.strictEqual(follow.situation, SITUATIONS.FOLLOWUP);
+
+  const granted = classifyOpportunity({
+    cz_solicitud_id: 1475,
+    ci: '33333333',
+    projected_estado: 13,
+    granted_elm: true,
+    provider_status: 'Convertido',
+  });
+  assert.strictEqual(granted.situation, SITUATIONS.GRANTED);
+
+  const rec = classifyOpportunity({
+    cz_solicitud_id: 1630,
+    ci: '52764618',
+    recoverable: true,
+    reason_code: 'elm_mobilephone_invalid',
+    s1_status: 'eligible',
+    s2_status: 'not_started',
+    followup_label: 'Paso 1 aceptado por ELM · paso 2 no enviado',
+  });
+  assert.strictEqual(rec.situation, SITUATIONS.RECOVERABLE);
+  assert.ok(rec.reason_label.toLowerCase().includes('celular'));
+  assert.strictEqual(rec.dashboard, 'preaprobados');
+
+  const recDash = classifyOpportunity({
+    cz_solicitud_id: 1630,
+    ci: '52764618',
+    recoverable: true,
+    reason_code: 'elm_mobilephone_invalid',
+    dashboard: 'rechazados',
+  });
+  assert.strictEqual(recDash.dashboard, 'rechazados');
+
+  const filtered = filterOpportunities(
+    [send, close, rec],
+    { ci: '18165244', situation: 'complete_send' },
+  );
+  assert.deepStrictEqual(filtered.map((i) => i.cz_solicitud_id), [1912]);
+});
+
+const PID1630 = '44444444-4444-4444-8444-444444444444';
+
+test('opportunities: one row per solicitud, CI search, 1912 complete_send, no 1630', async () => {
+  const p1912 = referredProcess({
+    cz_solicitud_id: 1912,
+    ci: 18165244,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'eligible',
+    s2_status: 'technical_error',
+    referred_at: null,
+    provider_status: null,
+  });
+  const p1630 = referredProcess({
+    id: PID1630,
+    cz_solicitud_id: 1630,
+    ci: 52764618,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'eligible',
+    s2_status: 'not_started',
+    referred_at: null,
+    provider_status: null,
+  });
+  const { service } = setup({
+    processes: [p1912, p1630],
+    allProcesses: [p1912, p1630],
+    projected: [[1912, 14], [1630, 3]],
+    estado3: [1630],
+    cases: [
+      {
+        id: CID,
+        fallback_request_id: 'req-1912',
+        cz_solicitud_id: 1912,
+        ci: 18165244,
+        elm_process_id: PID,
+        related_cz_solicitud_id: null,
+        reason_code: 'elm_s2_technical_error_retry_unsafe',
+        priority: 'normal',
+        due_at: '2026-10-09T12:00:00Z',
+        status: 'open',
+        assigned_to: null,
+        created_at: '2026-10-07T12:00:00Z',
+        version: 1,
+      },
+    ],
+    c1Referrals: [
+      c1Row({
+        cz_solicitud_id: 1475,
+        ci: '33333333',
+        projected_estado: 13,
+        granted_elm: true,
+        provider_status: 'Convertido',
+      }),
+      c1Row({
+        cz_solicitud_id: 1912,
+        ci: '18165244',
+        projected_estado: 14,
+        fallback_outcome: 'manual_review',
+        granted_elm: false,
+        stale: false,
+        last_event_type: null,
+        lock_state: null,
+      }),
+    ],
+    queued: [{ cz_solicitud_id: 1490, ci: '11111111', created_at: '2026-10-08T08:00:00Z' }],
+  });
+  const out = await service.opportunities({ limit: 50 });
+  const ids = out.items.map((i) => i.cz_solicitud_id);
+  assert.strictEqual(ids.length, new Set(ids).size, 'no duplicate C1 rows');
+  const byId = new Map(out.items.map((i) => [i.cz_solicitud_id, i]));
+  assert.ok(byId.has(1912));
+  assert.strictEqual(byId.get(1912).situation, SITUATIONS.COMPLETE_SEND);
+  assert.strictEqual(byId.get(1912).ci, '18165244');
+  assert.ok(byId.has(1475));
+  assert.strictEqual(byId.get(1475).situation, SITUATIONS.GRANTED);
+  assert.ok(byId.has(1490));
+  assert.strictEqual(byId.get(1490).situation, SITUATIONS.IN_EVALUATION);
+  assert.ok(!byId.has(1630), 'estado 3 recoverable stays out of Preaprobados');
+
+  const byCi = await service.opportunities({ ci: '18165244' });
+  assert.deepStrictEqual(byCi.items.map((i) => i.cz_solicitud_id), [1912]);
+  const bySit = await service.opportunities({ situation: 'granted' });
+  assert.ok(bySit.items.every((i) => i.situation === 'granted'));
+});
+
+test('recoverable: CZ 1630 localizable; S2 already started is excluded', async () => {
+  const p1630 = referredProcess({
+    id: PID1630,
+    cz_solicitud_id: 1630,
+    ci: 52764618,
+    s1_status: 'eligible',
+    s2_status: 'not_started',
+    referred_at: null,
+  });
+  const pSkip = referredProcess({
+    id: '55555555-5555-4555-8555-555555555555',
+    cz_solicitud_id: 1631,
+    ci: 52764619,
+    s1_status: 'eligible',
+    s2_status: 'unknown',
+    referred_at: null,
+  });
+  const { service } = setup({
+    processes: [p1630, pSkip],
+    estado3: [1630, 1631],
+    phoneInvalid: [
+      {
+        cz_solicitud_id: 1630,
+        ci: '52764618',
+        reason_code: 'elm_mobilephone_invalid',
+        elm_process_id: PID1630,
+        finalized_at: '2026-09-01T12:00:00Z',
+        created_at: '2026-09-01T12:00:00Z',
+      },
+      {
+        cz_solicitud_id: 1631,
+        ci: '52764619',
+        reason_code: 'elm_mobilephone_needs_correction',
+        elm_process_id: pSkip.id,
+        finalized_at: '2026-09-02T12:00:00Z',
+        created_at: '2026-09-02T12:00:00Z',
+      },
+    ],
+  });
+  const out = await service.recoverable({ limit: 50 });
+  assert.strictEqual(out.items.length, 1);
+  assert.strictEqual(out.items[0].cz_solicitud_id, 1630);
+  assert.strictEqual(out.items[0].ci, '52764618');
+  assert.strictEqual(out.items[0].situation, SITUATIONS.RECOVERABLE);
+  assert.strictEqual(out.items[0].dashboard, 'rechazados');
+  assert.ok(out.items[0].reason_label.toLowerCase().includes('celular'));
+  assert.ok(out.items[0].last_elm.includes('paso 2 no enviado'));
+  const byCi = await service.recoverable({ ci: '52764618' });
+  assert.strictEqual(byCi.items.length, 1);
+  const miss = await service.recoverable({ ci: '18165244' });
+  assert.strictEqual(miss.items.length, 0);
+});
+
+test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemblers', () => {
+  const pre = readSrc('src/routes/preaprobados.js');
+  assert.ok(pre.includes("router.get('/', async function getPreaprobadosList"));
+  assert.ok(pre.includes('assembleGroupedPreaprobadosList'));
+  assert.ok(pre.includes("router.use('/elm-ops', createElmOpsRouter())"));
+  const rec = readSrc('src/routes/rechazados.js');
+  assert.ok(rec.includes("router.get('/', async function getRechazadosList"));
+  assert.ok(rec.includes('assembleRejectedList'));
+  assert.ok(rec.indexOf("router.get('/elm-recoverable'") > rec.indexOf("router.get('/', async function getRechazadosList"));
+  assert.ok(rec.indexOf("router.get('/elm-recoverable'") < rec.indexOf("router.get('/:ci'"));
+  assert.ok(!/router\.post\('\/elm-recoverable'/.test(rec), 'recoverable is GET only');
+  const elmOps = readSrc('src/routes/elmOps.js');
+  assert.ok(elmOps.includes("router.get('/opportunities'"));
+  assert.ok(!/router\.post\('\/opportunities'/.test(elmOps));
+  const ui = readSrc('public/elm-ops.js');
+  assert.ok(ui.includes("request('/opportunities')"));
+  assert.ok(ui.includes('/rechazados/elm-recoverable'));
+  assert.ok(!/method:\s*'POST'/.test(ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable'))));
+});
+
+test('UI stage A: mount GET /opportunities only; CI search; no send actions', async () => {
   const calls = [];
   const fetchFn = async (url, opts) => {
     const method = (opts && opts.method) || 'GET';
     calls.push({ method: method, url: String(url), body: opts && opts.body });
-    let items = [];
-    if (String(url).includes('/followup')) {
-      items = [
-        {
-          kind: 'queued',
-          cz_solicitud_id: 1490,
-          ci: '11111111',
-          trigger_origin: 'cz_automatic',
-          label: 'En cola para ELM (circuito automático)',
-          provider_status: null,
-          since: '2026-10-16T12:00:00Z',
-          age_hours: 4,
-        },
-        {
-          kind: 'review',
-          cz_solicitud_id: 1939,
-          ci: '22222222',
-          trigger_origin: 'cz_automatic',
-          label: 'Resultado incierto',
-          provider_status: null,
-          since: '2026-10-16T12:00:00Z',
-          age_hours: 2,
-        },
-      ];
-    } else if (String(url).includes('/review-cases')) {
-      items = [
-        {
-          id: CID,
-          cz_solicitud_id: 1939,
-          ci: '22222222',
-          reason_code: 'elm_s1_unknown',
-          created_at: '2026-10-16T12:00:00Z',
-          age_hours: 2,
-          due_at: null,
-          unassigned: true,
-          overdue: false,
-          assigned_to: null,
-          status: 'open',
-          elm: { s1_status: 'unknown', s2_status: 'not_started' },
-          priority: 'normal',
-        },
-      ];
-    } else if (String(url).includes('/c1/active-referrals')) {
-      items = [
-        {
-          cz_solicitud_id: 1475,
-          ci: '33333333',
-          projected_estado: 13,
-          fallback_outcome: 'referred',
-          provider_status: 'Latente',
-          referred_at: '2026-10-15T12:00:00Z',
-          started_at: '2026-10-15T12:00:00Z',
-          age_hours: 24,
-          stale: false,
-          granted_elm: false,
-          last_event: { type: 'outcome', delivery_status: 'acked' },
-        },
-        {
-          cz_solicitud_id: 1631,
-          ci: '44444444',
-          projected_estado: 14,
-          provider_status: null,
-          age_hours: 8,
-          stale: false,
-          granted_elm: false,
-        },
-      ];
-    }
     return {
       status: 200,
-      json: async () => ({ ok: true, items: items }),
+      json: async () => ({
+        ok: true,
+        items: [
+          classifyOpportunity({
+            cz_solicitud_id: 1912,
+            ci: '18165244',
+            s1_status: 'eligible',
+            s2_status: 'technical_error',
+            reason_code: 'elm_s2_technical_error_retry_unsafe',
+            since: '2026-10-05T12:00:00Z',
+            age_hours: 72,
+          }),
+          classifyOpportunity({
+            cz_solicitud_id: 1475,
+            ci: '33333333',
+            projected_estado: 13,
+            granted_elm: true,
+            provider_status: 'Convertido',
+            since: '2026-10-04T12:00:00Z',
+            age_hours: 96,
+            dashboard: 'preaprobados',
+          }),
+        ],
+        situations: [
+          { id: 'complete_send', label: 'Completar envío a ELM' },
+          { id: 'granted', label: 'Préstamo otorgado' },
+        ],
+      }),
     };
   };
+  const listeners = [];
   const root = {
     innerHTML: '',
-    addEventListener() {
-      throw new Error('v1 tray must not attach action listeners');
+    addEventListener(type, fn) {
+      listeners.push({ type: type, fn: fn });
     },
   };
   const tray = ElmOpsUi.mount({ root: root, api: '', fetch: fetchFn, canAct: true });
   await tray.load();
-  assert.ok(calls.length >= 3);
-  assert.ok(calls.every((c) => c.method === 'GET'), 'tray v1 never POSTs');
-  assert.ok(calls.every((c) => c.body == null), 'GET bodies stay empty');
-  assert.ok(calls.some((c) => c.url.includes('/followup')));
-  assert.ok(calls.some((c) => c.url.includes('/review-cases')));
-  assert.ok(calls.some((c) => c.url.includes('/c1/active-referrals')));
-  assert.ok(!calls.some((c) => c.url.includes('/assignees')));
-  assert.ok(!calls.some((c) => c.url.includes('/processes')));
-  assert.ok(root.innerHTML.includes('Bandeja C1 / ELM'));
-  assert.ok(root.innerHTML.includes('Solo lectura'));
-  assert.ok(root.innerHTML.includes('1490'), 'estado 12 queued job');
-  assert.ok(root.innerHTML.includes('1939'), 'estado 14 review case');
-  assert.ok(root.innerHTML.includes('1475'), 'estado 13 active referral');
-  assert.ok(!root.innerHTML.includes('1631'), 'projected 14 stays in review-cases, not in 13');
-  assert.ok(!/Resolver|Asignar|Reenviar/.test(root.innerHTML));
-  assert.ok(!root.innerHTML.includes('data-elm-ops-action'));
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].method, 'GET');
+  assert.ok(calls[0].url.includes('/preaprobados/elm-ops/opportunities'));
+  assert.ok(!calls[0].url.includes('/followup'));
+  assert.ok(root.innerHTML.includes('Oportunidades ELM'));
+  assert.ok(root.innerHTML.includes('1912'));
+  assert.ok(root.innerHTML.includes('1475'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-search'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-filter'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-open-detail'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-actions'));
+  assert.ok(root.innerHTML.includes('data-elm-next="retry_s2"'));
+  assert.ok(!root.innerHTML.includes('id="elm-ops-estado-12"'));
+  assert.ok(!root.innerHTML.includes('id="elm-ops-estado-14"'));
+  assert.ok(!root.innerHTML.includes('id="elm-ops-estado-13"'));
+  assert.ok(root.innerHTML.includes('Reenviar paso 2'), 'next step is copy, not a send control');
+  assert.ok(!root.innerHTML.includes('data-elm-ops-action='), 'no action buttons yet');
   assert.ok(!root.innerHTML.includes('data-elm-ops-form'));
+  assert.ok(!/<form[\s>]/.test(root.innerHTML));
+  assert.strictEqual(ElmOpsUi.fmtAge(72.9), '3 d');
+  const input = listeners.find((l) => l.type === 'input');
+  assert.ok(input);
+  input.fn({
+    target: {
+      getAttribute(name) {
+        return name === 'data-elm-ops-search' ? '' : null;
+      },
+      value: '18165244',
+    },
+  });
+  assert.ok(root.innerHTML.includes('1912'));
+  assert.ok(!root.innerHTML.includes('>1475<') && !root.innerHTML.includes('>33333333<'), 'CI filter hides 1475');
+});
+
+test('UI stage A: Recuperables ELM GET /rechazados/elm-recoverable shows 1630', async () => {
+  const calls = [];
+  const fetchFn = async (url, opts) => {
+    calls.push({ method: (opts && opts.method) || 'GET', url: String(url) });
+    return {
+      status: 200,
+      json: async () => ({
+        ok: true,
+        items: [
+          classifyOpportunity({
+            cz_solicitud_id: 1630,
+            ci: '52764618',
+            recoverable: true,
+            reason_code: 'elm_mobilephone_invalid',
+            s1_status: 'eligible',
+            s2_status: 'not_started',
+            dashboard: 'rechazados',
+            followup_label: 'Paso 1 aceptado por ELM · paso 2 no enviado',
+            since: '2026-09-01T12:00:00Z',
+            age_hours: 1000,
+          }),
+        ],
+      }),
+    };
+  };
+  const root = { innerHTML: '', addEventListener() {} };
+  const tray = ElmOpsUi.mountRecoverable({ root: root, api: '', fetch: fetchFn });
+  await tray.load();
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].method, 'GET');
+  assert.ok(calls[0].url.includes('/rechazados/elm-recoverable'));
+  assert.ok(root.innerHTML.includes('Recuperables ELM'));
+  assert.ok(root.innerHTML.includes('1630'));
+  assert.ok(root.innerHTML.includes('52764618'));
+  assert.ok(root.innerHTML.toLowerCase().includes('celular') || root.innerHTML.includes('paso 2 no enviado'));
+  assert.ok(root.innerHTML.includes('Enviar paso 2'), 'next step explains the later resume');
+  assert.ok(!root.innerHTML.includes('data-elm-ops-action='), 'no action buttons yet');
+  assert.ok(!/<form[\s>]/.test(root.innerHTML));
 });
 
 test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, never resolved by precedence', async () => {

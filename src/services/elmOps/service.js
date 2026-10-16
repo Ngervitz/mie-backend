@@ -21,6 +21,11 @@ const {
 } = require('../elm/classification');
 const { computeElmKpis } = require('../elm/kpis');
 const {
+  classifyOpportunity,
+  filterOpportunities,
+  situationOptions,
+} = require('./opportunityClassify');
+const {
   REVIEW_PRIORITIES,
   REVIEW_CZ_OUTCOMES,
   PROCESS_CZ_OUTCOMES,
@@ -557,6 +562,155 @@ function createElmOpsService(deps) {
     return items.slice(0, max);
   }
 
+  function bagOf(map, czId) {
+    const id = Number(czId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    if (!map.has(id)) map.set(id, { cz_solicitud_id: id });
+    return map.get(id);
+  }
+
+  function setIf(bag, key, value) {
+    if (value != null && value !== '') bag[key] = value;
+  }
+
+  /**
+   * One commercial row per solicitud for Preaprobados «Oportunidades ELM».
+   * Composes existing followup / review-cases / active-referrals reads. No writes, no ELM send.
+   */
+  async function opportunities(query) {
+    const q = query || {};
+    const max = Math.min(q.limit || 200, 200);
+    const [followupItems, cases, referrals] = await Promise.all([
+      followup(max),
+      listReviewCases('open', max),
+      listC1ActiveReferrals(max),
+    ]);
+    const bags = new Map();
+    for (const f of followupItems) {
+      const bag = bagOf(bags, f.cz_solicitud_id);
+      if (!bag) continue;
+      setIf(bag, 'ci', f.ci);
+      setIf(bag, 'followup_kind', f.kind);
+      setIf(bag, 'followup_label', f.label);
+      setIf(bag, 'since', f.since);
+      if (f.age_hours != null) bag.age_hours = f.age_hours;
+      setIf(bag, 'provider_status', f.provider_status);
+      setIf(bag, 'trigger_origin', f.trigger_origin);
+      setIf(bag, 'process_id', f.process_id);
+    }
+    for (const c of cases) {
+      const bag = bagOf(bags, c.cz_solicitud_id);
+      if (!bag) continue;
+      setIf(bag, 'ci', c.ci);
+      setIf(bag, 'reason_code', c.reason_code);
+      if (c.related_cz_solicitud_id != null) bag.related_cz_solicitud_id = c.related_cz_solicitud_id;
+      setIf(bag, 'review_id', c.id);
+      setIf(bag, 'since', c.created_at);
+      if (c.age_hours != null) bag.age_hours = c.age_hours;
+      const elm = c.elm || {};
+      setIf(bag, 's1_status', elm.s1_status);
+      setIf(bag, 's2_status', elm.s2_status);
+      setIf(bag, 'provider_status', elm.provider_status);
+      if (elm.granted_elm === true) bag.granted_elm = true;
+      setIf(bag, 'process_id', elm.process_id);
+    }
+    for (const r of referrals) {
+      const bag = bagOf(bags, r.cz_solicitud_id);
+      if (!bag) continue;
+      setIf(bag, 'ci', r.ci);
+      bag.projected_estado = Number(r.projected_estado);
+      setIf(bag, 'provider_status', r.provider_status);
+      setIf(bag, 'since', r.referred_at || r.started_at);
+      if (r.age_hours != null) bag.age_hours = r.age_hours;
+      if (r.granted_elm === true) bag.granted_elm = true;
+      setIf(bag, 'elm_process_id', r.elm_process_id);
+      if (r.last_event) bag.last_event = r.last_event;
+      if (Number(r.projected_estado) === 13 && r.fallback_outcome === 'referred') {
+        setIf(bag, 's2_status', bag.s2_status || 'referred');
+      }
+    }
+    const processIds = [];
+    bags.forEach(function (bag) {
+      if (bag.process_id) processIds.push(bag.process_id);
+      if (bag.elm_process_id) processIds.push(bag.elm_process_id);
+    });
+    if (processIds.length) {
+      const processes = await repo.getProcessesByIds(processIds);
+      const nowMs = now();
+      bags.forEach(function (bag) {
+        const p =
+          (bag.process_id && processes.get(bag.process_id)) ||
+          (bag.elm_process_id && processes.get(bag.elm_process_id)) ||
+          null;
+        if (!p) return;
+        setIf(bag, 's1_status', effective(p.s1_status, p.s1_lease_expires_at, nowMs));
+        setIf(bag, 's2_status', effective(p.s2_status, p.s2_lease_expires_at, nowMs));
+        setIf(bag, 'provider_status', p.provider_status);
+        if (p.disbursed_at) bag.granted_elm = true;
+      });
+    }
+    const items = [];
+    bags.forEach(function (bag) {
+      bag.dashboard = 'preaprobados';
+      items.push(classifyOpportunity(bag));
+    });
+    items.sort(function (a, b) {
+      return String(a.since || '').localeCompare(String(b.since || ''));
+    });
+    const filtered = filterOpportunities(items, { ci: q.ci, situation: q.situation });
+    return {
+      items: filtered.slice(0, max),
+      situations: situationOptions(),
+    };
+  }
+
+  /**
+   * C1 rows in Credizona estado 3 that can still complete S2 (cellphone false-reject).
+   * Shown under Rechazados; never mixed into Preaprobados CDV KPIs.
+   */
+  async function recoverable(query) {
+    const q = query || {};
+    const max = Math.min(q.limit || 200, 200);
+    if (typeof repo.listPhoneInvalidFinalized !== 'function') {
+      return { items: [], situations: situationOptions() };
+    }
+    const rows = await repo.listPhoneInvalidFinalized(max);
+    const processIds = rows.map(function (r) { return r.elm_process_id; });
+    const processes = await repo.getProcessesByIds(processIds);
+    const czIds = rows.map(function (r) { return Number(r.cz_solicitud_id); });
+    const inEstado3 = await repo.czIdsWithEstado3(czIds);
+    const items = [];
+    for (const r of rows) {
+      const czId = Number(r.cz_solicitud_id);
+      if (!inEstado3.has(czId)) continue;
+      const p = r.elm_process_id ? processes.get(r.elm_process_id) : null;
+      const s1 = p && p.s1_status ? p.s1_status : null;
+      const s2 = p && p.s2_status ? p.s2_status : null;
+      if (s1 !== S1.ELIGIBLE || s2 !== S2.NOT_STARTED) continue;
+      items.push(
+        classifyOpportunity({
+          cz_solicitud_id: czId,
+          ci: r.ci,
+          reason_code: r.reason_code,
+          s1_status: s1,
+          s2_status: s2,
+          since: r.finalized_at || r.created_at,
+          age_hours: ageHours(r.finalized_at || r.created_at, now()),
+          process_id: r.elm_process_id,
+          projected_estado: 3,
+          recoverable: true,
+          dashboard: 'rechazados',
+          followup_label: 'Paso 1 aceptado por ELM · paso 2 no enviado',
+        }),
+      );
+    }
+    const filtered = filterOpportunities(items, { ci: q.ci, situation: q.situation });
+    return {
+      items: filtered.slice(0, max),
+      situations: situationOptions(),
+    };
+  }
+
   async function listAuditEvents(entityType, entityId) {
     if (!['elm_process', 'review_case', 'cz_conflict'].includes(entityType) || !isUuid(entityId)) return null;
     return repo.listAuditEvents(entityType, entityId);
@@ -579,6 +733,8 @@ function createElmOpsService(deps) {
     resolveCzConflict,
     kpis,
     followup,
+    opportunities,
+    recoverable,
   };
 }
 
@@ -591,4 +747,7 @@ module.exports = {
   reviewCaseView,
   c1ReferralView,
   createElmOpsService,
+  classifyOpportunity,
+  filterOpportunities,
+  situationOptions,
 };

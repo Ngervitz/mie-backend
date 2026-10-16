@@ -1,5 +1,6 @@
 /* ELM operations (Fase 3B): active referrals / uncertain ELM results + manual review queue.
- * Preaprobados mounts the C1/ELM tray with mount() in V1 read-only mode (GET only, canAct=false).
+ * Preaprobados mounts «Oportunidades ELM» with mount() (GET /opportunities, stage A read-only).
+ * Rechazados mounts «Recuperables ELM» with mountRecoverable() (GET /rechazados/elm-recoverable).
  * createProcessResolver ("Resolver ELM") stays in the solicitud detail; it is not the tray.
  * Every action sends the version the operator saw; the backend answers `stale` if anything
  * changed in between (postback, worker, another operator). Nothing here sends to ELM. */
@@ -110,9 +111,27 @@
   }
 
   function fmtAge(hours) {
-    if (hours == null) return '—';
-    if (hours < 24) return hours + ' h';
-    return Math.floor(hours / 24) + ' d ' + (hours % 24) + ' h';
+    if (hours == null || hours === '') return '—';
+    const h = Math.floor(Number(hours));
+    if (!Number.isFinite(h) || h < 0) return '—';
+    if (h < 24) return h + ' h';
+    const d = Math.floor(h / 24);
+    const rem = h % 24;
+    return rem ? d + ' d ' + rem + ' h' : d + ' d';
+  }
+
+  function defaultFmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('es-UY', {
+      timeZone: 'America/Montevideo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   function reasonLabel(code) {
@@ -630,29 +649,109 @@
     };
   }
 
+  function opportunityMatches(item, ciQuery, situation) {
+    if (situation && item.situation !== situation) return false;
+    const q = String(ciQuery || '').replace(/\D/g, '');
+    if (!q) return true;
+    const ci = String(item.ci || '').replace(/\D/g, '');
+    const cz = String(item.cz_solicitud_id || '');
+    return ci.indexOf(q) !== -1 || cz.indexOf(q) !== -1;
+  }
+
+  function opportunityRowHtml(item, fmtDate, openId) {
+    const cz = String(item.cz_solicitud_id);
+    const open = String(openId) === cz;
+    const tech = item.technical || {};
+    const related = item.related_cz_solicitud_id
+      ? '<p>Otra solicitud: ' + esc(item.related_cz_solicitud_id) + '</p>'
+      : '';
+    return (
+      '<tr data-elm-cz="' + esc(cz) + '"' + (open ? ' class="is-open"' : '') + '>' +
+      '<td>' + esc(item.ci || '—') + '</td>' +
+      '<td>' + esc(cz) + '</td>' +
+      '<td>' + esc(item.situation_label || '—') + '</td>' +
+      '<td>' + esc(item.reason_label || '—') + '</td>' +
+      '<td>' + esc(fmtDate(item.since)) + '</td>' +
+      '<td>' + esc(fmtAge(item.age_hours)) + '</td>' +
+      '<td>' + esc(item.last_elm || '—') + '</td>' +
+      '<td>' + esc(item.next_step || '—') + '</td>' +
+      '<td class="elm-ops-actions" data-elm-ops-actions data-elm-next="' +
+        esc(item.next_step_key || 'none') + '">' +
+      '<button type="button" class="btn btn-sm" data-elm-ops-open-detail="' + esc(cz) + '">' +
+      (open ? 'Ocultar' : 'Ver detalle') + '</button></td></tr>' +
+      (open
+        ? '<tr class="elm-ops-detail-row"><td colspan="9"><div class="elm-ops-detail">' +
+          '<p class="preaprobados-muted">Historial técnico (diagnóstico). No se envía nada a ELM.</p>' +
+          related +
+          '<dl class="preaprobados-dl">' +
+          '<div><dt>Paso 1</dt><dd>' + esc(tech.s1_status || '—') + '</dd></div>' +
+          '<div><dt>Paso 2</dt><dd>' + esc(tech.s2_status || '—') + '</dd></div>' +
+          '<div><dt>Motivo interno</dt><dd>' + esc(tech.review_reason || tech.followup_kind || '—') + '</dd></div>' +
+          '<div><dt>Estado ELM</dt><dd>' + esc(tech.provider_status || '—') + '</dd></div>' +
+          '<div><dt>Origen</dt><dd>' + esc(tech.trigger_origin || '—') + '</dd></div>' +
+          '</dl></div></td></tr>'
+        : '')
+    );
+  }
+
+  function opportunitiesTableHtml(items, fmtDate, openId) {
+    if (!items.length) {
+      return '<p class="preaprobados-muted">No hay oportunidades ELM con ese filtro.</p>';
+    }
+    return (
+      '<div class="table-wrap"><table class="mcl-table elm-ops-opportunities">' +
+      '<thead><tr><th>CI</th><th>Solicitud</th><th>Situación</th><th>Motivo</th>' +
+      '<th>Desde</th><th>Antigüedad</th><th>Última respuesta ELM</th><th>Próximo paso</th>' +
+      '<th></th></tr></thead><tbody>' +
+      items.map(function (i) { return opportunityRowHtml(i, fmtDate, openId); }).join('') +
+      '</tbody></table></div>'
+    );
+  }
+
+  function bindReadOnlyUi(root, state, render) {
+    if (state.bound) return;
+    state.bound = true;
+    root.addEventListener('input', function (ev) {
+      const t = ev.target;
+      if (!t || t.getAttribute('data-elm-ops-search') == null) return;
+      state.ciQuery = t.value || '';
+      render();
+    });
+    root.addEventListener('change', function (ev) {
+      const t = ev.target;
+      if (!t || t.getAttribute('data-elm-ops-filter') == null) return;
+      state.situation = t.value || '';
+      render();
+    });
+    root.addEventListener('click', function (ev) {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-elm-ops-open-detail]') : null;
+      if (!btn) return;
+      const cz = btn.getAttribute('data-elm-ops-open-detail');
+      state.openId = String(state.openId) === String(cz) ? null : cz;
+      render();
+    });
+  }
+
   /**
-   * C1/ELM tray in Preaprobados. V1 is strictly read-only: GET only, canAct always false,
-   * no Resolver / Asignar / Reenviar, no assignees fetch, no POST.
-   * @param {{ root: HTMLElement, api?: string, fmtDate?: Function, fetch?: Function, canAct?: boolean }} opts
+   * Preaprobados «Oportunidades ELM»: one table, GET only. Action cells are reserved
+   * (data-elm-next) for later admin buttons; stage A only opens a technical drawer.
    */
   function mount(opts) {
     const root = opts.root;
     const api = opts.api || '';
-    const fmtDate = opts.fmtDate || function (iso) { return iso || '—'; };
+    const fmtDate = opts.fmtDate || defaultFmtDate;
     const fetchFn = opts.fetch || (typeof fetch === 'function' ? fetch.bind(null) : null);
     const state = {
-      eval12: [],
-      cases: [],
-      referrals13: [],
-      canAct: false,
+      items: [],
+      situations: [],
+      ciQuery: '',
+      situation: '',
+      openId: null,
       error: null,
+      bound: false,
     };
 
-    async function request(method, path) {
-      const m = String(method || 'GET').toUpperCase();
-      if (m !== 'GET') {
-        throw new Error('elm-ops tray v1 is read-only');
-      }
+    async function request(path) {
       const res = await fetchFn(api + '/preaprobados/elm-ops' + path, {
         method: 'GET',
         headers: { Accept: 'application/json' },
@@ -664,90 +763,114 @@
       return { status: res.status, data: data };
     }
 
-    function sectionHtml(id, title, count, hint, table, empty) {
-      return (
-        '<details class="elm-ops-section" id="' + esc(id) + '"' + (count ? ' open' : '') + '>' +
-        '<summary>' + esc(title) + ' (' + count + ')</summary>' +
-        '<p class="preaprobados-muted">' + esc(hint) + '</p>' +
-        (count ? table : '<p class="preaprobados-muted">' + esc(empty) + '</p>') +
-        '</details>'
-      );
+    function visibleItems() {
+      return state.items.filter(function (i) {
+        return opportunityMatches(i, state.ciQuery, state.situation);
+      });
     }
 
     function render() {
+      const vis = visibleItems();
+      const options = ['<option value="">Todas las situaciones</option>'].concat(
+        (state.situations || []).map(function (s) {
+          return (
+            '<option value="' + esc(s.id) + '"' +
+            (state.situation === s.id ? ' selected' : '') + '>' +
+            esc(s.label) + '</option>'
+          );
+        }),
+      );
       let html =
         '<header class="elm-ops-head">' +
-        '<h2 class="elm-ops-title">Bandeja C1 / ELM</h2>' +
-        '<p class="preaprobados-muted">Solo lectura. No resuelve, no asigna y no reenvía a ELM. Independiente de la cohorte CDV de Preaprobados.</p>' +
-        '</header>';
+        '<h2 class="elm-ops-title">Oportunidades ELM</h2>' +
+        '<p class="preaprobados-muted">Seguimiento e intervención de solicitudes ELM. ' +
+        'Independiente de la cohorte CDV. Etapa A: lectura; no reenvía a ELM.</p>' +
+        '</header>' +
+        '<div class="elm-ops-toolbar">' +
+        '<label class="elm-ops-search">CI o solicitud ' +
+        '<input type="search" data-elm-ops-search value="' + esc(state.ciQuery) +
+        '" placeholder="Buscar CI" autocomplete="off"></label>' +
+        '<label class="elm-ops-filter">Situación <select data-elm-ops-filter>' +
+        options.join('') + '</select></label>' +
+        '<span class="preaprobados-muted">' + vis.length + ' de ' + state.items.length + '</span>' +
+        '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
-
-      html += sectionHtml(
-        'elm-ops-estado-12',
-        'Estado 12 — En evaluación y procesos trabados',
-        state.eval12.length,
-        'Solicitudes C1 todavía en evaluación ELM y jobs automáticos en cola o trabados. No son rechazos.',
-        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Origen</th><th>Situación</th>' +
-          '<th>Detalle</th><th>Estado ELM</th><th>Desde</th><th>Antigüedad</th></tr></thead><tbody>' +
-          state.eval12.map(function (i) { return followupRowHtml(i, fmtDate); }).join('') +
-          '</tbody></table>',
-        'Sin solicitudes en evaluación ni trabadas.',
-      );
-
-      html += sectionHtml(
-        'elm-ops-estado-14',
-        'Estado 14 — Revisión pendiente',
-        state.cases.length,
-        'Requieren intervención operativa. Motivo, fecha de ingreso y antigüedad. V1 no asigna ni resuelve.',
-        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Motivo</th><th>Ingreso</th>' +
-          '<th>Antigüedad</th><th>Estado ELM</th><th>Responsable</th><th>Prioridad</th><th>Vence</th><th></th></tr></thead><tbody>' +
-          state.cases.map(function (c) { return caseRowHtml(c, fmtDate, false); }).join('') +
-          '</tbody></table>',
-        'Sin revisiones pendientes.',
-      );
-
-      html += sectionHtml(
-        'elm-ops-estado-13',
-        'Estado 13 — Derivados a ELM',
-        state.referrals13.length,
-        'Derivación vigente: seguimiento comercial (estado ELM, último evento, antigüedad). V1 no reenvía.',
-        '<table class="mcl-table"><thead><tr><th>Solicitud</th><th>CI</th><th>Estado CZ</th><th>Situación comercial</th>' +
-          '<th>Último evento</th><th>Desde</th><th>Antigüedad</th><th>Seguimiento</th></tr></thead><tbody>' +
-          state.referrals13.map(function (r) { return c1ReferralRowHtml(r, fmtDate); }).join('') +
-          '</tbody></table>',
-        'Sin derivaciones C1 activas.',
-      );
+      html += opportunitiesTableHtml(vis, fmtDate, state.openId);
       root.innerHTML = html;
+      bindReadOnlyUi(root, state, render);
     }
 
     async function load() {
       state.error = null;
       try {
-        const [f, c, r] = await Promise.all([
-          request('GET', '/followup'),
-          request('GET', '/review-cases?status=open'),
-          request('GET', '/c1/active-referrals'),
-        ]);
-        if (f.status >= 400 || c.status >= 400 || r.status >= 400) {
-          state.error = 'No se pudieron cargar las colas C1 / ELM.';
-          state.eval12 = [];
-          state.cases = [];
-          state.referrals13 = [];
+        const res = await request('/opportunities');
+        if (res.status >= 400) {
+          state.error = 'No se pudieron cargar las oportunidades ELM.';
+          state.items = [];
+          state.situations = [];
         } else {
-          const followup = f.data.items || [];
-          state.eval12 = followup.filter(isEstado12Followup);
-          state.cases = c.data.items || [];
-          const referrals = r.data.items || [];
-          state.referrals13 = referrals.filter(function (item) {
-            return Number(item.projected_estado) === 13;
-          });
+          state.items = res.data.items || [];
+          state.situations = res.data.situations || [];
         }
       } catch (_) {
-        state.error = 'No se pudieron cargar las colas C1 / ELM.';
+        state.error = 'No se pudieron cargar las oportunidades ELM.';
+        state.items = [];
       }
       render();
     }
 
+    bindReadOnlyUi(root, state, render);
+    return { load: load };
+  }
+
+  /** Rechazados strip: C1 recuperables in estado 3. GET only. */
+  function mountRecoverable(opts) {
+    const root = opts.root;
+    const api = opts.api || '';
+    const fmtDate = opts.fmtDate || defaultFmtDate;
+    const fetchFn = opts.fetch || (typeof fetch === 'function' ? fetch.bind(null) : null);
+    const state = { items: [], openId: null, error: null, bound: false, ciQuery: '', situation: '' };
+
+    function render() {
+      let html =
+        '<header class="elm-ops-head">' +
+        '<h2 class="elm-ops-title">Recuperables ELM</h2>' +
+        '<p class="preaprobados-muted">Casos C1 en Rechazados que todavía se pueden completar en ELM. ' +
+        'No cambian los KPIs ni el listado de rechazos. Etapa A: lectura.</p>' +
+        '</header>';
+      if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
+      if (!state.items.length && !state.error) {
+        html += '<p class="preaprobados-muted">No hay recuperables ELM en este momento.</p>';
+      } else {
+        html += opportunitiesTableHtml(state.items, fmtDate, state.openId);
+      }
+      root.innerHTML = html;
+      bindReadOnlyUi(root, state, render);
+    }
+
+    async function load() {
+      state.error = null;
+      try {
+        const res = await fetchFn(api + '/rechazados/elm-recoverable', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (res.status >= 400) {
+          state.error = 'No se pudieron cargar los recuperables ELM.';
+          state.items = [];
+        } else {
+          state.items = data.items || [];
+        }
+      } catch (_) {
+        state.error = 'No se pudieron cargar los recuperables ELM.';
+        state.items = [];
+      }
+      render();
+    }
+
+    bindReadOnlyUi(root, state, render);
     return { load: load };
   }
 
@@ -778,5 +901,8 @@
     resolveCaseFormHtml,
     createProcessResolver,
     mount,
+    mountRecoverable,
+    opportunityRowHtml,
+    defaultFmtDate,
   };
 });

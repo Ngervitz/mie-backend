@@ -16753,6 +16753,21 @@ init();
     renderDetailModal();
   }
 
+  const elmRecoverableRoot = document.getElementById('elm-recoverable-root');
+  let elmRecoverableTray = null;
+  function ensureElmRecoverableTray() {
+    if (!elmRecoverableRoot || typeof ElmOps === 'undefined' || !ElmOps.mountRecoverable) return;
+    if (!elmRecoverableTray) {
+      elmRecoverableTray = ElmOps.mountRecoverable({
+        root: elmRecoverableRoot,
+        api: API,
+      });
+    }
+    if (elmRecoverableTray && typeof elmRecoverableTray.load === 'function') {
+      elmRecoverableTray.load();
+    }
+  }
+
   async function loadList() {
     state.loading = true;
     state.listError = null;
@@ -16805,6 +16820,7 @@ init();
       renderList();
     } finally {
       state.loading = false;
+      ensureElmRecoverableTray();
     }
   }
 
@@ -19163,6 +19179,7 @@ init();
       elmOpsTray = ElmOps.mount({
         root: elmOpsRoot,
         api: API,
+        fmtDate: fmtDate,
         canAct: false,
       });
     }

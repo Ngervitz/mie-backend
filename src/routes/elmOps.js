@@ -18,6 +18,7 @@
  *                                            cz_outcome: referred|rejected|granted|none }
  *   GET  /assignees                        active admins (action gate)
  *   GET  /audit?entity_type=&entity_id=    audit trail of one entity
+ *   GET  /opportunities                    unified C1/ELM operator table (read-only)
  *   GET  /c1/active-referrals              C1 solicitudes in 13/14: age, last ELM status, stale
  *   GET  /c1/conflicts?status=open|resolved  events not emitted because they contradict CZ state
  *   POST /c1/conflicts/:id/resolve         { note } audited acknowledgement (no CZ change)
@@ -137,6 +138,19 @@ function createElmOpsRouter(opts) {
       return res.json({ ok: true, items: await svc().listAssignableUsers() });
     } catch (err) {
       return fail(res, 'GET elm-ops/assignees failed', err);
+    }
+  });
+
+  router.get('/opportunities', async function (req, res) {
+    try {
+      const data = await svc().opportunities({
+        limit: limitOf(req.query.limit),
+        ci: req.query.ci,
+        situation: req.query.situation,
+      });
+      return res.json({ ok: true, items: data.items, situations: data.situations });
+    } catch (err) {
+      return fail(res, 'GET elm-ops/opportunities failed', err);
     }
   });
 

@@ -6417,6 +6417,25 @@
   gap: 8px;
   align-items: flex-end;
 }
+#mie-dashboard-app .elm-ops-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 0 0 12px;
+}
+#mie-dashboard-app .elm-ops-search input,
+#mie-dashboard-app .elm-ops-filter select {
+  display: block;
+  margin-top: 4px;
+  min-width: 160px;
+}
+#mie-dashboard-app .elm-ops-detail {
+  padding: 8px 4px 12px;
+}
+#mie-dashboard-app .elm-ops-opportunities .is-open td {
+  background: var(--accent-info-soft);
+}
 
 #mie-dashboard-app .elm-ops-form textarea {
   min-width: 320px;

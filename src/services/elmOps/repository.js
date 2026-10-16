@@ -253,6 +253,22 @@ function createElmOpsRepository(supabaseOverride) {
     });
   }
 
+  /**
+   * Finalized C1 jobs closed locally for cellphone format (stage A recoverable strip).
+   * Read-only; does not change rows. Caller still checks S1 eligible + S2 not started + CZ 3.
+   */
+  async function listPhoneInvalidFinalized(limit) {
+    const { data, error } = await db()
+      .from(FALLBACK_TABLE)
+      .select('id, cz_solicitud_id, ci, outcome, reason_code, elm_process_id, finalized_at, created_at')
+      .in('reason_code', ['elm_mobilephone_invalid', 'elm_mobilephone_needs_correction'])
+      .not('finalized_at', 'is', null)
+      .order('finalized_at', { ascending: false })
+      .limit(Math.min(limit || MAX_LIST, MAX_LIST));
+    if (error) throw rpcError(FALLBACK_TABLE + ' read', error);
+    return data || [];
+  }
+
   /** Automatic fallback requests not finalized yet (queued / running), oldest first. */
   async function listOpenFallbackRequests(limit) {
     const { data, error } = await db()
@@ -293,6 +309,7 @@ function createElmOpsRepository(supabaseOverride) {
 
   return {
     listOpenFallbackRequests,
+    listPhoneInvalidFinalized,
     czIdsWithEstado3,
     listOpenProcesses,
     getProcessById,
