@@ -471,6 +471,7 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/c1/active-referrals')).status, 200);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/c1/conflicts')).status, 200);
     assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/opportunities')).status, 200);
+    assert.strictEqual((await call(cronServer, 'GET', '/preaprobados/elm-ops/gestion')).status, 200);
     const cr = await call(cronServer, 'POST', '/preaprobados/elm-ops/c1/conflicts/' + CONFLICT_ID + '/resolve', { note: NOTE });
     assert.strictEqual(cr.status, 403, 'conflict resolution needs the action gate');
     assert.strictEqual(repo.calls.filter((c) => c[0] === 'c1ConflictResolve').length, 0);
@@ -519,6 +520,7 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
   const { resolveSectionForPath } = require('../src/middleware/dashboardSections');
   assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/processes'), 'preaprobados');
   assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/opportunities'), 'preaprobados');
+  assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/gestion'), 'preaprobados');
   assert.strictEqual(resolveSectionForPath('/rechazados/elm-recoverable'), 'rechazados');
   const opsSrc = readSrc('src/services/elmOps/repository.js') + readSrc('src/services/elmOps/service.js');
   assert.ok(!/\.from\([^)]*\)\s*\.(insert|update|delete|upsert)\(/.test(opsSrc), 'no direct writes');
@@ -577,16 +579,28 @@ test('UI helpers: alert banner, escaping, no action buttons without permission',
   const page = readSrc('public/mie-dashboard.html');
   assert.ok(page.indexOf('elm-ops.js') > page.indexOf('elm-ui-helpers.js'));
   assert.ok(page.indexOf('elm-ops.js') < page.indexOf('mie-dashboard.js'));
-  assert.ok(page.includes('id="elm-ops-root"'));
-  assert.ok(page.indexOf('id="preaprobados-results"') < page.indexOf('id="elm-ops-root"'));
-  assert.ok(page.includes('aria-label="Oportunidades ELM"'));
-  assert.ok(page.includes('aria-label="Recuperables ELM"'));
-  assert.ok(page.indexOf('id="rechazados-results"') < page.indexOf('id="elm-recoverable-root"'));
+  assert.ok(page.includes('data-dashboard-tab="elm-gestion"'));
+  assert.ok(page.includes('id="elm-gestion-panel"'));
+  assert.ok(page.includes('id="elm-gestion-root"'));
+  assert.ok(page.includes('Gestión ELM'));
+  assert.ok(!page.includes('id="elm-ops-root"'));
+  assert.ok(!page.includes('id="elm-recoverable-root"'));
+  assert.ok(!page.includes('aria-label="Oportunidades ELM"'));
+  assert.ok(!page.includes('aria-label="Recuperables ELM"'));
+  assert.ok(page.includes("sectionKey === 'elm-gestion'"));
+  assert.ok(page.includes('allowedSet.preaprobados'));
+  assert.ok(!page.includes("data-dashboard-tab=\"elm-gestion\"") || page.includes('SECTION_ORDER'));
+  assert.ok(/SECTION_ORDER = \[[\s\S]*?'preaprobados',\s*'elm-gestion'/m.test(page));
   const dash = readSrc('public/mie-dashboard.js');
   assert.ok(dash.includes('ElmOps.mount'));
   assert.ok(dash.includes('canAct: false'));
-  assert.ok(dash.includes('ElmOps.mountRecoverable'));
-  assert.ok(dash.includes('ensureElmRecoverableTray'));
+  assert.ok(dash.includes('initGestionElm'));
+  assert.ok(dash.includes('__openGestionElm'));
+  assert.ok(!dash.includes('ensureElmOpsTray'));
+  assert.ok(!dash.includes('ensureElmRecoverableTray'));
+  assert.ok(!dash.includes('ElmOps.mountRecoverable'));
+  const sections = readSrc('src/middleware/dashboardSections.js');
+  assert.ok(!sections.includes('elm-gestion'), 'no new section_key');
 });
 
 test('classifier: commercial situations in Spanish without raw ELM codes as primary text', () => {
@@ -671,6 +685,31 @@ test('classifier: commercial situations in Spanish without raw ELM codes as prim
     dashboard: 'rechazados',
   });
   assert.strictEqual(recDash.dashboard, 'rechazados');
+  assert.strictEqual(send.vintage, 'historical');
+  assert.strictEqual(send.lane, 'attention');
+  assert.strictEqual(send.attention, true);
+  assert.strictEqual(follow.lane, 'followup');
+  assert.strictEqual(follow.attention, false);
+  assert.strictEqual(granted.lane, 'followup');
+  assert.strictEqual(rec.lane, 'attention');
+  const post = classifyOpportunity({
+    cz_solicitud_id: 2000,
+    ci: '1',
+    s1_status: 'eligible',
+    s2_status: 'technical_error',
+    reason_code: 'elm_s2_technical_error_retry_unsafe',
+    since: '2026-10-16T19:00:00.000Z',
+  });
+  assert.strictEqual(post.vintage, 'post_correction');
+  assert.strictEqual(post.vintage_label, 'Posterior a correcciones');
+  assert.strictEqual(
+    filterOpportunities([send, post], { vintage: 'historical' }).map((i) => i.cz_solicitud_id).join(','),
+    '1912',
+  );
+  assert.strictEqual(
+    filterOpportunities([send, follow], { lane: 'followup' }).map((i) => i.cz_solicitud_id).join(','),
+    '1475',
+  );
 
   const filtered = filterOpportunities(
     [send, close, rec],
@@ -816,6 +855,103 @@ test('recoverable: CZ 1630 localizable; S2 already started is excluded', async (
   assert.strictEqual(miss.items.length, 0);
 });
 
+test('gestion: 1912 + 1630 + estado 13; historical vs post_correction; tab stays disableable', async () => {
+  const p1912 = referredProcess({
+    cz_solicitud_id: 1912,
+    ci: 18165244,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'eligible',
+    s2_status: 'technical_error',
+    referred_at: null,
+    provider_status: null,
+  });
+  const p1630 = referredProcess({
+    id: PID1630,
+    cz_solicitud_id: 1630,
+    ci: 52764618,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'eligible',
+    s2_status: 'not_started',
+    referred_at: null,
+    provider_status: null,
+  });
+  const { service } = setup({
+    processes: [p1912, p1630],
+    allProcesses: [p1912, p1630],
+    projected: [[1912, 14], [1630, 3]],
+    estado3: [1630],
+    cases: [
+      {
+        id: CID,
+        fallback_request_id: 'req-1912',
+        cz_solicitud_id: 1912,
+        ci: 18165244,
+        elm_process_id: PID,
+        related_cz_solicitud_id: null,
+        reason_code: 'elm_s2_technical_error_retry_unsafe',
+        priority: 'normal',
+        due_at: '2026-10-09T12:00:00Z',
+        status: 'open',
+        assigned_to: null,
+        created_at: '2026-10-07T12:00:00Z',
+        version: 1,
+      },
+    ],
+    c1Referrals: [
+      c1Row({
+        cz_solicitud_id: 1475,
+        ci: '33333333',
+        projected_estado: 13,
+        granted_elm: true,
+        provider_status: 'Convertido',
+      }),
+      c1Row({
+        cz_solicitud_id: 1912,
+        ci: '18165244',
+        projected_estado: 14,
+        fallback_outcome: 'manual_review',
+        granted_elm: false,
+        stale: false,
+        last_event_type: null,
+        lock_state: null,
+      }),
+    ],
+    queued: [{ cz_solicitud_id: 1490, ci: '11111111', created_at: '2026-10-08T08:00:00Z' }],
+    phoneInvalid: [
+      {
+        cz_solicitud_id: 1630,
+        ci: '52764618',
+        reason_code: 'elm_mobilephone_invalid',
+        elm_process_id: PID1630,
+        finalized_at: '2026-09-01T12:00:00Z',
+        created_at: '2026-09-01T12:00:00Z',
+      },
+    ],
+  });
+  const out = await service.gestion({ limit: 50 });
+  const ids = out.items.map((i) => i.cz_solicitud_id);
+  assert.strictEqual(ids.length, new Set(ids).size, 'no duplicate C1 rows');
+  const byId = new Map(out.items.map((i) => [i.cz_solicitud_id, i]));
+  assert.ok(byId.has(1912));
+  assert.strictEqual(byId.get(1912).situation, SITUATIONS.COMPLETE_SEND);
+  assert.strictEqual(byId.get(1912).vintage, 'historical');
+  assert.ok(byId.has(1630), 'estado 3 recoverable enters Gestión ELM');
+  assert.strictEqual(byId.get(1630).situation, SITUATIONS.RECOVERABLE);
+  assert.ok(byId.has(1475));
+  assert.strictEqual(byId.get(1475).lane, 'followup');
+  assert.strictEqual(byId.get(1475).attention, false);
+  assert.ok(out.tab_enabled === true);
+  assert.ok(out.cutover_at);
+  assert.ok(out.vintages.some((v) => v.id === 'historical'));
+  assert.ok(out.lanes.some((v) => v.id === 'followup'));
+  const hist = await service.gestion({ vintage: 'historical' });
+  assert.ok(hist.items.every((i) => i.vintage === 'historical'));
+  const followLane = await service.gestion({ lane: 'followup' });
+  assert.ok(followLane.items.every((i) => i.lane === 'followup'));
+  const byCi = await service.gestion({ ci: '52764618' });
+  assert.deepStrictEqual(byCi.items.map((i) => i.cz_solicitud_id), [1630]);
+});
+
 test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemblers', () => {
   const pre = readSrc('src/routes/preaprobados.js');
   assert.ok(pre.includes("router.get('/', async function getPreaprobadosList"));
@@ -829,14 +965,17 @@ test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemb
   assert.ok(!/router\.post\('\/elm-recoverable'/.test(rec), 'recoverable is GET only');
   const elmOps = readSrc('src/routes/elmOps.js');
   assert.ok(elmOps.includes("router.get('/opportunities'"));
+  assert.ok(elmOps.includes("router.get('/gestion'"));
   assert.ok(!/router\.post\('\/opportunities'/.test(elmOps));
+  assert.ok(!/router\.post\('\/gestion'/.test(elmOps));
   const ui = readSrc('public/elm-ops.js');
-  assert.ok(ui.includes("request('/opportunities')"));
+  assert.ok(ui.includes("request('/gestion')"));
+  assert.ok(!ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable')).includes("request('/opportunities')"));
   assert.ok(ui.includes('/rechazados/elm-recoverable'));
   assert.ok(!/method:\s*'POST'/.test(ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable'))));
 });
 
-test('UI stage A: mount GET /opportunities only; CI search; no send actions', async () => {
+test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send actions', async () => {
   const calls = [];
   const fetchFn = async (url, opts) => {
     const method = (opts && opts.method) || 'GET';
@@ -856,6 +995,17 @@ test('UI stage A: mount GET /opportunities only; CI search; no send actions', as
             age_hours: 72,
           }),
           classifyOpportunity({
+            cz_solicitud_id: 1630,
+            ci: '52764618',
+            recoverable: true,
+            reason_code: 'elm_mobilephone_invalid',
+            s1_status: 'eligible',
+            s2_status: 'not_started',
+            dashboard: 'rechazados',
+            since: '2026-09-01T12:00:00Z',
+            age_hours: 1000,
+          }),
+          classifyOpportunity({
             cz_solicitud_id: 1475,
             ci: '33333333',
             projected_estado: 13,
@@ -868,7 +1018,16 @@ test('UI stage A: mount GET /opportunities only; CI search; no send actions', as
         ],
         situations: [
           { id: 'complete_send', label: 'Completar envío a ELM' },
+          { id: 'recoverable', label: 'Recuperable' },
           { id: 'granted', label: 'Préstamo otorgado' },
+        ],
+        vintages: [
+          { id: 'historical', label: 'Pendiente histórico' },
+          { id: 'post_correction', label: 'Posterior a correcciones' },
+        ],
+        lanes: [
+          { id: 'attention', label: 'Requiere gestión' },
+          { id: 'followup', label: 'Seguimiento (no es un error)' },
         ],
       }),
     };
@@ -884,15 +1043,25 @@ test('UI stage A: mount GET /opportunities only; CI search; no send actions', as
   await tray.load();
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].method, 'GET');
-  assert.ok(calls[0].url.includes('/preaprobados/elm-ops/opportunities'));
+  assert.ok(calls[0].url.includes('/preaprobados/elm-ops/gestion'));
+  assert.ok(!calls[0].url.includes('/opportunities'));
   assert.ok(!calls[0].url.includes('/followup'));
-  assert.ok(root.innerHTML.includes('Oportunidades ELM'));
+  assert.ok(root.innerHTML.includes('Gestión ELM'));
+  assert.ok(root.innerHTML.includes('Pendiente histórico'));
+  assert.ok(root.innerHTML.includes('class="elm-ops-flag">Pendiente histórico'));
+  assert.ok(!root.innerHTML.includes('elm-ops-flag-danger">Pendiente histórico'));
+  assert.ok(root.innerHTML.includes('elm-ops-flag-danger">Requiere gestión'));
+  assert.ok(root.innerHTML.includes('value="attention" selected'));
   assert.ok(root.innerHTML.includes('1912'));
-  assert.ok(root.innerHTML.includes('1475'));
+  assert.ok(root.innerHTML.includes('1630'));
+  assert.ok(!root.innerHTML.includes('1475'), 'follow-up/granted stay out of the default attention lane');
+  assert.ok(root.innerHTML.includes('Seguimiento (no es un error)'), 'follow-up remains in the lane filter');
   assert.ok(root.innerHTML.includes('data-elm-ops-search'));
-  assert.ok(root.innerHTML.includes('data-elm-ops-filter'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-filter="vintage"'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-filter="lane"'));
   assert.ok(root.innerHTML.includes('data-elm-ops-open-detail'));
   assert.ok(root.innerHTML.includes('data-elm-ops-actions'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-admin-slot') === false, 'admin slot appears after opening detail');
   assert.ok(root.innerHTML.includes('data-elm-next="retry_s2"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-12"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-14"'));
@@ -901,7 +1070,34 @@ test('UI stage A: mount GET /opportunities only; CI search; no send actions', as
   assert.ok(!root.innerHTML.includes('data-elm-ops-action='), 'no action buttons yet');
   assert.ok(!root.innerHTML.includes('data-elm-ops-form'));
   assert.ok(!/<form[\s>]/.test(root.innerHTML));
+  assert.strictEqual(ElmOpsUi.GESTION_TAB_ENABLED, true);
   assert.strictEqual(ElmOpsUi.fmtAge(72.9), '3 d');
+  const change = listeners.find((l) => l.type === 'change');
+  assert.ok(change);
+  change.fn({
+    target: {
+      getAttribute(name) {
+        return name === 'data-elm-ops-filter' ? 'lane' : null;
+      },
+      value: '',
+    },
+  });
+  assert.ok(root.innerHTML.includes('1475'), 'follow-up/granted remain consultable via the lane filter');
+  const click = listeners.find((l) => l.type === 'click');
+  assert.ok(click);
+  click.fn({
+    target: {
+      closest() {
+        return {
+          getAttribute(name) {
+            return name === 'data-elm-ops-open-detail' ? '1912' : null;
+          },
+        };
+      },
+    },
+  });
+  assert.ok(root.innerHTML.includes('data-elm-ops-admin-slot'));
+  assert.ok(root.innerHTML.includes('Acciones administrativas'));
   const input = listeners.find((l) => l.type === 'input');
   assert.ok(input);
   input.fn({
@@ -914,6 +1110,7 @@ test('UI stage A: mount GET /opportunities only; CI search; no send actions', as
   });
   assert.ok(root.innerHTML.includes('1912'));
   assert.ok(!root.innerHTML.includes('>1475<') && !root.innerHTML.includes('>33333333<'), 'CI filter hides 1475');
+  assert.ok(!root.innerHTML.includes('>1630<'), 'CI filter hides 1630');
 });
 
 test('UI stage A: Recuperables ELM GET /rechazados/elm-recoverable shows 1630', async () => {

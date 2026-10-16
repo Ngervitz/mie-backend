@@ -1700,6 +1700,7 @@
 #mie-dashboard-app #cz-funnel-panel,
 #mie-dashboard-app #rechazados-panel,
 #mie-dashboard-app #preaprobados-panel,
+#mie-dashboard-app #elm-gestion-panel,
 #mie-dashboard-app #sms-panel,
 #mie-dashboard-app #email-panel,
 #mie-dashboard-app #inbox-panel,
@@ -6382,6 +6383,17 @@
   margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+#mie-dashboard-app .elm-ops-standalone {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+#mie-dashboard-app .elm-ops-admin-slot {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 #mie-dashboard-app .elm-ops-head {
   margin-bottom: 12px;

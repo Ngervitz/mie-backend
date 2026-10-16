@@ -16753,21 +16753,6 @@ init();
     renderDetailModal();
   }
 
-  const elmRecoverableRoot = document.getElementById('elm-recoverable-root');
-  let elmRecoverableTray = null;
-  function ensureElmRecoverableTray() {
-    if (!elmRecoverableRoot || typeof ElmOps === 'undefined' || !ElmOps.mountRecoverable) return;
-    if (!elmRecoverableTray) {
-      elmRecoverableTray = ElmOps.mountRecoverable({
-        root: elmRecoverableRoot,
-        api: API,
-      });
-    }
-    if (elmRecoverableTray && typeof elmRecoverableTray.load === 'function') {
-      elmRecoverableTray.load();
-    }
-  }
-
   async function loadList() {
     state.loading = true;
     state.listError = null;
@@ -16820,7 +16805,6 @@ init();
       renderList();
     } finally {
       state.loading = false;
-      ensureElmRecoverableTray();
     }
   }
 
@@ -19171,34 +19155,40 @@ init();
     });
   }
 
-  const elmOpsRoot = document.getElementById('elm-ops-root');
-  let elmOpsTray = null;
-  function ensureElmOpsTray() {
-    if (!elmOpsRoot || typeof ElmOps === 'undefined' || !ElmOps.mount) return;
-    if (!elmOpsTray) {
-      elmOpsTray = ElmOps.mount({
-        root: elmOpsRoot,
-        api: API,
-        fmtDate: fmtDate,
-        canAct: false,
-      });
-    }
-    if (elmOpsTray && typeof elmOpsTray.load === 'function') {
-      elmOpsTray.load();
-    }
-  }
-
   if (reloadBtn) {
     reloadBtn.addEventListener('click', function () {
       state.offset = 0;
       loadList();
-      ensureElmOpsTray();
     });
   }
 
   window.__openPreaprobados = function () {
     renderFilters();
     loadList();
-    ensureElmOpsTray();
+  };
+})();
+
+(function initGestionElm() {
+  const panel = document.getElementById('elm-gestion-panel');
+  const root = document.getElementById('elm-gestion-root');
+  const reloadBtn = document.getElementById('elm-gestion-reload-btn');
+  if (!panel || !root || typeof ElmOps === 'undefined' || !ElmOps.mount) return;
+  if (ElmOps.GESTION_TAB_ENABLED === false) return;
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+  const desk = ElmOps.mount({
+    root: root,
+    api: API,
+    canAct: false,
+  });
+
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', function () {
+      if (desk && typeof desk.load === 'function') desk.load();
+    });
+  }
+
+  window.__openGestionElm = function () {
+    if (desk && typeof desk.load === 'function') desk.load();
   };
 })();

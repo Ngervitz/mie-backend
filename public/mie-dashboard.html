@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/tabler-icons.min.css" />
-  <link rel="stylesheet" href="mie-dashboard.css?v=20261011-s2-technical" />
+  <link rel="stylesheet" href="mie-dashboard.css?v=20261016-gestion-elm" />
   <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
@@ -145,6 +145,15 @@
         data-dashboard-tab="preaprobados"
         id="tab-preaprobados">
         ✅ Preaprobados
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="elm-gestion"
+        id="tab-elm-gestion">
+        🛠️ Gestión ELM
       </button>
       <button
         type="button"
@@ -789,7 +798,6 @@
           aria-label="Filtro por estado operativo"></div>
         <div id="rechazados-status" class="mcl-status" aria-live="polite"></div>
         <div id="rechazados-results"></div>
-        <section id="elm-recoverable-root" class="elm-ops" aria-label="Recuperables ELM"></section>
       </div>
       <div
         id="mi-deuda-landing"
@@ -849,9 +857,32 @@
         <div id="preaprobados-kpis" class="preaprobados-kpis"></div>
         <div id="preaprobados-status" class="mcl-status" aria-live="polite"></div>
         <div id="preaprobados-results"></div>
-        <section id="elm-ops-root" class="elm-ops" aria-label="Oportunidades ELM"></section>
       </div>
       <div id="preaprobados-modal-root"></div>
+    </div>
+
+    <div
+      class="dashboard-panel hidden"
+      id="elm-gestion-panel"
+      role="tabpanel"
+      aria-labelledby="tab-elm-gestion"
+      hidden>
+      <div id="elm-gestion-landing" class="mcl-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Gestión ELM</h1>
+            <p class="mcl-subtitle">
+              Mesa transitoria · pendientes históricos C1 y detección de errores nuevos
+            </p>
+          </div>
+          <div class="mcl-header-actions">
+            <button type="button" id="elm-gestion-reload-btn" class="btn">
+              Recargar
+            </button>
+          </div>
+        </header>
+        <section id="elm-gestion-root" class="elm-ops elm-ops-standalone" aria-label="Gestión ELM"></section>
+      </div>
     </div>
 
     <!-- Search Console: honest placeholder only. The backend integration
@@ -1646,8 +1677,8 @@
   <script src="rechazados-helpers.js"></script>
   <script src="mi-deuda-helpers.js"></script>
   <script src="elm-ui-helpers.js?v=20261011-s2-technical"></script>
-  <script src="elm-ops.js?v=20261011-s2-technical"></script>
-  <script src="mie-dashboard.js?v=20261011-s2-technical"></script>
+  <script src="elm-ops.js?v=20261016-gestion-elm"></script>
+  <script src="mie-dashboard.js?v=20261016-gestion-elm"></script>
   <script src="meta-agent.js"></script>
   <script src="janus-assist.js"></script>
   <script>
@@ -1670,8 +1701,9 @@
         'cz-funnel': document.getElementById('cz-funnel-panel'),
         rechazados: document.getElementById('rechazados-panel'),
         preaprobados: document.getElementById('preaprobados-panel'),
+        'elm-gestion': document.getElementById('elm-gestion-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.rechazados || !panels.preaprobados || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.rechazados || !panels.preaprobados || !panels['elm-gestion'] || !tabs.length) return;
 
       var SECTION_ORDER = [
         'market',
@@ -1682,6 +1714,7 @@
         'cz-funnel',
         'rechazados',
         'preaprobados',
+        'elm-gestion',
         'meta',
         'sms',
         'email',
@@ -1701,6 +1734,13 @@
 
       function canAccess(sectionKey) {
         if (sectionKey === 'admin') return isAdminUser === true;
+        if (sectionKey === 'elm-gestion') {
+          if (typeof ElmOps !== 'undefined' && ElmOps.GESTION_TAB_ENABLED === false) {
+            return false;
+          }
+          if (!allowedSet) return true;
+          return isAdminUser === true || allowedSet.preaprobados === true;
+        }
         if (!allowedSet) return true;
         return allowedSet[sectionKey] === true;
       }
@@ -1759,6 +1799,9 @@
         }
         if (name === 'preaprobados' && window.__openPreaprobados) {
           window.__openPreaprobados();
+        }
+        if (name === 'elm-gestion' && window.__openGestionElm) {
+          window.__openGestionElm();
         }
         if (name === 'sms' && window.__openSms) window.__openSms();
         if (name === 'email' && window.__openEmail) window.__openEmail();

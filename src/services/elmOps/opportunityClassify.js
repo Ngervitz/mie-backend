@@ -40,6 +40,37 @@ const NEXT_STEP_LABELS = Object.freeze({
   none: 'Ver detalle',
 });
 
+/**
+ * Deploy of C1 classification + cellphone SQL (20261016183202). Cases older than
+ * this are «pendientes históricos»; newer ones are «posteriores a correcciones».
+ * The cutover is a label only: it does not mean later errors are resolved.
+ */
+const CORRECTION_CUTOVER_AT = '2026-10-16T18:32:02.000Z';
+const CORRECTION_CUTOVER_MS = Date.parse(CORRECTION_CUTOVER_AT);
+
+/** UX flag for the transitory Gestión ELM tab. APIs stay if this is false. */
+const GESTION_TAB_ENABLED = true;
+
+const VINTAGE = Object.freeze({
+  HISTORICAL: 'historical',
+  POST_CORRECTION: 'post_correction',
+});
+
+const VINTAGE_LABELS = Object.freeze({
+  historical: 'Pendiente histórico',
+  post_correction: 'Posterior a correcciones',
+});
+
+const LANES = Object.freeze({
+  ATTENTION: 'attention',
+  FOLLOWUP: 'followup',
+});
+
+const LANE_LABELS = Object.freeze({
+  attention: 'Requiere gestión',
+  followup: 'Seguimiento (no es un error)',
+});
+
 const REASON_LABELS = Object.freeze({
   elm_s2_unknown: 'El paso 1 llegó a ELM; el paso 2 no quedó registrado',
   elm_s2_technical_error_retry_unsafe: 'El paso 2 falló por un error técnico de ELM',
@@ -71,6 +102,19 @@ function nextStepLabel(key) {
 
 function reasonLabel(code) {
   return REASON_LABELS[code] || null;
+}
+
+function vintageOf(since) {
+  const t = Date.parse(String(since || ''));
+  if (!Number.isFinite(t) || t < CORRECTION_CUTOVER_MS) return VINTAGE.HISTORICAL;
+  return VINTAGE.POST_CORRECTION;
+}
+
+function laneOf(situation) {
+  if (situation === SITUATIONS.FOLLOWUP || situation === SITUATIONS.GRANTED) {
+    return LANES.FOLLOWUP;
+  }
+  return LANES.ATTENTION;
 }
 
 function lastElmText(input) {
@@ -137,12 +181,19 @@ function classifyOpportunity(input) {
   }
 
   const since = src.since || src.created_at || src.referred_at || src.started_at || null;
+  const vintage = vintageOf(since);
+  const lane = laneOf(situation);
   return {
     cz_solicitud_id: Number(src.cz_solicitud_id),
     ci: src.ci != null ? String(src.ci) : null,
     financier: 'ELM',
     situation: situation,
     situation_label: situationLabel(situation),
+    vintage: vintage,
+    vintage_label: VINTAGE_LABELS[vintage],
+    lane: lane,
+    lane_label: LANE_LABELS[lane],
+    attention: lane === LANES.ATTENTION,
     reason_code: motiveCode,
     reason_label: reasonLabel(motiveCode) || src.followup_label || situationLabel(situation),
     since: since,
@@ -180,8 +231,12 @@ function matchesCiQuery(item, raw) {
 function filterOpportunities(items, query) {
   const q = query || {};
   const situation = q.situation && SITUATION_LABELS[q.situation] ? q.situation : '';
+  const vintage = q.vintage && VINTAGE_LABELS[q.vintage] ? q.vintage : '';
+  const lane = q.lane && LANE_LABELS[q.lane] ? q.lane : '';
   return (items || []).filter(function (item) {
     if (situation && item.situation !== situation) return false;
+    if (vintage && item.vintage !== vintage) return false;
+    if (lane && item.lane !== lane) return false;
     return matchesCiQuery(item, q.ci);
   });
 }
@@ -192,14 +247,35 @@ function situationOptions() {
   });
 }
 
+function vintageOptions() {
+  return Object.keys(VINTAGE_LABELS).map(function (id) {
+    return { id: id, label: VINTAGE_LABELS[id] };
+  });
+}
+
+function laneOptions() {
+  return Object.keys(LANE_LABELS).map(function (id) {
+    return { id: id, label: LANE_LABELS[id] };
+  });
+}
+
 module.exports = {
   SITUATIONS,
   SITUATION_LABELS,
   NEXT_STEP_LABELS,
   REASON_LABELS,
+  VINTAGE,
+  VINTAGE_LABELS,
+  LANES,
+  LANE_LABELS,
+  CORRECTION_CUTOVER_AT,
+  GESTION_TAB_ENABLED,
   classifyOpportunity,
   filterOpportunities,
   matchesCiQuery,
   situationOptions,
+  vintageOptions,
+  laneOptions,
+  vintageOf,
   floorHours,
 };

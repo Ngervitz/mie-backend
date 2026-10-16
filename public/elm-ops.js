@@ -1,7 +1,7 @@
 /* ELM operations (Fase 3B): active referrals / uncertain ELM results + manual review queue.
- * Preaprobados mounts «Oportunidades ELM» with mount() (GET /opportunities, stage A read-only).
- * Rechazados mounts «Recuperables ELM» with mountRecoverable() (GET /rechazados/elm-recoverable).
- * createProcessResolver ("Resolver ELM") stays in the solicitud detail; it is not the tray.
+ * «Gestión ELM» is a transitory tab (mount() → GET /gestion). Preaprobados and Rechazados
+ * stay unchanged. mountRecoverable() remains as a read helper; the dashboard does not
+ * mount it. createProcessResolver stays in the solicitud detail.
  * Every action sends the version the operator saw; the backend answers `stale` if anything
  * changed in between (postback, worker, another operator). Nothing here sends to ELM. */
 (function (root, factory) {
@@ -649,8 +649,12 @@
     };
   }
 
-  function opportunityMatches(item, ciQuery, situation) {
+  const GESTION_TAB_ENABLED = true;
+
+  function opportunityMatches(item, ciQuery, situation, vintage, lane) {
     if (situation && item.situation !== situation) return false;
+    if (vintage && item.vintage !== vintage) return false;
+    if (lane && item.lane !== lane) return false;
     const q = String(ciQuery || '').replace(/\D/g, '');
     if (!q) return true;
     const ci = String(item.ci || '').replace(/\D/g, '');
@@ -669,6 +673,11 @@
       '<tr data-elm-cz="' + esc(cz) + '"' + (open ? ' class="is-open"' : '') + '>' +
       '<td>' + esc(item.ci || '—') + '</td>' +
       '<td>' + esc(cz) + '</td>' +
+      '<td><span class="elm-ops-flag">' +
+        esc(item.vintage_label || '—') + '</span></td>' +
+      '<td><span class="elm-ops-flag' +
+        (item.attention ? ' elm-ops-flag-danger' : '') + '">' +
+        esc(item.lane_label || item.situation_label || '—') + '</span></td>' +
       '<td>' + esc(item.situation_label || '—') + '</td>' +
       '<td>' + esc(item.reason_label || '—') + '</td>' +
       '<td>' + esc(fmtDate(item.since)) + '</td>' +
@@ -680,7 +689,7 @@
       '<button type="button" class="btn btn-sm" data-elm-ops-open-detail="' + esc(cz) + '">' +
       (open ? 'Ocultar' : 'Ver detalle') + '</button></td></tr>' +
       (open
-        ? '<tr class="elm-ops-detail-row"><td colspan="9"><div class="elm-ops-detail">' +
+        ? '<tr class="elm-ops-detail-row"><td colspan="11"><div class="elm-ops-detail">' +
           '<p class="preaprobados-muted">Historial técnico (diagnóstico). No se envía nada a ELM.</p>' +
           related +
           '<dl class="preaprobados-dl">' +
@@ -689,18 +698,22 @@
           '<div><dt>Motivo interno</dt><dd>' + esc(tech.review_reason || tech.followup_kind || '—') + '</dd></div>' +
           '<div><dt>Estado ELM</dt><dd>' + esc(tech.provider_status || '—') + '</dd></div>' +
           '<div><dt>Origen</dt><dd>' + esc(tech.trigger_origin || '—') + '</dd></div>' +
-          '</dl></div></td></tr>'
+          '</dl>' +
+          '<div class="elm-ops-admin-slot" data-elm-ops-admin-slot>' +
+          '<p class="preaprobados-muted">Acciones administrativas (reservado). ' +
+          'Esta etapa no envía a ELM ni modifica estados.</p></div>' +
+          '</div></td></tr>'
         : '')
     );
   }
 
   function opportunitiesTableHtml(items, fmtDate, openId) {
     if (!items.length) {
-      return '<p class="preaprobados-muted">No hay oportunidades ELM con ese filtro.</p>';
+      return '<p class="preaprobados-muted">No hay casos ELM con ese filtro.</p>';
     }
     return (
       '<div class="table-wrap"><table class="mcl-table elm-ops-opportunities">' +
-      '<thead><tr><th>CI</th><th>Solicitud</th><th>Situación</th><th>Motivo</th>' +
+      '<thead><tr><th>CI</th><th>Solicitud</th><th>Origen</th><th>Carril</th><th>Situación</th><th>Motivo</th>' +
       '<th>Desde</th><th>Antigüedad</th><th>Última respuesta ELM</th><th>Próximo paso</th>' +
       '<th></th></tr></thead><tbody>' +
       items.map(function (i) { return opportunityRowHtml(i, fmtDate, openId); }).join('') +
@@ -720,7 +733,10 @@
     root.addEventListener('change', function (ev) {
       const t = ev.target;
       if (!t || t.getAttribute('data-elm-ops-filter') == null) return;
-      state.situation = t.value || '';
+      const which = t.getAttribute('data-elm-ops-filter');
+      if (which === 'vintage') state.vintage = t.value || '';
+      else if (which === 'lane') state.lane = t.value || '';
+      else state.situation = t.value || '';
       render();
     });
     root.addEventListener('click', function (ev) {
@@ -733,8 +749,8 @@
   }
 
   /**
-   * Preaprobados «Oportunidades ELM»: one table, GET only. Action cells are reserved
-   * (data-elm-next) for later admin buttons; stage A only opens a technical drawer.
+   * Transitory «Gestión ELM» desk: GET /gestion only. Action cells reserved
+   * (data-elm-next) for later admin buttons; no send in this stage.
    */
   function mount(opts) {
     const root = opts.root;
@@ -744,8 +760,12 @@
     const state = {
       items: [],
       situations: [],
+      vintages: [],
+      lanes: [],
       ciQuery: '',
       situation: '',
+      vintage: '',
+      lane: 'attention',
       openId: null,
       error: null,
       bound: false,
@@ -763,35 +783,47 @@
       return { status: res.status, data: data };
     }
 
+    function optionList(items, current, emptyLabel) {
+      return ['<option value="">' + esc(emptyLabel) + '</option>'].concat(
+        (items || []).map(function (s) {
+          return (
+            '<option value="' + esc(s.id) + '"' +
+            (current === s.id ? ' selected' : '') + '>' +
+            esc(s.label) + '</option>'
+          );
+        }),
+      );
+    }
+
     function visibleItems() {
       return state.items.filter(function (i) {
-        return opportunityMatches(i, state.ciQuery, state.situation);
+        return opportunityMatches(i, state.ciQuery, state.situation, state.vintage, state.lane);
       });
     }
 
     function render() {
       const vis = visibleItems();
-      const options = ['<option value="">Todas las situaciones</option>'].concat(
-        (state.situations || []).map(function (s) {
-          return (
-            '<option value="' + esc(s.id) + '"' +
-            (state.situation === s.id ? ' selected' : '') + '>' +
-            esc(s.label) + '</option>'
-          );
-        }),
-      );
       let html =
         '<header class="elm-ops-head">' +
-        '<h2 class="elm-ops-title">Oportunidades ELM</h2>' +
-        '<p class="preaprobados-muted">Seguimiento e intervención de solicitudes ELM. ' +
-        'Independiente de la cohorte CDV. Etapa A: lectura; no reenvía a ELM.</p>' +
+        '<h2 class="elm-ops-title">Gestión ELM</h2>' +
+        '<p class="preaprobados-muted">Mesa transitoria para pendientes C1/ELM. ' +
+        'Por defecto se listan solo los casos que requieren gestión. ' +
+        'Seguimiento y préstamos otorgados se consultan con el filtro de carril; no son un error. ' +
+        'Lectura; no reenvía a ELM. La pestaña se puede ocultar después; el historial y las APIs permanecen.</p>' +
         '</header>' +
         '<div class="elm-ops-toolbar">' +
         '<label class="elm-ops-search">CI o solicitud ' +
         '<input type="search" data-elm-ops-search value="' + esc(state.ciQuery) +
         '" placeholder="Buscar CI" autocomplete="off"></label>' +
-        '<label class="elm-ops-filter">Situación <select data-elm-ops-filter>' +
-        options.join('') + '</select></label>' +
+        '<label class="elm-ops-filter">Origen <select data-elm-ops-filter="vintage">' +
+        optionList(state.vintages, state.vintage, 'Todos los orígenes').join('') +
+        '</select></label>' +
+        '<label class="elm-ops-filter">Carril <select data-elm-ops-filter="lane">' +
+        optionList(state.lanes, state.lane, 'Todos los carriles').join('') +
+        '</select></label>' +
+        '<label class="elm-ops-filter">Situación <select data-elm-ops-filter="situation">' +
+        optionList(state.situations, state.situation, 'Todas las situaciones').join('') +
+        '</select></label>' +
         '<span class="preaprobados-muted">' + vis.length + ' de ' + state.items.length + '</span>' +
         '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
@@ -803,17 +835,21 @@
     async function load() {
       state.error = null;
       try {
-        const res = await request('/opportunities');
+        const res = await request('/gestion');
         if (res.status >= 400) {
-          state.error = 'No se pudieron cargar las oportunidades ELM.';
+          state.error = 'No se pudo cargar Gestión ELM.';
           state.items = [];
           state.situations = [];
+          state.vintages = [];
+          state.lanes = [];
         } else {
           state.items = res.data.items || [];
           state.situations = res.data.situations || [];
+          state.vintages = res.data.vintages || [];
+          state.lanes = res.data.lanes || [];
         }
       } catch (_) {
-        state.error = 'No se pudieron cargar las oportunidades ELM.';
+        state.error = 'No se pudo cargar Gestión ELM.';
         state.items = [];
       }
       render();
@@ -904,5 +940,6 @@
     mountRecoverable,
     opportunityRowHtml,
     defaultFmtDate,
+    GESTION_TAB_ENABLED,
   };
 });

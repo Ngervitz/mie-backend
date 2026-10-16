@@ -24,6 +24,10 @@ const {
   classifyOpportunity,
   filterOpportunities,
   situationOptions,
+  vintageOptions,
+  laneOptions,
+  GESTION_TAB_ENABLED,
+  CORRECTION_CUTOVER_AT,
 } = require('./opportunityClassify');
 const {
   REVIEW_PRIORITIES,
@@ -711,6 +715,47 @@ function createElmOpsService(deps) {
     };
   }
 
+  /**
+   * Transitory Gestión ELM desk: pending 12/14 + estado-3 recoverables + 13 follow-up.
+   * Composes opportunities() + recoverable(). No writes. Tab may be hidden later;
+   * this read stays so history, audit and new-error detection remain.
+   */
+  async function gestion(query) {
+    const q = query || {};
+    const max = Math.min(q.limit || 200, 200);
+    const [ops, rec] = await Promise.all([
+      opportunities({ limit: max }),
+      recoverable({ limit: max }),
+    ]);
+    const byId = new Map();
+    (ops.items || []).forEach(function (item) {
+      byId.set(item.cz_solicitud_id, item);
+    });
+    (rec.items || []).forEach(function (item) {
+      byId.set(item.cz_solicitud_id, item);
+    });
+    const merged = Array.from(byId.values());
+    merged.sort(function (a, b) {
+      if (a.attention !== b.attention) return a.attention ? -1 : 1;
+      if (a.vintage !== b.vintage) return a.vintage === 'historical' ? -1 : 1;
+      return String(a.since || '').localeCompare(String(b.since || ''));
+    });
+    const filtered = filterOpportunities(merged, {
+      ci: q.ci,
+      situation: q.situation,
+      vintage: q.vintage,
+      lane: q.lane,
+    });
+    return {
+      items: filtered.slice(0, max),
+      situations: situationOptions(),
+      vintages: vintageOptions(),
+      lanes: laneOptions(),
+      tab_enabled: GESTION_TAB_ENABLED === true,
+      cutover_at: CORRECTION_CUTOVER_AT,
+    };
+  }
+
   async function listAuditEvents(entityType, entityId) {
     if (!['elm_process', 'review_case', 'cz_conflict'].includes(entityType) || !isUuid(entityId)) return null;
     return repo.listAuditEvents(entityType, entityId);
@@ -735,6 +780,7 @@ function createElmOpsService(deps) {
     followup,
     opportunities,
     recoverable,
+    gestion,
   };
 }
 
