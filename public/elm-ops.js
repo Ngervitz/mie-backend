@@ -673,6 +673,15 @@
 
   const GESTION_TAB_ENABLED = true;
 
+  /** Row «Enviar a ELM»: API viewer flag, resolved admin, or dashboard session hint. */
+  function gestionSendRowAllowed(o) {
+    const opts = o || {};
+    if (opts.viewerMaySendElm === true) return true;
+    if (opts.canAct === true) return true;
+    if (opts.dashboardIsAdmin === true) return true;
+    return false;
+  }
+
   function opportunityMatches(item, ciQuery, situation, vintage, lane) {
     if (situation && item.situation !== situation) return false;
     if (vintage && item.vintage !== vintage) return false;
@@ -862,8 +871,9 @@
       return a.id === 'send_elm';
     })[0];
     const sendEnabled = sendAct && sendAct.enabled !== false;
+    const maySendRow = gestion && sendAct && gestionSendRowAllowed(o);
     const canSendBtn =
-      gestion && o.canAct === true && sendAct
+      maySendRow
         ? '<button type="button" class="btn btn-sm btn-primary' +
           (sendEnabled ? '' : ' is-muted') +
           '" data-elm-ops-send-open="' +
@@ -1062,6 +1072,7 @@
       sendPreviewLoading: false,
       notice: null,
       canAct: opts.canAct === true ? true : false,
+      viewerMaySendElm: false,
       busy: false,
       error: null,
       bound: false,
@@ -1102,8 +1113,28 @@
       });
     }
 
+    function gestionActAllowed() {
+      if (state.viewerMaySendElm === true) return true;
+      if (state.canAct === true) return true;
+      if (typeof window !== 'undefined' && window.__janusDashboardIsAdmin === true) {
+        return true;
+      }
+      return false;
+    }
+
+    function renderContext() {
+      const dashboardIsAdmin =
+        typeof window !== 'undefined' && window.__janusDashboardIsAdmin === true;
+      return {
+        canAct: gestionActAllowed(),
+        viewerMaySendElm: state.viewerMaySendElm === true,
+        dashboardIsAdmin: dashboardIsAdmin,
+      };
+    }
+
     function render() {
       const vis = visibleItems();
+      const ctx = renderContext();
       let html =
         '<header class="elm-ops-head">' +
         '<h2 class="elm-ops-title">Gestión ELM</h2>' +
@@ -1130,7 +1161,9 @@
         '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
       html += opportunitiesTableHtml(vis, fmtDate, state.openId, {
-        canAct: state.canAct,
+        canAct: ctx.canAct,
+        viewerMaySendElm: ctx.viewerMaySendElm,
+        dashboardIsAdmin: ctx.dashboardIsAdmin,
         openCz: state.openId,
         openAction: state.openAction,
         notice: state.notice,
@@ -1150,7 +1183,7 @@
     }
 
     state.onSendOpen = async function (cz) {
-      if (state.canAct !== true || state.busy) return;
+      if (!gestionActAllowed() || state.busy) return;
       state.openSendCz = String(cz);
       state.sendPreview = null;
       state.sendPreviewLoading = true;
@@ -1179,7 +1212,7 @@
     };
 
     state.onActionClick = function (btn) {
-      if (state.canAct !== true || state.busy) return;
+      if (!gestionActAllowed() || state.busy) return;
       const id = btn.getAttribute('data-elm-ops-action');
       if (!id || id === 'cancel') return;
       const slot = btn.closest('[data-elm-ops-admin-slot]');
@@ -1193,7 +1226,7 @@
     };
 
     state.onActionSubmit = async function (form) {
-      if (state.canAct !== true || state.busy) return;
+      if (!gestionActAllowed() || state.busy) return;
       const kind = form.getAttribute('data-elm-ops-form');
       if (kind === 'send-to-elm') {
         if (!state.sendPreview || state.sendPreview.can_send !== true) {
@@ -1315,10 +1348,6 @@
       }
     };
 
-    function applyViewerMaySendElm(flag) {
-      if (typeof flag === 'boolean') state.canAct = flag;
-    }
-
     async function resolveCanAct() {
       if (opts.canAct === true) {
         state.canAct = true;
@@ -1366,7 +1395,7 @@
           state.vintages = [];
           state.lanes = [];
         } else {
-          applyViewerMaySendElm(res.data.viewer_may_send_elm);
+          state.viewerMaySendElm = res.data.viewer_may_send_elm === true;
           state.items = res.data.items || [];
           state.situations = res.data.situations || [];
           state.vintages = res.data.vintages || [];
@@ -1383,7 +1412,7 @@
     return {
       load: load,
       syncAdminAccess: function (isAdmin) {
-        applyViewerMaySendElm(isAdmin === true);
+        state.canAct = isAdmin === true;
         render();
       },
     };
@@ -1472,6 +1501,7 @@
     gestionAdminSlotHtml,
     gestionActionFormHtml,
     gestionSendFormHtml,
+    gestionSendRowAllowed,
     defaultFmtDate,
     GESTION_TAB_ENABLED,
   };

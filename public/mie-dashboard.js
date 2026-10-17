@@ -19187,6 +19187,9 @@ init();
     if (desk && typeof desk.syncAdminAccess === 'function') {
       desk.syncAdminAccess(isAdmin);
     }
+    if (isAdmin && desk && typeof desk.load === 'function' && !panel.hidden) {
+      desk.load();
+    }
   });
 
   if (reloadBtn) {
