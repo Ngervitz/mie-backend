@@ -57,6 +57,7 @@ const {
   mapSolicitudProfileFields,
   resolveLatestCelularByCi,
 } = require('../src/jobs/czFunnelSync');
+const { mergeCelularOnFunnelSync } = require('../src/lib/czFunnelSolicitudProfile');
 
 assert.strictEqual(nullableCelular(59899970709), '59899970709');
 assert.strictEqual(nullableCelular('099 970 709'), '099970709');
@@ -314,6 +315,52 @@ function createStore() {
 
   // monto_solicitado must NOT be invented on upsert rows
   assert.ok(!Object.prototype.hasOwnProperty.call(row, 'monto_solicitado'));
+
+  assert.strictEqual(mergeCelularOnFunnelSync('6955246', '59896955246'), '59896955246');
+  assert.strictEqual(mergeCelularOnFunnelSync('59896955246', '6955246'), '59896955246');
+
+  const storePreserve = createStore();
+  supabaseImpl.from = function (table) {
+    return {
+      select: function () {
+        return {
+          in: function () {
+            if (table !== SOURCE_SOLICITUDES) {
+              return Promise.resolve({ data: [], error: null });
+            }
+            return Promise.resolve({
+              data: [
+                {
+                  cz_id: 1630,
+                  tracking_data_summary: { jt: 'abcdefghijABCDEFGHIJ12' },
+                  celular: '59896955246',
+                },
+              ],
+              error: null,
+            });
+          },
+        };
+      },
+      upsert: function (rows, spec) {
+        storePreserve.upserts.push({ table: table, rows: rows, onConflict: spec && spec.onConflict });
+        if (table === SOURCE_SOLICITUDES) {
+          (rows || []).forEach(function (r) {
+            storePreserve.solicitudes.set(r.cz_id, Object.assign({}, r));
+          });
+        }
+        return Promise.resolve({ error: null });
+      },
+    };
+  };
+  await upsertSolicitudes([
+    item({
+      id: 1630,
+      ci: 52764618,
+      celular: 6955246,
+      updated: '2026-10-17 10:00:00',
+    }),
+  ]);
+  assert.strictEqual(storePreserve.solicitudes.get(1630).celular, '59896955246');
 
   console.log('OK unit-cz-funnel-solicitud-profile');
 })().catch(function (err) {

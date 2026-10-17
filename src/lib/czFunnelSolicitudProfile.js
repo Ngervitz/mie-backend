@@ -7,6 +7,7 @@
  */
 
 const { normalizeBirthDate, classifyBirthDate } = require('./birthDate');
+const { inspectMobilePhone } = require('../services/elm/payload');
 
 /**
  * Digits-only celular text from API number/string. Empty → null.
@@ -84,6 +85,21 @@ function nullableTrimmedText(raw) {
  *   relacion_laboral: string|null
  * }}
  */
+/**
+ * Credizona sync upsert: keep ELM-valid mirror celular when the API still sends an
+ * unnormalizable number (e.g. truncated 7 digits). Incoming ELM-valid values always win.
+ * @param {string|null|undefined} incoming from mapSolicitudProfileFields
+ * @param {string|null|undefined} existing from cz_funnel_solicitudes
+ * @returns {string|null}
+ */
+function mergeCelularOnFunnelSync(incoming, existing) {
+  const inc = inspectMobilePhone(incoming);
+  if (inc.status === 'ok') return inc.e164;
+  const ex = inspectMobilePhone(existing);
+  if (ex.status === 'ok') return ex.e164;
+  return incoming != null && incoming !== '' ? nullableCelular(incoming) : nullableCelular(existing);
+}
+
 function mapSolicitudProfileFields(item, now) {
   const src = item && typeof item === 'object' ? item : {};
   return {
@@ -139,6 +155,7 @@ module.exports = {
   nullableSalario,
   parseCzDateOnly,
   birthDateStatusOf,
+  mergeCelularOnFunnelSync,
   mapSolicitudProfileFields,
   resolveLatestCelularByCi,
 };

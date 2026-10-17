@@ -21,6 +21,7 @@ const {
 } = require('../lib/sanitizeCzTrackingData');
 const {
   mapSolicitudProfileFields,
+  mergeCelularOnFunnelSync,
   nullableCelular,
   nullableSalario,
   parseCzDateOnly,
@@ -302,7 +303,7 @@ async function loadExistingJtByCzId(czIds) {
     const chunk = czIds.slice(i, i + EXISTING_SUMMARY_SELECT_CHUNK);
     const { data, error } = await supabase
       .from(SOURCE_SOLICITUDES)
-      .select('cz_id, tracking_data_summary')
+      .select('cz_id, tracking_data_summary, celular')
       .in('cz_id', chunk);
     if (error) {
       throw new Error(
@@ -318,7 +319,10 @@ async function loadExistingJtByCzId(czIds) {
           ? summary.jt
           : null,
       );
-      if (jt) map.set(czId, jt);
+      map.set(czId, {
+        jt: jt || null,
+        celular: row.celular != null && row.celular !== '' ? String(row.celular) : null,
+      });
     }
   }
   return map;
@@ -397,15 +401,20 @@ async function upsertSolicitudes(items) {
     }),
   );
   for (const row of rows) {
+    const existing = existingJt.get(row.cz_id) || null;
     const applied = applyJtFirstValidWins(
       row.cz_id,
       row.tracking_data_summary,
-      existingJt.get(row.cz_id) || null,
+      existing && existing.jt ? existing.jt : null,
     );
     row.tracking_data_summary = applied.tracking_data_summary;
     if (applied.conflict) {
       logger.warn('CZ funnel jt conflict', applied.conflict);
     }
+    row.celular = mergeCelularOnFunnelSync(
+      row.celular,
+      existing && existing.celular ? existing.celular : null,
+    );
   }
   const { error } = await supabase.from(SOURCE_SOLICITUDES).upsert(rows, {
     onConflict: 'cz_id',
