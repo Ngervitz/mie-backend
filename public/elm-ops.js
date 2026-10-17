@@ -759,6 +759,12 @@
   function gestionSendBlockedHtml(preview, cz) {
     if (!preview) return '';
     const code = preview.code || preview.status || 'send_not_allowed';
+    const modeHint = preview.intended_mode || preview.mode || null;
+    const intentLine =
+      modeHint === 'admin_provider_resend'
+        ? '<p><strong>Acción prevista:</strong> reenvío completo S1+S2 autorizado por ELM ' +
+          '(referencia ELM y confirmación de duplicados al habilitarse).</p>'
+        : '';
     const warns = (preview.warnings || []).map(function (w) {
       return '<p class="elm-ops-warn">' + esc(w) + '</p>';
     }).join('');
@@ -774,6 +780,7 @@
       ' · <strong>Solicitud</strong> ' +
       esc(String(cz)) +
       '</p>' +
+      intentLine +
       '<p class="elm-ops-warn"><strong>No se puede enviar:</strong> ' +
       esc(actionErrorText(code)) +
       '</p>' +
@@ -1189,6 +1196,16 @@
       if (state.canAct !== true || state.busy) return;
       const kind = form.getAttribute('data-elm-ops-form');
       if (kind === 'send-to-elm') {
+        if (!state.sendPreview || state.sendPreview.can_send !== true) {
+          state.notice = {
+            tone: 'error',
+            text: actionErrorText(
+              (state.sendPreview && state.sendPreview.code) || 'send_not_allowed',
+            ),
+          };
+          render();
+          return;
+        }
         const czSend = form.getAttribute('data-elm-cz');
         const confirmElSend = form.elements.confirm;
         if (!confirmElSend || !confirmElSend.checked) {
@@ -1298,8 +1315,16 @@
       }
     };
 
+    function applyViewerMaySendElm(flag) {
+      if (typeof flag === 'boolean') state.canAct = flag;
+    }
+
     async function resolveCanAct() {
       if (opts.canAct === true) {
+        state.canAct = true;
+        return;
+      }
+      if (typeof window !== 'undefined' && window.__janusDashboardIsAdmin === true) {
         state.canAct = true;
         return;
       }
@@ -1341,6 +1366,7 @@
           state.vintages = [];
           state.lanes = [];
         } else {
+          applyViewerMaySendElm(res.data.viewer_may_send_elm);
           state.items = res.data.items || [];
           state.situations = res.data.situations || [];
           state.vintages = res.data.vintages || [];
@@ -1354,7 +1380,13 @@
     }
 
     bindReadOnlyUi(root, state, render);
-    return { load: load };
+    return {
+      load: load,
+      syncAdminAccess: function (isAdmin) {
+        applyViewerMaySendElm(isAdmin === true);
+        render();
+      },
+    };
   }
 
   /** Rechazados strip: C1 recuperables in estado 3. GET only. */

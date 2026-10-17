@@ -42,6 +42,7 @@ const SITUATION_LABELS = Object.freeze({
 
 const NEXT_STEP_LABELS = Object.freeze({
   retry_s2: 'Reenviar paso 2',
+  admin_provider_resend: 'Reenvío completo S1+S2 (autorizado ELM)',
   resume_s2: 'Enviar paso 2 (después de corregir el celular)',
   close_reject: 'Cerrar como rechazo ELM',
   retry_s1: 'Reintentar el mismo paso 1',
@@ -174,14 +175,18 @@ function classifyOpportunity(input) {
     motiveCode = 'referred';
   } else if (
     s1 === 'eligible' &&
-    (s2 === 'unknown' ||
-      s2 === 'technical_error' ||
-      reason === 'elm_s2_unknown' ||
-      (reason && String(reason).indexOf('elm_s2_technical') === 0))
+    (s2 === 'unknown' || reason === 'elm_s2_unknown')
+  ) {
+    situation = SITUATIONS.COMPLETE_SEND;
+    nextKey = 'admin_provider_resend';
+    motiveCode = reason || 'elm_s2_unknown';
+  } else if (
+    s1 === 'eligible' &&
+    (s2 === 'technical_error' || (reason && String(reason).indexOf('elm_s2_technical') === 0))
   ) {
     situation = SITUATIONS.COMPLETE_SEND;
     nextKey = 'retry_s2';
-    motiveCode = reason || (s2 === 'technical_error' ? 'elm_s2_technical_error_retry_unsafe' : 'elm_s2_unknown');
+    motiveCode = reason || 'elm_s2_technical_error_retry_unsafe';
   } else if (reason === 'ci_prior_unknown') {
     situation = SITUATIONS.WAITING_OTHER;
     nextKey = 'wait_other';

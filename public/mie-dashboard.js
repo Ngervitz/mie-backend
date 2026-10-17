@@ -19179,6 +19179,14 @@ init();
   const desk = ElmOps.mount({
     root: root,
     api: API,
+    canAct: typeof window !== 'undefined' && window.__janusDashboardIsAdmin === true,
+  });
+
+  window.addEventListener('janus-dashboard-auth', function (ev) {
+    const isAdmin = ev && ev.detail && ev.detail.is_admin === true;
+    if (desk && typeof desk.syncAdminAccess === 'function') {
+      desk.syncAdminAccess(isAdmin);
+    }
   });
 
   if (reloadBtn) {

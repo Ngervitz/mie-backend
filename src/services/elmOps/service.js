@@ -775,7 +775,10 @@ function createElmOpsService(deps) {
         cells = new Map();
       }
       const { createGestionActions } = require('./gestionActions');
-      const { sendRowActionFromPlan } = require('./gestionElmSendPlan');
+      const {
+        applyGestionSendDisplay,
+        attachFallbackSendRow,
+      } = require('./gestionSendDisplay');
       const actionsSvc = createGestionActions({ repository: repo });
       for (let i = 0; i < slice.length; i += 1) {
         const item = slice[i];
@@ -800,21 +803,13 @@ function createElmOpsService(deps) {
         }
         try {
           const preview = await actionsSvc.getSendPreview(item.cz_solicitud_id, {});
-          const sendAct = sendRowActionFromPlan(preview);
-          if (sendAct) {
-            item.allowed_actions = (item.allowed_actions || []).filter(function (a) {
-              return a.id !== 'send_elm';
-            });
-            item.allowed_actions.push(sendAct);
-            item.send_preview = {
-              can_send: preview.can_send,
-              mode: preview.mode,
-              duplicate_warning: preview.duplicate_warning,
-              code: preview.code || null,
-            };
-          }
-        } catch (_) {
-          /* preview optional for list */
+          applyGestionSendDisplay(item, preview);
+        } catch (err) {
+          logger.warn('gestion send preview failed for row', {
+            cz_solicitud_id: item.cz_solicitud_id,
+            error: err && err.message ? String(err.message).slice(0, 120) : 'unknown',
+          });
+          attachFallbackSendRow(item);
         }
       }
     }

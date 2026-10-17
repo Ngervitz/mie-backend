@@ -14,6 +14,15 @@ const { findUserById } = require('../services/dashboardUsers');
 const { isValidCronKey } = require('./auth');
 const logger = require('../lib/logger');
 
+/** Same admin gate as POST send / assignees: active dashboard user with is_admin. */
+async function resolveDashboardElmAdmin(req) {
+  if (req.dashboardAuthViaCron || isValidCronKey(req)) return false;
+  const userId = req.dashboardUserId;
+  if (!userId) return false;
+  const user = await findUserById(userId);
+  return !!(user && user.active && user.is_admin === true);
+}
+
 async function requireElmAction(req, res, next) {
   try {
     if (req.dashboardAuthViaCron || isValidCronKey(req)) {
@@ -49,4 +58,4 @@ async function requireElmAction(req, res, next) {
   }
 }
 
-module.exports = { requireElmAction };
+module.exports = { requireElmAction, resolveDashboardElmAdmin };

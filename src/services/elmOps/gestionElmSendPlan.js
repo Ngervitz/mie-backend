@@ -253,13 +253,20 @@ function sendRowActionFromPlan(plan) {
     return act ? Object.assign({ enabled: true }, act) : null;
   }
   if (!p.code && !p.hold) return null;
+  const modeHint = p.intended_mode || p.mode || null;
+  let explanation =
+    'Ver confirmación: este envío está bloqueado hasta resolver el motivo indicado.';
+  if (modeHint === SEND_MODES.ADMIN_PROVIDER_RESEND) {
+    explanation =
+      'Reenvío completo S1+S2 autorizado por ELM. Abra la confirmación: referencia ELM y duplicados.';
+  }
   return {
     id: 'send_elm',
     label: 'Enviar a ELM',
     enabled: false,
     block_code: p.code || (p.hold && p.hold.reason) || null,
-    explanation: 'Ver confirmación: este envío está bloqueado hasta resolver el motivo indicado.',
-    mode: p.mode || null,
+    explanation: explanation,
+    mode: modeHint,
     s1_status: p.s1_status || null,
     s2_status: p.s2_status || null,
   };

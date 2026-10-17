@@ -1077,17 +1077,19 @@ test('UI Gestión ELM: row send + detail; admin via /api/auth/me when assignees 
       cz_solicitud_id: 1912,
       ci: '18165244',
       s1_status: 'eligible',
-      s2_status: 'technical_error',
-      reason_code: 'elm_s2_technical_error_retry_unsafe',
+      s2_status: 'unknown',
+      reason_code: 'elm_s2_unknown',
       since: '2026-10-05T12:00:00Z',
       age_hours: 72,
     });
+    item1912.next_step = 'Reenvío completo S1+S2 (autorizado ELM)';
+    item1912.next_step_key = 'admin_provider_resend';
     item1912.allowed_actions = [
       {
         id: 'send_elm',
         label: 'Enviar a ELM',
-        enabled: true,
-        explanation: 'Reintenta paso 2',
+        enabled: false,
+        explanation: 'Reenvío completo S1+S2 autorizado por ELM. Abra la confirmación.',
       },
     ];
     const item1630 = classifyOpportunity({
@@ -1113,6 +1115,7 @@ test('UI Gestión ELM: row send + detail; admin via /api/auth/me when assignees 
       status: 200,
       json: async () => ({
         ok: true,
+        viewer_may_send_elm: true,
         items: [
           item1912,
           item1630,
@@ -1175,11 +1178,12 @@ test('UI Gestión ELM: row send + detail; admin via /api/auth/me when assignees 
   assert.ok(root.innerHTML.includes('data-elm-ops-open-detail'));
   assert.ok(root.innerHTML.includes('data-elm-ops-actions'));
   assert.ok(root.innerHTML.includes('data-elm-ops-admin-slot') === false, 'admin slot appears after opening detail');
-  assert.ok(root.innerHTML.includes('data-elm-next="retry_s2"'));
+  assert.ok(root.innerHTML.includes('data-elm-next="admin_provider_resend"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-12"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-14"'));
   assert.ok(!root.innerHTML.includes('id="elm-ops-estado-13"'));
-  assert.ok(root.innerHTML.includes('Reenviar paso 2'), 'next step is copy, not a send control');
+  assert.ok(root.innerHTML.includes('Reenvío completo S1+S2'), 'next step is full resend copy');
+  assert.ok(!root.innerHTML.includes('Reenviar paso 2'));
   assert.ok(!root.innerHTML.includes('data-elm-ops-form'));
   assert.ok(!/<form[\s>]/.test(root.innerHTML));
   assert.strictEqual(ElmOpsUi.GESTION_TAB_ENABLED, true);

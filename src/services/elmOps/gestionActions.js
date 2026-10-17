@@ -121,7 +121,7 @@ function createGestionActions(deps) {
       process.s2_status === S2.TECHNICAL_ERROR &&
       process.s2_attempts != null &&
       Number(process.s2_attempts) >= 1;
-    const plan = planGestionSend({
+    const planInput = {
       czId: czId,
       ci: ciFromSol,
       process: process,
@@ -132,6 +132,15 @@ function createGestionActions(deps) {
       gestionAuthorized: gestionAuthorized,
       retrySafeS2: retrySafeS2,
       s2ExpectedAttempts: process && process.s2_attempts != null ? Number(process.s2_attempts) : null,
+    };
+    const plan = planGestionSend(planInput);
+    let intended_mode = plan.mode || null;
+    if (!intended_mode && plan.hold && process) {
+      const peek = planGestionSend(Object.assign({}, planInput, { hold: null }));
+      intended_mode = peek.mode || null;
+    }
+    const planWithIntent = Object.assign({}, plan, {
+      intended_mode: intended_mode,
     });
     const projected = ev.projected;
     const commercial = process
@@ -145,7 +154,7 @@ function createGestionActions(deps) {
       ev: ev,
       bag: bag,
       deps: deps,
-      plan: plan,
+      plan: planWithIntent,
       ci: ciFromSol,
       gestionAuthorized: gestionAuthorized,
       commercial: commercial,
@@ -328,6 +337,7 @@ function createGestionActions(deps) {
       can_send: p.can_send === true,
       code: p.code || null,
       mode: p.mode || null,
+      intended_mode: p.intended_mode || p.mode || null,
       steps: p.steps || [],
       s1_status: p.s1_status || (ctx.ev.process && ctx.ev.process.s1_status) || null,
       s2_status: p.s2_status || (ctx.ev.process && ctx.ev.process.s2_status) || null,

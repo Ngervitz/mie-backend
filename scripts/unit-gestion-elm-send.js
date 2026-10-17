@@ -22,6 +22,8 @@ const {
   BLOCK_CODES,
 } = require('../src/services/elmOps/gestionElmSendPlan');
 const { createGestionActions } = require('../src/services/elmOps/gestionActions');
+const { applyGestionSendDisplay } = require('../src/services/elmOps/gestionSendDisplay');
+const { classifyOpportunity } = require('../src/services/elmOps/opportunityClassify');
 const { mapAdminRpc } = require('../src/services/elmOps/gestionAdminProviderSend');
 const { classifyElmProcess } = require('../src/services/elm/classification');
 
@@ -179,6 +181,54 @@ async function run(name, fn) {
   await run('sendRowActionFromPlan: reconcile → hidden', async function () {
     const row = sendRowActionFromPlan({ can_send: false, code: BLOCK_CODES.RECONCILE });
     assert.strictEqual(row, null);
+  });
+
+  await run('CZ 1912 shape: eligible + S2 unknown + CI hold → disabled row + intended_mode', async function () {
+    const { HOLD } = require('../src/lib/rejectedElmResendGuard');
+    const plan = planGestionSend({
+      czId: 1912,
+      process: proc({
+        cz_solicitud_id: 1912,
+        ci: 18165244,
+        s1_status: S1.ELIGIBLE,
+        s2_status: S2.UNKNOWN,
+      }),
+      bag: { s1_status: S1.ELIGIBLE, s2_status: S2.UNKNOWN, reason_code: 'elm_s2_unknown' },
+      readiness: ready(),
+      hold: { reason: HOLD.RECENT_SEND },
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+      gestionAuthorized: false,
+    });
+    assert.strictEqual(plan.can_send, false);
+    const intended = planGestionSend({
+      czId: 1912,
+      process: proc({
+        cz_solicitud_id: 1912,
+        ci: 18165244,
+        s1_status: S1.ELIGIBLE,
+        s2_status: S2.UNKNOWN,
+      }),
+      bag: { s1_status: S1.ELIGIBLE, s2_status: S2.UNKNOWN },
+      readiness: ready(),
+      hold: null,
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+      gestionAuthorized: false,
+    });
+    assert.strictEqual(intended.mode, SEND_MODES.ADMIN_PROVIDER_RESEND);
+    const preview = Object.assign({}, plan, { intended_mode: intended.mode });
+    const row = sendRowActionFromPlan(preview);
+    assert.strictEqual(row.enabled, false);
+    assert.ok(row.explanation.includes('S1+S2'));
+    const item = classifyOpportunity({
+      cz_solicitud_id: 1912,
+      ci: '18165244',
+      s1_status: S1.ELIGIBLE,
+      s2_status: S2.UNKNOWN,
+      reason_code: 'elm_s2_unknown',
+      since: '2026-10-05T12:00:00Z',
+    });
+    applyGestionSendDisplay(item, preview);
+    assert.strictEqual(item.next_step_key, 'admin_provider_resend');
   });
 
   await run('CZ 1912: admin provider resend in preview (no ref yet)', async function () {

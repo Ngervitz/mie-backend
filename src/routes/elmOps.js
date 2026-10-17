@@ -31,7 +31,10 @@
 
 const express = require('express');
 const logger = require('../lib/logger');
-const { requireElmAction } = require('../middleware/requireElmAction');
+const {
+  requireElmAction,
+  resolveDashboardElmAdmin,
+} = require('../middleware/requireElmAction');
 const { ACTION_HTTP } = require('../services/elmOps/service');
 const { GESTION_ACTION_HTTP } = require('../services/elmOps/gestionActions');
 
@@ -46,6 +49,7 @@ function limitOf(raw) {
 function createElmOpsRouter(opts) {
   const o = opts || {};
   const requireAction = o.requireAction || requireElmAction;
+  const resolveViewerMaySendElm = o.resolveDashboardElmAdmin || resolveDashboardElmAdmin;
   let service = o.service || null;
   let actions = o.actions || null;
   function svc() {
@@ -202,6 +206,12 @@ function createElmOpsRouter(opts) {
 
   router.get('/gestion', async function (req, res) {
     try {
+      let viewer_may_send_elm = false;
+      try {
+        viewer_may_send_elm = (await resolveViewerMaySendElm(req)) === true;
+      } catch (_) {
+        viewer_may_send_elm = false;
+      }
       const data = await svc().gestion({
         limit: limitOf(req.query.limit),
         ci: req.query.ci,
@@ -217,6 +227,7 @@ function createElmOpsRouter(opts) {
         lanes: data.lanes,
         tab_enabled: data.tab_enabled,
         cutover_at: data.cutover_at,
+        viewer_may_send_elm: viewer_may_send_elm,
       });
     } catch (err) {
       return fail(res, 'GET elm-ops/gestion failed', err);
