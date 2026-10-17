@@ -1753,6 +1753,151 @@
   min-width: 10.5rem;
 }
 
+/* Gestión ELM — «Enviar a ELM» confirmation modal (outside table layout). */
+#mie-dashboard-app .elm-ops-send-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.58);
+  box-sizing: border-box;
+}
+
+#mie-dashboard-app .elm-ops-send-modal {
+  width: 100%;
+  max-width: 650px;
+  max-height: min(90vh, 720px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+#mie-dashboard-app .elm-ops-send-modal-header {
+  flex: 0 0 auto;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#mie-dashboard-app .elm-ops-send-modal-title {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+}
+
+#mie-dashboard-app .elm-ops-send-modal-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .elm-ops-send-modal-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px 22px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#mie-dashboard-app .elm-ops-send-dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+#mie-dashboard-app .elm-ops-send-dl > div {
+  margin: 0;
+  min-width: 0;
+}
+
+#mie-dashboard-app .elm-ops-send-dl dt {
+  margin: 0 0 2px;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+#mie-dashboard-app .elm-ops-send-dl dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  word-break: break-word;
+}
+
+#mie-dashboard-app .elm-ops-send-section {
+  margin: 0 0 14px;
+}
+
+#mie-dashboard-app .elm-ops-send-section:last-child {
+  margin-bottom: 0;
+}
+
+#mie-dashboard-app .elm-ops-send-warn-block {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(176, 137, 74, 0.35);
+  background: var(--accent-warn-soft);
+}
+
+#mie-dashboard-app .elm-ops-send-field {
+  margin: 0 0 12px;
+}
+
+#mie-dashboard-app .elm-ops-send-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+}
+
+#mie-dashboard-app .elm-ops-send-input {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+#mie-dashboard-app .elm-ops-send-form .elm-ops-confirm,
+#mie-dashboard-app .elm-ops-send-blocked .elm-ops-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+#mie-dashboard-app .elm-ops-send-modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 520px) {
+  #mie-dashboard-app .elm-ops-send-dl {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Search Console placeholder: static informational card, no data UI yet. */
 #mie-dashboard-app .sc-placeholder {
   margin-top: 16px;

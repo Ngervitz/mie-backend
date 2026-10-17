@@ -273,10 +273,20 @@ async function run(name, fn) {
       setTimeout(r, 0);
     });
 
+    assert.ok(root.innerHTML.includes('elm-ops-send-modal-backdrop'));
+    assert.ok(root.innerHTML.includes('data-elm-ops-send-modal'));
     assert.ok(root.innerHTML.includes('elm-ops-send-blocked'));
-    assert.ok(root.innerHTML.includes('reenvío completo S1+S2'));
+    assert.ok(
+      /Reenvío completo S1 \+ S2/i.test(root.innerHTML),
+      'modal shows full S1+S2 send type',
+    );
+    assert.ok(root.innerHTML.includes('18165244'));
+    assert.ok(root.innerHTML.includes('Envío bloqueado'));
     assert.ok(!root.innerHTML.includes('data-elm-ops-form="send-to-elm"'));
     assert.ok(!calls.some(function (c) { return c.method === 'POST'; }));
+
+    const tableOnly = root.innerHTML.split('elm-ops-send-modal-backdrop')[0];
+    assert.ok(!tableOnly.includes('elm-ops-send-blocked'), 'blocked preview must not live inside table markup');
 
     click.fn({
       target: {

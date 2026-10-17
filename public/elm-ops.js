@@ -722,45 +722,94 @@
     return '';
   }
 
+  function gestionSendModeLabel(preview) {
+    const mode = preview && (preview.intended_mode || preview.mode);
+    if (mode === 'admin_provider_resend') {
+      return 'Reenvío completo S1 + S2 (autorizado por ELM)';
+    }
+    if (mode === 'resume_s2') return 'Completar paso 2';
+    if (mode === 'retry_s2') return 'Reenviar paso 2';
+    if (mode === 'retry_s1') return 'Reintento paso 1 y continuar';
+    if (mode === 'full') return 'Envío completo paso 1 y paso 2';
+    return 'Envío a ELM';
+  }
+
+  function gestionSendSummaryDl(preview, cz) {
+    return (
+      '<dl class="elm-ops-send-dl">' +
+      '<div><dt>CI</dt><dd>' +
+      esc(preview.ci || '—') +
+      '</dd></div>' +
+      '<div><dt>Solicitud</dt><dd>' +
+      esc(String(cz)) +
+      '</dd></div>' +
+      '<div><dt>Estado S1</dt><dd>' +
+      esc(preview.s1_status || '—') +
+      '</dd></div>' +
+      '<div><dt>Estado S2</dt><dd>' +
+      esc(preview.s2_status || '—') +
+      '</dd></div>' +
+      '<div><dt>Tipo de envío previsto</dt><dd>' +
+      esc(gestionSendModeLabel(preview)) +
+      '</dd></div>' +
+      '<div><dt>Último envío</dt><dd>' +
+      esc(preview.last_send_at ? preview.last_send_at : '—') +
+      '</dd></div>' +
+      '</dl>'
+    );
+  }
+
   function gestionSendFormHtml(preview, cz) {
     if (!preview) return '';
     const dup = preview.duplicate_warning
-      ? '<p class="elm-ops-warn">' + esc(preview.duplicate_warning) + '</p>'
+      ? '<div class="elm-ops-send-section elm-ops-send-warn-block"><p class="elm-ops-warn">' +
+        esc(preview.duplicate_warning) +
+        '</p></div>'
       : '';
     const refRequired =
       preview.provider_reference_required_for_hold || preview.requires_provider_reference === true;
-    const holdRef = refRequired
-      ? '<label>Referencia ELM (obligatoria) <input name="provider_reference" minlength="4" maxlength="200" required></label>'
-      : '<label>Referencia ELM (si ELM autorizó reenvío) <input name="provider_reference" maxlength="200"></label>';
+    const holdRef =
+      '<div class="elm-ops-send-field">' +
+      '<label for="elm-ops-send-ref-' +
+      esc(String(cz)) +
+      '">Referencia ELM' +
+      (refRequired ? ' (obligatoria)' : '') +
+      '</label>' +
+      '<input id="elm-ops-send-ref-' +
+      esc(String(cz)) +
+      '" name="provider_reference" class="elm-ops-send-input" maxlength="200"' +
+      (refRequired ? ' minlength="4" required' : '') +
+      ' placeholder="Ticket, mail o referencia de autorización ELM">' +
+      '</div>';
     const versionField =
       preview.expected_updated_at
         ? '<input type="hidden" name="expected_updated_at" value="' + esc(String(preview.expected_updated_at)) + '">'
         : '';
+    const warns = (preview.warnings || []).map(function (w) {
+      return '<p class="preaprobados-muted">' + esc(w) + '</p>';
+    }).join('');
     return (
-      '<form class="elm-ops-form elm-ops-send-form" data-elm-ops-form="send-to-elm" data-elm-cz="' +
+      '<form class="elm-ops-send-form" data-elm-ops-form="send-to-elm" data-elm-cz="' +
       esc(String(cz)) +
       '">' +
-      '<p><strong>CI</strong> ' +
-      esc(preview.ci || '—') +
-      ' · <strong>Solicitud</strong> ' +
-      esc(String(cz)) +
-      '</p>' +
-      '<p>S1: ' +
-      esc(preview.s1_status || '—') +
-      ' · S2: ' +
-      esc(preview.s2_status || '—') +
-      ' · Último envío: ' +
-      esc(preview.last_send_at ? preview.last_send_at : '—') +
-      '</p>' +
+      gestionSendSummaryDl(preview, cz) +
+      (warns ? '<div class="elm-ops-send-section">' + warns + '</div>' : '') +
       dup +
+      '<div class="elm-ops-send-section">' +
       holdRef +
-      versionField +
-      '<label class="elm-ops-confirm"><input type="checkbox" name="confirm" value="1" required> Confirmo enviar o reenviar a ELM desde Gestión ELM.</label>' +
+      '<label class="elm-ops-confirm">' +
+      '<input type="checkbox" name="confirm" value="1" required> ' +
+      'Confirmo enviar o reenviar a ELM desde Gestión ELM.</label>' +
       (preview.duplicate_warning
-        ? '<label class="elm-ops-confirm"><input type="checkbox" name="confirm_duplicate" value="1" required> Confirmo el riesgo de duplicación.</label>'
+        ? '<label class="elm-ops-confirm"><input type="checkbox" name="confirm_duplicate" value="1" required> ' +
+          'Confirmo el riesgo de duplicación en ELM.</label>'
         : '') +
-      '<button type="submit" class="btn">Enviar a ELM</button> ' +
-      '<button type="button" class="btn" data-elm-ops-action="cancel-send">Cancelar</button>' +
+      '</div>' +
+      versionField +
+      '<div class="elm-ops-send-modal-footer">' +
+      '<button type="button" class="btn btn-secondary" data-elm-ops-action="cancel-send">Cancelar</button>' +
+      '<button type="submit" class="btn btn-primary">Confirmar envío</button>' +
+      '</div>' +
       '</form>'
     );
   }
@@ -768,14 +817,8 @@
   function gestionSendBlockedHtml(preview, cz) {
     if (!preview) return '';
     const code = preview.code || preview.status || 'send_not_allowed';
-    const modeHint = preview.intended_mode || preview.mode || null;
-    const intentLine =
-      modeHint === 'admin_provider_resend'
-        ? '<p><strong>Acción prevista:</strong> reenvío completo S1+S2 autorizado por ELM ' +
-          '(referencia ELM y confirmación de duplicados al habilitarse).</p>'
-        : '';
     const warns = (preview.warnings || []).map(function (w) {
-      return '<p class="elm-ops-warn">' + esc(w) + '</p>';
+      return '<p class="preaprobados-muted">' + esc(w) + '</p>';
     }).join('');
     const dup = preview.duplicate_warning
       ? '<p class="elm-ops-warn">' + esc(preview.duplicate_warning) + '</p>'
@@ -784,23 +827,18 @@
       '<div class="elm-ops-send-blocked" data-elm-cz="' +
       esc(String(cz)) +
       '">' +
-      '<p><strong>CI</strong> ' +
-      esc(preview.ci || '—') +
-      ' · <strong>Solicitud</strong> ' +
-      esc(String(cz)) +
-      '</p>' +
-      intentLine +
-      '<p class="elm-ops-warn"><strong>No se puede enviar:</strong> ' +
+      gestionSendSummaryDl(preview, cz) +
+      '<div class="elm-ops-send-section elm-ops-send-warn-block">' +
+      '<p class="elm-ops-warn"><strong>Envío bloqueado</strong></p>' +
+      '<p>' +
       esc(actionErrorText(code)) +
       '</p>' +
       dup +
       warns +
-      '<p class="preaprobados-muted">S1: ' +
-      esc(preview.s1_status || '—') +
-      ' · S2: ' +
-      esc(preview.s2_status || '—') +
-      '</p>' +
-      '<button type="button" class="btn" data-elm-ops-action="cancel-send">Cerrar</button>' +
+      '</div>' +
+      '<div class="elm-ops-send-modal-footer">' +
+      '<button type="button" class="btn btn-secondary" data-elm-ops-action="cancel-send">Cerrar</button>' +
+      '</div>' +
       '</div>'
     );
   }
@@ -809,6 +847,32 @@
     if (!preview) return '';
     if (preview.can_send === true) return gestionSendFormHtml(preview, cz);
     return gestionSendBlockedHtml(preview, cz);
+  }
+
+  function gestionSendModalHtml(preview, cz, loading) {
+    if (!cz) return '';
+    let body = '';
+    if (loading) {
+      body = '<p class="preaprobados-muted">Cargando confirmación…</p>';
+    } else if (preview) {
+      body = gestionSendPreviewHtml(preview, cz);
+    } else {
+      body = '<p class="preaprobados-muted">No hay datos de confirmación.</p>';
+    }
+    return (
+      '<div class="elm-ops-send-modal-backdrop" data-elm-ops-send-modal-backdrop role="presentation">' +
+      '<div class="elm-ops-send-modal" role="dialog" aria-modal="true" aria-labelledby="elm-ops-send-modal-title" data-elm-ops-send-modal tabindex="-1">' +
+      '<header class="elm-ops-send-modal-header">' +
+      '<h3 id="elm-ops-send-modal-title" class="elm-ops-send-modal-title">Enviar a ELM</h3>' +
+      '<p class="elm-ops-send-modal-sub">Confirmación antes de enviar · solicitud ' +
+      esc(String(cz)) +
+      '</p>' +
+      '</header>' +
+      '<div class="elm-ops-send-modal-body">' +
+      body +
+      '</div>' +
+      '</div></div>'
+    );
   }
 
   function gestionAdminSlotHtml(item, opts) {
@@ -882,14 +946,6 @@
           esc(sendAct.explanation || 'Enviar a ELM') +
           '">Enviar a ELM</button> '
         : '';
-    const sendOpen = gestion && String(o.openSendCz) === cz;
-    const sendBlock = sendOpen
-      ? '<div class="elm-ops-send-slot">' +
-        (o.sendPreviewLoading
-          ? '<p class="preaprobados-muted">Cargando confirmación…</p>'
-          : gestionSendPreviewHtml(o.sendPreview, cz)) +
-        '</div>'
-      : '';
     const extraCols = gestion
       ? '<td>' +
         esc(item.last_send_action || '—') +
@@ -921,7 +977,6 @@
       '<td class="elm-ops-actions" data-elm-ops-actions data-elm-next="' +
         esc(item.next_step_key || 'none') + '">' +
       canSendBtn +
-      sendBlock +
       '<button type="button" class="btn btn-sm" data-elm-ops-open-detail="' + esc(cz) + '">' +
       (open ? 'Ocultar' : 'Ver detalle') + '</button></td></tr>' +
       (open
@@ -966,15 +1021,13 @@
       items.map(function (i) {
         const rowOpts = opts || {};
         const mine = String(rowOpts.openCz) === String(i.cz_solicitud_id);
-        const sendCz = String(rowOpts.openSendCz) === String(i.cz_solicitud_id);
         return opportunityRowHtml(i, fmtDate, openId, {
           canAct: rowOpts.canAct,
+          viewerMaySendElm: rowOpts.viewerMaySendElm,
+          dashboardIsAdmin: rowOpts.dashboardIsAdmin,
           openAction: mine ? rowOpts.openAction : null,
           notice: mine ? rowOpts.notice : null,
           tableMode: rowOpts.tableMode,
-          openSendCz: sendCz ? rowOpts.openSendCz : null,
-          sendPreview: sendCz ? rowOpts.sendPreview : null,
-          sendPreviewLoading: sendCz ? rowOpts.sendPreviewLoading : false,
         });
       }).join('') +
       '</tbody></table></div>'
@@ -999,9 +1052,26 @@
       else state.situation = t.value || '';
       render();
     });
+    root.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && state.openSendCz) {
+        ev.preventDefault();
+        state.openSendCz = null;
+        state.sendPreview = null;
+        state.sendPreviewLoading = false;
+        render();
+      }
+    });
     root.addEventListener('click', function (ev) {
       const t = ev.target;
       if (!t || !t.closest) return;
+      if (
+        t.getAttribute &&
+        t.getAttribute('data-elm-ops-send-modal-backdrop') != null &&
+        t.closest('[data-elm-ops-send-modal]') == null
+      ) {
+        ev.preventDefault();
+        return;
+      }
       const cancelSend = t.closest('[data-elm-ops-action="cancel-send"]');
       if (cancelSend) {
         state.openSendCz = null;
@@ -1168,11 +1238,19 @@
         openAction: state.openAction,
         notice: state.notice,
         tableMode: 'gestion',
-        openSendCz: state.openSendCz,
-        sendPreview: state.sendPreview,
-        sendPreviewLoading: state.sendPreviewLoading,
       });
+      if (state.openSendCz) {
+        html += gestionSendModalHtml(
+          state.sendPreview,
+          state.openSendCz,
+          state.sendPreviewLoading,
+        );
+      }
       root.innerHTML = html;
+      if (state.openSendCz && !state.sendPreviewLoading && root.querySelector) {
+        const dlg = root.querySelector('[data-elm-ops-send-modal]');
+        if (dlg && typeof dlg.focus === 'function') dlg.focus();
+      }
       bindReadOnlyUi(root, state, render);
     }
 
@@ -1501,6 +1579,8 @@
     gestionAdminSlotHtml,
     gestionActionFormHtml,
     gestionSendFormHtml,
+    gestionSendModalHtml,
+    gestionSendModeLabel,
     gestionSendRowAllowed,
     defaultFmtDate,
     GESTION_TAB_ENABLED,
