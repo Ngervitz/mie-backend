@@ -1700,7 +1700,6 @@
 #mie-dashboard-app #cz-funnel-panel,
 #mie-dashboard-app #rechazados-panel,
 #mie-dashboard-app #preaprobados-panel,
-#mie-dashboard-app #elm-gestion-panel,
 #mie-dashboard-app #sms-panel,
 #mie-dashboard-app #email-panel,
 #mie-dashboard-app #inbox-panel,
@@ -1708,6 +1707,50 @@
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 20px 64px;
+}
+
+/* Gestión ELM: full content width (sidebar stays); wide table scrolls inside .table-wrap. */
+#mie-dashboard-app #elm-gestion-panel {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0 20px 64px;
+  box-sizing: border-box;
+}
+
+#mie-dashboard-app #elm-gestion-panel .table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+#mie-dashboard-app #elm-gestion-panel .elm-ops-opportunities {
+  width: 100%;
+  min-width: 1280px;
+}
+
+#mie-dashboard-app #elm-gestion-panel .elm-ops-opportunities th:last-child,
+#mie-dashboard-app #elm-gestion-panel .elm-ops-opportunities td.elm-ops-actions {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: -6px 0 10px -4px rgba(15, 23, 42, 0.1);
+}
+
+#mie-dashboard-app #elm-gestion-panel .elm-ops-opportunities thead th:last-child {
+  z-index: 3;
+  background: var(--surface-2);
+}
+
+#mie-dashboard-app #elm-gestion-panel .elm-ops-opportunities tr.is-open td.elm-ops-actions {
+  background: var(--accent-info-soft);
+}
+
+#mie-dashboard-app #elm-gestion-panel .elm-ops-actions {
+  white-space: nowrap;
+  min-width: 10.5rem;
 }
 
 /* Search Console placeholder: static informational card, no data UI yet. */
