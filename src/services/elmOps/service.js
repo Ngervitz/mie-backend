@@ -754,8 +754,66 @@ function createElmOpsService(deps) {
       vintage: q.vintage,
       lane: q.lane,
     });
+    const slice = filtered.slice(0, max);
+    if (typeof repo.listLatestGestionSendAudits === 'function' && slice.length) {
+      const czIds = slice.map(function (i) {
+        return i.cz_solicitud_id;
+      });
+      let audits = new Map();
+      let cells = new Map();
+      try {
+        audits = await repo.listLatestGestionSendAudits(czIds);
+      } catch (_) {
+        audits = new Map();
+      }
+      try {
+        const listView = require('../elm/listView').createElmListView();
+        cells = await listView.cellsForCzIds(czIds, { allowSend: true });
+      } catch (_) {
+        cells = new Map();
+      }
+      const { createGestionActions } = require('./gestionActions');
+      const { sendActionFromPlan } = require('./gestionElmSendPlan');
+      const actionsSvc = createGestionActions({ repository: repo });
+      for (let i = 0; i < slice.length; i += 1) {
+        const item = slice[i];
+        const cell = cells.get(Number(item.cz_solicitud_id)) || null;
+        if (cell && cell.commercial_label) {
+          item.elm_commercial_label = cell.commercial_label;
+          item.elm_commercial_state = cell.state || null;
+        } else if (item.technical && item.technical.provider_status) {
+          item.elm_commercial_label = String(item.technical.provider_status);
+        }
+        const audit = audits.get(Number(item.cz_solicitud_id));
+        if (audit) {
+          const det = audit.detail || {};
+          item.last_send_action = det.mode ? 'Enviar a ELM (' + det.mode + ')' : 'Enviar a ELM';
+          item.last_send_at = audit.created_at || null;
+          item.last_send_result =
+            det.ok === true
+              ? det.outcome || 'ok'
+              : det.code
+                ? String(det.code)
+                : 'error';
+        }
+        try {
+          const preview = await actionsSvc.getSendPreview(item.cz_solicitud_id, {});
+          const sendAct = sendActionFromPlan(preview);
+          if (sendAct) {
+            item.allowed_actions = (item.allowed_actions || []).concat([sendAct]);
+            item.send_preview = {
+              can_send: preview.can_send,
+              mode: preview.mode,
+              duplicate_warning: preview.duplicate_warning,
+            };
+          }
+        } catch (_) {
+          /* preview optional for list */
+        }
+      }
+    }
     return {
-      items: filtered.slice(0, max),
+      items: slice,
       situations: situationOptions(),
       vintages: vintageOptions(),
       lanes: laneOptions(),

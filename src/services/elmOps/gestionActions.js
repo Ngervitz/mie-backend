@@ -13,10 +13,14 @@
  * the operator saw are re-checked; a concurrent change answers stale.
  */
 
-const { retryManualToElm } = require('../../lib/elmManualSend');
+const { retryManualToElm, sendManualToElm } = require('../../lib/elmManualSend');
 const { loadCiResendHold } = require('../../lib/rejectedElmResendGuard');
 const { S1_SUBCLASS, classifyS1Unknown, existingRetryApplies } = require('./s1UnknownClassify');
 const { ACTION_HTTP } = require('./service');
+const { S2, CODES } = require('../elm/constants');
+const { planGestionSend, SEND_MODES } = require('./gestionElmSendPlan');
+const { runAdminProviderResend } = require('./gestionAdminProviderSend');
+const { classifyElmProcess, readPostReferralRejectionStatuses } = require('../elm/classification');
 
 const CLOSE_RESOLUTION = 'resolved_with_provider';
 const PROCESS_UNBLOCK_RESOLUTION = 'other';
@@ -49,15 +53,103 @@ function createGestionActions(deps) {
   const elmRepo = d.elmRepository || require('../elm/repository').createElmRepository();
   const logger = d.logger || require('../../lib/logger');
 
-  function retryDeps() {
-    if (d.retryDeps) return d.retryDeps;
+  function sendDeps() {
+    if (d.sendDeps) return d.sendDeps;
     const supabase = require('../../clients/supabase');
     return {
       orchestrator: require('../elm/orchestrator').createElmOrchestrator(),
       listView: require('../elm/listView').createElmListView(),
+      elmRepository: require('../elm/repository').createElmRepository(),
       loadCiResendHold: function (ci, czId, opts) {
         return loadCiResendHold(supabase, ci, czId, opts);
       },
+    };
+  }
+
+  function retryDeps() {
+    if (d.retryDeps) return d.retryDeps;
+    const base = sendDeps();
+    return {
+      orchestrator: base.orchestrator,
+      listView: base.listView,
+      loadCiResendHold: base.loadCiResendHold,
+    };
+  }
+
+  function providerRefOk(body) {
+    const ref = body && typeof body.provider_reference === 'string' ? body.provider_reference.trim() : '';
+    return ref.length >= 4 && ref.length <= 200;
+  }
+
+  async function buildSendContext(czId, body) {
+    const ev = await loadEvidence(czId);
+    const bag = evidenceBag(czId, ev);
+    const deps = sendDeps();
+    const status = await deps.orchestrator.getElmStatus(czId);
+    const data = status && status.ok ? status.data : {};
+    const process = ev.process;
+    const ci =
+      process && process.ci != null
+        ? Number(process.ci)
+        : data.eligibility && data.process
+          ? Number(data.process && data.process.ci)
+          : null;
+    let ciFromSol = ci;
+    if (!Number.isSafeInteger(ciFromSol) || ciFromSol <= 0) {
+      try {
+        const ctx = await deps.elmRepository.loadSolicitudContext(czId);
+        if (ctx.solicitud && ctx.solicitud.ci != null) ciFromSol = Number(ctx.solicitud.ci);
+      } catch (_) {
+        ciFromSol = null;
+      }
+    }
+    const gestionAuthorized = providerRefOk(body);
+    let hold = null;
+    if (Number.isSafeInteger(ciFromSol) && ciFromSol > 0) {
+      const retryOwn =
+        process &&
+        (existingRetryApplies(bag) ||
+          (process.s1_status === 'eligible' && process.s2_status === S2.NOT_STARTED) ||
+          gestionAuthorized === true);
+      hold = await deps.loadCiResendHold(ciFromSol, czId, {
+        retryOwnProcess: retryOwn === true,
+        gestionAuthorized: gestionAuthorized,
+      });
+    }
+    const retrySafeS2 =
+      process &&
+      process.s2_status === S2.TECHNICAL_ERROR &&
+      process.s2_attempts != null &&
+      Number(process.s2_attempts) >= 1;
+    const plan = planGestionSend({
+      czId: czId,
+      ci: ciFromSol,
+      process: process,
+      bag: bag,
+      readiness: deps.orchestrator.getSendReadiness(),
+      hold: hold,
+      eligibility: data.eligibility || { eligible: false, blockers: [] },
+      gestionAuthorized: gestionAuthorized,
+      retrySafeS2: retrySafeS2,
+      s2ExpectedAttempts: process && process.s2_attempts != null ? Number(process.s2_attempts) : null,
+    });
+    const projected = ev.projected;
+    const commercial = process
+      ? classifyElmProcess(process, {
+          projectedEstado:
+            process.trigger_origin === 'cz_automatic' && projected != null ? projected : null,
+          postReferralRejectionStatuses: readPostReferralRejectionStatuses(),
+        })
+      : null;
+    return {
+      ev: ev,
+      bag: bag,
+      deps: deps,
+      plan: plan,
+      ci: ciFromSol,
+      gestionAuthorized: gestionAuthorized,
+      commercial: commercial,
+      cell: data.cell || null,
     };
   }
 
@@ -224,12 +316,215 @@ function createGestionActions(deps) {
     });
   }
 
-  return { closeS1AsRejected, retryS1 };
+  async function getSendPreview(czSolicitudId, body) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId == null) return { status: 'invalid_request' };
+    const ctx = await buildSendContext(czId, body || {});
+    const p = ctx.plan;
+    return {
+      status: 'preview',
+      cz_solicitud_id: czId,
+      ci: ctx.ci != null ? String(ctx.ci) : null,
+      can_send: p.can_send === true,
+      code: p.code || null,
+      mode: p.mode || null,
+      steps: p.steps || [],
+      s1_status: p.s1_status || (ctx.ev.process && ctx.ev.process.s1_status) || null,
+      s2_status: p.s2_status || (ctx.ev.process && ctx.ev.process.s2_status) || null,
+      last_send_at: p.last_send_at || null,
+      duplicate_warning: p.duplicate_warning || null,
+      warnings: p.warnings || [],
+      hold: p.hold || null,
+      fields: p.fields || null,
+      expected_attempts: p.expected_attempts != null ? p.expected_attempts : null,
+      commercial: ctx.commercial,
+      provider_reference_required_for_hold:
+        p.hold &&
+        (p.hold.reason === 'elm_ci_recent_send' || p.hold.reason === 'elm_ci_monthly_quota_used'),
+      expected_updated_at: p.expected_updated_at || null,
+      requires_provider_reference: p.requires_provider_reference === true,
+    };
+  }
+
+  async function recordSendAudit(czId, actorUserId, detail) {
+    const ev = await loadEvidence(czId);
+    const processId = ev.process && ev.process.id;
+    if (!processId || typeof repo.appendGestionSendAudit !== 'function') {
+      logger.info('gestion elm send audit (log only)', Object.assign({ cz_solicitud_id: czId }, detail));
+      return;
+    }
+    try {
+      await repo.appendGestionSendAudit({
+        entity_id: processId,
+        cz_solicitud_id: czId,
+        actor_user_id: actorUserId,
+        detail: detail,
+      });
+    } catch (err) {
+      logger.warn('gestion elm send audit insert failed', {
+        cz_solicitud_id: czId,
+        error: err && err.message ? String(err.message).slice(0, 120) : 'unknown',
+      });
+    }
+  }
+
+  /**
+   * Gestión ELM «Enviar a ELM». body: { confirm, provider_reference?, confirm_duplicate? }
+   */
+  async function sendToElm(czSolicitudId, body, actorUserId) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId == null || !actorUserId) return { status: 'invalid_request' };
+    if (!confirmed(body)) return { status: 'confirm_required' };
+    const preview = await getSendPreview(czId, body);
+    if (preview.can_send !== true) {
+      return Object.assign({ status: 'send_not_allowed' }, preview);
+    }
+    if (preview.hold && preview.provider_reference_required_for_hold && !providerRefOk(body)) {
+      return { status: 'provider_reference_required', hold: preview.hold };
+    }
+    if (preview.requires_provider_reference === true && !providerRefOk(body)) {
+      return { status: 'provider_reference_required' };
+    }
+    if (preview.mode === SEND_MODES.ADMIN_PROVIDER_RESEND) {
+      const expected =
+        typeof body.expected_updated_at === 'string' ? body.expected_updated_at.trim() : '';
+      if (!expected) {
+        return { status: 'invalid_request', code: CODES.ADMIN_PROVIDER_RESEND_STALE };
+      }
+    }
+    if (preview.duplicate_warning && body.confirm_duplicate !== true) {
+      return { status: 'confirm_duplicate_required', preview: preview };
+    }
+
+    return withLock(czId, async function () {
+      const ctx = await buildSendContext(czId, body);
+      const plan = ctx.plan;
+      if (plan.can_send !== true) {
+        return Object.assign({ status: 'stale' }, plan);
+      }
+      if (plan.mode === SEND_MODES.ADMIN_PROVIDER_RESEND) {
+        if (!providerRefOk(body)) {
+          return { status: 'provider_reference_required' };
+        }
+        const expected =
+          typeof body.expected_updated_at === 'string' ? body.expected_updated_at.trim() : '';
+        if (!expected || (plan.expected_updated_at && expected !== plan.expected_updated_at)) {
+          return { status: 'stale', code: CODES.ADMIN_PROVIDER_RESEND_STALE };
+        }
+      }
+      const deps = ctx.deps;
+      const resolveMember = async function () {
+        if (!Number.isSafeInteger(ctx.ci) || ctx.ci <= 0) {
+          return { status: 422, body: { ok: false, code: 'missing_ci' } };
+        }
+        return { ci: ctx.ci };
+      };
+      const holdOpts = {
+        retryOwnProcess: plan.mode !== SEND_MODES.FULL,
+        gestionAuthorized: ctx.gestionAuthorized,
+      };
+      let out;
+      if (plan.mode === SEND_MODES.RETRY_S1) {
+        out = await retryManualToElm(deps, {
+          czSolicitudId: czId,
+          expectedAttempts: plan.expected_attempts,
+          actorUserId: actorUserId,
+          resolveMember: resolveMember,
+        });
+      } else if (plan.mode === SEND_MODES.RETRY_S2) {
+        const orchOut = await deps.orchestrator.retryElmStep(
+          czId,
+          { triggerOrigin: 'janus_manual', triggeredByUserId: actorUserId },
+          { step: 's2', expectedAttempts: plan.expected_attempts },
+        );
+        const cells = await deps.listView.cellsForCzIds([czId], { allowSend: true });
+        out = {
+          status: orchOut.ok ? 200 : 409,
+          body: {
+            ok: orchOut.ok === true,
+            code: orchOut.code || null,
+            outcome: orchOut.ok ? 'referred' : 'blocked',
+            cz_solicitud_id: czId,
+            cell: cells.get(czId) || null,
+            mode: plan.mode,
+          },
+        };
+      } else if (plan.mode === SEND_MODES.ADMIN_PROVIDER_RESEND) {
+        out = await runAdminProviderResend(
+          {
+            orchestrator: deps.orchestrator,
+            elmRepository: deps.elmRepository,
+            listView: deps.listView,
+          },
+          {
+            czSolicitudId: czId,
+            actorUserId: actorUserId,
+            providerReference: String(body.provider_reference).trim(),
+            expectedUpdatedAt: String(body.expected_updated_at).trim(),
+          },
+        );
+      } else {
+        const preHold = await deps.loadCiResendHold(ctx.ci, czId, holdOpts);
+        if (preHold && !ctx.gestionAuthorized) {
+          return {
+            status: 'send_not_allowed',
+            code: preHold.reason,
+            hold: preHold,
+          };
+        }
+        out = await sendManualToElm(
+          Object.assign({}, deps, {
+            loadCiResendHold: function (ci, id) {
+              return deps.loadCiResendHold(ci, id, holdOpts);
+            },
+          }),
+          {
+            czSolicitudId: czId,
+            actorUserId: actorUserId,
+            resolveMember: resolveMember,
+          },
+        );
+      }
+
+      const bodyOut = out.body || {};
+      await recordSendAudit(czId, actorUserId, {
+        mode: plan.mode,
+        provider_reference: ctx.gestionAuthorized ? String(body.provider_reference).trim() : null,
+        ok: bodyOut.ok === true,
+        code: bodyOut.code || null,
+        outcome: bodyOut.outcome || null,
+        stage: bodyOut.stage || null,
+      });
+      logger.info('gestion elm send', {
+        cz_solicitud_id: czId,
+        mode: plan.mode,
+        http_status: out.status,
+        ok: bodyOut.ok,
+        code: bodyOut.code,
+      });
+      return Object.assign(
+        {
+          status: out.status === 200 ? 'sent' : 'send_failed',
+          http_status: out.status,
+          mode: plan.mode,
+        },
+        bodyOut,
+      );
+    });
+  }
+
+  return { closeS1AsRejected, retryS1, getSendPreview, sendToElm };
 }
 
 const GESTION_ACTION_HTTP = Object.assign({}, ACTION_HTTP, {
   retried: 200,
+  sent: 200,
+  preview: 200,
   confirm_required: 400,
+  confirm_duplicate_required: 400,
+  provider_reference_required: 400,
+  send_not_allowed: 409,
+  send_failed: 409,
   not_definitive: 409,
   no_review_case: 409,
   retry_not_allowed: 409,

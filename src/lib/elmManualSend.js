@@ -243,4 +243,5 @@ module.exports = {
   parseCzId,
   sendManualToElm,
   retryManualToElm,
+  respondWithCell,
 };

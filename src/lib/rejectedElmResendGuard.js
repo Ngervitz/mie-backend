@@ -109,6 +109,9 @@ function hold(reason, relatedCzId, until) {
  *   postReferralRejectionStatuses?: readonly string[],
  *   retryOwnProcess?: boolean,     manual retry of the target's own process: the target is
  *                                  still excluded, the CI's other solicitudes are evaluated
+ *   gestionAuthorized?: boolean,   Gestión ELM admin send with ELM provider reference: bypass
+ *                                  only the 30-day window and monthly quota holds (not active CI
+ *                                  locks or in-progress sends). Audited at the caller.
  * }} input
  * @returns {{ reason: string, related_cz_solicitud_id: number|null, until: string|null }|null}
  */
@@ -193,6 +196,12 @@ function evaluateCiResendHold(input) {
     });
   if (quota) timed.push(hold(HOLD.MONTHLY_QUOTA, quota.cz_solicitud_id, nextMonthKey(month)));
   if (!timed.length) return null;
+  if (input.gestionAuthorized === true) {
+    const soft = timed.filter(function (h) {
+      return h.reason === HOLD.RECENT_SEND || h.reason === HOLD.MONTHLY_QUOTA;
+    });
+    if (soft.length === timed.length) return null;
+  }
   timed.sort((a, b) => String(b.until).localeCompare(String(a.until)));
   return timed[0];
 }
@@ -228,6 +237,7 @@ async function readElmSendRowsByCis(supabase, cis) {
  *   postReferralRejectionStatuses?: string[],
  *   readRows?: Function,
  *   retryOwnProcess?: boolean,
+ *   gestionAuthorized?: boolean,
  * }} [opts]
  */
 async function loadCiResendHold(supabase, ci, czSolicitudId, opts) {
@@ -244,6 +254,7 @@ async function loadCiResendHold(supabase, ci, czSolicitudId, opts) {
     postReferralRejectionStatuses:
       o.postReferralRejectionStatuses || readPostReferralRejectionStatuses(),
     retryOwnProcess: o.retryOwnProcess === true,
+    gestionAuthorized: o.gestionAuthorized === true,
   });
 }
 

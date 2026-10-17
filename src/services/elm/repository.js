@@ -200,6 +200,27 @@ function createElmRepository(supabaseOverride) {
     return out;
   }
 
+  /**
+   * Provider-authorized full cycle reset (20261017 migration). Archives attempts, one CI lock,
+   * same process row → s1 in_flight with a new request. Caller runs transport after `ready`.
+   */
+  async function adminProviderResend(args) {
+    const { data, error } = await db().rpc('elm_admin_provider_resend', {
+      p_cz_solicitud_id: args.czSolicitudId,
+      p_expected_updated_at: args.expectedUpdatedAt,
+      p_provider_reference: args.providerReference,
+      p_s1_request: args.s1Request,
+      p_lease_seconds: args.leaseSeconds,
+      p_actor_user_id: args.actorUserId,
+    });
+    if (error) throw rpcError('elm_admin_provider_resend', error);
+    const out = firstRow(data);
+    if (!out || typeof out.status !== 'string') {
+      throw new Error('elm_admin_provider_resend returned no status');
+    }
+    return out;
+  }
+
   async function expireStaleInFlight(czId) {
     const { data, error } = await db().rpc('elm_expire_stale_in_flight', {
       p_cz_solicitud_id: czId,
@@ -363,6 +384,7 @@ function createElmRepository(supabaseOverride) {
     finishS2,
     retryStep,
     manualRetryS1,
+    adminProviderResend,
     expireStaleInFlight,
     recordLateResult,
     loadSolicitudContexts,

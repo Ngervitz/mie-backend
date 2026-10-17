@@ -111,6 +111,16 @@
     elm_ci_recent_send: 'Esta CI ya tuvo un envío ELM reciente.',
     elm_ci_monthly_quota_used: 'Esta CI ya usó el cupo mensual de envío ELM.',
     elm_ci_history_unverifiable: 'No se pudo verificar el historial de la CI. Sin reenvío.',
+    confirm_duplicate_required: 'Confirmá que entendés el riesgo de duplicación en ELM.',
+    provider_reference_required: 'Indicá la referencia de autorización de ELM (ticket, mail, etc.).',
+    send_not_allowed: 'Este caso no admite envío a ELM en este momento.',
+    send_failed: 'El envío no se completó. Revisá el resultado en la tabla.',
+    gestion_send_reconcile_required: 'Requiere conciliación con ELM antes de reenviar.',
+    gestion_send_use_close_reject: 'Use «Cerrar como rechazado»; no reenvíe a ELM.',
+    elm_gestion_full_resend_unavailable:
+      'Reenvío completo bloqueado: hace falta RPC elm_admin_provider_resend en base de datos.',
+    elm_mobilephone_needs_correction: 'Corregí el celular en Credizona antes de enviar.',
+    missing_required_fields: 'Faltan datos obligatorios para ELM.',
   });
 
   function esc(s) {
@@ -703,6 +713,49 @@
     return '';
   }
 
+  function gestionSendFormHtml(preview, cz) {
+    if (!preview) return '';
+    const dup = preview.duplicate_warning
+      ? '<p class="elm-ops-warn">' + esc(preview.duplicate_warning) + '</p>'
+      : '';
+    const refRequired =
+      preview.provider_reference_required_for_hold || preview.requires_provider_reference === true;
+    const holdRef = refRequired
+      ? '<label>Referencia ELM (obligatoria) <input name="provider_reference" minlength="4" maxlength="200" required></label>'
+      : '<label>Referencia ELM (si ELM autorizó reenvío) <input name="provider_reference" maxlength="200"></label>';
+    const versionField =
+      preview.expected_updated_at
+        ? '<input type="hidden" name="expected_updated_at" value="' + esc(String(preview.expected_updated_at)) + '">'
+        : '';
+    return (
+      '<form class="elm-ops-form elm-ops-send-form" data-elm-ops-form="send-to-elm" data-elm-cz="' +
+      esc(String(cz)) +
+      '">' +
+      '<p><strong>CI</strong> ' +
+      esc(preview.ci || '—') +
+      ' · <strong>Solicitud</strong> ' +
+      esc(String(cz)) +
+      '</p>' +
+      '<p>S1: ' +
+      esc(preview.s1_status || '—') +
+      ' · S2: ' +
+      esc(preview.s2_status || '—') +
+      ' · Último envío: ' +
+      esc(preview.last_send_at ? preview.last_send_at : '—') +
+      '</p>' +
+      dup +
+      holdRef +
+      versionField +
+      '<label class="elm-ops-confirm"><input type="checkbox" name="confirm" value="1" required> Confirmo enviar o reenviar a ELM desde Gestión ELM.</label>' +
+      (preview.duplicate_warning
+        ? '<label class="elm-ops-confirm"><input type="checkbox" name="confirm_duplicate" value="1" required> Confirmo el riesgo de duplicación.</label>'
+        : '') +
+      '<button type="submit" class="btn">Enviar a ELM</button> ' +
+      '<button type="button" class="btn" data-elm-ops-action="cancel-send">Cancelar</button>' +
+      '</form>'
+    );
+  }
+
   function gestionAdminSlotHtml(item, opts) {
     const o = opts || {};
     const actions = item.allowed_actions || [];
@@ -748,12 +801,43 @@
   }
 
   function opportunityRowHtml(item, fmtDate, openId, opts) {
+    const o = opts || {};
+    const gestion = o.tableMode === 'gestion';
     const cz = String(item.cz_solicitud_id);
     const open = String(openId) === cz;
     const tech = item.technical || {};
     const related = item.related_cz_solicitud_id
       ? '<p>Otra solicitud: ' + esc(item.related_cz_solicitud_id) + '</p>'
       : '';
+    const sendAct = (item.allowed_actions || []).filter(function (a) {
+      return a.id === 'send_elm';
+    })[0];
+    const canSendBtn =
+      gestion && o.canAct === true && sendAct
+        ? '<button type="button" class="btn btn-sm btn-primary" data-elm-ops-send-open="' +
+          esc(cz) +
+          '">Enviar a ELM</button> '
+        : '';
+    const sendOpen = gestion && String(o.openSendCz) === cz;
+    const sendBlock = sendOpen
+      ? '<div class="elm-ops-send-slot">' +
+        (o.sendPreviewLoading
+          ? '<p class="preaprobados-muted">Cargando confirmación…</p>'
+          : gestionSendFormHtml(o.sendPreview, cz)) +
+        '</div>'
+      : '';
+    const extraCols = gestion
+      ? '<td>' +
+        esc(item.last_send_action || '—') +
+        '</td><td>' +
+        esc(item.last_send_at ? fmtDate(item.last_send_at) : '—') +
+        '</td><td>' +
+        esc(item.last_send_result || '—') +
+        '</td><td>' +
+        esc(item.elm_commercial_label || item.last_elm || '—') +
+        '</td>'
+      : '';
+    const colSpan = gestion ? 15 : 11;
     return (
       '<tr data-elm-cz="' + esc(cz) + '"' + (open ? ' class="is-open"' : '') + '>' +
       '<td>' + esc(item.ci || '—') + '</td>' +
@@ -769,13 +853,18 @@
       '<td>' + esc(fmtAge(item.age_hours)) + '</td>' +
       '<td>' + esc(item.last_elm || '—') + '</td>' +
       '<td>' + esc(item.next_step || '—') + '</td>' +
+      extraCols +
       '<td class="elm-ops-actions" data-elm-ops-actions data-elm-next="' +
         esc(item.next_step_key || 'none') + '">' +
+      canSendBtn +
+      sendBlock +
       '<button type="button" class="btn btn-sm" data-elm-ops-open-detail="' + esc(cz) + '">' +
       (open ? 'Ocultar' : 'Ver detalle') + '</button></td></tr>' +
       (open
-        ? '<tr class="elm-ops-detail-row"><td colspan="11"><div class="elm-ops-detail">' +
-          '<p class="preaprobados-muted">Historial técnico (diagnóstico). No se envía nada a ELM.</p>' +
+        ? '<tr class="elm-ops-detail-row"><td colspan="' +
+          colSpan +
+          '"><div class="elm-ops-detail">' +
+          '<p class="preaprobados-muted">Historial técnico (diagnóstico). Las acciones de envío usan el mismo circuito manual que Preaprobados/Rechazados.</p>' +
           related +
           '<dl class="preaprobados-dl">' +
           '<div><dt>Paso 1</dt><dd>' + esc(tech.s1_status || '—') + '</dd></div>' +
@@ -800,18 +889,28 @@
     if (!items.length) {
       return '<p class="preaprobados-muted">No hay casos ELM con ese filtro.</p>';
     }
+    const gestion = opts && opts.tableMode === 'gestion';
+    const headExtra = gestion
+      ? '<th>Última acción</th><th>Fecha envío</th><th>Resultado</th><th>Estado comercial ELM</th>'
+      : '';
     return (
       '<div class="table-wrap"><table class="mcl-table elm-ops-opportunities">' +
       '<thead><tr><th>CI</th><th>Solicitud</th><th>Origen</th><th>Carril</th><th>Situación</th><th>Motivo</th>' +
       '<th>Desde</th><th>Antigüedad</th><th>Última respuesta ELM</th><th>Próximo paso</th>' +
+      headExtra +
       '<th></th></tr></thead><tbody>' +
       items.map(function (i) {
         const rowOpts = opts || {};
         const mine = String(rowOpts.openCz) === String(i.cz_solicitud_id);
+        const sendCz = String(rowOpts.openSendCz) === String(i.cz_solicitud_id);
         return opportunityRowHtml(i, fmtDate, openId, {
           canAct: rowOpts.canAct,
           openAction: mine ? rowOpts.openAction : null,
           notice: mine ? rowOpts.notice : null,
+          tableMode: rowOpts.tableMode,
+          openSendCz: sendCz ? rowOpts.openSendCz : null,
+          sendPreview: sendCz ? rowOpts.sendPreview : null,
+          sendPreviewLoading: sendCz ? rowOpts.sendPreviewLoading : false,
         });
       }).join('') +
       '</tbody></table></div>'
@@ -839,10 +938,23 @@
     root.addEventListener('click', function (ev) {
       const t = ev.target;
       if (!t || !t.closest) return;
+      const cancelSend = t.closest('[data-elm-ops-action="cancel-send"]');
+      if (cancelSend) {
+        state.openSendCz = null;
+        state.sendPreview = null;
+        state.sendPreviewLoading = false;
+        render();
+        return;
+      }
       const cancel = t.closest('[data-elm-ops-action="cancel"]');
       if (cancel && cancel.getAttribute && cancel.getAttribute('data-elm-ops-action') === 'cancel') {
         state.openAction = null;
         render();
+        return;
+      }
+      const sendOpen = t.closest('[data-elm-ops-send-open]');
+      if (sendOpen && state.onSendOpen) {
+        state.onSendOpen(sendOpen.getAttribute('data-elm-ops-send-open'));
         return;
       }
       const actBtn = t.closest('[data-elm-ops-action]');
@@ -891,6 +1003,9 @@
       lane: 'attention',
       openId: null,
       openAction: null,
+      openSendCz: null,
+      sendPreview: null,
+      sendPreviewLoading: false,
       notice: null,
       canAct: opts.canAct === true ? true : false,
       busy: false,
@@ -965,6 +1080,10 @@
         openCz: state.openId,
         openAction: state.openAction,
         notice: state.notice,
+        tableMode: 'gestion',
+        openSendCz: state.openSendCz,
+        sendPreview: state.sendPreview,
+        sendPreviewLoading: state.sendPreviewLoading,
       });
       root.innerHTML = html;
       bindReadOnlyUi(root, state, render);
@@ -975,6 +1094,35 @@
         return String(i.cz_solicitud_id) === String(cz);
       })[0] || null;
     }
+
+    state.onSendOpen = async function (cz) {
+      if (state.canAct !== true || state.busy) return;
+      state.openSendCz = String(cz);
+      state.sendPreview = null;
+      state.sendPreviewLoading = true;
+      state.notice = null;
+      render();
+      let out;
+      try {
+        out = await request('GET', '/gestion/' + encodeURIComponent(cz) + '/send-preview');
+      } catch (_) {
+        out = { status: 0, data: {} };
+      }
+      state.sendPreviewLoading = false;
+      if (out.status === 200 && out.data && out.data.can_send === true) {
+        state.sendPreview = out.data;
+      } else {
+        state.openSendCz = null;
+        state.notice = {
+          tone: 'error',
+          text:
+            out.status === 0
+              ? 'No se pudo cargar la confirmación.'
+              : actionErrorText((out.data && out.data.code) || (out.data && out.data.status)),
+        };
+      }
+      render();
+    };
 
     state.onActionClick = function (btn) {
       if (state.canAct !== true || state.busy) return;
@@ -993,6 +1141,58 @@
     state.onActionSubmit = async function (form) {
       if (state.canAct !== true || state.busy) return;
       const kind = form.getAttribute('data-elm-ops-form');
+      if (kind === 'send-to-elm') {
+        const czSend = form.getAttribute('data-elm-cz');
+        const confirmElSend = form.elements.confirm;
+        if (!confirmElSend || !confirmElSend.checked) {
+          state.notice = { tone: 'error', text: actionErrorText('confirm_required') };
+          render();
+          return;
+        }
+        const bodySend = { confirm: true };
+        if (form.elements.provider_reference && form.elements.provider_reference.value) {
+          bodySend.provider_reference = form.elements.provider_reference.value;
+        }
+        if (form.elements.confirm_duplicate && form.elements.confirm_duplicate.checked) {
+          bodySend.confirm_duplicate = true;
+        }
+        if (form.elements.expected_updated_at && form.elements.expected_updated_at.value) {
+          bodySend.expected_updated_at = form.elements.expected_updated_at.value;
+        }
+        state.busy = true;
+        let sendOut;
+        try {
+          sendOut = await request(
+            'POST',
+            '/gestion/' + encodeURIComponent(czSend) + '/send-to-elm',
+            bodySend,
+          );
+        } catch (_) {
+          sendOut = { status: 0, data: {} };
+        }
+        state.busy = false;
+        if (sendOut.status === 200) {
+          state.openSendCz = null;
+          state.sendPreview = null;
+          state.notice = {
+            tone: 'ok',
+            text:
+              'Envío registrado. Resultado: ' +
+              String((sendOut.data && sendOut.data.outcome) || 'ok'),
+          };
+          await load();
+          return;
+        }
+        state.notice = {
+          tone: 'error',
+          text:
+            sendOut.status === 0
+              ? 'No se pudo conectar.'
+              : actionErrorText((sendOut.data && sendOut.data.status) || (sendOut.data && sendOut.data.code)),
+        };
+        render();
+        return;
+      }
       const slot = form.closest('[data-elm-ops-admin-slot]');
       const cz = slot && slot.getAttribute('data-elm-cz');
       const item = itemByCz(cz);
@@ -1164,6 +1364,7 @@
     opportunityRowHtml,
     gestionAdminSlotHtml,
     gestionActionFormHtml,
+    gestionSendFormHtml,
     defaultFmtDate,
     GESTION_TAB_ENABLED,
   };

@@ -60,6 +60,13 @@ const MANUAL_RETRY_CODES = Object.freeze({
   not_allowed: CODES.RETRY_NOT_ALLOWED,
 });
 
+const ADMIN_PROVIDER_RESEND_CODES = Object.freeze({
+  not_found: CODES.PROCESS_NOT_FOUND,
+  stale: CODES.ADMIN_PROVIDER_RESEND_STALE,
+  blocked: CODES.CI_LOCK_BLOCKED,
+  not_allowed: CODES.ADMIN_PROVIDER_RESEND_NOT_ALLOWED,
+});
+
 function blockerOf(failure) {
   return failure.fields ? { code: failure.code, fields: failure.fields } : { code: failure.code };
 }
@@ -563,6 +570,41 @@ function createElmOrchestrator(deps) {
   }
 
   /**
+   * Continue S1+S2 after elm_admin_provider_resend left the process in s1 in_flight.
+   * Does not claim or reset; only transport + referElm when S1 is favorable.
+   */
+  async function continueSendAfterProviderResend(czSolicitudId, context) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId == null) return blocked(CODES.INVALID_CZ_ID, { stage: 's1' });
+    const ctx = validateContext(context, enabledTriggerOrigins);
+    if (!ctx.ok) return Object.assign({ stage: 's1' }, ctx);
+    if (ctx.triggerOrigin !== 'janus_manual') return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+
+    const gate = sendGate();
+    if (gate) return Object.assign({ stage: 's1' }, gate);
+
+    let process = await repo.getProcessByCzId(czId);
+    if (!process) return blocked(CODES.PROCESS_NOT_FOUND, { stage: 's1' });
+    process = await expireIfStale(czId, process);
+    if (process.s1_status !== S1.IN_FLIGHT) {
+      return blocked(CODES.S1_NOT_ELIGIBLE, { stage: 's1', process: toProcessView(process, now()) });
+    }
+    if (!process.s1_request) {
+      return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+    }
+
+    const s1 = await runStep('s1', process.id, czId, process.s1_request, ctx);
+    if (!s1.ok) return Object.assign({ stage: 's1' }, s1);
+    const view = s1.process;
+    if (view.s1.effective_status !== S1.ELIGIBLE || view.s2.effective_status !== S2.NOT_STARTED) {
+      return { ok: true, stage: 's1', process: view };
+    }
+    const s2 = await referElm(czId, context);
+    if (s2.ok) return { ok: true, stage: 's2', process: s2.process };
+    return { ok: true, stage: 's1', process: view, s2_blocked: { code: s2.code } };
+  }
+
+  /**
    * Whether a real send could run now: transport enabled and every ELM format/mapping the
    * payload needs confirmed in config. Per-solicitud blockers are checked by eligibility.
    * @returns {{ ready: boolean, reasons: string[] }}
@@ -668,7 +710,16 @@ function createElmOrchestrator(deps) {
     };
   }
 
-  return { evaluateElm, referElm, sendElm, retryElmStep, retrySendElm, getElmStatus, getSendReadiness };
+  return {
+    evaluateElm,
+    referElm,
+    sendElm,
+    retryElmStep,
+    retrySendElm,
+    continueSendAfterProviderResend,
+    getElmStatus,
+    getSendReadiness,
+  };
 }
 
 module.exports = {
@@ -679,4 +730,5 @@ module.exports = {
   effectiveStatus,
   S1_BY_OUTCOME,
   S2_BY_OUTCOME,
+  ADMIN_PROVIDER_RESEND_CODES,
 };

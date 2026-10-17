@@ -200,6 +200,44 @@ function createElmOpsRepository(supabaseOverride) {
     return data || [];
   }
 
+  /** Latest Gestión ELM send audit per solicitud (action gestion_send). */
+  async function listLatestGestionSendAudits(czIds) {
+    const ids = uniq(czIds).map(Number).filter(function (n) {
+      return Number.isSafeInteger(n) && n > 0;
+    });
+    const out = new Map();
+    if (!ids.length) return out;
+    for (let i = 0; i < ids.length; i += MAX_LIST) {
+      const chunk = ids.slice(i, i + MAX_LIST);
+      const { data, error } = await db()
+        .from(AUDIT_TABLE)
+        .select('cz_solicitud_id, action, actor_user_id, detail, created_at')
+        .in('cz_solicitud_id', chunk)
+        .eq('action', 'gestion_send')
+        .order('created_at', { ascending: false });
+      if (error) throw rpcError(AUDIT_TABLE + ' gestion_send read', error);
+      for (const row of data || []) {
+        const cz = Number(row.cz_solicitud_id);
+        if (!out.has(cz)) out.set(cz, row);
+      }
+    }
+    return out;
+  }
+
+  async function appendGestionSendAudit(row) {
+    const payload = {
+      entity_type: row.entity_type || 'elm_process',
+      entity_id: row.entity_id,
+      cz_solicitud_id: Number(row.cz_solicitud_id),
+      action: 'gestion_send',
+      actor_user_id: row.actor_user_id,
+      detail: row.detail || {},
+    };
+    const { error } = await db().from(AUDIT_TABLE).insert(payload);
+    if (error) throw rpcError(AUDIT_TABLE + ' gestion_send insert', error);
+    return { ok: true };
+  }
+
   async function callStatusRpc(name, params) {
     const { data, error } = await db().rpc(name, params);
     if (error) throw rpcError(name, error);
@@ -349,6 +387,8 @@ function createElmOpsRepository(supabaseOverride) {
     listAssignableUsers,
     countOpenProcesses,
     listAuditEvents,
+    listLatestGestionSendAudits,
+    appendGestionSendAudit,
     resolveProcess,
     assignReviewCase,
     triageReviewCase,

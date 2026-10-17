@@ -108,6 +108,10 @@ const CODES = Object.freeze({
   /** Manual retry: ELM may have received the lead (or S1 is not a pre-reception failure). */
   RETRY_NOT_PRE_RECEPTION: 'elm_retry_not_pre_reception',
   RETRY_ATTEMPTS_EXHAUSTED: 'elm_retry_attempts_exhausted',
+  /** Gestión admin provider resend (elm_admin_provider_resend). */
+  ADMIN_PROVIDER_RESEND_STALE: 'elm_admin_provider_resend_stale',
+  ADMIN_PROVIDER_RESEND_NOT_ALLOWED: 'elm_admin_provider_resend_not_allowed',
+  ADMIN_PROVIDER_DUPLICATE_REFERENCE: 'elm_admin_provider_duplicate_reference',
   PERSIST_FAILED: 'elm_persist_failed',
   LATE_RESULT_DISCARDED: 'elm_late_result_discarded',
   LEASE_EXPIRED: 'elm_in_flight_lease_expired',

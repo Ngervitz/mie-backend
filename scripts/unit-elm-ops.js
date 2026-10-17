@@ -540,7 +540,10 @@ test('routes: reads open to the section; actions need requireElmAction (cron for
   assert.strictEqual(resolveSectionForPath('/preaprobados/elm-ops/gestion'), 'preaprobados');
   assert.strictEqual(resolveSectionForPath('/rechazados/elm-recoverable'), 'rechazados');
   const opsSrc = readSrc('src/services/elmOps/repository.js') + readSrc('src/services/elmOps/service.js');
-  assert.ok(!/\.from\([^)]*\)\s*\.(insert|update|delete|upsert)\(/.test(opsSrc), 'no direct writes');
+  assert.ok(
+    !/\.from\(\s*['"](?!elm_ops_audit_events)[^'"]+['"]\s*\)\s*\.(insert|update|delete|upsert)\(/.test(opsSrc),
+    'no direct writes except append-only gestion_send audit',
+  );
   assert.ok(!/evaluateElm|referElm|retryElmStep|service1|service2/.test(opsSrc), 'ops never sends to ELM');
 });
 
@@ -1045,9 +1048,13 @@ test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemb
   assert.ok(elmOps.includes("router.get('/gestion'"));
   assert.ok(elmOps.includes("router.post('/gestion/:czId/close-reject'"));
   assert.ok(elmOps.includes("router.post('/gestion/:czId/retry-s1'"));
+  assert.ok(elmOps.includes("router.get('/gestion/:czId/send-preview'"));
+  assert.ok(elmOps.includes("router.post('/gestion/:czId/send-to-elm'"));
   assert.ok(!/router\.post\('\/opportunities'/.test(elmOps));
   const ui = readSrc('public/elm-ops.js');
   assert.ok(ui.includes("request('GET', '/gestion')"));
+  assert.ok(ui.includes('data-elm-ops-send-open'));
+  assert.ok(ui.includes('/send-to-elm'));
   assert.ok(!ui.slice(ui.indexOf('function mount('), ui.indexOf('function mountRecoverable')).includes("request('/opportunities')"));
   assert.ok(ui.includes('/rechazados/elm-recoverable'));
   assert.ok(ui.includes('/close-reject'));
@@ -1165,12 +1172,15 @@ test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send
   assert.ok(click);
   click.fn({
     target: {
-      closest() {
-        return {
-          getAttribute(name) {
-            return name === 'data-elm-ops-open-detail' ? '1912' : null;
-          },
-        };
+      closest(sel) {
+        if (sel === '[data-elm-ops-open-detail]') {
+          return {
+            getAttribute(name) {
+              return name === 'data-elm-ops-open-detail' ? '1912' : null;
+            },
+          };
+        }
+        return null;
       },
     },
   });

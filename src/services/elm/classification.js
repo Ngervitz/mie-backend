@@ -203,6 +203,9 @@ function classifyElmProcess(p, options) {
   const cz = p.trigger_origin === 'cz_automatic' ? STATE_BY_PROJECTED_ESTADO[projected] : null;
   if (!cz || cz.state === base.state || base.state === COMMERCIAL.GRANTED) return base;
   if (cz.state === COMMERCIAL.REJECTED && base.detail === DUPLICATE_OTHER_CHANNEL_DETAIL) return base;
+  if (cz.state === COMMERCIAL.REJECTED && projected === 3) {
+    return result(COMMERCIAL.REJECTED, cz.detail, base.stage);
+  }
   const open = base.state === COMMERCIAL.IN_EVALUATION || base.state === COMMERCIAL.REVIEW;
   if (cz.state === COMMERCIAL.GRANTED || cz.state === COMMERCIAL.REJECTED || open) {
     return result(cz.state, cz.detail, base.stage);

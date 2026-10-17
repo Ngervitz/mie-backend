@@ -22,6 +22,8 @@
  *   GET  /gestion                          transitory Gestión ELM desk (opportunities + recoverable)
  *   POST /gestion/:czId/close-reject       admin: close definitive S1 rejection (no ELM call)
  *   POST /gestion/:czId/retry-s1           admin: retry same S1 only if pre-reception proven
+ *   GET  /gestion/:czId/send-preview       admin: confirm dialog payload (no ELM call)
+ *   POST /gestion/:czId/send-to-elm        admin: Enviar a ELM (shared manual path)
  *   GET  /c1/active-referrals              C1 solicitudes in 13/14: age, last ELM status, stale
  *   GET  /c1/conflicts?status=open|resolved  events not emitted because they contradict CZ state
  *   POST /c1/conflicts/:id/resolve         { note } audited acknowledgement (no CZ change)
@@ -179,6 +181,22 @@ function createElmOpsRouter(opts) {
       return sendAction(res, await act().retryS1(req.params.czId, req.body, req.elmActorUserId));
     } catch (err) {
       return fail(res, 'POST elm-ops/gestion/:czId/retry-s1 failed', err);
+    }
+  });
+
+  router.get('/gestion/:czId/send-preview', requireAction, async function (req, res) {
+    try {
+      return sendAction(res, await act().getSendPreview(req.params.czId, req.query));
+    } catch (err) {
+      return fail(res, 'GET elm-ops/gestion/:czId/send-preview failed', err);
+    }
+  });
+
+  router.post('/gestion/:czId/send-to-elm', requireAction, async function (req, res) {
+    try {
+      return sendAction(res, await act().sendToElm(req.params.czId, req.body, req.elmActorUserId));
+    } catch (err) {
+      return fail(res, 'POST elm-ops/gestion/:czId/send-to-elm failed', err);
     }
   });
 
