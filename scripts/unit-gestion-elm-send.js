@@ -14,7 +14,13 @@ Object.assign(process.env, {
 
 const assert = require('assert');
 const { S1, S2, CODES } = require('../src/services/elm/constants');
-const { planGestionSend, SEND_MODES, sendActionFromPlan } = require('../src/services/elmOps/gestionElmSendPlan');
+const {
+  planGestionSend,
+  SEND_MODES,
+  sendActionFromPlan,
+  sendRowActionFromPlan,
+  BLOCK_CODES,
+} = require('../src/services/elmOps/gestionElmSendPlan');
 const { createGestionActions } = require('../src/services/elmOps/gestionActions');
 const { mapAdminRpc } = require('../src/services/elmOps/gestionAdminProviderSend');
 const { classifyElmProcess } = require('../src/services/elm/classification');
@@ -153,6 +159,26 @@ async function run(name, fn) {
     assert.strictEqual(plan.can_send, true);
     assert.strictEqual(plan.mode, SEND_MODES.RESUME_S2);
     assert.ok(sendActionFromPlan(plan));
+    const row = sendRowActionFromPlan(plan);
+    assert.strictEqual(row.enabled, true);
+    assert.strictEqual(row.id, 'send_elm');
+  });
+
+  await run('sendRowActionFromPlan: blocked hold → disabled row button', async function () {
+    const plan = {
+      can_send: false,
+      code: 'recent_send',
+      hold: { reason: 'recent_send' },
+      warnings: ['dup'],
+    };
+    const row = sendRowActionFromPlan(plan);
+    assert.strictEqual(row.id, 'send_elm');
+    assert.strictEqual(row.enabled, false);
+  });
+
+  await run('sendRowActionFromPlan: reconcile → hidden', async function () {
+    const row = sendRowActionFromPlan({ can_send: false, code: BLOCK_CODES.RECONCILE });
+    assert.strictEqual(row, null);
   });
 
   await run('CZ 1912: admin provider resend in preview (no ref yet)', async function () {

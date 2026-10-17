@@ -1061,36 +1061,61 @@ test('GET Preaprobados and Rechazados list handlers stay the CDV/rejected assemb
   assert.ok(ui.includes('/retry-s1'));
 });
 
-test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send actions', async () => {
+test('UI Gestión ELM: row send + detail; admin via /api/auth/me when assignees denied', async () => {
   const calls = [];
   const fetchFn = async (url, opts) => {
     const method = (opts && opts.method) || 'GET';
     calls.push({ method: method, url: String(url), body: opts && opts.body });
+    const u = String(url);
+    if (u.includes('/preaprobados/elm-ops/assignees')) {
+      return { status: 403, json: async () => ({ ok: false }) };
+    }
+    if (u.includes('/api/auth/me')) {
+      return { status: 200, json: async () => ({ user: { is_admin: true } }) };
+    }
+    const item1912 = classifyOpportunity({
+      cz_solicitud_id: 1912,
+      ci: '18165244',
+      s1_status: 'eligible',
+      s2_status: 'technical_error',
+      reason_code: 'elm_s2_technical_error_retry_unsafe',
+      since: '2026-10-05T12:00:00Z',
+      age_hours: 72,
+    });
+    item1912.allowed_actions = [
+      {
+        id: 'send_elm',
+        label: 'Enviar a ELM',
+        enabled: true,
+        explanation: 'Reintenta paso 2',
+      },
+    ];
+    const item1630 = classifyOpportunity({
+      cz_solicitud_id: 1630,
+      ci: '52764618',
+      recoverable: true,
+      reason_code: 'elm_mobilephone_invalid',
+      s1_status: 'eligible',
+      s2_status: 'not_started',
+      dashboard: 'rechazados',
+      since: '2026-09-01T12:00:00Z',
+      age_hours: 1000,
+    });
+    item1630.allowed_actions = [
+      {
+        id: 'send_elm',
+        label: 'Enviar a ELM',
+        enabled: false,
+        explanation: 'Bloqueado',
+      },
+    ];
     return {
       status: 200,
       json: async () => ({
         ok: true,
         items: [
-          classifyOpportunity({
-            cz_solicitud_id: 1912,
-            ci: '18165244',
-            s1_status: 'eligible',
-            s2_status: 'technical_error',
-            reason_code: 'elm_s2_technical_error_retry_unsafe',
-            since: '2026-10-05T12:00:00Z',
-            age_hours: 72,
-          }),
-          classifyOpportunity({
-            cz_solicitud_id: 1630,
-            ci: '52764618',
-            recoverable: true,
-            reason_code: 'elm_mobilephone_invalid',
-            s1_status: 'eligible',
-            s2_status: 'not_started',
-            dashboard: 'rechazados',
-            since: '2026-09-01T12:00:00Z',
-            age_hours: 1000,
-          }),
+          item1912,
+          item1630,
           classifyOpportunity({
             cz_solicitud_id: 1475,
             ci: '33333333',
@@ -1125,11 +1150,13 @@ test('UI Gestión ELM: mount GET /gestion only; CI search; vintage/lane; no send
       listeners.push({ type: type, fn: fn });
     },
   };
-  const tray = ElmOpsUi.mount({ root: root, api: '', fetch: fetchFn, canAct: true });
+  const tray = ElmOpsUi.mount({ root: root, api: '', fetch: fetchFn });
   await tray.load();
-  assert.strictEqual(calls.length, 1, 'canAct:true skips /assignees and only reads /gestion');
-  assert.strictEqual(calls[0].method, 'GET');
-  assert.ok(calls[0].url.includes('/preaprobados/elm-ops/gestion'));
+  assert.ok(calls.some((c) => c.url.includes('/preaprobados/elm-ops/gestion')));
+  assert.ok(calls.some((c) => c.url.includes('/api/auth/me')), 'admin canAct when assignees denied');
+  assert.ok(root.innerHTML.includes('data-elm-ops-send-open="1912"'));
+  assert.ok(root.innerHTML.includes('data-elm-ops-send-open="1630"'));
+  assert.ok(root.innerHTML.includes('is-muted'), 'disabled send row button when enabled:false');
   assert.ok(!calls[0].url.includes('/opportunities'));
   assert.ok(!calls[0].url.includes('/followup'));
   assert.ok(root.innerHTML.includes('Gestión ELM'));

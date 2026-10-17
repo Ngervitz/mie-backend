@@ -233,6 +233,38 @@ function planGestionSend(input) {
   };
 }
 
+/** Gestión row: no send button (use close / retry / reconcile instead). */
+const SEND_ROW_HIDDEN_CODES = new Set([
+  BLOCK_CODES.RECONCILE,
+  BLOCK_CODES.DEFINITIVE,
+  BLOCK_CODES.UNCERTAIN,
+]);
+
+/**
+ * Row action for «Enviar a ELM»: enabled when send is allowed; disabled when preview-only (blocked).
+ * @returns {object|null}
+ */
+function sendRowActionFromPlan(plan) {
+  const p = plan && plan.can_send != null ? plan : plan && plan.plan;
+  if (!p || typeof p !== 'object') return null;
+  if (SEND_ROW_HIDDEN_CODES.has(p.code)) return null;
+  if (p.can_send === true) {
+    const act = sendActionFromPlan(p);
+    return act ? Object.assign({ enabled: true }, act) : null;
+  }
+  if (!p.code && !p.hold) return null;
+  return {
+    id: 'send_elm',
+    label: 'Enviar a ELM',
+    enabled: false,
+    block_code: p.code || (p.hold && p.hold.reason) || null,
+    explanation: 'Ver confirmación: este envío está bloqueado hasta resolver el motivo indicado.',
+    mode: p.mode || null,
+    s1_status: p.s1_status || null,
+    s2_status: p.s2_status || null,
+  };
+}
+
 function sendActionFromPlan(plan) {
   const p = plan && plan.can_send != null ? plan : plan && plan.plan;
   if (!p || p.can_send !== true) return null;
@@ -240,6 +272,7 @@ function sendActionFromPlan(plan) {
   return {
     id: 'send_elm',
     label: 'Enviar a ELM',
+    enabled: true,
     explanation:
       plan.mode === SEND_MODES.RESUME_S2
         ? 'Completa el paso 2 con el celular y datos actuales del funnel.'
@@ -265,6 +298,7 @@ module.exports = {
   BLOCK_CODES,
   planGestionSend,
   sendActionFromPlan,
+  sendRowActionFromPlan,
   lastSendAt,
   holdBypassable,
 };

@@ -756,9 +756,51 @@
     );
   }
 
+  function gestionSendBlockedHtml(preview, cz) {
+    if (!preview) return '';
+    const code = preview.code || preview.status || 'send_not_allowed';
+    const warns = (preview.warnings || []).map(function (w) {
+      return '<p class="elm-ops-warn">' + esc(w) + '</p>';
+    }).join('');
+    const dup = preview.duplicate_warning
+      ? '<p class="elm-ops-warn">' + esc(preview.duplicate_warning) + '</p>'
+      : '';
+    return (
+      '<div class="elm-ops-send-blocked" data-elm-cz="' +
+      esc(String(cz)) +
+      '">' +
+      '<p><strong>CI</strong> ' +
+      esc(preview.ci || '—') +
+      ' · <strong>Solicitud</strong> ' +
+      esc(String(cz)) +
+      '</p>' +
+      '<p class="elm-ops-warn"><strong>No se puede enviar:</strong> ' +
+      esc(actionErrorText(code)) +
+      '</p>' +
+      dup +
+      warns +
+      '<p class="preaprobados-muted">S1: ' +
+      esc(preview.s1_status || '—') +
+      ' · S2: ' +
+      esc(preview.s2_status || '—') +
+      '</p>' +
+      '<button type="button" class="btn" data-elm-ops-action="cancel-send">Cerrar</button>' +
+      '</div>'
+    );
+  }
+
+  function gestionSendPreviewHtml(preview, cz) {
+    if (!preview) return '';
+    if (preview.can_send === true) return gestionSendFormHtml(preview, cz);
+    return gestionSendBlockedHtml(preview, cz);
+  }
+
   function gestionAdminSlotHtml(item, opts) {
     const o = opts || {};
     const actions = item.allowed_actions || [];
+    const stageActions = actions.filter(function (a) {
+      return a.id !== 'send_elm';
+    });
     const subclass = item.s1_subclass;
     const notice = o.notice;
     let html = '<div class="elm-ops-admin-slot" data-elm-ops-admin-slot data-elm-cz="' +
@@ -770,13 +812,13 @@
       html +=
         '<p class="elm-ops-reconcile"><strong>Requiere conciliación con ELM.</strong> ' +
         'No sabemos si ELM recibió o procesó esta solicitud. El reenvío está bloqueado hasta resolver la incertidumbre.</p>';
-    } else if (subclass === 'tech_not_processed' && !actions.length) {
+    } else if (subclass === 'tech_not_processed' && !stageActions.length) {
       html +=
         '<p class="preaprobados-muted">Hay evidencia de que ELM no ejecutó el RESTlet, ' +
         'pero el reintento existente no aplica a este origen. Sin reenvío hasta una autorización específica.</p>';
     }
     if (o.canAct !== true) {
-      if (actions.length) {
+      if (stageActions.length) {
         html += '<p class="preaprobados-muted">Solo un administrador puede ejecutar estas acciones.</p>';
       } else if (subclass !== 'uncertain' && subclass !== 'tech_not_processed') {
         html += '<p class="preaprobados-muted">No hay acciones administrativas válidas para esta solicitud.</p>';
@@ -788,13 +830,13 @@
       html += gestionActionFormHtml(action);
       return html + '</div>';
     }
-    for (let i = 0; i < actions.length; i += 1) {
-      const a = actions[i];
+    for (let i = 0; i < stageActions.length; i += 1) {
+      const a = stageActions[i];
       html +=
         '<button type="button" class="btn btn-sm" data-elm-ops-action="' + esc(a.id) +
         '" title="' + esc(a.explanation) + '">' + esc(a.label) + '</button> ';
     }
-    if (!actions.length && subclass !== 'uncertain' && subclass !== 'tech_not_processed') {
+    if (!stageActions.length && subclass !== 'uncertain' && subclass !== 'tech_not_processed') {
       html += '<p class="preaprobados-muted">No hay acciones administrativas válidas para esta solicitud.</p>';
     }
     return html + '</div>';
@@ -812,10 +854,15 @@
     const sendAct = (item.allowed_actions || []).filter(function (a) {
       return a.id === 'send_elm';
     })[0];
+    const sendEnabled = sendAct && sendAct.enabled !== false;
     const canSendBtn =
       gestion && o.canAct === true && sendAct
-        ? '<button type="button" class="btn btn-sm btn-primary" data-elm-ops-send-open="' +
+        ? '<button type="button" class="btn btn-sm btn-primary' +
+          (sendEnabled ? '' : ' is-muted') +
+          '" data-elm-ops-send-open="' +
           esc(cz) +
+          '" title="' +
+          esc(sendAct.explanation || 'Enviar a ELM') +
           '">Enviar a ELM</button> '
         : '';
     const sendOpen = gestion && String(o.openSendCz) === cz;
@@ -823,7 +870,7 @@
       ? '<div class="elm-ops-send-slot">' +
         (o.sendPreviewLoading
           ? '<p class="preaprobados-muted">Cargando confirmación…</p>'
-          : gestionSendFormHtml(o.sendPreview, cz)) +
+          : gestionSendPreviewHtml(o.sendPreview, cz)) +
         '</div>'
       : '';
     const extraCols = gestion
@@ -1109,7 +1156,7 @@
         out = { status: 0, data: {} };
       }
       state.sendPreviewLoading = false;
-      if (out.status === 200 && out.data && out.data.can_send === true) {
+      if (out.status === 200 && out.data) {
         state.sendPreview = out.data;
       } else {
         state.openSendCz = null;
@@ -1251,14 +1298,42 @@
       }
     };
 
+    async function resolveCanAct() {
+      if (opts.canAct === true) {
+        state.canAct = true;
+        return;
+      }
+      try {
+        const assignees = await request('GET', '/assignees');
+        if (assignees.status === 200) {
+          state.canAct = true;
+          return;
+        }
+      } catch (_) {
+        /* fall through */
+      }
+      try {
+        const me = await fetchFn((api || '') + '/api/auth/me', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        if (me.status === 200) {
+          const data = await me.json().catch(function () {
+            return {};
+          });
+          state.canAct = !!(data.user && data.user.is_admin === true);
+        }
+      } catch (_) {
+        state.canAct = false;
+      }
+    }
+
     async function load() {
       state.error = null;
       try {
-        const reads = [request('GET', '/gestion')];
-        if (opts.canAct !== true) reads.push(request('GET', '/assignees'));
-        const out = await Promise.all(reads);
-        const res = out[0];
-        if (out[1]) state.canAct = out[1].status === 200;
+        await resolveCanAct();
+        const res = await request('GET', '/gestion');
         if (res.status >= 400) {
           state.error = 'No se pudo cargar Gestión ELM.';
           state.items = [];

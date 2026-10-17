@@ -755,16 +755,18 @@ function createElmOpsService(deps) {
       lane: q.lane,
     });
     const slice = filtered.slice(0, max);
-    if (typeof repo.listLatestGestionSendAudits === 'function' && slice.length) {
+    if (slice.length) {
       const czIds = slice.map(function (i) {
         return i.cz_solicitud_id;
       });
       let audits = new Map();
       let cells = new Map();
-      try {
-        audits = await repo.listLatestGestionSendAudits(czIds);
-      } catch (_) {
-        audits = new Map();
+      if (typeof repo.listLatestGestionSendAudits === 'function') {
+        try {
+          audits = await repo.listLatestGestionSendAudits(czIds);
+        } catch (_) {
+          audits = new Map();
+        }
       }
       try {
         const listView = require('../elm/listView').createElmListView();
@@ -773,7 +775,7 @@ function createElmOpsService(deps) {
         cells = new Map();
       }
       const { createGestionActions } = require('./gestionActions');
-      const { sendActionFromPlan } = require('./gestionElmSendPlan');
+      const { sendRowActionFromPlan } = require('./gestionElmSendPlan');
       const actionsSvc = createGestionActions({ repository: repo });
       for (let i = 0; i < slice.length; i += 1) {
         const item = slice[i];
@@ -798,13 +800,17 @@ function createElmOpsService(deps) {
         }
         try {
           const preview = await actionsSvc.getSendPreview(item.cz_solicitud_id, {});
-          const sendAct = sendActionFromPlan(preview);
+          const sendAct = sendRowActionFromPlan(preview);
           if (sendAct) {
-            item.allowed_actions = (item.allowed_actions || []).concat([sendAct]);
+            item.allowed_actions = (item.allowed_actions || []).filter(function (a) {
+              return a.id !== 'send_elm';
+            });
+            item.allowed_actions.push(sendAct);
             item.send_preview = {
               can_send: preview.can_send,
               mode: preview.mode,
               duplicate_warning: preview.duplicate_warning,
+              code: preview.code || null,
             };
           }
         } catch (_) {
