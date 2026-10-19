@@ -27,6 +27,16 @@ const REJECTED_ESTADO_ID = 3;
 const ENCUESTA_SELECT =
   'cz_id, ci, score_v2, completed_at, email, version_cuestionario, segmentacion_base, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10';
 
+/** List grid score column only (detail keeps ENCUESTA_SELECT). */
+const LIST_ENCUESTA_SELECT =
+  'cz_id, ci, score_v2, completed_at, version_cuestionario, segmentacion_base';
+
+const SOLICITUD_CI_LINK_SELECT = 'cz_id, ci';
+
+const LIST_DEFAULT_LIMIT = 50;
+const LIST_MAX_LIMIT = 10000;
+const BUNDLE_FETCH_CONCURRENCY = 3;
+
 /** Score context so consumers never read a V2 (0–27) score with V1 (0–30) cuts. */
 function encuestaScoreMeta(encuesta) {
   return {
@@ -58,6 +68,114 @@ function parseStatusQuery(raw) {
   if (s === '') return { ok: true, status: null };
   if (!ALLOWED_OPS_STATUS.includes(s)) return { ok: false };
   return { ok: true, status: s };
+}
+
+/**
+ * @param {unknown} limitRaw
+ * @param {unknown} offsetRaw
+ * @returns {{ ok: true, paginated: boolean, limit: number|null, offset: number } | { ok: false }}
+ */
+function parseListPagination(limitRaw, offsetRaw) {
+  const hasLimit =
+    limitRaw != null && String(limitRaw).trim() !== '';
+  const hasOffset =
+    offsetRaw != null && String(offsetRaw).trim() !== '';
+  if (!hasLimit && !hasOffset) {
+    return { ok: true, paginated: false, limit: null, offset: 0 };
+  }
+  let limit = LIST_DEFAULT_LIMIT;
+  if (hasLimit) {
+    const n = Number(String(limitRaw).trim());
+    if (!Number.isInteger(n) || n < 1) return { ok: false };
+    limit = Math.min(n, LIST_MAX_LIMIT);
+  }
+  let offset = 0;
+  if (hasOffset) {
+    const n = Number(String(offsetRaw).trim());
+    if (!Number.isInteger(n) || n < 0) return { ok: false };
+    offset = n;
+  }
+  return { ok: true, paginated: true, limit: limit, offset: offset };
+}
+
+/**
+ * @param {object[]} rows sorted list rows
+ * @param {{ paginated: boolean, limit: number|null, offset: number }} pagination
+ */
+function paginateAssembledList(rows, pagination) {
+  const list = Array.isArray(rows) ? rows : [];
+  const total = list.length;
+  if (!pagination || !pagination.paginated) {
+    return {
+      rows: list,
+      total: total,
+      limit: null,
+      offset: 0,
+      paginated: false,
+    };
+  }
+  const limit = pagination.limit;
+  const offset = pagination.offset;
+  return {
+    rows: list.slice(offset, offset + limit),
+    total: total,
+    limit: limit,
+    offset: offset,
+    paginated: true,
+  };
+}
+
+/**
+ * @param {object[]} rows
+ * @param {object[]} encuestaRows
+ */
+function applyEncuestasToListRows(rows, encuestaRows) {
+  const encuestasByCi = mapByCi(encuestaRows || []);
+  return (rows || []).map(function (row) {
+    const ci = toNum(row && row.ci);
+    const encuestas = sortEncuestas(
+      ci != null ? encuestasByCi.get(ci) || [] : [],
+    );
+    const encuesta = encuestas[0] || null;
+    return Object.assign({}, row, {
+      score_v2: encuesta ? toNum(encuesta.score_v2) : null,
+      encuesta_completed_at: encuesta
+        ? encuesta.completed_at || null
+        : null,
+    }, encuestaScoreMeta(encuesta));
+  });
+}
+
+async function fetchListEncuestasForCis(supabase, cis) {
+  if (!cis || !cis.length) return [];
+  return fetchInChunks(
+    supabase,
+    'cz_funnel_encuestas',
+    LIST_ENCUESTA_SELECT,
+    'ci',
+    cis,
+  );
+}
+
+async function runParallelLimited(taskFns, concurrency) {
+  const fns = Array.isArray(taskFns) ? taskFns : [];
+  if (!fns.length) return [];
+  const cap = Math.max(1, Math.min(Number(concurrency) || 1, fns.length));
+  const results = new Array(fns.length);
+  let next = 0;
+  async function worker() {
+    while (next < fns.length) {
+      const i = next;
+      next += 1;
+      results[i] = await fns[i]();
+    }
+  }
+  const workers = [];
+  for (let w = 0; w < cap; w += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return results;
 }
 
 function tsMs(raw) {
@@ -633,15 +751,22 @@ async function fetchRejectedListBundle(supabase) {
   const solicitudIds = estadoRows.map(function (e) {
     return e.cz_solicitud_id;
   });
-  const rejectedSolicitudesFromHist = await fetchInChunks(
-    supabase,
-    'cz_funnel_solicitudes',
-    SOLICITUD_LIST_SELECT,
-    'cz_id',
-    solicitudIds,
-  );
-  const rejectedSolicitudesFromCurrent =
-    await fetchCurrentEstadoRejectedSolicitudes(supabase);
+
+  const linkPromise =
+    solicitudIds.length > 0
+      ? fetchInChunks(
+          supabase,
+          'cz_funnel_solicitudes',
+          SOLICITUD_CI_LINK_SELECT,
+          'cz_id',
+          solicitudIds,
+        )
+      : Promise.resolve([]);
+  const currentPromise = fetchCurrentEstadoRejectedSolicitudes(supabase);
+  const [histCiLinks, rejectedSolicitudesFromCurrent] = await Promise.all([
+    linkPromise,
+    currentPromise,
+  ]);
 
   const ciSeen = new Set();
   const cis = [];
@@ -651,67 +776,71 @@ async function fetchRejectedListBundle(supabase) {
     ciSeen.add(ci);
     cis.push(ci);
   }
-  for (let i = 0; i < rejectedSolicitudesFromHist.length; i += 1) {
-    addCi(rejectedSolicitudesFromHist[i].ci);
+  for (let i = 0; i < histCiLinks.length; i += 1) {
+    addCi(histCiLinks[i].ci);
   }
   for (let i = 0; i < rejectedSolicitudesFromCurrent.length; i += 1) {
     addCi(rejectedSolicitudesFromCurrent[i].ci);
   }
 
-  const solicitudRows = cis.length
-    ? await fetchInChunks(
-        supabase,
-        'cz_funnel_solicitudes',
-        SOLICITUD_LIST_SELECT,
-        'ci',
-        cis,
-      )
-    : [];
-  const encuestaRows = cis.length
-    ? await fetchInChunks(
-        supabase,
-        'cz_funnel_encuestas',
-        ENCUESTA_SELECT,
-        'ci',
-        cis,
-      )
-    : [];
-  const snapshotRows = cis.length
-    ? await fetchInChunks(
-        supabase,
-        'rejected_bcu_snapshots',
-        SNAPSHOT_SELECT,
-        'ci',
-        cis,
-      )
-    : [];
-  const snapshotIds = snapshotRows.map(function (s) {
-    return s.id;
-  });
-  const institutionRows = snapshotIds.length
-    ? await fetchInChunks(
-        supabase,
-        'rejected_bcu_institutions',
-        INSTITUTION_SELECT,
-        'snapshot_id',
-        snapshotIds,
-      )
-    : [];
-  const outreachRows = cis.length
-    ? await fetchInChunks(
-        supabase,
-        'rejected_ci_outreach',
-        OUTREACH_SELECT,
-        'ci',
-        cis,
-      )
-    : [];
+  const [solicitudRows, snapBundle, outreachRows] = await runParallelLimited(
+    [
+      function () {
+        return cis.length
+          ? fetchInChunks(
+              supabase,
+              'cz_funnel_solicitudes',
+              SOLICITUD_LIST_SELECT,
+              'ci',
+              cis,
+            )
+          : Promise.resolve([]);
+      },
+      async function () {
+        const snapshotRows = cis.length
+          ? await fetchInChunks(
+              supabase,
+              'rejected_bcu_snapshots',
+              SNAPSHOT_SELECT,
+              'ci',
+              cis,
+            )
+          : [];
+        const snapshotIds = snapshotRows.map(function (s) {
+          return s.id;
+        });
+        const institutionRows = snapshotIds.length
+          ? await fetchInChunks(
+              supabase,
+              'rejected_bcu_institutions',
+              INSTITUTION_SELECT,
+              'snapshot_id',
+              snapshotIds,
+            )
+          : [];
+        return { snapshotRows: snapshotRows, institutionRows: institutionRows };
+      },
+      function () {
+        return cis.length
+          ? fetchInChunks(
+              supabase,
+              'rejected_ci_outreach',
+              OUTREACH_SELECT,
+              'ci',
+              cis,
+            )
+          : Promise.resolve([]);
+      },
+    ],
+    BUNDLE_FETCH_CONCURRENCY,
+  );
+
   return {
     estadoRows: estadoRows,
     solicitudRows: solicitudRows,
-    encuestaRows: encuestaRows,
-    snapshotRows: snapshotRows,
-    institutionRows: institutionRows,
+    encuestaRows: [],
+    snapshotRows: snapBundle.snapshotRows,
+    institutionRows: snapBundle.institutionRows,
     outreachRows: outreachRows,
   };
 }
@@ -820,7 +949,14 @@ function buildCreatedSnapshotResponse(snapshot, institutionRows) {
 module.exports = {
   REJECTED_ESTADO_ID,
   ALLOWED_OPS_STATUS,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  LIST_ENCUESTA_SELECT,
   parseStatusQuery,
+  parseListPagination,
+  paginateAssembledList,
+  applyEncuestasToListRows,
+  fetchListEncuestasForCis,
   sortRejectionsDesc,
   sortEncuestas,
   sortSnapshotsDesc,

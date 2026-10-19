@@ -488,10 +488,19 @@
     return p.day + '/' + p.month + ' ' + p.hour + ':' + p.minute;
   }
 
-  function buildListUrl(base, status) {
+  function buildListUrl(base, status, paging) {
     var root = String(base || '') + '/rechazados';
-    if (status == null || status === '' || status === 'all') return root;
-    return root + '?status=' + encodeURIComponent(String(status));
+    var params = new URLSearchParams();
+    if (status != null && status !== '' && status !== 'all') {
+      params.set('status', String(status));
+    }
+    var pg = paging || null;
+    if (pg && pg.limit != null && pg.limit !== '') {
+      params.set('limit', String(pg.limit));
+      params.set('offset', String(pg.offset != null ? pg.offset : 0));
+    }
+    var qs = params.toString();
+    return qs ? root + '?' + qs : root;
   }
 
   function emptyInstitution() {

@@ -13,12 +13,12 @@ const logger = require('../lib/logger');
 const { normalizeCi } = require('../lib/rejectedOps');
 const {
   parseStatusQuery,
-  assembleRejectedList,
+  parseListPagination,
   assembleRejectedDetail,
-  fetchRejectedListBundle,
   fetchRejectedDetailBundle,
   fetchCiHasRejectedHistorico,
 } = require('../lib/rejectedOpsRead');
+const { loadRejectedListResponse } = require('../lib/rejectedListServe');
 const { parseSnapshotPayload, parseCreatedBy } = require('../lib/rejectedBcuValidate');
 const {
   MAX_FILE_BYTES,
@@ -49,25 +49,12 @@ const {
 } = require('../lib/rejectedBcuSnapshotSourceRead');
 const { loadMiDeudaBagsWithDeclared } = require('../lib/miDeudaBagsRead');
 const { loadCreditorCatalog } = require('../lib/creditorCatalogRead');
-const {
-  attachMiDeudaOptinToListRows,
-  loadMiDeudaOptinDetail,
-} = require('../lib/miplanDebtOptinRead');
-const {
-  attachSurveyInviteToListRows,
-} = require('../lib/rejectedSurveyInviteEligibility');
-const {
-  attachSurveySequenceToListRows,
-  attachSurveyEmailClickedToListRows,
-} = require('../lib/rejectedSurveyInviteDisplay');
+const { loadMiDeudaOptinDetail } = require('../lib/miplanDebtOptinRead');
 const {
   runSurveyInviteSequenceForCi,
   evaluateSurveyInviteSequenceForCi,
 } = require('../lib/rejectedSurveyInviteEvaluate');
-const {
-  attachElmToRejectedRows,
-  loadRejectedDetailElm,
-} = require('../lib/rejectedElmRead');
+const { loadRejectedDetailElm } = require('../lib/rejectedElmRead');
 const { sendRejectedToElm, retryRejectedElm } = require('../lib/rejectedElmSend');
 const { loadCiResendHold } = require('../lib/rejectedElmResendGuard');
 const { requireElmAction } = require('../middleware/requireElmAction');
@@ -163,51 +150,36 @@ router.get('/', async function getRechazadosList(req, res) {
   if (!parsed.ok) {
     return res.status(400).json({ error: 'status inválido' });
   }
+  const pageP = parseListPagination(
+    req.query && req.query.limit,
+    req.query && req.query.offset,
+  );
+  if (!pageP.ok) {
+    return res.status(400).json({ error: 'paginación inválida' });
+  }
 
   try {
-    const bundle = await fetchRejectedListBundle(supabase);
-    const rows = assembleRejectedList({
-      estadoRows: bundle.estadoRows,
-      solicitudRows: bundle.solicitudRows,
-      encuestaRows: bundle.encuestaRows,
-      snapshotRows: bundle.snapshotRows,
-      institutionRows: bundle.institutionRows,
-      outreachRows: bundle.outreachRows,
+    const data = await loadRejectedListResponse(supabase, {
       status: parsed.status,
-    });
-    const withInvite = await attachSurveyInviteToListRows(supabase, rows, {
-      estadoRows: bundle.estadoRows,
-      solicitudRows: bundle.solicitudRows,
-    });
-    const surveyInviteAvailable =
-      withInvite.length === 0 ||
-      withInvite.every(function (r) {
-        return !(r.survey_invite && r.survey_invite.available === false);
-      });
-    const withSequence = await attachSurveySequenceToListRows(
-      supabase,
-      withInvite,
-    );
-    const withEmailClick = await attachSurveyEmailClickedToListRows(
-      supabase,
-      withSequence,
-    );
-    const optin = await attachMiDeudaOptinToListRows(supabase, withEmailClick);
-    if (!optin.available) {
-      logger.warn('GET /rechazados mi_deuda_optin unavailable', { code: optin.error_code });
-    }
-    const elmAvailable = await attachElmToRejectedRows(optin.rows, {
-      supabase: supabase,
+      pagination: pageP,
       listView: getElmListView(),
       logger: logger,
     });
+    if (!data.mi_deuda_optin_available) {
+      logger.warn('GET /rechazados mi_deuda_optin unavailable', {
+        code: data.mi_deuda_optin_error_code,
+      });
+    }
     return res.json({
       ok: true,
       data: {
-        rows: optin.rows,
-        mi_deuda_optin_available: optin.available,
-        elm_available: elmAvailable,
-        survey_invite_available: surveyInviteAvailable,
+        rows: data.rows,
+        total: data.total,
+        limit: data.limit,
+        offset: data.offset,
+        mi_deuda_optin_available: data.mi_deuda_optin_available,
+        elm_available: data.elm_available,
+        survey_invite_available: data.survey_invite_available,
       },
     });
   } catch (err) {

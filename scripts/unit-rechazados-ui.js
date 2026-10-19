@@ -285,6 +285,14 @@ assert.strictEqual(
   H.buildListUrl('/api', 'retry_eligible'),
   '/api/rechazados?status=retry_eligible',
 );
+assert.strictEqual(
+  H.buildListUrl('', null, { limit: 50, offset: 0 }),
+  '/rechazados?limit=50&offset=0',
+);
+assert.strictEqual(
+  H.buildListUrl('', 'bcu_pending', { limit: 50, offset: 100 }),
+  '/rechazados?status=bcu_pending&limit=50&offset=100',
+);
 
 const overdue = H.formatNextReviewOn('2020-01-05', Date.parse('2026-09-03T15:00:00Z'));
 assert.strictEqual(overdue.overdue, true);
@@ -387,10 +395,18 @@ const loadListMatch = js.match(
 assert.ok(loadListMatch, 'loadList block missing');
 const loadListSrc = loadListMatch[0];
 assert.ok(
-  /state\.rows = rows;\s*state\.loading = false;\s*setStatus\([\s\S]*?renderList\(\);/.test(
+  /state\.rows = rows;\s*state\.loading = false;[\s\S]*?setStatus\([\s\S]*?renderList\(\);/.test(
     loadListSrc,
   ),
   'success path must set loading=false before renderList',
+);
+assert.ok(
+  loadListSrc.indexOf('listLimit') !== -1 && loadListSrc.indexOf('listOffset') !== -1,
+  'loadList uses pagination state',
+);
+assert.ok(
+  loadListSrc.indexOf('buildListUrl(API, state.statusFilter,') !== -1,
+  'loadList passes paging to buildListUrl',
 );
 assert.ok(
   /listError[\s\S]*state\.loading = false;\s*setStatus\(state\.listError/.test(

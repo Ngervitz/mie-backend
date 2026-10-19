@@ -1139,7 +1139,8 @@ test('26 list and detail share one send path (dashboard + route wiring)', async 
   assert.ok(dash.includes("closest('[data-elm-pick]')"), 'picker binds the chosen solicitud');
   assert.ok(dash.includes("window.confirm("), 'confirmation kept');
   assert.ok(dash.includes('rejectedRowElmHtml(row.elm, row.ci)'));
-  assert.ok(/attachElmToRejectedRows\(optin\.rows, \{\s*supabase: supabase,\s*listView: getElmListView\(\)/.test(route));
+  assert.ok(route.includes('loadRejectedListResponse'));
+  assert.ok(/parseListPagination\(/.test(route));
   assert.strictEqual((route.match(/sendRejectedToElm\(/g) || []).length, 1, 'one send route');
   assert.ok(/loadCiResendHold: function \(holdCi, czId\) \{\s*return loadCiResendHold\(supabase, holdCi, czId\);/.test(route), 'endpoint uses the same guard');
   assert.ok(!dash.includes('elm.ci_active'), 'detail shows the send hold, not the survey-gate meaning');

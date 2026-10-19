@@ -14704,8 +14704,13 @@ init();
         })
       : null;
 
+  const LIST_PAGE_LIMIT = 50;
+
   const state = {
     statusFilter: null,
+    listOffset: 0,
+    listLimit: LIST_PAGE_LIMIT,
+    listTotal: null,
     loading: false,
     rows: [],
     listError: null,
@@ -15040,8 +15045,21 @@ init();
       return;
     }
     if (!state.rows.length) {
+      const totalEmpty = state.listTotal != null ? Number(state.listTotal) : 0;
+      const pagEmpty =
+        totalEmpty > 0
+          ? '<div class="mcl-pagination preaprobados-pagination">' +
+            '<span>0 de ' +
+            escapeHtml(String(totalEmpty)) +
+            ' CI</span>' +
+            '<button type="button" class="btn" data-action="rechazados-prev-page"' +
+            (state.listOffset > 0 ? '' : ' disabled') +
+            '>Anterior</button>' +
+            '<button type="button" class="btn" data-action="rechazados-next-page" disabled>Siguiente</button>' +
+            '</div>'
+          : '';
       resultsEl.innerHTML =
-        '<div class="mcl-empty">Sin resultados</div>';
+        '<div class="mcl-empty">Sin resultados</div>' + pagEmpty;
       return;
     }
     const body = state.rows
@@ -15120,6 +15138,11 @@ init();
       })
       .join('');
     const elmMsg = state.elmSendMessage;
+    const total =
+      state.listTotal != null ? Number(state.listTotal) : state.rows.length;
+    const offset = state.listOffset != null ? Number(state.listOffset) : 0;
+    const canPrev = offset > 0;
+    const canNext = offset + state.rows.length < total;
     resultsEl.innerHTML =
       (elmMsg
         ? '<div class="rechazados-elm-msg is-' +
@@ -15146,7 +15169,22 @@ init();
       '<th class="rechazados-col-ver">Ver</th>' +
       '</tr></thead><tbody>' +
       body +
-      '</tbody></table></div>';
+      '</tbody></table></div>' +
+      '<div class="mcl-pagination preaprobados-pagination">' +
+      '<span>' +
+      escapeHtml(String(Math.min(offset + 1, total))) +
+      '–' +
+      escapeHtml(String(offset + state.rows.length)) +
+      ' de ' +
+      escapeHtml(String(total)) +
+      ' CI</span>' +
+      '<button type="button" class="btn" data-action="rechazados-prev-page"' +
+      (canPrev ? '' : ' disabled') +
+      '>Anterior</button>' +
+      '<button type="button" class="btn" data-action="rechazados-next-page"' +
+      (canNext ? '' : ' disabled') +
+      '>Siguiente</button>' +
+      '</div>';
   }
 
   function instMoneyTd(v, catClass) {
@@ -16759,7 +16797,10 @@ init();
     setStatus('Cargando…', false);
     renderList();
     try {
-      const url = H.buildListUrl(API, state.statusFilter);
+      const url = H.buildListUrl(API, state.statusFilter, {
+        limit: state.listLimit,
+        offset: state.listOffset,
+      });
       const res = await fetch(url, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
@@ -16782,8 +16823,14 @@ init();
           : [];
       state.rows = rows;
       state.loading = false;
+      const payload = data && data.data ? data.data : {};
+      state.listTotal =
+        payload.total != null ? Number(payload.total) : rows.length;
+      if (payload.offset != null) state.listOffset = Number(payload.offset);
       setStatus(
-        rows.length ? String(rows.length) + ' resultado(s)' : '',
+        state.listTotal
+          ? String(state.listTotal) + ' resultado(s)'
+          : '',
         false,
       );
       try {
@@ -17436,6 +17483,7 @@ init();
     if (!btn) return;
     const raw = btn.getAttribute('data-status-filter');
     state.statusFilter = raw ? raw : null;
+    state.listOffset = 0;
     state.elmSendMessage = null;
     loadList();
   });
@@ -17451,6 +17499,19 @@ init();
       : null;
     if (!btn || btn.disabled) return;
     const action = btn.getAttribute('data-action');
+    if (action === 'rechazados-prev-page') {
+      state.listOffset = Math.max(
+        0,
+        state.listOffset - state.listLimit,
+      );
+      loadList();
+      return;
+    }
+    if (action === 'rechazados-next-page') {
+      state.listOffset = state.listOffset + state.listLimit;
+      loadList();
+      return;
+    }
     const ci = btn.getAttribute('data-ci');
     if (!ci) return;
     if (action === 'view-ci') {
