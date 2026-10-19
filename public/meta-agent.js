@@ -153,9 +153,10 @@
     var impressions = isNaN(impressionsNum) ? 0 : impressionsNum;
     var clicks = isNaN(clicksNum) ? 0 : clicksNum;
     var metaLeads = metaLeadCountFromInsight(row.raw_json);
+    var spendNum = fmtN(row.spend);
 
     var ctr = impressions > 0 ? (clicks / impressions) * 100 : '';
-    var cpc = clicks > 0 ? spend / clicks : '';
+    var cpc = spendNum !== null && clicks > 0 ? spendNum / clicks : '';
 
     var name = toCsvCompatString(row.campaign_name);
     var freq = toCsvCompatString(row.frequency);
