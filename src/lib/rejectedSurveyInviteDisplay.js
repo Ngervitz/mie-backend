@@ -19,6 +19,11 @@ const {
   getAllSurveyInviteStepCampaignIds,
 } = require('./rejectedSurveyInviteEligibility');
 
+/** Episode `.in()` width — same size as other Rechazados list chunks. */
+const SEQUENCE_QUERY_CHUNK = 200;
+/** PostgREST default max rows; must page with `.range()` past this. */
+const SEQUENCE_PAGE_SIZE = 1000;
+
 /**
  * Historical pilot STEP campaign map (display observability).
  * @returns {{1: string, 2: string, 3: string}}
@@ -178,21 +183,32 @@ async function attachSurveySequenceToListRows(supabase, rows, opts) {
   const byEpisode = new Map();
 
   if (episodeIds.length) {
-    const { data: priors, error } = await supabase
-      .from('email_campaign_recipients')
-      .select('ci, campaign_id, status, purpose, sent_at, cz_solicitud_id')
-      .in('campaign_id', ids)
-      .eq('purpose', PURPOSE)
-      .eq('status', 'sent')
-      .in('cz_solicitud_id', episodeIds);
-    if (error) {
-      throw new Error('list survey_sequence recipients: ' + error.message);
-    }
-    for (let i = 0; i < (priors || []).length; i += 1) {
-      const row = priors[i];
-      const key = String(row.cz_solicitud_id);
-      if (!byEpisode.has(key)) byEpisode.set(key, []);
-      byEpisode.get(key).push(row);
+    for (let i = 0; i < episodeIds.length; i += SEQUENCE_QUERY_CHUNK) {
+      const epSlice = episodeIds.slice(i, i + SEQUENCE_QUERY_CHUNK);
+      for (let from = 0; ; from += SEQUENCE_PAGE_SIZE) {
+        const { data: priors, error } = await supabase
+          .from('email_campaign_recipients')
+          .select(
+            'id, ci, campaign_id, status, purpose, sent_at, cz_solicitud_id',
+          )
+          .in('campaign_id', ids)
+          .eq('purpose', PURPOSE)
+          .eq('status', 'sent')
+          .in('cz_solicitud_id', epSlice)
+          .order('id', { ascending: true })
+          .range(from, from + SEQUENCE_PAGE_SIZE - 1);
+        if (error) {
+          throw new Error('list survey_sequence recipients: ' + error.message);
+        }
+        const page = priors || [];
+        for (let j = 0; j < page.length; j += 1) {
+          const row = page[j];
+          const key = String(row.cz_solicitud_id);
+          if (!byEpisode.has(key)) byEpisode.set(key, []);
+          byEpisode.get(key).push(row);
+        }
+        if (page.length < SEQUENCE_PAGE_SIZE) break;
+      }
     }
   }
 
@@ -392,6 +408,8 @@ async function attachSurveyEmailClickedToListRows(supabase, rows) {
 
 module.exports = {
   PURPOSE,
+  SEQUENCE_QUERY_CHUNK,
+  SEQUENCE_PAGE_SIZE,
   getHistoricalSurveyInviteStepCampaignIds,
   resolveDisplaySurveyInviteStepCampaigns,
   buildSurveySequenceForCi,

@@ -90,34 +90,38 @@ pass(
     'rechazados_survey_invite:campaign:6:ci:15088043',
 );
 
-// E — CI 15088043: legacy S1/S2 NULL excluded; current cz 1357 → clock
-(async function () {
-  const sb = {
+function episodeSequenceSupabase(data) {
+  const api = {
+    in: function () {
+      return api;
+    },
+    eq: function () {
+      return api;
+    },
+    order: function () {
+      return api;
+    },
+    range: function () {
+      return Promise.resolve({ data: data, error: null });
+    },
+    is: function () {
+      return Promise.resolve({ data: [], error: null });
+    },
+  };
+  return {
     from: function () {
       return {
         select: function () {
-          return {
-            in: function () {
-              return {
-                eq: function () {
-                  return {
-                    eq: function () {
-                      return {
-                        in: async function () {
-                          // Episode query for 1357 returns empty (legacy NULL not matched)
-                          return { data: [], error: null };
-                        },
-                      };
-                    },
-                  };
-                },
-              };
-            },
-          };
+          return api;
         },
       };
     },
   };
+}
+
+// E — CI 15088043: legacy S1/S2 NULL excluded; current cz 1357 → clock
+(async function () {
+  const sb = episodeSequenceSupabase([]);
   const rows = await attachSurveySequenceToListRows(sb, [
     { ci: 15088043, cz_solicitud_id: 1357 },
   ]);
@@ -132,43 +136,16 @@ pass(
   );
 
   // F — after STEP1 for cz 1357 → display S1
-  const sbF = {
-    from: function () {
-      return {
-        select: function () {
-          return {
-            in: function () {
-              return {
-                eq: function () {
-                  return {
-                    eq: function () {
-                      return {
-                        in: async function () {
-                          return {
-                            data: [
-                              {
-                                ci: '15088043',
-                                campaign_id: 6,
-                                status: 'sent',
-                                purpose: PURPOSE,
-                                sent_at: '2026-09-20T12:00:00.000Z',
-                                cz_solicitud_id: 1357,
-                              },
-                            ],
-                            error: null,
-                          };
-                        },
-                      };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+  const sbF = episodeSequenceSupabase([
+    {
+      ci: '15088043',
+      campaign_id: 6,
+      status: 'sent',
+      purpose: PURPOSE,
+      sent_at: '2026-09-20T12:00:00.000Z',
+      cz_solicitud_id: 1357,
     },
-  };
+  ]);
   const rowsF = await attachSurveySequenceToListRows(sbF, [
     { ci: 15088043, cz_solicitud_id: 1357 },
   ]);
