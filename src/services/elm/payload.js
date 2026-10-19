@@ -130,10 +130,11 @@ function inspectMobilePhone(raw) {
 }
 
 /**
- * Operator exception for two Gestión ELM solicitudes. S1 does not carry the phone.
- * S2 still requires a confirmed UY mobile and never rewrites the stored number.
+ * Operator exception: S1 does not carry the phone. S2 still requires a confirmed UY
+ * mobile and never rewrites the stored number. 2143 is the same S1-only exception
+ * as 2049 and 2056; no other solicitud is included.
  */
-const S1_INVALID_PHONE_ALLOWED_CZ = Object.freeze([2049, 2056]);
+const S1_INVALID_PHONE_ALLOWED_CZ = Object.freeze([2049, 2056, 2143]);
 
 function s1AllowsInvalidPhone(czId) {
   const n = Number(czId);

@@ -201,9 +201,35 @@ function createElmRepository(supabaseOverride) {
   }
 
   /**
-   * Provider-authorized full cycle reset (20261017 migration). Archives attempts, one CI lock,
-   * same process row → s1 in_flight with a new request. Caller runs transport after `ready`.
+   * CZ 2056 only (20261019). Archives the unknown MODULE_DOES_NOT_EXIST attempt and
+   * returns the same process in s1 in_flight. Does not send.
    */
+  async function moduleMissingRetryS1(args) {
+    const { data, error } = await db().rpc('elm_s1_module_missing_retry', {
+      p_cz_solicitud_id: args.czSolicitudId,
+      p_expected_attempts: args.expectedAttempts,
+      p_lease_seconds: args.leaseSeconds,
+      p_actor_user_id: args.actorUserId,
+    });
+    if (error) throw rpcError('elm_s1_module_missing_retry', error);
+    const out = firstRow(data);
+    if (!out || typeof out.status !== 'string') {
+      throw new Error('elm_s1_module_missing_retry returned no status');
+    }
+    return out;
+  }
+
+  /** Narrow read so Gestión can recognize the CZ 2056 MODULE_DOES_NOT_EXIST body. */
+  async function getS1ResponseByCzId(czId) {
+    const { data, error } = await db()
+      .from(PROCESS_TABLE)
+      .select('s1_response')
+      .eq('cz_solicitud_id', czId)
+      .maybeSingle();
+    if (error) throw rpcError(PROCESS_TABLE + ' s1_response', error);
+    return data ? data.s1_response : null;
+  }
+
   async function adminProviderResend(args) {
     const { data, error } = await db().rpc('elm_admin_provider_resend', {
       p_cz_solicitud_id: args.czSolicitudId,
@@ -384,6 +410,8 @@ function createElmRepository(supabaseOverride) {
     finishS2,
     retryStep,
     manualRetryS1,
+    moduleMissingRetryS1,
+    getS1ResponseByCzId,
     adminProviderResend,
     expireStaleInFlight,
     recordLateResult,

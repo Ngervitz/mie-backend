@@ -112,6 +112,7 @@
     elm_ci_monthly_quota_used: 'Esta CI ya usó el cupo mensual de envío ELM.',
     elm_ci_history_unverifiable: 'No se pudo verificar el historial de la CI. Sin reenvío.',
     confirm_duplicate_required: 'Confirmá que entendés el riesgo de duplicación en ELM.',
+    confirm_s1_only_required: 'Confirmá que este reenvío es solo el paso 1, en el mismo proceso.',
     provider_reference_required: 'Indicá la referencia de autorización de ELM (ticket, mail, etc.).',
     send_not_allowed: 'Este caso no admite envío a ELM en este momento.',
     send_failed: 'El envío no se completó. Revisá el resultado en la tabla.',
@@ -730,6 +731,9 @@
     if (mode === 'resume_s2') return 'Completar paso 2';
     if (mode === 'retry_s2') return 'Reenviar paso 2';
     if (mode === 'retry_s1') return 'Reintento paso 1 y continuar';
+    if (mode === 's1_module_retry') {
+      return 'Reenvío solo paso 1 (MODULE_DOES_NOT_EXIST, mismo proceso)';
+    }
     if (mode === 'full' && preview.steps && preview.steps.length === 1 && preview.steps[0] === 's1') {
       return 'Solo paso 1 (el paso 2 no sale: celular fuera del formato ELM)';
     }
@@ -788,6 +792,14 @@
       preview.expected_updated_at
         ? '<input type="hidden" name="expected_updated_at" value="' + esc(String(preview.expected_updated_at)) + '">'
         : '';
+    const s1Only = preview.mode === 's1_module_retry';
+    const s1OnlyField = s1Only
+      ? '<label class="elm-ops-confirm"><input type="checkbox" name="confirm_s1_only" value="1" required> ' +
+        'Confirmo reenviar únicamente el paso 1 de este mismo proceso. El paso 2 no se envía.</label>' +
+        '<input type="hidden" name="expected_attempts" value="' +
+        esc(String(preview.expected_attempts)) +
+        '">'
+      : '';
     const warns = (preview.warnings || []).map(function (w) {
       return '<p class="preaprobados-muted">' + esc(w) + '</p>';
     }).join('');
@@ -807,6 +819,7 @@
         ? '<label class="elm-ops-confirm"><input type="checkbox" name="confirm_duplicate" value="1" required> ' +
           'Confirmo el riesgo de duplicación en ELM.</label>'
         : '') +
+      s1OnlyField +
       '</div>' +
       versionField +
       '<div class="elm-ops-send-modal-footer">' +
@@ -1336,6 +1349,12 @@
         }
         if (form.elements.expected_updated_at && form.elements.expected_updated_at.value) {
           bodySend.expected_updated_at = form.elements.expected_updated_at.value;
+        }
+        if (form.elements.confirm_s1_only && form.elements.confirm_s1_only.checked) {
+          bodySend.confirm_s1_only = true;
+        }
+        if (form.elements.expected_attempts && form.elements.expected_attempts.value) {
+          bodySend.expected_attempts = Number(form.elements.expected_attempts.value);
         }
         state.busy = true;
         let sendOut;

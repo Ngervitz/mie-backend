@@ -570,6 +570,51 @@ function createElmOrchestrator(deps) {
   }
 
   /**
+   * CZ 2056 only. Archives the HTTP 400 MODULE_DOES_NOT_EXIST attempt and rearms the
+   * same frozen S1 on the reserved lock. Sends S1 once. Never calls S2.
+   */
+  async function retryModuleMissingS1(czSolicitudId, context, opts) {
+    const czId = parseCzId(czSolicitudId);
+    if (czId !== 2056) return blocked(CODES.RETRY_NOT_ALLOWED, { stage: 's1', reason: 'not_this_case' });
+    const ctx = validateContext(context, enabledTriggerOrigins);
+    if (!ctx.ok) return Object.assign({ stage: 's1' }, ctx);
+    if (ctx.triggerOrigin !== 'janus_manual') return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+    const expected = Number(opts && opts.expectedAttempts);
+    if (!Number.isInteger(expected) || expected < 1) return blocked(CODES.INVALID_CONTEXT, { stage: 's1' });
+
+    const gate = sendGate();
+    if (gate) return Object.assign({ stage: 's1' }, gate);
+
+    const out = await repo.moduleMissingRetryS1({
+      czSolicitudId: czId,
+      expectedAttempts: expected,
+      leaseSeconds: config.inFlightLeaseSeconds,
+      actorUserId: ctx.triggeredByUserId,
+    });
+    if (out.status !== 'retried' || !out.process) {
+      return blocked(MANUAL_RETRY_CODES[out.status] || CODES.RETRY_NOT_ALLOWED, {
+        stage: 's1',
+        reason: out.reason || null,
+      });
+    }
+    logger.info('elm s1 module-missing retry started', {
+      cz_solicitud_id: czId,
+      step: 's1',
+      attempt: out.process.s1_attempts,
+      lock_status: out.lock ? out.lock.status : null,
+    });
+
+    const s1 = await runStep('s1', out.process.id, czId, out.process.s1_request, ctx);
+    if (!s1.ok) return Object.assign({ stage: 's1' }, s1);
+    return {
+      ok: true,
+      stage: 's1',
+      process: s1.process,
+      s2_blocked: { code: CODES.MOBILEPHONE_NEEDS_CORRECTION },
+    };
+  }
+
+  /**
    * Continue S1+S2 after elm_admin_provider_resend left the process in s1 in_flight.
    * Does not claim or reset; only transport + referElm when S1 is favorable.
    */
@@ -716,6 +761,7 @@ function createElmOrchestrator(deps) {
     sendElm,
     retryElmStep,
     retrySendElm,
+    retryModuleMissingS1,
     continueSendAfterProviderResend,
     getElmStatus,
     getSendReadiness,

@@ -12,6 +12,7 @@ const {
   classifyS1Unknown,
   existingRetryApplies,
   isS1UnknownLike,
+  moduleMissingS1RetryApplies,
 } = require('./s1UnknownClassify');
 
 const SEND_MODES = Object.freeze({
@@ -20,6 +21,7 @@ const SEND_MODES = Object.freeze({
   RETRY_S1: 'retry_s1',
   RETRY_S2: 'retry_s2',
   ADMIN_PROVIDER_RESEND: 'admin_provider_resend',
+  S1_MODULE_RETRY: 's1_module_retry',
 });
 
 const BLOCK_CODES = Object.freeze({
@@ -74,7 +76,10 @@ function planGestionSend(input) {
   const src = input || {};
   const czId = Number(src.czId);
   const process = src.process || null;
-  const bag = src.bag || {};
+  const bag = Object.assign(
+    { cz_solicitud_id: Number.isFinite(czId) ? czId : null },
+    src.bag || {},
+  );
   const warnings = [];
   const duplicateWarning =
     'ELM puede tratar este envío como duplicado si la misma persona recibió otro lead recientemente. ' +
@@ -85,6 +90,30 @@ function planGestionSend(input) {
       can_send: false,
       code: BLOCK_CODES.NOT_READY,
       reasons: (src.readiness && src.readiness.reasons) || [],
+    };
+  }
+
+  if (moduleMissingS1RetryApplies(bag)) {
+    const attempts = Number(process && process.s1_attempts);
+    if (!process || !Number.isInteger(attempts) || attempts < 1) {
+      return { can_send: false, code: CODES.INVALID_CONTEXT };
+    }
+    warnings.push(
+      'ELM pidió reenviar solo el paso 1 de este proceso tras MODULE_DOES_NOT_EXIST. ' +
+        'Se reutiliza el mismo proceso y el cupo ya reservado. El paso 2 no se envía y el celular no se modifica.',
+    );
+    return {
+      can_send: true,
+      mode: SEND_MODES.S1_MODULE_RETRY,
+      steps: ['s1'],
+      s1_status: process.s1_status,
+      s2_status: process.s2_status,
+      last_send_at: lastSendAt(process),
+      warnings: warnings,
+      duplicate_warning: null,
+      expected_attempts: attempts,
+      requires_s1_only_confirm: true,
+      process_id: process.id,
     };
   }
 
@@ -302,9 +331,11 @@ function sendActionFromPlan(plan) {
             ? 'Reintenta el paso 2 técnico con el payload congelado.'
             : plan.mode === SEND_MODES.ADMIN_PROVIDER_RESEND
               ? 'Reenvío completo S1+S2 autorizado por ELM (mismo proceso, historial archivado).'
-              : plan.steps && plan.steps.length === 1 && plan.steps[0] === 's1'
-                ? 'Envía solo el paso 1. El paso 2 no se envía: el celular no tiene el formato confirmado por ELM y no se sustituye.'
-                : 'Envía paso 1 y paso 2 a ELM (proceso nuevo).',
+              : plan.mode === SEND_MODES.S1_MODULE_RETRY
+                ? 'Reenvía solo el paso 1 del mismo proceso (MODULE_DOES_NOT_EXIST). El paso 2 no se envía.'
+                : plan.steps && plan.steps.length === 1 && plan.steps[0] === 's1'
+                  ? 'Envía solo el paso 1. El paso 2 no se envía: el celular no tiene el formato confirmado por ELM y no se sustituye.'
+                  : 'Envía paso 1 y paso 2 a ELM (proceso nuevo).',
     requires_confirm: true,
     mode: plan.mode,
     expected_attempts: plan.expected_attempts,

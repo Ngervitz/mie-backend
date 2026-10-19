@@ -22,6 +22,8 @@ const {
   BLOCK_CODES,
 } = require('../src/services/elmOps/gestionElmSendPlan');
 const { createGestionActions } = require('../src/services/elmOps/gestionActions');
+const { createElmOrchestrator } = require('../src/services/elm/orchestrator');
+const { OUTCOME } = require('../src/services/elm/constants');
 const { applyGestionSendDisplay } = require('../src/services/elmOps/gestionSendDisplay');
 const { classifyOpportunity } = require('../src/services/elmOps/opportunityClassify');
 const { mapAdminRpc } = require('../src/services/elmOps/gestionAdminProviderSend');
@@ -498,6 +500,247 @@ async function run(name, fn) {
     });
     assert.strictEqual(afterS1.can_send, false);
     assert.strictEqual(afterS1.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    const plan2143 = planGestionSend({
+      czId: 2143,
+      process: null,
+      readiness: ready(),
+      hold: null,
+      eligibility: elig,
+    });
+    assert.strictEqual(plan2143.can_send, true);
+    assert.deepStrictEqual(plan2143.steps, ['s1']);
+    assert.strictEqual(plan2143.mode, SEND_MODES.FULL);
+  });
+
+  const MODULE_BODY = {
+    error: { code: 'MODULE_DOES_NOT_EXIST', message: 'Module does not exist: /SuiteScripts/adapters/equifaxAdapter.js' },
+  };
+  function moduleBag(over) {
+    return Object.assign(
+      {
+        s1_status: S1.UNKNOWN,
+        s2_status: S2.NOT_STARTED,
+        s1_http_status: 400,
+        s1_error_code: 'elm_http_error',
+        s1_attempts: 1,
+        trigger_origin: 'janus_manual',
+        s1_response: MODULE_BODY,
+      },
+      over || {},
+    );
+  }
+  function moduleProcess(over) {
+    return proc({
+      cz_solicitud_id: 2056,
+      ci: 50562896,
+      trigger_origin: 'janus_manual',
+      s1_status: S1.UNKNOWN,
+      s2_status: S2.NOT_STARTED,
+      s1_http_status: 400,
+      s1_error_code: 'elm_http_error',
+      s1_attempts: 1,
+      s1_response: MODULE_BODY,
+      ...over,
+    });
+  }
+
+  await run('CZ 2056 MODULE_DOES_NOT_EXIST plans S1 only on the same process', async function () {
+    const plan = planGestionSend({
+      czId: 2056,
+      process: moduleProcess(),
+      bag: moduleBag(),
+      readiness: ready(),
+      hold: null,
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+    });
+    assert.strictEqual(plan.can_send, true);
+    assert.strictEqual(plan.mode, SEND_MODES.S1_MODULE_RETRY);
+    assert.deepStrictEqual(plan.steps, ['s1']);
+    assert.strictEqual(plan.expected_attempts, 1);
+    assert.strictEqual(plan.requires_s1_only_confirm, true);
+    const act = sendActionFromPlan(plan);
+    assert.ok(act.explanation.indexOf('solo el paso 1') !== -1);
+    assert.strictEqual(sendRowActionFromPlan(plan).enabled, true);
+  });
+
+  await run('MODULE_DOES_NOT_EXIST stays blocked outside CZ 2056 and other errors', async function () {
+    const otherCz = planGestionSend({
+      czId: 2143,
+      process: moduleProcess({ cz_solicitud_id: 2143 }),
+      bag: moduleBag(),
+      readiness: ready(),
+      hold: null,
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+    });
+    assert.strictEqual(otherCz.can_send, false);
+    assert.strictEqual(otherCz.code, BLOCK_CODES.RECONCILE);
+    const otherHttp = planGestionSend({
+      czId: 2056,
+      process: moduleProcess({ s1_http_status: 401, s1_error_code: 'elm_http_auth_rejected' }),
+      bag: moduleBag({ s1_http_status: 401, s1_error_code: 'elm_http_auth_rejected' }),
+      readiness: ready(),
+      hold: null,
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+    });
+    assert.strictEqual(otherHttp.can_send, false);
+    assert.strictEqual(otherHttp.code, BLOCK_CODES.RECONCILE);
+    const otherBody = planGestionSend({
+      czId: 2056,
+      process: moduleProcess({ s1_response: { error: { code: 'OTHER' } } }),
+      bag: moduleBag({ s1_response: { error: { code: 'OTHER' } } }),
+      readiness: ready(),
+      hold: null,
+      eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] },
+    });
+    assert.strictEqual(otherBody.can_send, false);
+    assert.strictEqual(otherBody.code, BLOCK_CODES.RECONCILE);
+  });
+
+  function moduleActions(calls) {
+    return mockActions({
+      repository: {
+        async getProcessByCzId(cz) {
+          if (Number(cz) !== 2056) return null;
+          return moduleProcess({ s1_response: undefined });
+        },
+      },
+      elmRepository: {
+        async getS1ResponseByCzId(cz) {
+          assert.strictEqual(Number(cz), 2056);
+          return MODULE_BODY;
+        },
+      },
+      sendDeps: {
+        orchestrator: {
+          getSendReadiness: ready,
+          async getElmStatus() {
+            return { ok: true, data: { eligibility: { eligible: false, blockers: [{ code: CODES.PROCESS_EXISTS }] } } };
+          },
+          async retryModuleMissingS1() {
+            calls.retry += 1;
+            return { ok: true, stage: 's1', process: {} };
+          },
+          async continueSendAfterProviderResend() {
+            calls.admin += 1;
+            return { ok: true, stage: 's2' };
+          },
+          async retrySendElm() {
+            calls.manual += 1;
+            return { ok: true, stage: 's2' };
+          },
+        },
+        listView: { async cellsForCzIds() { return new Map(); } },
+        elmRepository: {
+          async loadSolicitudContext() {
+            return { solicitud: solicitudFixture(2056), grantedRow: null };
+          },
+        },
+        loadCiResendHold: async function () { return null; },
+      },
+    });
+  }
+
+  await run('CZ 2056 send refuses without S1-only confirm and stale attempts', async function () {
+    const calls = { retry: 0, admin: 0, manual: 0 };
+    const actions = moduleActions(calls);
+    const missing = await actions.sendToElm(2056, { confirm: true, expected_attempts: 1 }, ADMIN);
+    assert.strictEqual(missing.status, 'confirm_s1_only_required');
+    const stale = await actions.sendToElm(
+      2056,
+      { confirm: true, confirm_s1_only: true, expected_attempts: 2 },
+      ADMIN,
+    );
+    assert.strictEqual(stale.status, 'stale');
+    assert.strictEqual(calls.retry, 0);
+    assert.strictEqual(calls.admin, 0);
+    assert.strictEqual(calls.manual, 0);
+  });
+
+  await run('CZ 2056 confirmed send calls only the module-missing S1 retry', async function () {
+    const calls = { retry: 0, admin: 0, manual: 0 };
+    const actions = moduleActions(calls);
+    const sent = await actions.sendToElm(
+      2056,
+      { confirm: true, confirm_s1_only: true, expected_attempts: 1 },
+      ADMIN,
+    );
+    assert.strictEqual(sent.status, 'sent');
+    assert.strictEqual(sent.stage, 's1');
+    assert.strictEqual(sent.mode, SEND_MODES.S1_MODULE_RETRY);
+    assert.strictEqual(calls.retry, 1);
+    assert.strictEqual(calls.admin, 0);
+    assert.strictEqual(calls.manual, 0);
+  });
+
+  await run('retryModuleMissingS1 sends S1 and never S2', async function () {
+    let s2 = 0;
+    let rpc = 0;
+    const orch = createElmOrchestrator({
+      logger: { info() {}, warn() {}, error() {} },
+      client: {
+        enabled: true,
+        async service1() {
+          return {
+            outcome: OUTCOME.NEGATIVE,
+            httpStatus: 200,
+            resultMessage: 'SCORE BAJO',
+            responseBody: { result: 'SCORE BAJO' },
+            latencyMs: 4,
+          };
+        },
+        async service2() {
+          s2 += 1;
+          throw new Error('s2 must not run');
+        },
+      },
+      repository: {
+        async moduleMissingRetryS1(args) {
+          rpc += 1;
+          assert.strictEqual(args.czSolicitudId, 2056);
+          assert.strictEqual(args.expectedAttempts, 1);
+          return {
+            status: 'retried',
+            process: {
+              id: '11111111-1111-4111-8111-111111111111',
+              cz_solicitud_id: 2056,
+              s1_status: S1.IN_FLIGHT,
+              s1_attempts: 2,
+              s1_request: { docNumber: '50562896' },
+              s2_status: S2.NOT_STARTED,
+            },
+            lock: { status: 'held', state: 'reserved' },
+          };
+        },
+        async finishS1(_id, step) {
+          return {
+            id: '11111111-1111-4111-8111-111111111111',
+            cz_solicitud_id: 2056,
+            s1_status: step.status,
+            s2_status: S2.NOT_STARTED,
+            s1_attempts: 2,
+            s1_result_message: step.resultMessage,
+          };
+        },
+      },
+    });
+    const out = await orch.retryModuleMissingS1(
+      2056,
+      { triggerOrigin: 'janus_manual', triggeredByUserId: ADMIN },
+      { expectedAttempts: 1 },
+    );
+    assert.strictEqual(out.ok, true);
+    assert.strictEqual(out.stage, 's1');
+    assert.strictEqual(out.s2_blocked.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    assert.strictEqual(s2, 0);
+    assert.strictEqual(rpc, 1);
+    const refused = await orch.retryModuleMissingS1(
+      2143,
+      { triggerOrigin: 'janus_manual', triggeredByUserId: ADMIN },
+      { expectedAttempts: 1 },
+    );
+    assert.strictEqual(refused.ok, false);
+    assert.strictEqual(refused.code, CODES.RETRY_NOT_ALLOWED);
+    assert.strictEqual(rpc, 1);
   });
 
   console.log('unit-gestion-elm-send: all passed');

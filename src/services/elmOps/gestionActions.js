@@ -15,7 +15,12 @@
 
 const { retryManualToElm, sendManualToElm } = require('../../lib/elmManualSend');
 const { loadCiResendHold } = require('../../lib/rejectedElmResendGuard');
-const { S1_SUBCLASS, classifyS1Unknown, existingRetryApplies } = require('./s1UnknownClassify');
+const {
+  S1_SUBCLASS,
+  classifyS1Unknown,
+  existingRetryApplies,
+  moduleMissingS1RetryApplies,
+} = require('./s1UnknownClassify');
 const { ACTION_HTTP } = require('./service');
 const { S2, CODES } = require('../elm/constants');
 const { planGestionSend, SEND_MODES } = require('./gestionElmSendPlan');
@@ -109,6 +114,7 @@ function createGestionActions(deps) {
       const retryOwn =
         process &&
         (existingRetryApplies(bag) ||
+          moduleMissingS1RetryApplies(bag) ||
           (process.s1_status === 'eligible' && process.s2_status === S2.NOT_STARTED) ||
           gestionAuthorized === true);
       hold = await deps.loadCiResendHold(ciFromSol, czId, {
@@ -163,7 +169,7 @@ function createGestionActions(deps) {
   }
 
   async function loadEvidence(czId) {
-    const [process, review, projected] = await Promise.all([
+    const [loaded, review, projected] = await Promise.all([
       typeof repo.getProcessByCzId === 'function'
         ? repo.getProcessByCzId(czId)
         : elmRepo.getProcessByCzId(czId),
@@ -172,6 +178,17 @@ function createGestionActions(deps) {
         : Promise.resolve(null),
       elmRepo.getProjectedEstadosByCzIds([czId]),
     ]);
+    let process = loaded;
+    if (
+      process &&
+      Number(czId) === 2056 &&
+      process.s1_response == null &&
+      typeof elmRepo.getS1ResponseByCzId === 'function'
+    ) {
+      process = Object.assign({}, process, {
+        s1_response: await elmRepo.getS1ResponseByCzId(czId),
+      });
+    }
     return {
       process: process,
       review: review,
@@ -199,6 +216,7 @@ function createGestionActions(deps) {
       review_version: c.version,
       reason_code: c.reason_code || null,
       projected_estado: ev.projected,
+      s1_response: p.s1_response || null,
     };
   }
 
@@ -347,6 +365,7 @@ function createGestionActions(deps) {
       hold: p.hold || null,
       fields: p.fields || null,
       expected_attempts: p.expected_attempts != null ? p.expected_attempts : null,
+      requires_s1_only_confirm: p.requires_s1_only_confirm === true,
       commercial: ctx.commercial,
       provider_reference_required_for_hold:
         p.hold &&
@@ -402,6 +421,15 @@ function createGestionActions(deps) {
         return { status: 'invalid_request', code: CODES.ADMIN_PROVIDER_RESEND_STALE };
       }
     }
+    if (preview.mode === SEND_MODES.S1_MODULE_RETRY) {
+      if (body.confirm_s1_only !== true) {
+        return { status: 'confirm_s1_only_required', preview: preview };
+      }
+      const expectedAttempts = Number(body.expected_attempts);
+      if (!Number.isInteger(expectedAttempts) || expectedAttempts !== Number(preview.expected_attempts)) {
+        return { status: 'stale' };
+      }
+    }
     if (preview.duplicate_warning && body.confirm_duplicate !== true) {
       return { status: 'confirm_duplicate_required', preview: preview };
     }
@@ -411,6 +439,10 @@ function createGestionActions(deps) {
       const plan = ctx.plan;
       if (plan.can_send !== true) {
         return Object.assign({ status: 'stale' }, plan);
+      }
+      if (plan.mode === SEND_MODES.S1_MODULE_RETRY) {
+        if (body.confirm_s1_only !== true) return { status: 'confirm_s1_only_required' };
+        if (Number(body.expected_attempts) !== Number(plan.expected_attempts)) return { status: 'stale' };
       }
       if (plan.mode === SEND_MODES.ADMIN_PROVIDER_RESEND) {
         if (!providerRefOk(body)) {
@@ -456,6 +488,23 @@ function createGestionActions(deps) {
             outcome: orchOut.ok ? 'referred' : 'blocked',
             cz_solicitud_id: czId,
             cell: cells.get(czId) || null,
+            mode: plan.mode,
+          },
+        };
+      } else if (plan.mode === SEND_MODES.S1_MODULE_RETRY) {
+        const orchOut = await deps.orchestrator.retryModuleMissingS1(
+          czId,
+          { triggerOrigin: 'janus_manual', triggeredByUserId: actorUserId },
+          { expectedAttempts: plan.expected_attempts },
+        );
+        out = {
+          status: orchOut.ok ? 200 : 409,
+          body: {
+            ok: orchOut.ok === true,
+            code: orchOut.code || null,
+            outcome: orchOut.ok ? 'review' : 'blocked',
+            stage: 's1',
+            cz_solicitud_id: czId,
             mode: plan.mode,
           },
         };
@@ -532,6 +581,7 @@ const GESTION_ACTION_HTTP = Object.assign({}, ACTION_HTTP, {
   preview: 200,
   confirm_required: 400,
   confirm_duplicate_required: 400,
+  confirm_s1_only_required: 400,
   provider_reference_required: 400,
   send_not_allowed: 409,
   send_failed: 409,

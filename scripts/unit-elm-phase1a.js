@@ -542,6 +542,45 @@ async function runAll() {
       process: { ci: 12345678 },
     });
     assert.strictEqual(refer.eligible, false);
+    const phone2143 = '1234567890';
+    assert.strictEqual(inspectMobilePhone(phone2143).status, 'invalid');
+    assert.strictEqual(normalizeUyMobileDigits(phone2143), null, 'CZ 2143 digits are not rewritten');
+    const s1_2143 = buildService1Payload({
+      czId: 2143,
+      solicitud: solicitudFixture({ celular: phone2143 }),
+      config: TEST_CONFIG,
+    });
+    assert.ok(s1_2143.ok, 'CZ 2143 S1 is built without a valid mobile');
+    assert.ok(!('mobilephone' in s1_2143.payload));
+    const elig2143 = evaluateElmEligibility({
+      czId: 2143,
+      solicitud: solicitudFixture({ celular: phone2143 }),
+      grantedRow: null,
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(elig2143.eligible, true);
+    assert.strictEqual(elig2143.s2_withheld, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    const s2_2143 = buildService2Payload({
+      ci: 44489656,
+      czId: 2143,
+      solicitud: solicitudFixture({ celular: phone2143 }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(s2_2143.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    assert.ok(!s2_2143.payload, 'CZ 2143 invalid phone is not rewritten into S2');
+    const refer2143 = evaluateElmReferEligibility({
+      czId: 2143,
+      solicitud: solicitudFixture({ celular: phone2143 }),
+      grantedRow: null,
+      process: { ci: 44489656 },
+    });
+    assert.strictEqual(refer2143.eligible, false);
+    const not2144 = buildService1Payload({
+      czId: 2144,
+      solicitud: solicitudFixture({ celular: phone2143 }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(not2144.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
   });
 
   await test('classification: exact documented texts only; anything else unknown', async () => {

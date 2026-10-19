@@ -62,6 +62,33 @@ function existingRetryApplies(input) {
   return isPreReceptionFailure(input) && srcTrigger(input) !== 'cz_automatic';
 }
 
+/** CZ 2056 / CI 50562896 only. ELM asked to resend S1 after HTTP 400 MODULE_DOES_NOT_EXIST. */
+const MODULE_MISSING_CZ = 2056;
+
+function responseHasModuleDoesNotExist(body) {
+  if (body == null) return false;
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  return text.indexOf('MODULE_DOES_NOT_EXIST') !== -1;
+}
+
+/**
+ * Same process, frozen S1, reserved lock. Not a general HTTP 400 retry.
+ * S2 stays not_started. Any other solicitud or error is false.
+ */
+function moduleMissingS1RetryApplies(input) {
+  const src = input || {};
+  if (Number(src.cz_solicitud_id) !== MODULE_MISSING_CZ) return false;
+  if (srcTrigger(src) !== 'janus_manual') return false;
+  return (
+    src.s1_status === S1.UNKNOWN &&
+    Number(src.s1_http_status) === 400 &&
+    src.s1_error_code === 'elm_http_error' &&
+    (src.s2_status === S2.NOT_STARTED || !src.s2_status) &&
+    !src.ops_resolved_at &&
+    responseHasModuleDoesNotExist(src.s1_response)
+  );
+}
+
 function srcTrigger(input) {
   return input && input.trigger_origin ? String(input.trigger_origin) : null;
 }
@@ -162,6 +189,9 @@ module.exports = {
   isS1UnknownLike,
   isPreReceptionFailure,
   existingRetryApplies,
+  MODULE_MISSING_CZ,
+  responseHasModuleDoesNotExist,
+  moduleMissingS1RetryApplies,
   classifyS1Unknown,
   actionsForS1Unknown,
 };
