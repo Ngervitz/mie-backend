@@ -125,20 +125,33 @@ function planGestionSend(input) {
         blockers: elig.blockers || [],
       };
     }
+    if (elig.s2_withheld) {
+      warnings.push(
+        'El celular no cumple el formato confirmado por ELM. Se envía solo el paso 1. El número original no se modifica y el paso 2 no sale.',
+      );
+    }
     return {
       can_send: true,
       mode: SEND_MODES.FULL,
-      steps: ['s1', 's2'],
+      steps: elig.s2_withheld ? ['s1'] : ['s1', 's2'],
       s1_status: 'not_started',
       s2_status: 'not_started',
       last_send_at: null,
       warnings: warnings,
       duplicate_warning: duplicateWarning,
       expected_attempts: null,
+      s2_withheld: elig.s2_withheld || null,
     };
   }
 
   if (s1 === S1.ELIGIBLE && (s2 === S2.NOT_STARTED || !s2)) {
+    if (elig.s2_withheld) {
+      return {
+        can_send: false,
+        code: elig.s2_withheld,
+        blockers: [{ code: elig.s2_withheld }],
+      };
+    }
     const blockers = (elig.blockers || []).filter(function (b) {
       return b.code !== CODES.PROCESS_EXISTS;
     });
@@ -289,7 +302,9 @@ function sendActionFromPlan(plan) {
             ? 'Reintenta el paso 2 técnico con el payload congelado.'
             : plan.mode === SEND_MODES.ADMIN_PROVIDER_RESEND
               ? 'Reenvío completo S1+S2 autorizado por ELM (mismo proceso, historial archivado).'
-              : 'Envía paso 1 y paso 2 a ELM (proceso nuevo).',
+              : plan.steps && plan.steps.length === 1 && plan.steps[0] === 's1'
+                ? 'Envía solo el paso 1. El paso 2 no se envía: el celular no tiene el formato confirmado por ELM y no se sustituye.'
+                : 'Envía paso 1 y paso 2 a ELM (proceso nuevo).',
     requires_confirm: true,
     mode: plan.mode,
     expected_attempts: plan.expected_attempts,

@@ -130,6 +130,17 @@ function inspectMobilePhone(raw) {
 }
 
 /**
+ * Operator exception for two Gestión ELM solicitudes. S1 does not carry the phone.
+ * S2 still requires a confirmed UY mobile and never rewrites the stored number.
+ */
+const S1_INVALID_PHONE_ALLOWED_CZ = Object.freeze([2049, 2056]);
+
+function s1AllowsInvalidPhone(czId) {
+  const n = Number(czId);
+  return S1_INVALID_PHONE_ALLOWED_CZ.indexOf(n) !== -1;
+}
+
+/**
  * Only UY mobiles (5989 + 7 digits), after safe normalization. Invalid applicant numbers
  * are `elm_mobilephone_needs_correction` (never a commercial rejection). Unconfirmed
  * serialization format stays a JANUS config blocker.
@@ -171,7 +182,9 @@ function buildService1Payload(input) {
   if (missing.length) return fail(CODES.MISSING_REQUIRED_FIELDS, { fields: missing });
 
   const phone = inspectMobilePhone(s.celular);
-  if (phone.status === 'invalid') return fail(CODES.MOBILEPHONE_NEEDS_CORRECTION);
+  if (phone.status === 'invalid' && !s1AllowsInvalidPhone(input && input.czId)) {
+    return fail(CODES.MOBILEPHONE_NEEDS_CORRECTION);
+  }
 
   const czId = positiveSafeInt(input && input.czId);
   if (czId == null) return fail(CODES.INVALID_CZ_ID);
@@ -237,6 +250,7 @@ module.exports = {
   formatMobilePhone,
   normalizeUyMobileDigits,
   inspectMobilePhone,
+  s1AllowsInvalidPhone,
   missingRequiredFields,
   resolveActivityType,
   buildService1Payload,

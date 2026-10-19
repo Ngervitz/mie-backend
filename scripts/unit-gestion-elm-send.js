@@ -472,6 +472,34 @@ async function run(name, fn) {
     assert.ok(statuses.includes('sent') || statuses.includes('send_failed'), statuses.join(','));
   });
 
+  await run('invalid phone exception sends S1 only for CZ 2049 and 2056', async function () {
+    const elig = {
+      eligible: true,
+      blockers: [],
+      s2_withheld: CODES.MOBILEPHONE_NEEDS_CORRECTION,
+    };
+    const plan = planGestionSend({
+      czId: 2049,
+      process: null,
+      readiness: { ready: true },
+      hold: null,
+      eligibility: elig,
+    });
+    assert.strictEqual(plan.can_send, true);
+    assert.deepStrictEqual(plan.steps, ['s1']);
+    const act = sendActionFromPlan(plan);
+    assert.ok(act.explanation.indexOf('solo el paso 1') !== -1);
+    const afterS1 = planGestionSend({
+      czId: 2049,
+      process: { s1_status: S1.ELIGIBLE, s2_status: S2.NOT_STARTED, id: 'p' },
+      readiness: { ready: true },
+      hold: null,
+      eligibility: elig,
+    });
+    assert.strictEqual(afterS1.can_send, false);
+    assert.strictEqual(afterS1.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+  });
+
   console.log('unit-gestion-elm-send: all passed');
 })().catch(function (err) {
   console.error(err);

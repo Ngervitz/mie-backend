@@ -21,7 +21,12 @@
 
 const { isGrantedForSolicitud } = require('../../lib/preaprobadosRead');
 const { CODES } = require('./constants');
-const { missingRequiredFields, inspectMobilePhone, resolveActivityType } = require('./payload');
+const {
+  missingRequiredFields,
+  inspectMobilePhone,
+  resolveActivityType,
+  s1AllowsInvalidPhone,
+} = require('./payload');
 
 /**
  * Commercial origin for tracking only (never sent, never blocks). Base comes from the SMS touch
@@ -72,8 +77,10 @@ function evaluateElmEligibility(input) {
   }
 
   const phone = inspectMobilePhone(sol.celular);
+  let s2Withheld = null;
   if (phone.status === 'invalid') {
-    blockers.push({ code: CODES.MOBILEPHONE_NEEDS_CORRECTION });
+    if (s1AllowsInvalidPhone(input.czId)) s2Withheld = CODES.MOBILEPHONE_NEEDS_CORRECTION;
+    else blockers.push({ code: CODES.MOBILEPHONE_NEEDS_CORRECTION });
   }
 
   const relacion =
@@ -82,7 +89,7 @@ function evaluateElmEligibility(input) {
     blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
   }
 
-  return { eligible: blockers.length === 0, blockers: blockers };
+  return { eligible: blockers.length === 0, blockers: blockers, s2_withheld: s2Withheld };
 }
 
 /**

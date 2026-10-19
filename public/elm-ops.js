@@ -730,6 +730,9 @@
     if (mode === 'resume_s2') return 'Completar paso 2';
     if (mode === 'retry_s2') return 'Reenviar paso 2';
     if (mode === 'retry_s1') return 'Reintento paso 1 y continuar';
+    if (mode === 'full' && preview.steps && preview.steps.length === 1 && preview.steps[0] === 's1') {
+      return 'Solo paso 1 (el paso 2 no sale: celular fuera del formato ELM)';
+    }
     if (mode === 'full') return 'Envío completo paso 1 y paso 2';
     return 'Envío a ELM';
   }

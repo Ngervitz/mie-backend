@@ -161,6 +161,7 @@ const {
 const {
   normalizeCommercialOrigin,
   evaluateElmEligibility,
+  evaluateElmReferEligibility,
 } = require('../src/services/elm/eligibility');
 const {
   createElmClient,
@@ -505,6 +506,42 @@ async function runAll() {
     });
     assert.strictEqual(eligPhone.eligible, false);
     assert.ok(eligPhone.blockers.some((b) => b.code === CODES.MOBILEPHONE_NEEDS_CORRECTION));
+    const allowed = buildService1Payload({
+      czId: 2049,
+      solicitud: solicitudFixture({ celular: '6955246' }),
+      config: TEST_CONFIG,
+    });
+    assert.ok(allowed.ok, 'CZ 2049 S1 is built without a valid mobile');
+    assert.ok(!('mobilephone' in allowed.payload));
+    const stillBlocked = buildService1Payload({
+      czId: 1001,
+      solicitud: solicitudFixture({ celular: '6955246' }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(stillBlocked.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    const eligAllowed = evaluateElmEligibility({
+      czId: 2056,
+      solicitud: solicitudFixture({ celular: '598991234567' }),
+      grantedRow: null,
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(eligAllowed.eligible, true);
+    assert.strictEqual(eligAllowed.s2_withheld, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    const s2Blocked = buildService2Payload({
+      ci: 12345678,
+      czId: 2049,
+      solicitud: solicitudFixture({ celular: '6955246' }),
+      config: TEST_CONFIG,
+    });
+    assert.strictEqual(s2Blocked.code, CODES.MOBILEPHONE_NEEDS_CORRECTION);
+    assert.ok(!s2Blocked.payload, 'invalid phone is not rewritten into S2');
+    const refer = evaluateElmReferEligibility({
+      czId: 2049,
+      solicitud: solicitudFixture({ celular: '6955246' }),
+      grantedRow: null,
+      process: { ci: 12345678 },
+    });
+    assert.strictEqual(refer.eligible, false);
   });
 
   await test('classification: exact documented texts only; anything else unknown', async () => {
