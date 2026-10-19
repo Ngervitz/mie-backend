@@ -616,7 +616,7 @@ async function fetchRejectedEstadoRows(supabase, solicitudIds) {
 }
 
 const SOLICITUD_LIST_SELECT =
-  'cz_id, ci, nombre, apellido, fecha_reg, solicitudes_estados_id';
+  'cz_id, ci, nombre, apellido, fecha_reg, solicitudes_estados_id, email, lrw_id';
 
 async function fetchCurrentEstadoRejectedSolicitudes(supabase) {
   return fetchAllPages(function (from, to) {

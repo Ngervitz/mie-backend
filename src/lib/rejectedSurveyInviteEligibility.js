@@ -21,6 +21,9 @@ const {
   unavailableSurveyInvite,
 } = require('./emailSuppressionsRead');
 const logger = require('./logger');
+const {
+  resolveSurveyInviteListContext,
+} = require('./rejectedSurveyInviteListContext');
 
 function getWave1CampaignId() {
   const fromEnv =
@@ -278,7 +281,12 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
  * Uses the same catch-up due-step rules as the job (T0 → dueStep → gates).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} rows
- * @param {{ now?: Date }} [opts]
+ * @param {{
+ *   now?: Date,
+ *   estadoRows?: object[],
+ *   solicitudRows?: object[],
+ * }} [opts]
+ *   estadoRows / solicitudRows — reuse fetchRejectedListBundle output (hotfix A+B).
  */
 async function attachSurveyInviteToListRows(supabase, rows, opts) {
   const list = rows || [];
@@ -306,18 +314,18 @@ async function attachSurveyInviteToListRows(supabase, rows, opts) {
     return Number(r.ci);
   });
 
-  const { data: solicitudRows, error: solErr } = await supabase
-    .from('cz_funnel_solicitudes')
-    .select('cz_id, ci, email, lrw_id, nombre');
-  if (solErr) throw new Error('list survey solicitudes: ' + solErr.message);
-
-  const { data: estadoRows, error: estErr } = await supabase
-    .from('cz_funnel_solicitud_estados')
-    .select(
-      'cz_historico_id, cz_solicitud_id, fechahora_src, solicitudes_estados_id',
-    )
-    .eq('solicitudes_estados_id', REJECTED_ESTADO_ID);
-  if (estErr) throw new Error('list survey estados: ' + estErr.message);
+  let solicitudRows;
+  let estadoRows;
+  try {
+    const ctx = await resolveSurveyInviteListContext(supabase, opts);
+    solicitudRows = ctx.solicitudRows;
+    estadoRows = ctx.estadoRows;
+  } catch (ctxErr) {
+    throw new Error(
+      'list survey invite context: ' +
+        (ctxErr && ctxErr.message ? ctxErr.message : 'unknown'),
+    );
+  }
 
   const { data: encuestas, error: encErr } = await supabase
     .from('cz_funnel_encuestas')

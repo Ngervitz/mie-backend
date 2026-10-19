@@ -175,7 +175,10 @@ router.get('/', async function getRechazadosList(req, res) {
       outreachRows: bundle.outreachRows,
       status: parsed.status,
     });
-    const withInvite = await attachSurveyInviteToListRows(supabase, rows);
+    const withInvite = await attachSurveyInviteToListRows(supabase, rows, {
+      estadoRows: bundle.estadoRows,
+      solicitudRows: bundle.solicitudRows,
+    });
     const surveyInviteAvailable =
       withInvite.length === 0 ||
       withInvite.every(function (r) {
