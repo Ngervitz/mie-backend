@@ -767,3 +767,93 @@
   background: rgba(239, 68, 68, 0.14);
   border-color: #ef4444;
 }
+
+#meta-ads-root .ma-period-bar {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  background: var(--meta-agent-surface);
+  border: 1px solid var(--meta-agent-border);
+  border-radius: 8px;
+}
+
+#meta-ads-root .ma-period-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#meta-ads-root .ma-period-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--meta-agent-border);
+  background: transparent;
+  color: var(--meta-agent-muted);
+  cursor: pointer;
+}
+
+#meta-ads-root .ma-period-btn.active {
+  border-color: #60a5fa;
+  color: #e8eaed;
+  background: rgba(96, 165, 250, 0.12);
+}
+
+#meta-ads-root .ma-period-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--meta-agent-muted);
+}
+
+#meta-ads-root .ma-period-input {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--meta-agent-border);
+  background: var(--meta-agent-bg);
+  color: var(--meta-agent-text);
+}
+
+#meta-ads-root .ma-period-summary {
+  font-size: 12px;
+  color: var(--meta-agent-muted);
+  margin-top: 4px;
+}
+
+#meta-ads-root .ma-period-tz {
+  color: var(--meta-agent-faint);
+}
+
+#meta-ads-root .ma-period-note {
+  font-size: 11px;
+  color: var(--meta-agent-faint);
+  margin: 8px 0 0;
+}
+
+#meta-ads-root .ma-coverage-banner {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--meta-agent-amber-border);
+  background: var(--meta-agent-amber-soft);
+  color: var(--meta-agent-amber-text);
+}
+
+#meta-ads-root .ma-coverage-banner.ma-coverage-warn {
+  border-color: var(--meta-agent-red-border);
+  background: var(--meta-agent-red-soft);
+  color: var(--meta-agent-red-text);
+}
+
+#meta-ads-root .ma-camp-id {
+  font-size: 11px;
+  color: var(--meta-agent-faint);
+  margin-left: 8px;
+}
