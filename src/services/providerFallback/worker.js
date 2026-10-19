@@ -157,8 +157,6 @@ function createProviderFallbackWorker(deps) {
     if (guard.kind === 'wait') {
       return defer(job, workerId, secondsUntil(guard.untilMs), false, DEFER.CI_OTHER_IN_FLIGHT);
     }
-    const phone = classifyPhoneCorrection(snapshotToSolicitud(job.snapshot));
-    if (phone) return finalizeDecision(job, workerId, phone, elmProcessId);
     const lock = decideCiLock(
       await repo.acquireCiLock({ ci: ci, czSolicitudId: czId, fallbackRequestId: job.id }),
     );
@@ -166,6 +164,8 @@ function createProviderFallbackWorker(deps) {
     if (lock.kind === 'wait') {
       return defer(job, workerId, config.notStartedRetrySeconds, false, DEFER.CI_SEND_IN_PROGRESS);
     }
+    const phone = classifyPhoneCorrection(snapshotToSolicitud(job.snapshot));
+    if (phone) return finalizeDecision(job, workerId, phone, elmProcessId);
     return null;
   }
 

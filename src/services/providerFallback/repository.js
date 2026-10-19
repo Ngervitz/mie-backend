@@ -21,7 +21,7 @@ const STATUS_SELECT =
   'id, cz_solicitud_id, provider, exec_status, outcome, reason_code, related_cz_solicitud_id, cz_estado_id_at_start:snapshot->cz_estado_id, finalized_at, cz_delivery_status, cz_acked_at, created_at';
 
 const CI_GUARD_SELECT =
-  'id, cz_solicitud_id, ci, s1_status, s1_lease_expires_at, s2_status, s2_lease_expires_at, referred_at, provider_status, disbursed_at, ops_resolved_at';
+  'id, cz_solicitud_id, ci, s1_status, s1_lease_expires_at, s1_started_at, s1_completed_at, s2_status, s2_lease_expires_at, referred_at, provider_status, disbursed_at, ops_resolved_at';
 
 function firstRow(data) {
   if (Array.isArray(data)) return data.length ? data[0] : null;

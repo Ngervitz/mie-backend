@@ -26,6 +26,7 @@ const { technicalRetryDelaySeconds } = require('../elm/config');
 const { isService1Negative } = require('../elm/client');
 const { isS2Accepted } = require('../elm/classification');
 const { inspectMobilePhone } = require('../elm/payload');
+const { montevideoMonthKey } = require('../../lib/rejectedElmResendGuard');
 const {
   OUTCOME,
   REASONS,
@@ -165,9 +166,12 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
 /**
  * Rules (Fase 3B + C1). Processes closed by an audited manual resolution (ops_resolved_at) are
  * ignored. A referral that ended (ELM GRANTED / Convertido, or projected CZ estado 3 / 16) no
- * longer counts as an active / uncertain referral; an uncertain S1 still blocks until resolved.
+ * longer counts as an active / uncertain referral. An uncertain S1/S2 still blocks until the
+ * prior solicitud is closed in CZ, except when the prior is already closed with a documented
+ * negative S1 text (e.g. Repetido): the new solicitud follows the rejected circuit instead.
  * A GRANTED loan only closes its own solicitud: it never blocks later solicitudes of the CI.
- *  1. another process of the CI is unknown (persisted or lease expired) → manual_review;
+ *  1. another process of the CI is unknown (persisted or lease expired) and not closed in CZ
+ *     → manual_review; closed prior with definitive negative S1 → rejected (duplicate);
  *  2. another process of the CI is in_flight (lease valid) → wait for it;
  *  3. another process of the CI has an S2 referral → already_referred (nothing is sent), whatever
  *     the provider status (no automatic expiry of an active referral);
@@ -203,9 +207,48 @@ function evaluateCiGuard(processes, selfCzId, nowMs) {
     return Object.assign(decision, { relatedCzId: Number(p.cz_solicitud_id) });
   }
 
+  /** Prior solicitud closed in CZ with ELM duplicate-rejection text (Repetido…Rechaz…), not other negatives. */
+  function isPriorDuplicateRejectionMessage(text) {
+    if (typeof text !== 'string') return false;
+    const k = text.trim().toLowerCase();
+    return k.includes('repetido') && k.includes('rechaz');
+  }
+
+  function priorSendMonthKey(p) {
+    const priorMs = leaseMs(p.s1_completed_at) || leaseMs(p.s1_started_at);
+    return priorMs != null ? montevideoMonthKey(priorMs) : null;
+  }
+
+  /**
+   * Prior solicitud already closed in CZ with ELM duplicate text (Repetido…Rechaz…). The new
+   * solicitud was never sent to ELM: use ci_monthly_quota_used (same calendar month as the prior
+   * send), not elm_s1_rejected. Cross-month blocks are not faked here (lock / future reason).
+   */
+  function priorClosedDuplicate(p) {
+    if (!closedInCz(p)) return null;
+    const msg = p.s1_result_message;
+    if (!isPriorDuplicateRejectionMessage(msg)) return null;
+    const s1Eff = effective(p.s1_status, p.s1_lease_expires_at, nowMs);
+    if (p.s1_status !== S1.REJECTED && s1Eff !== S1.UNKNOWN) return null;
+    const priorMonth = priorSendMonthKey(p);
+    if (priorMonth == null || priorMonth !== montevideoMonthKey(nowMs)) return null;
+    return withRelated(
+      final(OUTCOME.NOT_ELIGIBLE, REASONS.CI_MONTHLY_QUOTA_USED, {
+        prior_cz_solicitud_id: p.cz_solicitud_id,
+        month_key: priorMonth,
+        ci_duplicate_prior_closed: true,
+      }),
+      p,
+    );
+  }
+
+  for (const p of others) {
+    const dup = priorClosedDuplicate(p);
+    if (dup) return dup;
+  }
   for (const p of others) {
     if (
-      effective(p.s1_status, p.s1_lease_expires_at, nowMs) === S1.UNKNOWN ||
+      (effective(p.s1_status, p.s1_lease_expires_at, nowMs) === S1.UNKNOWN && !closedInCz(p)) ||
       (effective(p.s2_status, p.s2_lease_expires_at, nowMs) === S2.UNKNOWN && !closedInCz(p) && !isS2Accepted(p))
     ) {
       return withRelated(final(OUTCOME.MANUAL_REVIEW, REASONS.CI_PRIOR_UNKNOWN), p);
