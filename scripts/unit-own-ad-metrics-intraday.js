@@ -70,6 +70,20 @@ test('Montevideo range rolls forward at 00:30 Uruguay', function () {
   assert.deepStrictEqual(range, { since: '2026-10-12', until: '2026-10-13' });
 });
 
+test('insights URL ad level includes ad_id and time_increment=1', function () {
+  const url = metrics.buildInsightsUrl({
+    version: 'v25.0',
+    adAccountId: 'act_1327861319208450',
+    reportingRange: { since: '2026-10-11', until: '2026-10-12' },
+    level: 'ad',
+  });
+  const parsed = new URL(url);
+  assert.strictEqual(parsed.searchParams.get('level'), 'ad');
+  assert.strictEqual(parsed.searchParams.get('time_increment'), '1');
+  assert.ok(parsed.searchParams.get('fields').includes('ad_id'));
+  assert.ok(parsed.searchParams.get('fields').includes('campaign_id'));
+});
+
 test('insights URL splits yesterday and today with time_increment=1', function () {
   const url = metrics.buildInsightsUrl({
     version: 'v25.0',
@@ -261,6 +275,115 @@ test('upsert uses the natural key and a second call replaces the same row', asyn
   assert.strictEqual(store.get(entityId + '|99|2026-10-12').run_id, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 });
 
+test('mapRowToAdMetric and collapseAdMetricRows dedupe by ad_id and date', function () {
+  const entityId = 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df';
+  const first = metrics.mapRowToAdMetric({
+    row: {
+      ad_id: '120000',
+      ad_name: 'Ad A',
+      campaign_id: '99',
+      campaign_name: 'Camp',
+      date_start: '2026-10-12',
+      spend: '1',
+      impressions: '10',
+      clicks: '1',
+      conversions: [
+        {
+          action_type: 'offsite_conversion.fb_pixel_custom.form_step_3',
+          value: '1',
+        },
+      ],
+    },
+    entityId: entityId,
+    runId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  });
+  const second = metrics.mapRowToAdMetric({
+    row: {
+      ad_id: '120000',
+      ad_name: 'Ad A',
+      campaign_id: '99',
+      campaign_name: 'Camp',
+      date_start: '2026-10-12',
+      spend: '4',
+      impressions: '40',
+      clicks: '4',
+    },
+    entityId: entityId,
+    runId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  });
+  assert.strictEqual(first.ad_id, '120000');
+  assert.strictEqual(first.actions, 1);
+  const collapsed = metrics.collapseAdMetricRows([first, second]);
+  assert.strictEqual(collapsed.length, 1);
+  assert.strictEqual(collapsed[0].spend, 4);
+});
+
+test('upsertAdMetrics uses entity_id,ad_id,metric_date conflict', async function () {
+  const entityId = 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df';
+  const row = metrics.mapRowToAdMetric({
+    row: {
+      ad_id: '120001',
+      ad_name: 'Ad B',
+      campaign_id: '99',
+      date_start: '2026-10-12',
+      spend: '2',
+      clicks: '2',
+    },
+    entityId: entityId,
+    runId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  });
+  upserts.length = 0;
+  await metrics.upsertAdMetrics([row]);
+  assert.strictEqual(upserts.length, 1);
+  assert.strictEqual(upserts[0].table, 'own_ad_ad_metrics');
+  assert.strictEqual(upserts[0].options.onConflict, metrics.UPSERT_AD_CONFLICT);
+});
+
+test('collectAdLevelMetrics returns failed status without throwing', async function () {
+  const originalFetch = global.fetch;
+  global.fetch = async function () {
+    return {
+      ok: false,
+      status: 500,
+      json: async function () {
+        return { error: { message: 'rate limit' } };
+      },
+    };
+  };
+  try {
+    const result = await metrics.collectAdLevelMetrics({
+      version: 'v25.0',
+      adAccountId: 'act_1',
+      accessToken: 'token',
+      reportingRange: { since: '2026-10-11', until: '2026-10-12' },
+      entityId: 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df',
+      runId: '11111111-1111-1111-1111-111111111111',
+    });
+    assert.strictEqual(result.status, 'failed');
+    assert.ok(result.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('migration own_ad_ad_metrics defines unique entity ad date', function () {
+  const sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/20261015_own_ad_ad_metrics.sql'),
+    'utf8',
+  );
+  assert.ok(sql.includes('own_ad_ad_metrics'));
+  assert.ok(/UNIQUE\s*\(\s*entity_id\s*,\s*ad_id\s*,\s*metric_date\s*\)/i.test(sql));
+  assert.ok(sql.includes('allow_anon_select_own_ad_ad_metrics'));
+  assert.ok(/GRANT SELECT ON TABLE public\.own_ad_ad_metrics TO anon/i.test(sql));
+  assert.ok(
+    /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.own_ad_ad_metrics TO service_role/i.test(sql),
+  );
+  assert.ok(/REVOKE ALL ON TABLE public\.own_ad_ad_metrics FROM anon/i.test(sql));
+  assert.ok(/TO anon\s*\n\s*USING \(true\)/s.test(sql));
+  assert.ok(!/TO anon, authenticated/i.test(sql));
+  assert.ok(sql.includes('has_table_privilege'));
+});
+
 test('migration deletes only the two Make runs and adds the natural unique key', function () {
   const sql = fs.readFileSync(
     path.join(__dirname, '../migrations/20261012_own_ad_metrics_dedupe_unique.sql'),
@@ -298,6 +421,8 @@ test('dashboard keeps performance open, marks the current day, and collapses liq
   assert.ok(js.includes('ma-kpi-section-performance'));
   assert.ok(!js.includes('toggle-performance'));
   assert.ok(js.includes('data-ma-action="toggle-liquidity"'));
+  assert.ok(js.includes('Ver anuncios'));
+  assert.ok(js.includes('var spendNum = fmtN(row.spend)'));
 });
 
 (async function main() {

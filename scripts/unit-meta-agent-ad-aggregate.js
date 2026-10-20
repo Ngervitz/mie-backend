@@ -1,0 +1,231 @@
+'use strict';
+
+/**
+ * node scripts/unit-meta-agent-ad-aggregate.js
+ * Ad-level period aggregation + UI helpers (Fase 2).
+ */
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const ui = require('../public/meta-agent.js');
+
+function adLegacyRow(opts) {
+  return ui.mapOwnAdAdMetricsToLegacyRow({
+    campaign_id: opts.campaign_id,
+    campaign_name: opts.campaign_name || 'Camp',
+    ad_id: opts.ad_id,
+    ad_name: opts.ad_name,
+    metric_date: opts.metric_date,
+    spend: opts.spend,
+    impressions: opts.impressions,
+    clicks: opts.clicks,
+    created_at: opts.created_at || '2026-10-01T12:00:00.000Z',
+    raw_json: opts.raw_json || {
+      conversions: [
+        {
+          action_type: 'offsite_conversion.fb_pixel_custom.form_step_3',
+          value: String(opts.leads != null ? opts.leads : 0),
+        },
+      ],
+    },
+  });
+}
+
+function test(name, fn) {
+  return { name: name, fn: fn };
+}
+
+const tests = [
+  test('mapOwnAdAdMetricsToLegacyRow uses spendNum for CPC (hotfix parity)', function () {
+    const row = adLegacyRow({
+      ad_id: 'ad-1',
+      ad_name: 'Creative A',
+      campaign_id: 'camp-1',
+      metric_date: '2026-10-10',
+      spend: 20,
+      impressions: 200,
+      clicks: 10,
+      leads: 2,
+    });
+    assert.strictEqual(row.ad_id, 'ad-1');
+    const cpc = parseFloat(row.cpc);
+    assert.strictEqual(cpc, 2);
+  }),
+
+  test('buildAdListByAdId groups by ad_id not name', function () {
+    const rows = [
+      adLegacyRow({
+        ad_id: '777',
+        ad_name: 'Name A',
+        campaign_id: 'camp-1',
+        metric_date: '2026-10-01',
+        spend: 5,
+        impressions: 100,
+        clicks: 10,
+        leads: 1,
+      }),
+      adLegacyRow({
+        ad_id: '777',
+        ad_name: 'Name B typo',
+        campaign_id: 'camp-1',
+        metric_date: '2026-10-02',
+        spend: 7,
+        impressions: 100,
+        clicks: 10,
+        leads: 2,
+      }),
+    ];
+    const list = ui.buildAdListByAdId(rows);
+    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list[0].ad_id, '777');
+    assert.strictEqual(list[0].gasto, 12);
+    assert.strictEqual(list[0].conversiones, 3);
+    assert.strictEqual(list[0].cpl, 4);
+  }),
+
+  test('CPL is null when no form_step_3 on ad rows', function () {
+    const row = ui.mapOwnAdAdMetricsToLegacyRow({
+      ad_id: '1',
+      ad_name: 'Ad',
+      campaign_id: 'c1',
+      metric_date: '2026-10-01',
+      spend: 50,
+      impressions: 100,
+      clicks: 10,
+      raw_json: { conversions: [] },
+    });
+    const list = ui.buildAdListByAdId([row]);
+    assert.strictEqual(list[0].cpl, null);
+    assert.strictEqual(list[0].cplSinConversiones, true);
+  }),
+
+  test('dedupeRowsByAdDate keeps newest created_at', function () {
+    const older = adLegacyRow({
+      ad_id: '1',
+      campaign_id: 'c1',
+      metric_date: '2026-10-05',
+      spend: 1,
+      impressions: 10,
+      clicks: 1,
+      leads: 1,
+      created_at: '2026-10-05T08:00:00.000Z',
+    });
+    const newer = adLegacyRow({
+      ad_id: '1',
+      campaign_id: 'c1',
+      metric_date: '2026-10-05',
+      spend: 9,
+      impressions: 10,
+      clicks: 1,
+      leads: 2,
+      created_at: '2026-10-05T18:00:00.000Z',
+    });
+    const out = ui.dedupeRowsByAdDate([older, newer]);
+    assert.strictEqual(out.length, 1);
+    assert.strictEqual(parseFloat(out[0].spend), 9);
+  }),
+
+  test('computeAdsDerivedForState respects global period filter', function () {
+    const rows = [
+      adLegacyRow({
+        ad_id: 'a1',
+        campaign_id: '999',
+        metric_date: '2026-10-10',
+        spend: 10,
+        impressions: 100,
+        clicks: 10,
+        leads: 1,
+      }),
+      adLegacyRow({
+        ad_id: 'a1',
+        campaign_id: '999',
+        metric_date: '2026-10-20',
+        spend: 5,
+        impressions: 50,
+        clicks: 5,
+        leads: 0,
+      }),
+    ];
+    const derived = ui.computeAdsDerivedForState(
+      rows,
+      'custom',
+      '2026-10-10',
+      '2026-10-11',
+    );
+    assert.strictEqual(derived.adList.length, 1);
+    assert.strictEqual(derived.adList[0].gasto, 10);
+    assert.strictEqual((derived.adsByCampaign['999'] || []).length, 1);
+  }),
+
+  test('toggleExpandedCampaign expands and collapses independently', function () {
+    let map = {};
+    map = ui.toggleExpandedCampaign(map, '111');
+    assert.strictEqual(map['111'], true);
+    map = ui.toggleExpandedCampaign(map, '222');
+    assert.strictEqual(map['222'], true);
+    assert.strictEqual(map['111'], true);
+    map = ui.toggleExpandedCampaign(map, '111');
+    assert.strictEqual(map['111'], undefined);
+    assert.strictEqual(map['222'], true);
+  }),
+
+  test('campaign KPI path unchanged when ad dataset is empty', function () {
+    const campRows = [
+      ui.mapOwnAdMetricsToLegacyRow({
+        campaign_id: '999',
+        campaign_name: 'C',
+        metric_date: '2026-10-10',
+        spend: 40,
+        impressions: 100,
+        clicks: 10,
+        raw_json: {
+          conversions: [
+            {
+              action_type: 'offsite_conversion.fb_pixel_custom.form_step_3',
+              value: '2',
+            },
+          ],
+        },
+      }),
+    ];
+    const derived = ui.computeDerivedForState(
+      campRows,
+      'custom',
+      '2026-10-10',
+      '2026-10-10',
+    );
+    const adsDerived = ui.computeAdsDerivedForState([], 'custom', '2026-10-10', '2026-10-10');
+    assert.strictEqual(derived.period.spend, 40);
+    assert.strictEqual(adsDerived.datasetEmpty, true);
+    assert.strictEqual(adsDerived.adList.length, 0);
+  }),
+
+  test('meta-agent UI includes Ver anuncios control without new tabs', function () {
+    const js = fs.readFileSync(
+      path.join(__dirname, '../public/meta-agent.js'),
+      'utf8',
+    );
+    assert.ok(js.includes('Ver anuncios'));
+    assert.ok(js.includes('Ocultar anuncios'));
+    assert.ok(js.includes('toggle-campaign-ads'));
+    assert.ok(js.includes('own_ad_ad_metrics'));
+    assert.ok(!js.includes("data-ma-tab=\"ads\""));
+  }),
+];
+
+(async function main() {
+  for (const item of tests) {
+    try {
+      await item.fn();
+      console.log('ok ' + item.name);
+    } catch (err) {
+      console.error('FAIL ' + item.name);
+      console.error(err && err.stack ? err.stack : err);
+      process.exitCode = 1;
+    }
+  }
+  if (process.exitCode) process.exit(process.exitCode);
+  console.log('all meta-agent ad aggregate checks passed');
+})();

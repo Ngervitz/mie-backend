@@ -15,6 +15,40 @@ const ACCOUNT_TIME_ZONE = 'America/Montevideo';
  */
 const META_CPL_ACTION_TYPE = 'offsite_conversion.fb_pixel_custom.form_step_3';
 const UPSERT_CONFLICT = 'entity_id,campaign_id,metric_date';
+const UPSERT_AD_CONFLICT = 'entity_id,ad_id,metric_date';
+
+const CAMPAIGN_INSIGHT_FIELDS = [
+  'campaign_id',
+  'campaign_name',
+  'spend',
+  'impressions',
+  'clicks',
+  'actions',
+  'action_values',
+  'conversions',
+  'conversion_values',
+  'frequency',
+  'reach',
+  'quality_ranking',
+  'engagement_rate_ranking',
+  'conversion_rate_ranking',
+  'date_start',
+];
+
+const AD_INSIGHT_FIELDS = [
+  'ad_id',
+  'ad_name',
+  'campaign_id',
+  'campaign_name',
+  'spend',
+  'impressions',
+  'clicks',
+  'actions',
+  'action_values',
+  'conversions',
+  'conversion_values',
+  'date_start',
+];
 
 // Ayer y hoy en la zona de la cuenta. El día en curso se actualiza; el anterior
 // sigue abierto a ajustes de atribución. time_increment=1 evita mezclarlos.
@@ -85,6 +119,7 @@ function buildSuccessRawJson({
   reportingRange,
   campaignsFound,
   metricsInserted,
+  adLevel,
 }) {
   return {
     reportingDate,
@@ -95,6 +130,7 @@ function buildSuccessRawJson({
     campaignsFound,
     metricsInserted,
     noCampaignsFound: campaignsFound === 0,
+    adLevel: adLevel || null,
   };
 }
 
@@ -188,26 +224,21 @@ async function finishRun({ runId, status, rawJson }) {
   return finishedAt;
 }
 
-function buildInsightsUrl({ version, adAccountId, reportingRange, after }) {
+function buildInsightsUrl({
+  version,
+  adAccountId,
+  reportingRange,
+  after,
+  level,
+  fields,
+}) {
+  const insightLevel = level || 'campaign';
+  const fieldList =
+    fields ||
+    (insightLevel === 'ad' ? AD_INSIGHT_FIELDS : CAMPAIGN_INSIGHT_FIELDS);
   const params = new URLSearchParams({
-    level: 'campaign',
-    fields: [
-      'campaign_id',
-      'campaign_name',
-      'spend',
-      'impressions',
-      'clicks',
-      'actions',
-      'action_values',
-      'conversions',
-      'conversion_values',
-      'frequency',
-      'reach',
-      'quality_ranking',
-      'engagement_rate_ranking',
-      'conversion_rate_ranking',
-      'date_start',
-    ].join(','),
+    level: insightLevel,
+    fields: fieldList.join(','),
     time_increment: '1',
     time_range: JSON.stringify({
       since: reportingRange.since,
@@ -253,21 +284,27 @@ async function fetchInsightsPage({ url, accessToken, pageNumber }) {
   return body;
 }
 
-async function fetchAllCampaignRows({
+async function fetchAllInsightRows({
   version,
   adAccountId,
   accessToken,
   reportingRange,
+  level,
+  fields,
+  logLabel,
 }) {
   const rows = [];
   const seenCursors = new Set();
   let after = null;
   let pageNumber = 0;
+  const label = logLabel || level || 'insights';
 
   while (true) {
     pageNumber += 1;
     if (pageNumber > MAX_PAGES) {
-      throw new Error(`Meta Insights pagination exceeded max pages (${MAX_PAGES})`);
+      throw new Error(
+        `Meta Insights ${label} pagination exceeded max pages (${MAX_PAGES})`,
+      );
     }
 
     const url = buildInsightsUrl({
@@ -275,12 +312,15 @@ async function fetchAllCampaignRows({
       adAccountId,
       reportingRange,
       after,
+      level,
+      fields,
     });
     const body = await fetchInsightsPage({ url, accessToken, pageNumber });
     const pageRows = Array.isArray(body.data) ? body.data : [];
     rows.push(...pageRows);
 
     logger.info('Meta Insights page processed', {
+      level: label,
       pageNumber,
       recordsProcessed: pageRows.length,
       totalRecords: rows.length,
@@ -300,12 +340,12 @@ async function fetchAllCampaignRows({
 
     if (!cursor) {
       throw new Error(
-        `Meta Insights page ${pageNumber}: paging.next present without cursors.after`,
+        `Meta Insights ${label} page ${pageNumber}: paging.next present without cursors.after`,
       );
     }
     if (seenCursors.has(cursor)) {
       throw new Error(
-        `Meta Insights page ${pageNumber}: repeated pagination cursor detected`,
+        `Meta Insights ${label} page ${pageNumber}: repeated pagination cursor detected`,
       );
     }
     seenCursors.add(cursor);
@@ -313,6 +353,22 @@ async function fetchAllCampaignRows({
   }
 
   return rows;
+}
+
+async function fetchAllCampaignRows(opts) {
+  return fetchAllInsightRows({
+    ...opts,
+    level: 'campaign',
+    logLabel: 'campaign',
+  });
+}
+
+async function fetchAllAdRows(opts) {
+  return fetchAllInsightRows({
+    ...opts,
+    level: 'ad',
+    logLabel: 'ad',
+  });
 }
 
 function mapRowToMetric({ row, entityId, runId }) {
@@ -353,6 +409,97 @@ async function upsertMetrics(rows) {
     throw new Error(`Failed to upsert own_ad_metrics: ${error.message}`);
   }
   return { upserted: deduped.length };
+}
+
+function mapRowToAdMetric({ row, entityId, runId }) {
+  if (!row || row.ad_id == null || row.campaign_id == null || !row.date_start) {
+    return null;
+  }
+  const adId = String(row.ad_id);
+  if (!adId) return null;
+  return {
+    entity_id: entityId,
+    run_id: runId,
+    campaign_id: String(row.campaign_id),
+    campaign_name: row.campaign_name != null ? String(row.campaign_name) : null,
+    ad_id: adId,
+    ad_name: row.ad_name != null ? String(row.ad_name) : null,
+    metric_date: String(row.date_start),
+    spend: parseFloatOrNull(row.spend),
+    impressions: parseIntOrNull(row.impressions),
+    clicks: parseIntOrNull(row.clicks),
+    actions: metaApplicationSuccessCount(row),
+    actions_value: metaApplicationSuccessValue(row),
+    raw_json: row,
+  };
+}
+
+function collapseAdMetricRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    if (!row) continue;
+    const key = [row.entity_id, row.ad_id, row.metric_date].join('\u0000');
+    byKey.set(key, row);
+  }
+  return Array.from(byKey.values());
+}
+
+async function upsertAdMetrics(rows) {
+  const deduped = collapseAdMetricRows(rows);
+  if (!deduped.length) return { upserted: 0 };
+  const { error } = await supabase.from('own_ad_ad_metrics').upsert(deduped, {
+    onConflict: UPSERT_AD_CONFLICT,
+  });
+  if (error) {
+    throw new Error(`Failed to upsert own_ad_ad_metrics: ${error.message}`);
+  }
+  return { upserted: deduped.length };
+}
+
+/**
+ * Ad-level ingest isolated from campaign success: failures are logged and returned, not thrown.
+ */
+async function collectAdLevelMetrics({
+  version,
+  adAccountId,
+  accessToken,
+  reportingRange,
+  entityId,
+  runId,
+}) {
+  try {
+    const adRows = await fetchAllAdRows({
+      version,
+      adAccountId,
+      accessToken,
+      reportingRange,
+    });
+    const metricRows = adRows
+      .map((row) => mapRowToAdMetric({ row, entityId, runId }))
+      .filter(Boolean);
+    const { upserted } = await upsertAdMetrics(metricRows);
+    return {
+      status: 'success',
+      adsFound: adRows.length,
+      adRowsUpserted: upserted,
+      message: null,
+    };
+  } catch (err) {
+    const message =
+      err && err.message != null ? String(err.message) : 'unknown';
+    logger.error('Meta ad-level own-metrics collect failed (campaign ingest succeeded)', {
+      runId,
+      entityId,
+      error: message,
+    });
+    return {
+      status: 'failed',
+      adsFound: 0,
+      adRowsUpserted: 0,
+      message,
+      metaBody: err && err.metaBody !== undefined ? err.metaBody : undefined,
+    };
+  }
 }
 
 /**
@@ -412,11 +559,22 @@ async function collectOwnMetrics(options = {}) {
       mapRowToMetric({ row, entityId, runId }));
 
     const { upserted } = await upsertMetrics(metricRows);
+
+    const adLevel = await collectAdLevelMetrics({
+      version: apiVersion,
+      adAccountId,
+      accessToken,
+      reportingRange,
+      entityId,
+      runId,
+    });
+
     const successRawJson = buildSuccessRawJson({
       reportingDate,
       reportingRange,
       campaignsFound: campaignRows.length,
       metricsInserted: upserted,
+      adLevel,
     });
     const finishedAt = await finishRun({
       runId,
@@ -431,6 +589,7 @@ async function collectOwnMetrics(options = {}) {
       entityName,
       campaignsFound: campaignRows.length,
       rowsInserted: upserted,
+      adLevel,
       reportingDate,
       reportingRange,
       finishedAt,
@@ -441,6 +600,8 @@ async function collectOwnMetrics(options = {}) {
       runId,
       campaignsFound: campaignRows.length,
       rowsInserted: upserted,
+      adLevelStatus: adLevel.status,
+      adRowsUpserted: adLevel.adRowsUpserted,
       reportingDate,
       status: 'success',
     });
@@ -474,19 +635,32 @@ async function collectOwnMetrics(options = {}) {
 
 module.exports = {
   collectOwnMetrics,
+  collectAdLevelMetrics,
+  resolveSelfEntityId,
+  insertRun,
+  finishRun,
   parseFloatOrNull,
   parseIntOrNull,
   mapRowToMetric,
+  mapRowToAdMetric,
   metaApplicationSuccessCount,
   countExactActionType,
   collapseMetricRows,
+  collapseAdMetricRows,
   upsertMetrics,
+  upsertAdMetrics,
+  fetchAllCampaignRows,
+  fetchAllAdRows,
+  fetchAllInsightRows,
   resolveMontevideoReportingRange,
   calendarDateInZone,
   buildInsightsUrl,
   ACCOUNT_TIME_ZONE,
   META_CPL_ACTION_TYPE,
   UPSERT_CONFLICT,
+  UPSERT_AD_CONFLICT,
+  AD_INSIGHT_FIELDS,
+  CAMPAIGN_INSIGHT_FIELDS,
   buildSuccessRawJson,
   buildFailureRawJson,
   MAX_PAGES,

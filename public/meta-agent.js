@@ -57,6 +57,11 @@
     liquidityListOpen: false,
     // Current BCU usura rate from GET /api/bcu-usura-rate/current.
     bcuUsuraRate: null,
+    /** Ad-level rows from own_ad_ad_metrics (legacy-mapped). */
+    adData: [],
+    adDataError: null,
+    /** campaign_id → true when ad list is expanded */
+    expandedCampaignIds: {},
   };
 
   var auctionPressureChart = null;
@@ -391,6 +396,148 @@
     });
   }
 
+  function dedupeRowsByAdDate(rows) {
+    var byKey = {};
+    (rows || []).forEach(function (row) {
+      var aid =
+        row.ad_id != null && String(row.ad_id) !== ''
+          ? String(row.ad_id)
+          : '';
+      if (!aid) return;
+      var d = row.metric_date || '';
+      var key = aid + '\u0000' + d;
+      var created = row.created_at != null ? String(row.created_at) : '';
+      if (!byKey[key] || created > (byKey[key].created_at || '')) {
+        byKey[key] = row;
+      }
+    });
+    return Object.keys(byKey).map(function (k) {
+      return byKey[k];
+    });
+  }
+
+  function buildAdListByAdId(rows) {
+    var ads = {};
+    (rows || []).forEach(function (row) {
+      var aid =
+        row.ad_id != null && String(row.ad_id) !== ''
+          ? String(row.ad_id)
+          : '__unknown__';
+      if (aid === '__unknown__') return;
+      if (!ads[aid]) {
+        ads[aid] = {
+          ad_id: aid,
+          campaign_id:
+            row.campaign_id != null && String(row.campaign_id) !== ''
+              ? String(row.campaign_id)
+              : null,
+          name:
+            (row.ad_name && String(row.ad_name)) ||
+            findVal(row, 'ad') ||
+            'Sin nombre',
+          rowDays: {},
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          leads: 0,
+          hasSpend: false,
+          hasImpressions: false,
+          hasClicks: false,
+          hasLeads: false,
+        };
+      }
+      var a = ads[aid];
+      var d = row.metric_date || '';
+      if (d) a.rowDays[d] = true;
+      var s = fmtN(row.spend != null ? row.spend : row.gasto);
+      var i = fmtN(row.impressions);
+      var cl = fmtN(row.clicks);
+      var l = metaLeadsFromRow(row);
+      if (s !== null) {
+        a.spend += s;
+        a.hasSpend = true;
+      }
+      if (i !== null) {
+        a.impressions += i;
+        a.hasImpressions = true;
+      }
+      if (cl !== null) {
+        a.clicks += cl;
+        a.hasClicks = true;
+      }
+      if (l !== null) {
+        a.leads += l;
+        a.hasLeads = true;
+      }
+    });
+
+    return Object.keys(ads).map(function (key) {
+      var a = ads[key];
+      var gasto = a.hasSpend ? a.spend : null;
+      var impressions = a.hasImpressions ? a.impressions : null;
+      var clicks = a.hasClicks ? a.clicks : null;
+      var conversiones = a.hasLeads ? a.leads : null;
+      var ctr =
+        impressions !== null && impressions > 0 && clicks !== null
+          ? (clicks / impressions) * 100
+          : null;
+      var cpc =
+        clicks !== null && clicks > 0 && gasto !== null ? gasto / clicks : null;
+      var cpl =
+        conversiones !== null && conversiones > 0 && gasto !== null
+          ? gasto / conversiones
+          : null;
+      return {
+        ad_id: a.ad_id,
+        campaign_id: a.campaign_id,
+        name: a.name,
+        dias: Object.keys(a.rowDays).length,
+        gasto: gasto,
+        impressions: impressions,
+        clicks: clicks,
+        conversiones: conversiones,
+        cpl: cpl,
+        cplSinConversiones: !(conversiones !== null && conversiones > 0),
+        ctr: ctr,
+        cpc: cpc,
+      };
+    });
+  }
+
+  function groupAdsByCampaignId(adList) {
+    var byCamp = {};
+    (adList || []).forEach(function (a) {
+      var cid = a.campaign_id != null ? String(a.campaign_id) : '__unknown__';
+      if (!byCamp[cid]) byCamp[cid] = [];
+      byCamp[cid].push(a);
+    });
+    return byCamp;
+  }
+
+  /**
+   * Ad-level aggregates for the active period preset (same as campaigns).
+   * Future cross-source enrichments (e.g. attribution) can wrap or extend this helper.
+   * @param {object[]} allAdData
+   */
+  function computeAdsDerived(allAdData) {
+    var range = resolvePeriodRange(
+      state.periodPreset,
+      state.customFrom,
+      state.customTo,
+    );
+    var filtered = filterRowsByMetricDate(allAdData || [], range.from, range.to);
+    var deduped = dedupeRowsByAdDate(filtered);
+    var adList = buildAdListByAdId(deduped);
+    var adsByCampaign = groupAdsByCampaignId(adList);
+    return {
+      adList: adList,
+      adsByCampaign: adsByCampaign,
+      range: range,
+      datasetEmpty: !(allAdData && allAdData.length),
+      bounds: computeDatasetDateBounds(allAdData || []),
+    };
+  }
+
   function computeDatasetDateBounds(rows) {
     var minD = null;
     var maxD = null;
@@ -494,6 +641,41 @@
     };
   }
 
+  function mapOwnAdAdMetricsToLegacyRow(row) {
+    var impressionsNum = parseFloat(row.impressions);
+    var clicksNum = parseFloat(row.clicks);
+    var impressions = isNaN(impressionsNum) ? 0 : impressionsNum;
+    var clicks = isNaN(clicksNum) ? 0 : clicksNum;
+    var metaLeads = metaLeadsFromRow({
+      meta_leads: row.actions,
+      raw_json: row.raw_json,
+    });
+    var spendNum = fmtN(row.spend);
+    var ctr = impressions > 0 ? (clicks / impressions) * 100 : '';
+    var cpc = spendNum !== null && clicks > 0 ? spendNum / clicks : '';
+    var spendStr = toCsvCompatString(row.spend);
+    var adName = toCsvCompatString(row.ad_name);
+
+    return {
+      ad_id: row.ad_id != null ? toCsvCompatString(row.ad_id) : '',
+      ad_name: adName,
+      campaign_id:
+        row.campaign_id != null ? toCsvCompatString(row.campaign_id) : '',
+      campaign_name: toCsvCompatString(row.campaign_name),
+      meta_leads: metaLeads === null ? '' : toCsvCompatString(metaLeads),
+      ctr: toCsvCompatString(ctr),
+      cpc: toCsvCompatString(cpc),
+      spend: spendStr,
+      gasto: spendStr,
+      impressions: toCsvCompatString(row.impressions),
+      clicks: toCsvCompatString(row.clicks),
+      metric_date: toCsvCompatString(row.metric_date),
+      created_at: toCsvCompatString(row.created_at),
+      raw_json:
+        row.raw_json && typeof row.raw_json === 'object' ? row.raw_json : null,
+    };
+  }
+
   function lookbackStartDateIso(now) {
     var today = calendarDateInZone(now);
     if (!today) return null;
@@ -543,6 +725,56 @@
       var chunk = await res.json();
       if (!Array.isArray(chunk)) {
         throw new Error('Respuesta inesperada de Supabase');
+      }
+      for (var i = 0; i < chunk.length; i++) {
+        all.push(chunk[i]);
+      }
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return all;
+  }
+
+  async function fetchOwnAdAdMetricsRows(cfg) {
+    var since = lookbackStartDateIso();
+    var base =
+      cfg.url.replace(/\/+$/, '') +
+      '/rest/v1/own_ad_ad_metrics' +
+      '?entity_id=eq.' +
+      encodeURIComponent(OWN_ENTITY_ID) +
+      '&metric_date=gte.' +
+      encodeURIComponent(since) +
+      '&select=entity_id,campaign_id,campaign_name,ad_id,ad_name,metric_date,spend,impressions,clicks,actions,actions_value,raw_json,created_at' +
+      '&order=metric_date.asc';
+
+    var pageSize = 1000;
+    var from = 0;
+    var all = [];
+
+    while (true) {
+      var res = await fetch(base, {
+        method: 'GET',
+        headers: {
+          apikey: cfg.anonKey,
+          Authorization: 'Bearer ' + cfg.anonKey,
+          Accept: 'application/json',
+          Range: from + '-' + (from + pageSize - 1),
+          Prefer: 'count=exact',
+        },
+      });
+      if (!res.ok) {
+        var body = '';
+        try {
+          body = await res.text();
+        } catch (ignore) {
+          body = '';
+        }
+        throw new Error('Supabase HTTP ' + res.status + (body ? ': ' + body.slice(0, 200) : ''));
+      }
+      var chunk = await res.json();
+      if (!Array.isArray(chunk)) {
+        throw new Error('Respuesta inesperada de Supabase (ads)');
       }
       for (var i = 0; i < chunk.length; i++) {
         all.push(chunk[i]);
@@ -1955,7 +2187,107 @@
     );
   }
 
-  function renderCampaigns(campList, totalGasto, totalConv) {
+  function renderAdRow(ad) {
+    var metrics = [
+      { label: 'GASTO', val: ad.gasto !== null ? '$' + fmt(ad.gasto, 0) : '—' },
+      {
+        label: 'IMPRES.',
+        val: ad.impressions !== null ? fmt(ad.impressions, 0) : '—',
+      },
+      { label: 'CLICS', val: ad.clicks !== null ? fmt(ad.clicks, 0) : '—' },
+      {
+        label: 'CTR',
+        val: ad.ctr !== null ? fmt(ad.ctr) + '%' : '—',
+      },
+      {
+        label: 'CPC',
+        val: ad.cpc !== null ? '$' + fmt(ad.cpc) : '—',
+      },
+      {
+        label: 'CONV. META',
+        val:
+          ad.conversiones !== null && ad.conversiones > 0
+            ? fmt(ad.conversiones, 0)
+            : 'Sin conversiones',
+      },
+      {
+        label: 'CPL META',
+        val: ad.cplSinConversiones
+          ? 'Sin conversiones'
+          : ad.cpl !== null
+            ? '$' + fmt(ad.cpl)
+            : '—',
+      },
+    ];
+    return (
+      '<div class="ma-ad-row">' +
+      '<div class="ma-ad-row-head">' +
+      '<span class="ma-ad-name">' +
+      escapeHtml(ad.name) +
+      '</span>' +
+      '<span class="ma-ad-id">ID ' +
+      escapeHtml(ad.ad_id) +
+      '</span>' +
+      '</div>' +
+      '<div class="ma-ad-metrics">' +
+      metrics
+        .map(function (m) {
+          return (
+            '<div class="ma-ad-metric">' +
+            '<div class="ma-metric-label">' +
+            escapeHtml(m.label) +
+            '</div>' +
+            '<div class="ma-mv ma-ad-metric-val">' +
+            escapeHtml(m.val) +
+            '</div>' +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      '<div class="ma-ad-note">Conversiones Meta (form_step_3), no solicitudes Credizona.</div>' +
+      '</div>'
+    );
+  }
+
+  function renderCampaignAdsPanel(c, adsDerived) {
+    var cid = c.campaign_id != null ? String(c.campaign_id) : null;
+    if (!cid) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-muted">Sin ID de campaña para listar anuncios.</div>'
+      );
+    }
+    if (state.adDataError) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-warn">' +
+        escapeHtml(state.adDataError) +
+        ' Las tarjetas de campaña siguen operativas.</div>'
+      );
+    }
+    if (adsDerived.datasetEmpty) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-muted">' +
+        'Histórico por anuncio aún no disponible. Tras migración, sincronización y backfill, los anuncios aparecerán aquí para el período seleccionado.</div>'
+      );
+    }
+    var ads = (adsDerived.adsByCampaign[cid] || []).slice();
+    ads.sort(function (a, b) {
+      return (b.gasto || 0) - (a.gasto || 0);
+    });
+    if (!ads.length) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-muted">' +
+        'Sin anuncios con datos Meta en este período para esta campaña.</div>'
+      );
+    }
+    return (
+      '<div class="ma-ad-panel">' +
+      ads.map(renderAdRow).join('') +
+      '</div>'
+    );
+  }
+
+  function renderCampaigns(campList, totalGasto, totalConv, adsDerived) {
     if (campList.length === 0) {
       return '<div class="ma-fade"><div class="ma-empty">No se encontraron campañas</div></div>';
     }
@@ -1964,6 +2296,9 @@
       '<div class="ma-fade">' +
       campList
         .map(function (c) {
+          var cidKey =
+            c.campaign_id != null ? String(c.campaign_id) : null;
+          var expanded = !!(cidKey && state.expandedCampaignIds[cidKey]);
           var hasAlert = campaignHasAlert(c);
           var metrics = [
             {
@@ -2038,11 +2373,20 @@
               : '') +
             (hasAlert ? '<span class="ma-ab">⚠ ALERTA</span>' : '') +
             '</div>' +
+            '<div class="ma-row-actions">' +
             '<div class="ma-dias">' +
             c.dias +
             ' DÍA' +
             (c.dias !== 1 ? 'S' : '') +
             ' CON DATOS' +
+            '</div>' +
+            (cidKey
+              ? '<button type="button" class="ma-ad-toggle" data-ma-action="toggle-campaign-ads" data-campaign-id="' +
+                escapeHtml(cidKey) +
+                '">' +
+                (expanded ? 'Ocultar anuncios' : 'Ver anuncios') +
+                '</button>'
+              : '') +
             '</div>' +
             '</div>' +
             '<div class="ma-metrics">' +
@@ -2064,6 +2408,7 @@
               })
               .join('') +
             '</div>' +
+            (expanded ? renderCampaignAdsPanel(c, adsDerived) : '') +
             '</div>'
           );
         })
@@ -2218,7 +2563,13 @@
   function renderBody(derived) {
     var tabContent = '';
     if (state.tab === 'campaigns') {
-      tabContent = renderCampaigns(derived.campList, derived.totalGasto, derived.totalConv);
+      var adsDerived = computeAdsDerived(state.adData);
+      tabContent = renderCampaigns(
+        derived.campList,
+        derived.totalGasto,
+        derived.totalConv,
+        adsDerived,
+      );
     } else if (state.tab === 'alerts') {
       tabContent = renderAlerts(derived.alertas);
     } else {
@@ -2280,6 +2631,15 @@
           state.customTo = toEl ? toEl.value : '';
           state.periodPreset = 'custom';
           render();
+        } else if (action === 'toggle-campaign-ads') {
+          var campId = el.getAttribute('data-campaign-id');
+          if (!campId) return;
+          if (state.expandedCampaignIds[campId]) {
+            delete state.expandedCampaignIds[campId];
+          } else {
+            state.expandedCampaignIds[campId] = true;
+          }
+          render();
         }
       });
     });
@@ -2334,7 +2694,21 @@
       state.lastUpdate = new Date().toLocaleTimeString('es-AR');
       state.error = null;
     } catch (e) {
+      state.data = [];
       state.error = 'No se pudo conectar con Supabase.';
+      var errMsg = e && e.message ? e.message : String(e);
+      console.error('[meta-agent] loadData own_ad_metrics failed:', errMsg);
+    }
+    try {
+      var adRawRows = await fetchOwnAdAdMetricsRows(cfg);
+      state.adData = adRawRows.map(mapOwnAdAdMetricsToLegacyRow);
+      state.adDataError = null;
+    } catch (adErr) {
+      state.adData = [];
+      state.adDataError = 'No se pudieron cargar métricas por anuncio.';
+      var adErrMsg =
+        adErr && adErr.message ? adErr.message : String(adErr);
+      console.error('[meta-agent] loadData own_ad_ad_metrics failed:', adErrMsg);
     }
     state.loading = false;
     render();
@@ -2458,8 +2832,34 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       mapOwnAdMetricsToLegacyRow: mapOwnAdMetricsToLegacyRow,
+      mapOwnAdAdMetricsToLegacyRow: mapOwnAdAdMetricsToLegacyRow,
       resolvePeriodRange: resolvePeriodRange,
       filterRowsByMetricDate: filterRowsByMetricDate,
+      dedupeRowsByAdDate: dedupeRowsByAdDate,
+      buildAdListByAdId: buildAdListByAdId,
+      groupAdsByCampaignId: groupAdsByCampaignId,
+      computeAdsDerived: computeAdsDerived,
+      computeAdsDerivedForState: function (adData, preset, customFrom, customTo) {
+        var prev = {
+          periodPreset: state.periodPreset,
+          customFrom: state.customFrom,
+          customTo: state.customTo,
+        };
+        state.periodPreset = preset;
+        state.customFrom = customFrom || '';
+        state.customTo = customTo || '';
+        var out = computeAdsDerived(adData);
+        state.periodPreset = prev.periodPreset;
+        state.customFrom = prev.customFrom;
+        state.customTo = prev.customTo;
+        return out;
+      },
+      toggleExpandedCampaign: function (expandedMap, campaignId) {
+        var next = Object.assign({}, expandedMap || {});
+        if (next[campaignId]) delete next[campaignId];
+        else next[campaignId] = true;
+        return next;
+      },
       dedupeRowsByCampaignDate: dedupeRowsByCampaignDate,
       buildCampListByCampaignId: buildCampListByCampaignId,
       aggregateAccountPeriod: aggregateAccountPeriod,
