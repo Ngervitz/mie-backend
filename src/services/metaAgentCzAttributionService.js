@@ -13,6 +13,9 @@ const {
   dedupeAdMetricRowsByAdDate,
   filterSolicitudesByFechaRegPeriod,
   mergeOutcomesIntoByAdId,
+  computeCampaignCzRollups,
+  classifyCzSolicitudBucket,
+  CZ_ATTRIBUTION_BUCKETS,
   sanitizePublicAttributionPayload,
   uyDayEndExclusiveUtcIso,
   uyDayStartUtcIso,
@@ -125,7 +128,7 @@ async function buildOutcomeByCzId(attributedCzIds, solicitudRows) {
   if (!attributedCzIds.length) return outcomeByCzId;
 
   var historicoEstado8 = await fetchRowsInChunks(
-    'cz_funnel_historico',
+    'cz_funnel_solicitud_estados',
     'cz_solicitud_id',
     attributedCzIds,
     'cz_solicitud_id, solicitudes_estados_id, fechahora_src',
@@ -254,24 +257,48 @@ async function buildCzAttributionAggregates(input) {
   var czToAd = buildAttributedCzToAdMap(solicitudes, adDim, entityId);
   var attributedCzIds = Array.from(czToAd.keys());
 
+  var pendingCzIds = [];
+  solicitudes.forEach(function (row) {
+    if (!row || row.cz_id == null) return;
+    var summary =
+      row.tracking_data_summary && typeof row.tracking_data_summary === 'object'
+        ? row.tracking_data_summary
+        : {};
+    var bucket = classifyCzSolicitudBucket(summary, adDim, entityId);
+    if (bucket === CZ_ATTRIBUTION_BUCKETS.META_AD_PENDING) {
+      pendingCzIds.push(Number(row.cz_id));
+    }
+  });
+  var outcomeCzIds = attributedCzIds.slice();
+  pendingCzIds.forEach(function (id) {
+    if (outcomeCzIds.indexOf(id) < 0) outcomeCzIds.push(id);
+  });
+
   var solicitudesWithEstado = solicitudesRaw;
-  if (attributedCzIds.length) {
+  if (outcomeCzIds.length) {
     solicitudesWithEstado = await fetchRowsInChunks(
       'cz_funnel_solicitudes',
       'cz_id',
-      attributedCzIds,
+      outcomeCzIds,
       'cz_id, ci, fecha_reg, solicitudes_estados_id, tracking_data_summary',
       'cz_id',
     );
   }
 
   var outcomeByCzId = await buildOutcomeByCzId(
-    attributedCzIds,
+    outcomeCzIds,
     solicitudesWithEstado,
   );
   attribution.byAdId = mergeOutcomesIntoByAdId(
     attribution.byAdId,
     czToAd,
+    outcomeByCzId,
+  );
+  attribution.byCampaignId = computeCampaignCzRollups(
+    solicitudes,
+    adDim,
+    entityId,
+    attribution.byAdId,
     outcomeByCzId,
   );
   attribution.dateSemantics = DATE_SEMANTICS;

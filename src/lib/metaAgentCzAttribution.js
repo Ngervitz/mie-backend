@@ -242,6 +242,95 @@ function uyDayEndExclusiveUtcIso(dateStr) {
   return shiftIsoDate(dateStr, 1) + 'T03:00:00.000Z';
 }
 
+function emptyCampaignCzSlice() {
+  return { solicitudCount: 0, preaprobadosCount: 0, grantedCount: 0 };
+}
+
+/**
+ * Campaign-level CZ rollups: identified ads (byAdId + adDim) plus Meta-paid
+ * solicitudes pending ad conciliation (utm_campaign only), deduped by cz_id.
+ * Does not change per-ad attribution rules.
+ */
+function computeCampaignCzRollups(
+  solicitudes,
+  adDim,
+  entityId,
+  byAdId,
+  outcomeByCzId,
+) {
+  var identified = {};
+  Object.keys(byAdId || {}).forEach(function (adId) {
+    var dim = adDim && adDim.get(adId);
+    var camp =
+      dim && dim.campaign_id != null && String(dim.campaign_id) !== ''
+        ? String(dim.campaign_id)
+        : null;
+    if (!camp) return;
+    if (!identified[camp]) identified[camp] = emptyCampaignCzSlice();
+    var s = byAdId[adId];
+    identified[camp].solicitudCount += s.solicitudCount || 0;
+    identified[camp].preaprobadosCount += s.preaprobadosCount || 0;
+    identified[camp].grantedCount += s.grantedCount || 0;
+  });
+
+  var pendingByCamp = {};
+  (solicitudes || []).forEach(function (row) {
+    if (!row || row.cz_id == null) return;
+    var summary = trackingSummaryObject(row.tracking_data_summary);
+    var bucket = classifyCzSolicitudBucket(summary, adDim, entityId);
+    if (bucket !== CZ_ATTRIBUTION_BUCKETS.META_AD_PENDING) return;
+    if (!isNumericMetaId(summary.utm_campaign)) return;
+    var cid = String(summary.utm_campaign).trim();
+    if (!pendingByCamp[cid]) pendingByCamp[cid] = { _czIds: {} };
+    pendingByCamp[cid]._czIds[String(row.cz_id)] = true;
+  });
+
+  var unidentified = {};
+  Object.keys(pendingByCamp).forEach(function (cid) {
+    var czKeys = Object.keys(pendingByCamp[cid]._czIds);
+    if (!czKeys.length) return;
+    var slice = emptyCampaignCzSlice();
+    slice.solicitudCount = czKeys.length;
+    czKeys.forEach(function (czKey) {
+      var out =
+        outcomeByCzId && typeof outcomeByCzId.get === 'function'
+          ? outcomeByCzId.get(Number(czKey))
+          : null;
+      if (!out) return;
+      if (out.preaprobado) slice.preaprobadosCount += 1;
+      if (out.granted) slice.grantedCount += 1;
+    });
+    unidentified[cid] = slice;
+  });
+
+  var byCampaignId = {};
+  var campIds = {};
+  Object.keys(identified).forEach(function (k) {
+    campIds[k] = true;
+  });
+  Object.keys(unidentified).forEach(function (k) {
+    campIds[k] = true;
+  });
+  Object.keys(campIds).forEach(function (cid) {
+    byCampaignId[cid] = {
+      identified: identified[cid] || emptyCampaignCzSlice(),
+      unidentified: unidentified[cid] || emptyCampaignCzSlice(),
+    };
+  });
+
+  return byCampaignId;
+}
+
+function mergeCampaignCzSlices(a, b) {
+  var left = a || emptyCampaignCzSlice();
+  var right = b || emptyCampaignCzSlice();
+  return {
+    solicitudCount: left.solicitudCount + right.solicitudCount,
+    preaprobadosCount: left.preaprobadosCount + right.preaprobadosCount,
+    grantedCount: left.grantedCount + right.grantedCount,
+  };
+}
+
 function sanitizePublicAttributionPayload(attribution, meta) {
   var overlap = attribution.ciOverlap || {};
   return {
@@ -251,6 +340,7 @@ function sanitizePublicAttributionPayload(attribution, meta) {
     dateSemantics: attribution.dateSemantics || null,
     limitations: attribution.limitations || null,
     byAdId: attribution.byAdId,
+    byCampaignId: attribution.byCampaignId || {},
     buckets: attribution.buckets,
     globalAttributed: attribution.globalAttributed,
     ciOverlap: {
@@ -493,6 +583,9 @@ module.exports = {
   sanitizePublicAttributionPayload,
   computeCiOverlapStats,
   dedupeAdMetricRowsByAdDate,
+  emptyCampaignCzSlice,
+  computeCampaignCzRollups,
+  mergeCampaignCzSlices,
 };
 
 /**

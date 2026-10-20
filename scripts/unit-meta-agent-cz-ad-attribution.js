@@ -6,6 +6,8 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const cz = require('../src/lib/metaAgentCzAttribution');
 const ui = require('../public/meta-agent.js');
 
@@ -54,6 +56,21 @@ function calendarDateInZone(d) {
 }
 
 const tests = [
+  test('cz attribution service reads preaprob historico from cz_funnel_solicitud_estados', function () {
+    var src = fs.readFileSync(
+      path.join(__dirname, '../src/services/metaAgentCzAttributionService.js'),
+      'utf8',
+    );
+    assert.ok(
+      !src.includes("'cz_funnel_historico'"),
+      'must not query non-existent cz_funnel_historico table',
+    );
+    assert.ok(
+      src.includes("'cz_funnel_solicitud_estados'"),
+      'must use cz_funnel_solicitud_estados like preaprobadosRead',
+    );
+  }),
+
   test('czFunnelChannelFromUtmSource maps meta and legacy without breaking sms', function () {
     assert.strictEqual(cz.czFunnelChannelFromUtmSource('meta'), 'meta');
     assert.strictEqual(cz.czFunnelChannelFromUtmSource('facebook'), 'meta');
@@ -218,6 +235,60 @@ const tests = [
     );
     assert.strictEqual(dim.size, 1);
     assert.strictEqual(dim.get('111').campaign_id, '999');
+  }),
+
+  test('computeCampaignCzRollups sums byAdId by campaign and pending without ad row', function () {
+    var adDim = cz.buildAdDimensionMap(
+      [
+        adMetric('111', '999', '2026-10-14', 1),
+        adMetric('222', '999', '2026-10-14', 2),
+      ],
+      ENTITY,
+    );
+    var rows = [
+      sol(1, 10, '2026-10-14T18:00:00.000Z', {
+        utm_source: 'meta',
+        utm_campaign: '999',
+        utm_content: '111',
+      }),
+      sol(2, 11, '2026-10-14T19:00:00.000Z', {
+        utm_source: 'meta',
+        utm_campaign: '999',
+        utm_content: '111',
+      }),
+      sol(3, 12, '2026-10-14T20:00:00.000Z', {
+        utm_source: 'meta',
+        utm_campaign: '999',
+        utm_content: '444',
+      }),
+    ];
+    var attr = cz.computeCzAdAttribution(rows, adDim, ENTITY);
+    var czToAd = cz.buildAttributedCzToAdMap(rows, adDim, ENTITY);
+    var outcome = new Map([
+      [1, { preaprobado: true, granted: false }],
+      [2, { preaprobado: false, granted: false }],
+      [3, { preaprobado: true, granted: true }],
+    ]);
+    attr.byAdId = cz.mergeOutcomesIntoByAdId(attr.byAdId, czToAd, outcome);
+    var byCamp = cz.computeCampaignCzRollups(
+      rows,
+      adDim,
+      ENTITY,
+      attr.byAdId,
+      outcome,
+    );
+    assert.strictEqual(byCamp['999'].identified.solicitudCount, 2);
+    assert.strictEqual(byCamp['999'].identified.preaprobadosCount, 1);
+    assert.strictEqual(byCamp['999'].unidentified.solicitudCount, 1);
+    assert.strictEqual(byCamp['999'].unidentified.preaprobadosCount, 1);
+    assert.strictEqual(byCamp['999'].unidentified.grantedCount, 1);
+    var total = cz.mergeCampaignCzSlices(
+      byCamp['999'].identified,
+      byCamp['999'].unidentified,
+    );
+    assert.strictEqual(total.solicitudCount, 3);
+    assert.strictEqual(total.preaprobadosCount, 2);
+    assert.strictEqual(total.grantedCount, 1);
   }),
 
   test('computeAdsDerivedForState wires CZ stats without double-counting CI in adList sum', function () {

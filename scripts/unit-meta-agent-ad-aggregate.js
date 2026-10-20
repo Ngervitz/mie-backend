@@ -213,6 +213,96 @@ const tests = [
     assert.ok(js.includes('own_ad_ad_metrics'));
     assert.ok(!js.includes("data-ma-tab=\"ads\""));
   }),
+
+  test('buildCampaignEntity uses byCampaignId rollup not only visible ad rows', function () {
+    const camp = {
+      campaign_id: '999',
+      name: 'Camp',
+      gasto: 100,
+      impressions: 1000,
+      clicks: 50,
+      conversiones: 2,
+      cpl: 50,
+      cplSinConversiones: false,
+      ctr: 5,
+      cpc: 2,
+      dias: 1,
+    };
+    const czPayload = {
+      byAdId: {
+        111: { solicitudCount: 2, preaprobadosCount: 1, grantedCount: 0 },
+      },
+      byCampaignId: {
+        999: {
+          identified: { solicitudCount: 2, preaprobadosCount: 1, grantedCount: 0 },
+          unidentified: { solicitudCount: 1, preaprobadosCount: 0, grantedCount: 1 },
+        },
+      },
+    };
+    const adsDerived = {
+      adsByCampaign: { 999: [] },
+      czAttribution: czPayload,
+    };
+    const entity = ui.buildCampaignEntity(
+      camp,
+      adsDerived,
+      [],
+      { from: '2026-10-14', to: '2026-10-14' },
+      [],
+    );
+    assert.strictEqual(entity.czSolicitudes, 3);
+    assert.strictEqual(entity.czPreaprobados, 1);
+    assert.strictEqual(entity.czGranted, 1);
+    const orphan = ui.enrichCampaignAdsWithCzOrphans(
+      '999',
+      [],
+      czPayload,
+      [
+        {
+          entity_id: 'dd6dcb1a-4458-4534-993d-a2c4c0ca20df',
+          ad_id: '111',
+          campaign_id: '999',
+          metric_date: '2026-10-01',
+        },
+      ],
+    );
+    assert.strictEqual(orphan.length, 1);
+    assert.strictEqual(orphan[0].czSolicitudes, 2);
+    const unidentified = ui.buildUnidentifiedCzSyntheticAd('999', czPayload.byCampaignId['999']);
+    assert.strictEqual(unidentified.name, 'Sin anuncio identificado');
+    assert.strictEqual(unidentified.czSolicitudes, 1);
+  }),
+
+  test('unified entity grid shares KPI column order for campaign and ad rows', function () {
+    assert.ok(Array.isArray(ui.MA_ENTITY_KPI_COLUMNS));
+    assert.strictEqual(ui.MA_ENTITY_KPI_COLUMNS.length, 15);
+    const ids = ui.MA_ENTITY_KPI_COLUMNS.map((c) => c.id);
+    assert.deepStrictEqual(ids, [
+      'gasto',
+      'impressions',
+      'clicks',
+      'ctr',
+      'cpc',
+      'cplMeta',
+      'convMeta',
+      'czSolicitudes',
+      'czPreaprobados',
+      'czGranted',
+      'cplCz',
+      'costPerPreaprob',
+      'costPerGranted',
+      'alcance',
+      'frecuencia',
+    ]);
+    const css = fs.readFileSync(
+      path.join(__dirname, '../public/meta-agent.css'),
+      'utf8',
+    );
+    assert.ok(css.includes('ma-entity-grid'));
+    assert.ok(css.includes('--ma-kpi-gasto'));
+    const prior = ui.resolvePreviousEquivalentRange('2026-10-10', '2026-10-12');
+    assert.deepStrictEqual(prior, { from: '2026-10-07', to: '2026-10-09' });
+  }),
 ];
 
 (async function main() {

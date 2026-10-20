@@ -35,6 +35,7 @@ router.get('/cz-attribution', async (req, res) => {
     }
     logger.error('GET /api/meta-agent/cz-attribution failed', {
       code: err && err.code ? err.code : 'internal',
+      message: err && err.message ? String(err.message) : undefined,
     });
     return res.status(500).json({ error: 'No se pudo calcular atribución' });
   }

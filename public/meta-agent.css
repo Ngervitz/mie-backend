@@ -32,6 +32,25 @@
   --meta-agent-spark-track: #22262f;
   --meta-agent-maxw: 1200px;
 
+  /* KPI identity colors (shared campaign/ad grid + labels) */
+  --ma-kpi-gasto: #3b82f6;
+  --ma-kpi-impressions: #38bdf8;
+  --ma-kpi-clicks: #60a5fa;
+  --ma-kpi-ctr: #3b82f6;
+  --ma-kpi-cpc: #8b5cf6;
+  --ma-kpi-cplMeta: #22c55e;
+  --ma-kpi-convMeta: #22c55e;
+  --ma-kpi-czSolicitudes: #5b7fad;
+  --ma-kpi-czPreaprobados: #5a9a72;
+  --ma-kpi-czGranted: #b0894a;
+  --ma-kpi-cplCz: #5b7fad;
+  --ma-kpi-costPerPreaprob: #5a9a72;
+  --ma-kpi-costPerGranted: #b0894a;
+  --ma-kpi-alcance: #38bdf8;
+  --ma-kpi-frecuencia: #fb7185;
+
+  --ma-entity-grid-cols: minmax(200px, 1.35fr) repeat(15, minmax(76px, 1fr));
+
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 400;
   background: var(--meta-agent-bg);
@@ -899,6 +918,181 @@
   font-size: 12px;
   color: var(--meta-agent-red-text);
   line-height: 1.45;
+}
+
+#meta-ads-root .ma-entity-grid-scroll {
+  overflow-x: auto;
+  margin-bottom: 8px;
+  border: 1px solid var(--meta-agent-border);
+  border-radius: 10px;
+  background: var(--meta-agent-surface);
+}
+
+#meta-ads-root .ma-entity-grid {
+  min-width: 1280px;
+}
+
+#meta-ads-root .ma-entity-grid-head,
+#meta-ads-root .ma-entity-grid-row {
+  display: grid;
+  grid-template-columns: var(--ma-entity-grid-cols);
+  column-gap: 8px;
+  align-items: center;
+}
+
+#meta-ads-root .ma-entity-grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 14px;
+  background: #22262f;
+  border-bottom: 1px solid var(--meta-agent-border);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#meta-ads-root .ma-entity-grid-body .ma-entity-grid-group {
+  border-bottom: 1px solid var(--meta-agent-border);
+}
+
+#meta-ads-root .ma-entity-grid-body .ma-entity-grid-group:last-child {
+  border-bottom: none;
+}
+
+#meta-ads-root .ma-entity-grid-row {
+  padding: 10px 14px;
+  min-height: 52px;
+}
+
+#meta-ads-root .ma-entity-grid-row--campaign {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+#meta-ads-root .ma-entity-grid-row--ad {
+  background: rgba(0, 0, 0, 0.12);
+  border-top: 1px dashed var(--meta-agent-border);
+}
+
+#meta-ads-root .ma-entity-grid-row--unidentified .ma-entity-ad-name {
+  font-style: italic;
+}
+
+#meta-ads-root .ma-entity-grid-ads .ma-entity-grid-row--ad:first-child {
+  border-top: none;
+}
+
+#meta-ads-root .ma-entity-grid-cell--name {
+  min-width: 0;
+}
+
+#meta-ads-root .ma-entity-camp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#meta-ads-root .ma-entity-camp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+#meta-ads-root .ma-entity-ad-name {
+  display: block;
+  font-weight: 600;
+  font-size: 12px;
+  padding-left: 12px;
+}
+
+#meta-ads-root .ma-entity-kpi-label {
+  display: block;
+  color: var(--meta-agent-faint);
+}
+
+#meta-ads-root .ma-entity-kpi-val {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+#meta-ads-root .ma-entity-kpi-val--muted {
+  color: var(--meta-agent-faint);
+  font-size: 11px;
+}
+
+#meta-ads-root .ma-entity-grid-cell--kpi .ma-trend {
+  font-size: 10px;
+}
+
+#meta-ads-root .ma-entity-grid-foot {
+  font-size: 10px;
+  color: var(--meta-agent-faint);
+  margin: 0 0 16px;
+  line-height: 1.4;
+}
+
+#meta-ads-root .ma-entity-grid-detail {
+  padding: 8px 14px 12px 38px;
+  border-top: 1px dashed var(--meta-agent-border);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+#meta-ads-root .ma-kpi-id-gasto,
+#meta-ads-root .ma-kpi-val-gasto { color: var(--ma-kpi-gasto); }
+#meta-ads-root .ma-kpi-id-impressions,
+#meta-ads-root .ma-kpi-val-impressions { color: var(--ma-kpi-impressions); }
+#meta-ads-root .ma-kpi-id-clicks,
+#meta-ads-root .ma-kpi-val-clicks { color: var(--ma-kpi-clicks); }
+#meta-ads-root .ma-kpi-id-ctr,
+#meta-ads-root .ma-kpi-val-ctr { color: var(--ma-kpi-ctr); }
+#meta-ads-root .ma-kpi-id-cpc,
+#meta-ads-root .ma-kpi-val-cpc { color: var(--ma-kpi-cpc); }
+#meta-ads-root .ma-kpi-id-cplMeta,
+#meta-ads-root .ma-kpi-val-cplMeta { color: var(--ma-kpi-cplMeta); }
+#meta-ads-root .ma-kpi-id-convMeta,
+#meta-ads-root .ma-kpi-val-convMeta { color: var(--ma-kpi-convMeta); }
+#meta-ads-root .ma-kpi-id-czSolicitudes,
+#meta-ads-root .ma-kpi-val-czSolicitudes { color: var(--ma-kpi-czSolicitudes); }
+#meta-ads-root .ma-kpi-id-czPreaprobados,
+#meta-ads-root .ma-kpi-val-czPreaprobados { color: var(--ma-kpi-czPreaprobados); }
+#meta-ads-root .ma-kpi-id-czGranted,
+#meta-ads-root .ma-kpi-val-czGranted { color: var(--ma-kpi-czGranted); }
+#meta-ads-root .ma-kpi-id-cplCz,
+#meta-ads-root .ma-kpi-val-cplCz { color: var(--ma-kpi-cplCz); }
+#meta-ads-root .ma-kpi-id-costPerPreaprob,
+#meta-ads-root .ma-kpi-val-costPerPreaprob { color: var(--ma-kpi-costPerPreaprob); }
+#meta-ads-root .ma-kpi-id-costPerGranted,
+#meta-ads-root .ma-kpi-val-costPerGranted { color: var(--ma-kpi-costPerGranted); }
+#meta-ads-root .ma-kpi-id-alcance,
+#meta-ads-root .ma-kpi-val-alcance { color: var(--ma-kpi-alcance); }
+#meta-ads-root .ma-kpi-id-frecuencia,
+#meta-ads-root .ma-kpi-val-frecuencia { color: var(--ma-kpi-frecuencia); }
+
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-gasto,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-impressions,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-clicks,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-ctr,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-cpc,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-cplMeta,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-convMeta,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-czSolicitudes,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-czPreaprobados,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-czGranted,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-cplCz,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-costPerPreaprob,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-costPerGranted,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-alcance,
+#meta-ads-root .ma-entity-kpi-val--muted.ma-kpi-val-frecuencia {
+  color: var(--meta-agent-faint);
 }
 
 #meta-ads-root .ma-ad-row {
