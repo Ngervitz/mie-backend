@@ -2346,21 +2346,21 @@
 
   /** Shared campaign/ad grid columns — identity colors via CSS (--ma-kpi-*). */
   var MA_ENTITY_KPI_COLUMNS = [
-    { id: 'gasto', label: 'Gasto', trend: 'cost' },
-    { id: 'impressions', label: 'Impresiones', trend: 'volume' },
-    { id: 'clicks', label: 'Clics', trend: 'volume' },
-    { id: 'ctr', label: 'CTR', trend: 'rate_up' },
-    { id: 'cpc', label: 'CPC', trend: 'cost' },
-    { id: 'cplMeta', label: 'CPL Meta', trend: 'cost' },
-    { id: 'convMeta', label: 'Conv. Meta', trend: 'volume' },
-    { id: 'czSolicitudes', label: 'Solic. CZ', trend: null },
-    { id: 'czPreaprobados', label: 'Preaprob.', trend: null },
-    { id: 'czGranted', label: 'Otorg.', trend: null },
-    { id: 'cplCz', label: 'CPL CZ', trend: null },
-    { id: 'costPerPreaprob', label: 'Costo/preap.', trend: null },
-    { id: 'costPerGranted', label: 'Costo/otor.', trend: null },
-    { id: 'alcance', label: 'Alcance', trend: null },
-    { id: 'frecuencia', label: 'Frecuencia', trend: null },
+    { id: 'gasto', label: 'Gasto', title: 'Gasto', trend: 'cost' },
+    { id: 'impressions', label: 'Impr.', title: 'Impresiones', trend: 'volume' },
+    { id: 'clicks', label: 'Clics', title: 'Clics', trend: 'volume' },
+    { id: 'ctr', label: 'CTR', title: 'CTR', trend: 'rate_up' },
+    { id: 'cpc', label: 'CPC', title: 'CPC', trend: 'cost' },
+    { id: 'cplMeta', label: 'CPL M.', title: 'CPL Meta', trend: 'cost' },
+    { id: 'convMeta', label: 'Conv M.', title: 'Conv. Meta', trend: 'volume' },
+    { id: 'czSolicitudes', label: 'Sol CZ', title: 'Solicitudes Credizona', trend: null },
+    { id: 'czPreaprobados', label: 'Preap.', title: 'Preaprobados', trend: null },
+    { id: 'czGranted', label: 'Otor.', title: 'Otorgados', trend: null },
+    { id: 'cplCz', label: 'CPL CZ', title: 'CPL Credizona', trend: null },
+    { id: 'costPerPreaprob', label: '$/Preap', title: 'Costo por preaprobado', trend: null },
+    { id: 'costPerGranted', label: '$/Otor', title: 'Costo por otorgado', trend: null },
+    { id: 'alcance', label: 'Alc.', title: 'Alcance', trend: null },
+    { id: 'frecuencia', label: 'Frec.', title: 'Frecuencia', trend: null },
   ];
 
   function resolvePreviousEquivalentRange(from, to) {
@@ -2787,7 +2787,7 @@
           : { text: '—', muted: true };
       case 'cplMeta':
         if (entity.cplSinConversiones) {
-          return { text: 'Sin conversiones', muted: true };
+          return { text: '—', muted: true, title: 'Sin conversiones' };
         }
         return entity.cplMeta !== null
           ? { text: '$' + fmt(entity.cplMeta), muted: false }
@@ -2797,39 +2797,39 @@
           return { text: fmt(entity.convMeta, 0), muted: false };
         }
         if (entity.convMeta === 0) return { text: '0', muted: false };
-        return { text: 'Sin conversiones', muted: true };
+        return { text: '—', muted: true, title: 'Sin conversiones' };
       case 'czSolicitudes':
         if (entity.czSolicitudes === null || entity.czSolicitudes === undefined) {
-          return { text: 'Sin datos', muted: true };
+          return { text: '—', muted: true, title: 'Sin datos' };
         }
         return { text: fmt(entity.czSolicitudes, 0), muted: entity.czSolicitudes === 0 };
       case 'czPreaprobados':
         if (entity.czPreaprobados === null || entity.czPreaprobados === undefined) {
-          return { text: 'Sin datos', muted: true };
+          return { text: '—', muted: true, title: 'Sin datos' };
         }
         return { text: fmt(entity.czPreaprobados, 0), muted: entity.czPreaprobados === 0 };
       case 'czGranted':
         if (entity.czGranted === null || entity.czGranted === undefined) {
-          return { text: 'Sin datos', muted: true };
+          return { text: '—', muted: true, title: 'Sin datos' };
         }
         return { text: fmt(entity.czGranted, 0), muted: entity.czGranted === 0 };
       case 'cplCz':
         if (entity.cplCzSinSolicitudes) {
-          return { text: 'Sin solicitudes', muted: true };
+          return { text: '—', muted: true, title: 'Sin solicitudes' };
         }
         return entity.cplCz !== null
           ? { text: '$' + fmt(entity.cplCz), muted: false }
-          : { text: 'Sin datos', muted: true };
+          : { text: '—', muted: true, title: 'Sin datos' };
       case 'costPerPreaprob': {
         var cpp = entity.costPerPreaprob;
         if (cpp != null) return { text: '$' + fmt(cpp), muted: false };
-        if (entity.czPreaprobados === 0) return { text: 'Sin datos', muted: true };
+        if (entity.czPreaprobados === 0) return { text: '—', muted: true, title: 'Sin datos' };
         return { text: '—', muted: true };
       }
       case 'costPerGranted': {
         var cpg = entity.costPerGranted;
         if (cpg != null) return { text: '$' + fmt(cpg), muted: false };
-        if (entity.czGranted === 0) return { text: 'Sin datos', muted: true };
+        if (entity.czGranted === 0) return { text: '—', muted: true, title: 'Sin datos' };
         return { text: '—', muted: true };
       }
       case 'alcance':
@@ -2849,15 +2849,18 @@
     return (
       '<div class="ma-entity-grid-head" role="row">' +
       '<div class="ma-entity-grid-cell ma-entity-grid-cell--name" role="columnheader">' +
-      'Campaña / anuncio' +
+      '<span class="ma-entity-kpi-label">Entidad</span>' +
       '</div>' +
       MA_ENTITY_KPI_COLUMNS.map(function (col) {
+        var tip = col.title || col.label;
         return (
           '<div class="ma-entity-grid-cell ma-entity-grid-cell--kpi ma-kpi-id-' +
           col.id +
           '" role="columnheader">' +
           '<span class="ma-entity-kpi-label ma-kpi-id-' +
           col.id +
+          '" title="' +
+          escapeHtml(tip) +
           '">' +
           escapeHtml(col.label) +
           '</span>' +
@@ -2884,7 +2887,11 @@
         '<div class="' +
         valClass +
         '">' +
-        '<span class="ma-entity-kpi-val-text">' +
+        '<span class="ma-entity-kpi-val-text"' +
+        (disp.title
+          ? ' title="' + escapeHtml(disp.title) + '"'
+          : '') +
+        '>' +
         escapeHtml(disp.text) +
         '</span>' +
         renderTrendHtml(trend) +
@@ -2973,12 +2980,18 @@
       (ad.czUnidentifiedRow ? ' ma-entity-grid-row--unidentified' : '') +
       '" role="row">' +
       '<div class="ma-entity-grid-cell ma-entity-grid-cell--name" role="cell">' +
-      '<span class="ma-entity-ad-name">' +
+      '<div class="ma-entity-name-line ma-entity-name-line--ad">' +
+      '<span class="ma-entity-ad-name" title="' +
+      escapeHtml(
+        ad.name +
+          (ad.ad_id != null && String(ad.ad_id) !== ''
+            ? ' · ID ' + String(ad.ad_id)
+            : ''),
+      ) +
+      '">' +
       escapeHtml(ad.name) +
       '</span>' +
-      (ad.ad_id != null && String(ad.ad_id) !== ''
-        ? '<span class="ma-ad-id">ID ' + escapeHtml(ad.ad_id) + '</span>'
-        : '') +
+      '</div>' +
       '</div>' +
       renderEntityGridKpiCells(entity, priorEntity, trendEnabled) +
       '</div>' +
@@ -3197,29 +3210,31 @@
           '<div class="ma-entity-grid-group">' +
           '<div class="ma-entity-grid-row ma-entity-grid-row--campaign" role="row">' +
           '<div class="ma-entity-grid-cell ma-entity-grid-cell--name" role="cell">' +
-          '<div class="ma-entity-camp-head">' +
+          '<div class="ma-entity-name-line ma-entity-name-line--campaign">' +
           '<span class="ma-status-dot" style="color:' +
           (hasAlert ? '#ef4444' : '#22c55e') +
           '">●</span>' +
-          '<span class="ma-camp-name">' +
+          '<span class="ma-camp-name" title="' +
+          escapeHtml(
+            c.name +
+              (c.campaign_id ? ' · ID ' + String(c.campaign_id) : '') +
+              ' · ' +
+              c.dias +
+              ' día' +
+              (c.dias !== 1 ? 's' : '') +
+              ' con datos',
+          ) +
+          '">' +
           escapeHtml(c.name) +
           '</span>' +
-          (c.campaign_id
-            ? '<span class="ma-camp-id">ID ' + escapeHtml(c.campaign_id) + '</span>'
-            : '') +
-          (hasAlert ? '<span class="ma-ab">⚠ ALERTA</span>' : '') +
-          '</div>' +
-          '<div class="ma-entity-camp-meta">' +
-          '<span class="ma-dias">' +
-          c.dias +
-          ' día' +
-          (c.dias !== 1 ? 's' : '') +
-          ' con datos</span>' +
+          (hasAlert ? '<span class="ma-ab ma-ab--compact">⚠</span>' : '') +
           (cidKey
-            ? '<button type="button" class="ma-ad-toggle" data-ma-action="toggle-campaign-ads" data-campaign-id="' +
+            ? '<button type="button" class="ma-ad-toggle ma-ad-toggle--compact" data-ma-action="toggle-campaign-ads" data-campaign-id="' +
               escapeHtml(cidKey) +
-              '">' +
+              '" title="' +
               (expanded ? 'Ocultar anuncios' : 'Ver anuncios') +
+              '">' +
+              (expanded ? '▾ Ads' : '▸ Ads') +
               '</button>'
             : '') +
           '</div>' +

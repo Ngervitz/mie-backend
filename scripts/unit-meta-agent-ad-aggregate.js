@@ -207,11 +207,36 @@ const tests = [
       path.join(__dirname, '../public/meta-agent.js'),
       'utf8',
     );
+    assert.ok(js.includes('toggle-campaign-ads'));
+    assert.ok(js.includes('ma-ad-toggle--compact'));
     assert.ok(js.includes('Ver anuncios'));
     assert.ok(js.includes('Ocultar anuncios'));
-    assert.ok(js.includes('toggle-campaign-ads'));
     assert.ok(js.includes('own_ad_ad_metrics'));
     assert.ok(!js.includes("data-ma-tab=\"ads\""));
+  }),
+
+  test('entity grid CSS fits JANUS 1366 desktop without forced horizontal scroll', function () {
+    const css = fs.readFileSync(
+      path.join(__dirname, '../public/meta-agent.css'),
+      'utf8',
+    );
+    assert.ok(!css.includes('min-width: 1280px'));
+    assert.ok(css.includes('overflow-x: hidden'));
+    assert.ok(css.includes('repeat(15,'));
+    const colMatch = css.match(/--ma-entity-grid-cols:\s*([^;]+)/);
+    assert.ok(colMatch, 'grid column template');
+    assert.ok(!colMatch[1].includes('76px'), 'no wide min column');
+    const gapMatch = css.match(/--ma-entity-grid-gap:\s*([0-9.]+px)/);
+    const gap = gapMatch ? Number(gapMatch[1].replace('px', '')) : 8;
+    const sidebar = 220;
+    const appPad = 40;
+    const bodyPad = 24;
+    const gridPad = 16;
+    const avail =
+      1366 - sidebar - appPad - bodyPad - gridPad - 15 * gap;
+    const nameCol = 108;
+    const perKpi = (avail - nameCol) / 15;
+    assert.ok(perKpi >= 52, 'KPI col width at 1366: ' + perKpi.toFixed(1) + 'px');
   }),
 
   test('buildCampaignEntity uses byCampaignId rollup not only visible ad rows', function () {
