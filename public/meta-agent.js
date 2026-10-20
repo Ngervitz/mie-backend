@@ -62,6 +62,8 @@
     adDataError: null,
     /** campaign_id → true when ad list is expanded */
     expandedCampaignIds: {},
+    /** ad expand key → true when platform detail is expanded */
+    expandedPlatformAdIds: {},
     /** Aggregated CZ ↔ Meta attribution from GET /api/meta-agent/cz-attribution. */
     czAttribution: null,
     czAttributionError: null,
@@ -137,6 +139,12 @@
     if (dec === undefined) dec = 2;
     var n = parseFloat(val);
     return isNaN(n) ? '—' : n.toFixed(dec);
+  }
+
+  /** USD display only — always two decimals; does not alter stored metrics. */
+  function fmtUsd(val) {
+    var n = parseFloat(val);
+    return isNaN(n) ? '—' : n.toFixed(2);
   }
 
   function fmtN(val) {
@@ -1902,10 +1910,10 @@
                   return 'Fase: ' + (phaseLabels[index] || '—');
                 }
                 if (id === 'cpc') {
-                  return value == null ? null : 'CPC propio: $' + fmt(value);
+                  return value == null ? null : 'CPC propio: $' + fmtUsd(value);
                 }
                 if (id === 'cpl') {
-                  return value == null ? null : 'CPL propio: $' + fmt(value);
+                  return value == null ? null : 'CPL propio: $' + fmtUsd(value);
                 }
                 if (id === 'bcuRate') {
                   return value == null
@@ -1965,7 +1973,7 @@
             var dateLabel = formatDateEs(r.log_date) || r.log_date || '—';
             var spend =
               r.meta_spend_day !== null && r.meta_spend_day !== undefined
-                ? '$' + fmt(r.meta_spend_day)
+                ? '$' + fmtUsd(r.meta_spend_day)
                 : '—';
             return (
               '<tr>' +
@@ -2154,7 +2162,7 @@
         label: 'GASTO',
         val:
           period.spend !== null && period.spend !== undefined
-            ? '$' + fmt(period.spend, 0)
+            ? '$' + fmtUsd(period.spend)
             : '—',
         sub: periodSub,
         color: '#3b82f6',
@@ -2176,7 +2184,7 @@
       },
       {
         label: 'CPL PROMEDIO',
-        val: avgCPL !== null ? '$' + fmt(avgCPL) : '—',
+        val: avgCPL !== null ? '$' + fmtUsd(avgCPL) : '—',
         sub:
           avgCPL === null
             ? 'sin datos'
@@ -2191,7 +2199,7 @@
         label: 'CPL META',
         val:
           metaCpl !== null
-            ? '$' + fmt(metaCpl)
+            ? '$' + fmtUsd(metaCpl)
             : metaLeadCount === 0
               ? 'Sin conversiones'
               : '—',
@@ -2217,7 +2225,7 @@
         label: 'CPC',
         val:
           period.cpc !== null && period.cpc !== undefined
-            ? '$' + fmt(period.cpc)
+            ? '$' + fmtUsd(period.cpc)
             : '—',
         sub: periodSub,
         color: '#8b5cf6',
@@ -2228,7 +2236,7 @@
         label: 'CPM',
         val:
           period.cpm !== null && period.cpm !== undefined
-            ? '$' + fmt(period.cpm)
+            ? '$' + fmtUsd(period.cpm)
             : '—',
         sub: periodSub,
         color: '#f59e0b',
@@ -2767,7 +2775,7 @@
     switch (colId) {
       case 'gasto':
         return entity.gasto !== null
-          ? { text: '$' + fmt(entity.gasto, 0), muted: false }
+          ? { text: '$' + fmtUsd(entity.gasto), muted: false }
           : { text: '—', muted: true };
       case 'impressions':
         return entity.impressions !== null
@@ -2783,14 +2791,14 @@
           : { text: '—', muted: true };
       case 'cpc':
         return entity.cpc !== null
-          ? { text: '$' + fmt(entity.cpc), muted: false }
+          ? { text: '$' + fmtUsd(entity.cpc), muted: false }
           : { text: '—', muted: true };
       case 'cplMeta':
         if (entity.cplSinConversiones) {
           return { text: '—', muted: true, title: 'Sin conversiones' };
         }
         return entity.cplMeta !== null
-          ? { text: '$' + fmt(entity.cplMeta), muted: false }
+          ? { text: '$' + fmtUsd(entity.cplMeta), muted: false }
           : { text: '—', muted: true };
       case 'convMeta':
         if (entity.convMeta !== null && entity.convMeta > 0) {
@@ -2818,17 +2826,17 @@
           return { text: '—', muted: true, title: 'Sin solicitudes' };
         }
         return entity.cplCz !== null
-          ? { text: '$' + fmt(entity.cplCz), muted: false }
+          ? { text: '$' + fmtUsd(entity.cplCz), muted: false }
           : { text: '—', muted: true, title: 'Sin datos' };
       case 'costPerPreaprob': {
         var cpp = entity.costPerPreaprob;
-        if (cpp != null) return { text: '$' + fmt(cpp), muted: false };
+        if (cpp != null) return { text: '$' + fmtUsd(cpp), muted: false };
         if (entity.czPreaprobados === 0) return { text: '—', muted: true, title: 'Sin datos' };
         return { text: '—', muted: true };
       }
       case 'costPerGranted': {
         var cpg = entity.costPerGranted;
-        if (cpg != null) return { text: '$' + fmt(cpg), muted: false };
+        if (cpg != null) return { text: '$' + fmtUsd(cpg), muted: false };
         if (entity.czGranted === 0) return { text: '—', muted: true, title: 'Sin datos' };
         return { text: '—', muted: true };
       }
@@ -2901,6 +2909,25 @@
     }).join('');
   }
 
+  function adHasPlatformDetail(ad) {
+    if (!ad) return false;
+    if (
+      ad.platformSpend &&
+      typeof ad.platformSpend === 'object' &&
+      Object.keys(ad.platformSpend).length > 0
+    ) {
+      return true;
+    }
+    return ad.gasto !== null && ad.gasto !== undefined && ad.gasto > 0;
+  }
+
+  function platformAdExpandKey(ad) {
+    if (ad.ad_id != null && String(ad.ad_id) !== '') {
+      return String(ad.ad_id);
+    }
+    return 'synthetic-' + String(ad.name || 'ad');
+  }
+
   function renderAdPlatformDetail(ad) {
     var platformHtml = '';
     if (ad.platformSpend && typeof ad.platformSpend === 'object') {
@@ -2919,7 +2946,7 @@
                 '<li>' +
                 escapeHtml(CZ.formatPlatformLabel(pk)) +
                 ': $' +
-                fmt(ad.platformSpend[pk], 0) +
+                fmtUsd(ad.platformSpend[pk]) +
                 '</li>'
               );
             })
@@ -2973,7 +3000,23 @@
         trendEnabled = !!priorEntity;
       }
     }
-    var detail = renderAdPlatformDetail(ad);
+    var platKey = platformAdExpandKey(ad);
+    var platExpanded = !!state.expandedPlatformAdIds[platKey];
+    var showPlatform = adHasPlatformDetail(ad);
+    var platToggle = '';
+    if (showPlatform) {
+      platToggle =
+        '<button type="button" class="ma-ad-toggle ma-ad-toggle--compact ma-platform-toggle" data-ma-action="toggle-ad-platform" data-ad-id="' +
+        escapeHtml(platKey) +
+        '" aria-expanded="' +
+        (platExpanded ? 'true' : 'false') +
+        '" title="' +
+        (platExpanded ? 'Ocultar gasto por plataforma' : 'Ver gasto por plataforma') +
+        '">' +
+        (platExpanded ? '▾ Plat' : '▸ Plat') +
+        '</button>';
+    }
+    var detail = platExpanded ? renderAdPlatformDetail(ad) : '';
     return (
       '<div class="ma-entity-grid-ad-block">' +
       '<div class="ma-entity-grid-row ma-entity-grid-row--ad' +
@@ -2991,6 +3034,7 @@
       '">' +
       escapeHtml(ad.name) +
       '</span>' +
+      platToggle +
       '</div>' +
       '</div>' +
       renderEntityGridKpiCells(entity, priorEntity, trendEnabled) +
@@ -3297,7 +3341,7 @@
               '<div class="ma-alert-chip ma-alert-chip-red">' +
               '<div class="ma-alert-chip-label">📉 CPL ALTO</div>' +
               '<div class="ma-mv ma-alert-chip-val" style="color:#ef4444">$' +
-              escapeHtml(fmt(c.cpl)) +
+              escapeHtml(fmtUsd(c.cpl)) +
               '</div>' +
               '<div class="ma-alert-chip-hint">Revisar audiencia y landing</div>' +
               '</div>';
@@ -3488,6 +3532,15 @@
             delete state.expandedCampaignIds[campId];
           } else {
             state.expandedCampaignIds[campId] = true;
+          }
+          render();
+        } else if (action === 'toggle-ad-platform') {
+          var adKey = el.getAttribute('data-ad-id');
+          if (!adKey) return;
+          if (state.expandedPlatformAdIds[adKey]) {
+            delete state.expandedPlatformAdIds[adKey];
+          } else {
+            state.expandedPlatformAdIds[adKey] = true;
           }
           render();
         }
@@ -3718,6 +3771,14 @@
         else next[campaignId] = true;
         return next;
       },
+      toggleExpandedPlatformAd: function (expandedMap, adKey) {
+        var next = Object.assign({}, expandedMap || {});
+        if (next[adKey]) delete next[adKey];
+        else next[adKey] = true;
+        return next;
+      },
+      adHasPlatformDetail: adHasPlatformDetail,
+      platformAdExpandKey: platformAdExpandKey,
       dedupeRowsByCampaignDate: dedupeRowsByCampaignDate,
       buildCampListByCampaignId: buildCampListByCampaignId,
       aggregateAccountPeriod: aggregateAccountPeriod,
@@ -3744,6 +3805,8 @@
       shiftIsoDate: shiftIsoDate,
       METRIC_LOOKBACK_DAYS: METRIC_LOOKBACK_DAYS,
       fmtN: fmtN,
+      fmtUsd: fmtUsd,
+      fmt: fmt,
       ACCOUNT_TIME_ZONE: ACCOUNT_TIME_ZONE,
       CZ: CZ,
       computeAdsDerived: computeAdsDerived,

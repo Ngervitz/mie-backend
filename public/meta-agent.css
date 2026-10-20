@@ -964,11 +964,15 @@
 }
 
 #meta-ads-root .ma-entity-grid-body .ma-entity-grid-group {
-  border-bottom: 1px solid var(--meta-agent-border);
+  border-bottom: 1px solid rgba(42, 47, 58, 0.95);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
 }
 
 #meta-ads-root .ma-entity-grid-body .ma-entity-grid-group:last-child {
   border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 #meta-ads-root .ma-entity-grid-row {
@@ -977,12 +981,24 @@
 }
 
 #meta-ads-root .ma-entity-grid-row--campaign {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 3px solid var(--meta-agent-blue);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#meta-ads-root .ma-entity-grid-row--campaign .ma-entity-kpi-val {
+  font-weight: 700;
+}
+
+#meta-ads-root .ma-entity-grid-ads {
+  background: rgba(0, 0, 0, 0.22);
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
 }
 
 #meta-ads-root .ma-entity-grid-row--ad {
-  background: rgba(0, 0, 0, 0.12);
-  border-top: 1px dashed var(--meta-agent-border);
+  background: rgba(0, 0, 0, 0.16);
+  border-top: 1px solid rgba(42, 47, 58, 0.75);
+  border-left: 3px solid transparent;
 }
 
 #meta-ads-root .ma-entity-grid-row--unidentified .ma-entity-ad-name {
@@ -990,7 +1006,11 @@
 }
 
 #meta-ads-root .ma-entity-grid-ads .ma-entity-grid-row--ad:first-child {
-  border-top: none;
+  border-top: 1px solid rgba(42, 47, 58, 0.55);
+}
+
+#meta-ads-root .ma-entity-grid-ad-block:last-child .ma-entity-grid-row--ad {
+  border-bottom: 1px solid rgba(42, 47, 58, 0.45);
 }
 
 #meta-ads-root .ma-entity-grid-cell--name {
@@ -1007,7 +1027,7 @@
 }
 
 #meta-ads-root .ma-entity-name-line--ad {
-  padding-left: 8px;
+  padding-left: 14px;
 }
 
 #meta-ads-root .ma-entity-camp-head,
@@ -1022,13 +1042,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
   font-size: 11px;
   line-height: 1.2;
 }
 
+#meta-ads-root .ma-camp-name {
+  font-weight: 700;
+  color: var(--meta-agent-text);
+}
+
 #meta-ads-root .ma-entity-ad-name {
-  font-weight: 500;
+  font-weight: 400;
   color: var(--meta-agent-text);
 }
 
@@ -1050,6 +1074,11 @@
   font-size: 9px;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+#meta-ads-root .ma-platform-toggle {
+  opacity: 0.88;
+  color: var(--meta-agent-muted);
 }
 
 #meta-ads-root .ma-entity-grid-cell--kpi {
@@ -1111,9 +1140,9 @@
 }
 
 #meta-ads-root .ma-entity-grid-detail {
-  padding: 8px 14px 12px 38px;
-  border-top: 1px dashed var(--meta-agent-border);
-  background: rgba(0, 0, 0, 0.08);
+  padding: 8px 14px 12px 42px;
+  border-top: 1px solid rgba(42, 47, 58, 0.65);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 #meta-ads-root .ma-kpi-id-gasto,

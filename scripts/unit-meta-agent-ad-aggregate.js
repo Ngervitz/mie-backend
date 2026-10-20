@@ -208,11 +208,45 @@ const tests = [
       'utf8',
     );
     assert.ok(js.includes('toggle-campaign-ads'));
+    assert.ok(js.includes('toggle-ad-platform'));
     assert.ok(js.includes('ma-ad-toggle--compact'));
     assert.ok(js.includes('Ver anuncios'));
     assert.ok(js.includes('Ocultar anuncios'));
     assert.ok(js.includes('own_ad_ad_metrics'));
     assert.ok(!js.includes("data-ma-tab=\"ads\""));
+  }),
+
+  test('toggleExpandedPlatformAd toggles independently per ad', function () {
+    let map = {};
+    map = ui.toggleExpandedPlatformAd(map, 'ad-1');
+    assert.strictEqual(map['ad-1'], true);
+    map = ui.toggleExpandedPlatformAd(map, 'ad-2');
+    assert.strictEqual(map['ad-2'], true);
+    map = ui.toggleExpandedPlatformAd(map, 'ad-1');
+    assert.strictEqual(map['ad-1'], undefined);
+    assert.strictEqual(map['ad-2'], true);
+  }),
+
+  test('adHasPlatformDetail true when platformSpend or positive gasto', function () {
+    assert.strictEqual(
+      ui.adHasPlatformDetail({ platformSpend: { facebook: 1 }, gasto: 0 }),
+      true,
+    );
+    assert.strictEqual(ui.adHasPlatformDetail({ gasto: 0.45 }), true);
+    assert.strictEqual(ui.adHasPlatformDetail({ gasto: 0 }), false);
+    assert.strictEqual(ui.adHasPlatformDetail({ gasto: null }), false);
+  }),
+
+  test('entity grid CSS distinguishes campaign vs ad hierarchy', function () {
+    const css = fs.readFileSync(
+      path.join(__dirname, '../public/meta-agent.css'),
+      'utf8',
+    );
+    assert.ok(css.includes('.ma-entity-grid-row--campaign'));
+    assert.ok(css.includes('border-left: 3px solid var(--meta-agent-blue)'));
+    assert.ok(css.includes('.ma-entity-grid-row--ad'));
+    assert.ok(css.includes('.ma-camp-name'));
+    assert.ok(/\.ma-camp-name[\s\S]*font-weight:\s*700/.test(css));
   }),
 
   test('entity grid CSS fits JANUS 1366 desktop without forced horizontal scroll', function () {
@@ -296,6 +330,36 @@ const tests = [
     const unidentified = ui.buildUnidentifiedCzSyntheticAd('999', czPayload.byCampaignId['999']);
     assert.strictEqual(unidentified.name, 'Sin anuncio identificado');
     assert.strictEqual(unidentified.czSolicitudes, 1);
+  }),
+
+  test('fmtUsd always uses two decimals for USD (including amounts below $1)', function () {
+    assert.strictEqual(ui.fmtUsd(1), '1.00');
+    assert.strictEqual(ui.fmtUsd(0.45), '0.45');
+    assert.strictEqual(ui.fmtUsd(0.08), '0.08');
+    assert.strictEqual(ui.fmtUsd(25.324), '25.32');
+    assert.strictEqual(ui.fmtUsd('0.67'), '0.67');
+    assert.strictEqual(ui.fmtUsd(null), '—');
+  }),
+
+  test('formatEntityKpiDisplay formats monetary KPIs with two decimals', function () {
+    const entity = {
+      gasto: 0.45,
+      cpc: 0.08,
+      cplMeta: 0.67,
+      cplSinConversiones: false,
+      cplCz: 0.34,
+      cplCzSinSolicitudes: false,
+      costPerPreaprob: 0.12,
+      costPerGranted: 1.5,
+      czPreaprobados: 1,
+      czGranted: 1,
+    };
+    assert.strictEqual(ui.formatEntityKpiDisplay('gasto', entity).text, '$0.45');
+    assert.strictEqual(ui.formatEntityKpiDisplay('cpc', entity).text, '$0.08');
+    assert.strictEqual(ui.formatEntityKpiDisplay('cplMeta', entity).text, '$0.67');
+    assert.strictEqual(ui.formatEntityKpiDisplay('cplCz', entity).text, '$0.34');
+    assert.strictEqual(ui.formatEntityKpiDisplay('costPerPreaprob', entity).text, '$0.12');
+    assert.strictEqual(ui.formatEntityKpiDisplay('costPerGranted', entity).text, '$1.50');
   }),
 
   test('unified entity grid shares KPI column order for campaign and ad rows', function () {
