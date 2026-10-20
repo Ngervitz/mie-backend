@@ -7,6 +7,7 @@ const socialCommentsRouter = require('./routes/social-comments');
 const socialConversationsRouter = require('./routes/social-conversations');
 const liquidityCycleRouter = require('./routes/liquidity-cycle');
 const bcuUsuraRateRouter = require('./routes/bcu-usura-rate');
+const metaAgentCzAttributionRouter = require('./routes/meta-agent-cz-attribution');
 const competitorActivityPredictionsRouter = require('./routes/competitor-activity-predictions');
 const marketPatternsRouter = require('./routes/market-patterns');
 const mlNotesRouter = require('./routes/ml-notes');
@@ -133,6 +134,11 @@ app.use(
   '/api/bcu-usura-rate',
   requireDashboardPermission('meta'),
   bcuUsuraRateRouter,
+);
+app.use(
+  '/api/meta-agent',
+  requireDashboardPermission('meta'),
+  metaAgentCzAttributionRouter,
 );
 app.use(
   '/competitor-activity-predictions',

@@ -86,6 +86,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/hugo/knowledge-own-ads',
     '/api/liquidity-cycle',
     '/api/bcu-usura-rate',
+    '/api/meta-agent',
     '/jobs/run-metaagente',
     '/jobs/metaagente-status',
     '/jobs/run-own-ad-changes',
@@ -135,7 +136,11 @@ const SECTION_MOUNT_PREFIXES = Object.freeze({
     '/ml-notes',
     '/assist',
   ]),
-  meta: Object.freeze(['/api/liquidity-cycle', '/api/bcu-usura-rate']),
+  meta: Object.freeze([
+    '/api/liquidity-cycle',
+    '/api/bcu-usura-rate',
+    '/api/meta-agent',
+  ]),
   rechazados: Object.freeze(['/rechazados']),
   preaprobados: Object.freeze(['/preaprobados']),
 });

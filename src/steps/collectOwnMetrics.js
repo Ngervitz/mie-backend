@@ -231,6 +231,7 @@ function buildInsightsUrl({
   after,
   level,
   fields,
+  breakdowns,
 }) {
   const insightLevel = level || 'campaign';
   const fieldList =
@@ -246,6 +247,9 @@ function buildInsightsUrl({
     }),
     limit: '100',
   });
+  if (breakdowns) {
+    params.set('breakdowns', breakdowns);
+  }
   if (after) {
     params.set('after', after);
   }
@@ -291,6 +295,7 @@ async function fetchAllInsightRows({
   reportingRange,
   level,
   fields,
+  breakdowns,
   logLabel,
 }) {
   const rows = [];
@@ -314,6 +319,7 @@ async function fetchAllInsightRows({
       after,
       level,
       fields,
+      breakdowns,
     });
     const body = await fetchInsightsPage({ url, accessToken, pageNumber });
     const pageRows = Array.isArray(body.data) ? body.data : [];
@@ -368,6 +374,53 @@ async function fetchAllAdRows(opts) {
     ...opts,
     level: 'ad',
     logLabel: 'ad',
+  });
+}
+
+const AD_PLATFORM_FIELDS = [
+  'ad_id',
+  'campaign_id',
+  'date_start',
+  'spend',
+  'impressions',
+  'clicks',
+  'publisher_platform',
+];
+
+async function fetchAllAdPlatformRows(opts) {
+  return fetchAllInsightRows({
+    ...opts,
+    level: 'ad',
+    fields: AD_PLATFORM_FIELDS,
+    breakdowns: 'publisher_platform',
+    logLabel: 'ad_platform',
+  });
+}
+
+function attachPlatformSlicesToAdMetrics(metricRows, platformRows) {
+  const slicesByKey = new Map();
+  for (const row of platformRows || []) {
+    if (!row || row.ad_id == null || !row.date_start) continue;
+    const key = [String(row.ad_id), String(row.date_start)].join('\u0000');
+    if (!slicesByKey.has(key)) slicesByKey.set(key, []);
+    slicesByKey.get(key).push({
+      publisher_platform:
+        row.publisher_platform != null ? String(row.publisher_platform) : null,
+      spend: parseFloatOrNull(row.spend),
+      impressions: parseIntOrNull(row.impressions),
+      clicks: parseIntOrNull(row.clicks),
+    });
+  }
+  return (metricRows || []).map((metric) => {
+    const key = [String(metric.ad_id), String(metric.metric_date)].join('\u0000');
+    const slices = slicesByKey.get(key);
+    if (!slices || !slices.length) return metric;
+    const raw =
+      metric.raw_json && typeof metric.raw_json === 'object'
+        ? { ...metric.raw_json }
+        : {};
+    raw.platform_slices = slices;
+    return { ...metric, raw_json: raw };
   });
 }
 
@@ -474,9 +527,30 @@ async function collectAdLevelMetrics({
       accessToken,
       reportingRange,
     });
-    const metricRows = adRows
+    let platformRows = [];
+    try {
+      platformRows = await fetchAllAdPlatformRows({
+        version,
+        adAccountId,
+        accessToken,
+        reportingRange,
+      });
+    } catch (platformErr) {
+      logger.warn('Meta ad-level platform breakdown skipped', {
+        runId,
+        entityId,
+        error:
+          platformErr && platformErr.message
+            ? platformErr.message
+            : 'unknown',
+      });
+    }
+    let metricRows = adRows
       .map((row) => mapRowToAdMetric({ row, entityId, runId }))
       .filter(Boolean);
+    if (platformRows.length) {
+      metricRows = attachPlatformSlicesToAdMetrics(metricRows, platformRows);
+    }
     const { upserted } = await upsertAdMetrics(metricRows);
     return {
       status: 'success',

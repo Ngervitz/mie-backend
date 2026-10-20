@@ -62,7 +62,62 @@
     adDataError: null,
     /** campaign_id → true when ad list is expanded */
     expandedCampaignIds: {},
+    /** Aggregated CZ ↔ Meta attribution from GET /api/meta-agent/cz-attribution. */
+    czAttribution: null,
+    czAttributionError: null,
+    czAttributionLoading: false,
   };
+
+  function resolveCzAttributionApi() {
+    if (typeof require === 'function') {
+      try {
+        return require('../src/lib/metaAgentCzAttribution');
+      } catch (ignore) {}
+    }
+    if (typeof window !== 'undefined' && window.__META_AGENT_CZ_ATTRIBUTION__) {
+      return window.__META_AGENT_CZ_ATTRIBUTION__;
+    }
+    return null;
+  }
+
+  var CZ = resolveCzAttributionApi();
+
+  if (!CZ) {
+    CZ = {
+      CZ_ATTRIBUTION_BUCKETS: {
+        META_AD_ATTRIBUTED: 'meta_ad_attributed',
+        META_AD_PENDING: 'meta_ad_pending',
+        META_NO_AD: 'meta_no_ad',
+        UNKNOWN_ORIGIN: 'unknown_origin',
+        OTHER_CHANNEL: 'other_channel',
+      },
+      attachCzStatsToAdList: function (adList, byAdId) {
+        return (adList || []).map(function (ad) {
+          var stats =
+            (byAdId && ad.ad_id != null && byAdId[String(ad.ad_id)]) || null;
+          var czSolicitudes = stats ? stats.solicitudCount : 0;
+          var gasto = ad.gasto;
+          var cplCz =
+            gasto !== null && gasto !== undefined && czSolicitudes > 0
+              ? gasto / czSolicitudes
+              : null;
+          return Object.assign({}, ad, {
+            czSolicitudes: czSolicitudes,
+            czUniqueCi: stats ? stats.uniqueCi : 0,
+            czPreaprobados: stats ? stats.preaprobadosCount || 0 : 0,
+            czGranted: stats ? stats.grantedCount || 0 : 0,
+            cplCz: cplCz,
+            cplCzSinSolicitudes: czSolicitudes === 0,
+            costPerPreaprob: null,
+            costPerGranted: null,
+          });
+        });
+      },
+      formatPlatformLabel: function (p) {
+        return p || 'Sin datos';
+      },
+    };
+  }
 
   var auctionPressureChart = null;
   var activeSeriesToggles = {
@@ -514,12 +569,19 @@
     return byCamp;
   }
 
+  function czPayloadMatchesPeriod(payload, range) {
+    if (!payload || !payload.range || !range) return false;
+    return (
+      payload.range.from === range.from && payload.range.to === range.to
+    );
+  }
+
   /**
    * Ad-level aggregates for the active period preset (same as campaigns).
-   * Future cross-source enrichments (e.g. attribution) can wrap or extend this helper.
    * @param {object[]} allAdData
+   * @param {object|null} czPayload from GET /api/meta-agent/cz-attribution
    */
-  function computeAdsDerived(allAdData) {
+  function computeAdsDerived(allAdData, czPayload) {
     var range = resolvePeriodRange(
       state.periodPreset,
       state.customFrom,
@@ -528,6 +590,35 @@
     var filtered = filterRowsByMetricDate(allAdData || [], range.from, range.to);
     var deduped = dedupeRowsByAdDate(filtered);
     var adList = buildAdListByAdId(deduped);
+    var czAttribution = null;
+    if (CZ && czPayload && czPayloadMatchesPeriod(czPayload, range)) {
+      adList = CZ.attachCzStatsToAdList(adList, czPayload.byAdId || {});
+      czAttribution = {
+        byAdId: czPayload.byAdId || {},
+        buckets: czPayload.buckets || {},
+        globalAttributed: czPayload.globalAttributed || {
+          solicitudCount: 0,
+          uniqueCi: 0,
+        },
+        ciOverlap: czPayload.ciOverlap || {},
+        pendingAdIds: czPayload.pendingAdIds || [],
+        dateSemantics: czPayload.dateSemantics || null,
+        limitations: czPayload.limitations || null,
+      };
+    } else if (CZ) {
+      adList = CZ.attachCzStatsToAdList(adList, {});
+    }
+    if (CZ && CZ.aggregatePlatformSpendForAd) {
+      var platByAd = CZ.aggregatePlatformSpendForAd(
+        deduped,
+        range.from,
+        range.to,
+      );
+      adList = adList.map(function (ad) {
+        var slices = platByAd[String(ad.ad_id)] || null;
+        return Object.assign({}, ad, { platformSpend: slices });
+      });
+    }
     var adsByCampaign = groupAdsByCampaignId(adList);
     return {
       adList: adList,
@@ -535,6 +626,7 @@
       range: range,
       datasetEmpty: !(allAdData && allAdData.length),
       bounds: computeDatasetDateBounds(allAdData || []),
+      czAttribution: czAttribution,
     };
   }
 
@@ -784,6 +876,69 @@
     }
 
     return all;
+  }
+
+  function apiBaseUrl() {
+    return window.location.protocol === 'file:'
+      ? 'https://mie-backend-production.up.railway.app'
+      : '';
+  }
+
+  async function loadCzAttribution() {
+    var range = resolvePeriodRange(
+      state.periodPreset,
+      state.customFrom,
+      state.customTo,
+    );
+    if (!range.from || !range.to) {
+      state.czAttribution = null;
+      state.czAttributionError = null;
+      state.czAttributionLoading = false;
+      return;
+    }
+    state.czAttributionLoading = true;
+    try {
+      var url =
+        apiBaseUrl() +
+        '/api/meta-agent/cz-attribution?from=' +
+        encodeURIComponent(range.from) +
+        '&to=' +
+        encodeURIComponent(range.to);
+      var res = await fetch(url, {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (res.status === 401 || res.status === 403) {
+        state.czAttribution = null;
+        state.czAttributionError =
+          'Sesión sin permiso para atribución Credizona (Meta Ads).';
+        return;
+      }
+      if (!res.ok) {
+        state.czAttribution = null;
+        state.czAttributionError =
+          'No se pudo cargar atribución Credizona (' + res.status + ').';
+        return;
+      }
+      var body = await res.json();
+      if (!body || typeof body !== 'object' || !body.byAdId) {
+        state.czAttribution = null;
+        state.czAttributionError = 'Respuesta inválida de atribución Credizona.';
+        return;
+      }
+      state.czAttribution = body;
+      state.czAttributionError = null;
+    } catch (e) {
+      state.czAttribution = null;
+      state.czAttributionError = 'No se pudo cargar atribución Credizona.';
+      console.error(
+        '[meta-agent] loadCzAttribution failed:',
+        e && e.message ? e.message : String(e),
+      );
+    } finally {
+      state.czAttributionLoading = false;
+      render();
+    }
   }
 
   function findVal(row) {
@@ -2218,7 +2373,91 @@
             ? '$' + fmt(ad.cpl)
             : '—',
       },
+      {
+        label: 'SOLIC. CZ',
+        val:
+          ad.czSolicitudes != null && ad.czSolicitudes > 0
+            ? fmt(ad.czSolicitudes, 0)
+            : ad.czSolicitudes === 0
+              ? '0'
+              : 'Sin datos',
+      },
+      {
+        label: 'PREAPROB.',
+        val:
+          ad.czPreaprobados != null && ad.czPreaprobados > 0
+            ? fmt(ad.czPreaprobados, 0)
+            : ad.czPreaprobados === 0
+              ? '0'
+              : 'Sin datos',
+      },
+      {
+        label: 'OTORG.',
+        val:
+          ad.czGranted != null && ad.czGranted > 0
+            ? fmt(ad.czGranted, 0)
+            : ad.czGranted === 0
+              ? '0'
+              : 'Sin datos',
+      },
+      {
+        label: 'CPL CZ',
+        val: ad.cplCzSinSolicitudes
+          ? 'Sin solicitudes'
+          : ad.cplCz !== null
+            ? '$' + fmt(ad.cplCz)
+            : 'Sin datos',
+      },
+      {
+        label: 'COSTO/PREAP.',
+        val:
+          ad.costPerPreaprob != null
+            ? '$' + fmt(ad.costPerPreaprob)
+            : ad.czPreaprobados === 0
+              ? 'Sin datos'
+              : '—',
+      },
+      {
+        label: 'COSTO/OTOR.',
+        val:
+          ad.costPerGranted != null
+            ? '$' + fmt(ad.costPerGranted)
+            : ad.czGranted === 0
+              ? 'Sin datos'
+              : '—',
+      },
     ];
+    var platformHtml = '';
+    if (ad.platformSpend && typeof ad.platformSpend === 'object') {
+      var platKeys = Object.keys(ad.platformSpend);
+      if (platKeys.length) {
+        platformHtml =
+          '<div class="ma-ad-platform">' +
+          '<div class="ma-ad-platform-title">Gasto Meta por plataforma (Insights)</div>' +
+          '<ul class="ma-ad-platform-list">' +
+          platKeys
+            .sort(function (a, b) {
+              return (ad.platformSpend[b] || 0) - (ad.platformSpend[a] || 0);
+            })
+            .map(function (pk) {
+              return (
+                '<li>' +
+                escapeHtml(CZ.formatPlatformLabel(pk)) +
+                ': $' +
+                fmt(ad.platformSpend[pk], 0) +
+                '</li>'
+              );
+            })
+            .join('') +
+          '</ul></div>';
+      }
+    } else if (ad.gasto !== null && ad.gasto > 0) {
+      platformHtml =
+        '<div class="ma-ad-platform ma-ad-platform-muted">' +
+        'Gasto por plataforma: Sin datos (requiere ingest con publisher_platform).</div>';
+    }
+    var outcomePlatformNote =
+      '<div class="ma-ad-platform-note">Solicitudes / preaprobados / otorgados: No atribuible por plataforma (sin tracking verificable).</div>';
     return (
       '<div class="ma-ad-row">' +
       '<div class="ma-ad-row-head">' +
@@ -2245,7 +2484,59 @@
         })
         .join('') +
       '</div>' +
-      '<div class="ma-ad-note">Conversiones Meta (form_step_3), no solicitudes Credizona.</div>' +
+      platformHtml +
+      outcomePlatformNote +
+      '<div class="ma-ad-note">CONV. META = form_step_3. SOLIC./PREAPROB./OTOR. = Credizona atribuidos por utm_content=ad_id (fechas en panel resumen).</div>' +
+      '</div>'
+    );
+  }
+
+  function renderCzAttributionSummary(czAttribution, czError) {
+    if (czError) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-warn">' +
+        escapeHtml(czError) +
+        ' Las métricas Meta por anuncio siguen operativas.</div>'
+      );
+    }
+    if (!CZ) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-muted">' +
+        'Atribución Credizona no disponible en el cliente.</div>'
+      );
+    }
+    if (!czAttribution || !czAttribution.buckets) {
+      return (
+        '<div class="ma-ad-panel ma-ad-panel-muted">' +
+        (state.czAttributionLoading
+          ? 'Cargando atribución Credizona…'
+          : 'Sin datos de solicitudes Credizona para el período.') +
+        '</div>'
+      );
+    }
+    var b = czAttribution.buckets;
+    var B = CZ.CZ_ATTRIBUTION_BUCKETS;
+    var ga = czAttribution.globalAttributed || { solicitudCount: 0, uniqueCi: 0 };
+    return (
+      '<div class="ma-cz-attrib-summary">' +
+      '<div class="ma-cz-attrib-title">Credizona ↔ Meta (período seleccionado)</div>' +
+      '<div class="ma-cz-attrib-total">Atribuidas a anuncio: <strong>' +
+      fmt(ga.solicitudCount, 0) +
+      '</strong> solicitudes · <strong>' +
+      fmt(ga.uniqueCi, 0) +
+      '</strong> CI únicas</div>' +
+      '<ul class="ma-cz-attrib-list">' +
+      '<li>Meta → anuncio: ' +
+      fmt((b[B.META_AD_ATTRIBUTED] || {}).solicitudes || 0, 0) +
+      ' solic.</li>' +
+      '<li>Pendiente conciliación ad_id: ' +
+      fmt((b[B.META_AD_PENDING] || {}).solicitudes || 0, 0) +
+      ' solic.</li>' +
+      '<li>Sin anuncio Meta determinado: ' +
+      fmt((b[B.META_NO_AD] || {}).solicitudes || 0, 0) +
+      ' solic.</li>' +
+      '</ul>' +
+      '<div class="ma-cz-attrib-foot">Preaprobados/otorgados: reglas CDV (estado 8 / grant) y ELM (S2 referred / disbursed_at), 1 por solicitud.</div>' +
       '</div>'
     );
   }
@@ -2288,12 +2579,21 @@
   }
 
   function renderCampaigns(campList, totalGasto, totalConv, adsDerived) {
+    var summaryHtml = renderCzAttributionSummary(
+      adsDerived && adsDerived.czAttribution,
+      state.czAttributionError,
+    );
     if (campList.length === 0) {
-      return '<div class="ma-fade"><div class="ma-empty">No se encontraron campañas</div></div>';
+      return (
+        '<div class="ma-fade">' +
+        summaryHtml +
+        '<div class="ma-empty">No se encontraron campañas</div></div>'
+      );
     }
 
     return (
       '<div class="ma-fade">' +
+      summaryHtml +
       campList
         .map(function (c) {
           var cidKey =
@@ -2563,7 +2863,7 @@
   function renderBody(derived) {
     var tabContent = '';
     if (state.tab === 'campaigns') {
-      var adsDerived = computeAdsDerived(state.adData);
+      var adsDerived = computeAdsDerived(state.adData, state.czAttribution);
       tabContent = renderCampaigns(
         derived.campList,
         derived.totalGasto,
@@ -2631,6 +2931,7 @@
           state.customTo = toEl ? toEl.value : '';
           state.periodPreset = 'custom';
           render();
+          loadCzAttribution();
         } else if (action === 'toggle-campaign-ads') {
           var campId = el.getAttribute('data-campaign-id');
           if (!campId) return;
@@ -2651,6 +2952,7 @@
         state.periodPreset = preset;
         if (preset !== 'custom') {
           render();
+          loadCzAttribution();
           return;
         }
         var range = resolvePeriodRange('7d', '', '');
@@ -2712,6 +3014,7 @@
     }
     state.loading = false;
     render();
+    loadCzAttribution();
     loadNextEvents();
     loadAuctionPressure();
     loadLiquidityCycle();
@@ -2839,7 +3142,13 @@
       buildAdListByAdId: buildAdListByAdId,
       groupAdsByCampaignId: groupAdsByCampaignId,
       computeAdsDerived: computeAdsDerived,
-      computeAdsDerivedForState: function (adData, preset, customFrom, customTo) {
+      computeAdsDerivedForState: function (
+        adData,
+        preset,
+        customFrom,
+        customTo,
+        czPayload,
+      ) {
         var prev = {
           periodPreset: state.periodPreset,
           customFrom: state.customFrom,
@@ -2848,7 +3157,7 @@
         state.periodPreset = preset;
         state.customFrom = customFrom || '';
         state.customTo = customTo || '';
-        var out = computeAdsDerived(adData);
+        var out = computeAdsDerived(adData, czPayload);
         state.periodPreset = prev.periodPreset;
         state.customFrom = prev.customFrom;
         state.customTo = prev.customTo;
@@ -2887,7 +3196,20 @@
       METRIC_LOOKBACK_DAYS: METRIC_LOOKBACK_DAYS,
       fmtN: fmtN,
       ACCOUNT_TIME_ZONE: ACCOUNT_TIME_ZONE,
+      CZ: CZ,
+      computeAdsDerived: computeAdsDerived,
+      czPayloadMatchesPeriod: czPayloadMatchesPeriod,
+      loadCzAttribution: loadCzAttribution,
     };
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    try {
+      var czLib = require('../src/lib/metaAgentCzAttribution');
+      Object.keys(czLib).forEach(function (k) {
+        if (module.exports[k] === undefined) module.exports[k] = czLib[k];
+      });
+    } catch (ignoreCzLib) {}
   }
 
   if (typeof document !== 'undefined') {
