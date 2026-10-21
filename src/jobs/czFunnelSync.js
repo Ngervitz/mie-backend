@@ -321,6 +321,10 @@ async function loadExistingJtByCzId(czIds) {
       );
       map.set(czId, {
         jt: jt || null,
+        summary:
+          summary && typeof summary === 'object' && !Array.isArray(summary)
+            ? summary
+            : null,
         celular: row.celular != null && row.celular !== '' ? String(row.celular) : null,
       });
     }
@@ -406,6 +410,7 @@ async function upsertSolicitudes(items) {
       row.cz_id,
       row.tracking_data_summary,
       existing && existing.jt ? existing.jt : null,
+      existing && existing.summary ? existing.summary : null,
     );
     row.tracking_data_summary = applied.tracking_data_summary;
     if (applied.conflict) {

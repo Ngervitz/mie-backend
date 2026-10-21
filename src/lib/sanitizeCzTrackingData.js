@@ -12,20 +12,48 @@ const TRACKING_SUMMARY_ALLOWLIST = Object.freeze([
   'utm_term',
   'submitted_at',
   'jt',
+  'cz_click',
+  'presentation_at',
 ]);
 
 const TRACKING_SUMMARY_COPY_KEYS = Object.freeze(
   TRACKING_SUMMARY_ALLOWLIST.filter(function (k) {
-    return k !== 'jt';
+    return k !== 'jt' && k !== 'cz_click' && k !== 'presentation_at';
   }),
 );
 
 const JT_RE = /^[A-Za-z0-9_-]{22}$/;
+const CZ_CLICK_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PRESENTATION_AT_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function normalizeJt(raw) {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   if (!JT_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeCzClick(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!CZ_CLICK_RE.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
+
+/**
+ * ISO-8601 with an explicit zone. Naive datetimes are rejected.
+ * The original text is kept so the offset is not rewritten.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function normalizePresentationAt(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!PRESENTATION_AT_RE.test(trimmed)) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
   return trimmed;
 }
 
@@ -69,17 +97,47 @@ function sanitizeTrackingDataSummary(raw) {
     const jt = normalizeJt(obj.jt);
     if (jt) out.jt = jt;
   }
+  const czClick = normalizeCzClick(obj.cz_click);
+  if (czClick) out.cz_click = czClick;
+  const presentationAt = normalizePresentationAt(obj.presentation_at);
+  if (presentationAt) out.presentation_at = presentationAt;
   return out;
+}
+
+function summaryObject(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return raw;
+}
+
+/**
+ * Keep a value already stored for this solicitud. Incoming fills it only when
+ * the stored row does not have a valid one yet.
+ * @param {Record<string, unknown>} out
+ * @param {Record<string, unknown>|null} existingSummary
+ * @param {string} key
+ * @param {(raw: unknown) => string|null} normalize
+ */
+function keepStoredAttribution(out, existingSummary, key, normalize) {
+  const stored = normalize(existingSummary && existingSummary[key]);
+  if (stored) {
+    out[key] = stored;
+    return;
+  }
+  const incoming = normalize(out[key]);
+  if (incoming) out[key] = incoming;
+  else delete out[key];
 }
 
 /**
  * First valid jt wins per cz_id. Incoming UTMs otherwise replace.
+ * A cz_click or presentation_at already stored on the row is kept.
  * @param {number} czId
  * @param {Record<string, unknown>|null|undefined} incomingSummary
  * @param {unknown} existingJt
+ * @param {Record<string, unknown>|null|undefined} [existingSummary]
  * @returns {{ tracking_data_summary: Record<string, unknown>, conflict: object|null }}
  */
-function applyJtFirstValidWins(czId, incomingSummary, existingJt) {
+function applyJtFirstValidWins(czId, incomingSummary, existingJt, existingSummary) {
   const incoming = normalizeJt(incomingSummary && incomingSummary.jt);
   const existing = normalizeJt(existingJt);
   const out = Object.assign({}, incomingSummary || {});
@@ -98,6 +156,9 @@ function applyJtFirstValidWins(czId, incomingSummary, existingJt) {
   } else if (incoming) {
     out.jt = incoming;
   }
+  const stored = summaryObject(existingSummary);
+  keepStoredAttribution(out, stored, 'cz_click', normalizeCzClick);
+  keepStoredAttribution(out, stored, 'presentation_at', normalizePresentationAt);
   return { tracking_data_summary: out, conflict: conflict };
 }
 
@@ -106,6 +167,8 @@ module.exports = {
   TRACKING_SUMMARY_COPY_KEYS,
   JT_RE,
   normalizeJt,
+  normalizeCzClick,
+  normalizePresentationAt,
   applyJtFirstValidWins,
   sanitizeTrackingDataSummary,
 };

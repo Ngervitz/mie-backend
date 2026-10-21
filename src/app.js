@@ -30,6 +30,7 @@ const { createElmPostbackRouter } = require('./routes/elmPostback');
 const miplanInterestRouter = require('./routes/miplan-interest');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 const emailClickRouter = require('./routes/email-click');
+const affiliateLinksRouter = require('./routes/affiliate-links');
 
 const app = express();
 
@@ -83,6 +84,8 @@ app.use(smsShortLinksRouter);
 app.use(emailUnsubscribeRouter);
 // Public email click redirect (GET records event; HEAD does not) — before requireAuth.
 app.use(emailClickRouter);
+// Public affiliate redirects — own tables, no marketing_impacts. Before requireAuth.
+app.use(affiliateLinksRouter);
 // Public email HTML assets only (Encuesta STEP1–3). Must run before requireAuth.
 // Does NOT expose the rest of public/ — that remains behind requireAuth below.
 app.use(

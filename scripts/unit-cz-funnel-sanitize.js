@@ -6,14 +6,23 @@
 const assert = require('assert');
 const {
   sanitizeTrackingDataSummary,
+  applyJtFirstValidWins,
   TRACKING_SUMMARY_ALLOWLIST,
   TRACKING_SUMMARY_COPY_KEYS,
   JT_RE,
   normalizeJt,
 } = require('../src/lib/sanitizeCzTrackingData');
 
+const CLICK_A = '22222222-2222-4222-8222-222222222222';
+const CLICK_B = '33333333-3333-4333-8333-333333333333';
+const PRESENTED = '2026-10-21T11:21:00-03:00';
+
 assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('jt'));
+assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('cz_click'));
+assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('presentation_at'));
 assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('jt'));
+assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('cz_click'));
+assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('presentation_at'));
 assert.ok(JT_RE.test('AAAAAAAAAAAAAAAAAAAAAA'));
 
 const VALID_JT = 'AAAAAAAAAAAAAAAAAAAAAA';
@@ -82,5 +91,69 @@ assert.deepStrictEqual(
   [...TRACKING_SUMMARY_COPY_KEYS].sort(),
 );
 assert.strictEqual(utmsUnchanged.utm_medium, 'cpc');
+
+const attributed = sanitizeTrackingDataSummary(
+  Object.assign({}, raw, {
+    cz_click: '  ' + CLICK_A.toUpperCase() + ' ',
+    presentation_at: PRESENTED,
+    ip: '203.0.113.8',
+  }),
+);
+assert.strictEqual(attributed.cz_click, CLICK_A);
+assert.strictEqual(attributed.presentation_at, PRESENTED);
+assert.strictEqual(attributed.utm_source, 'fb');
+assert.strictEqual(attributed.utm_medium, 'cpc');
+assert.strictEqual(attributed.jt, undefined);
+assert.strictEqual(attributed.ip, undefined);
+
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ cz_click: 'not-a-uuid', utm_source: 'sms' }).cz_click,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({
+    utm_source: 'sms',
+    presentation_at: '2026-10-21 11:21:00',
+  }).presentation_at,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({
+    utm_source: 'email',
+    presentation_at: '2026-10-21T14:21:00Z',
+  }).presentation_at,
+  '2026-10-21T14:21:00Z',
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ utm_source: 'email' }).utm_source,
+  'email',
+);
+
+const kept = applyJtFirstValidWins(
+  7,
+  { utm_source: 'meta', cz_click: CLICK_B, presentation_at: '2026-10-22T11:21:00-03:00' },
+  null,
+  { utm_source: 'sms', cz_click: CLICK_A, presentation_at: PRESENTED, jt: VALID_JT },
+);
+assert.strictEqual(kept.tracking_data_summary.utm_source, 'meta');
+assert.strictEqual(kept.tracking_data_summary.cz_click, CLICK_A);
+assert.strictEqual(kept.tracking_data_summary.presentation_at, PRESENTED);
+assert.strictEqual(kept.tracking_data_summary.jt, undefined);
+
+const filled = applyJtFirstValidWins(
+  8,
+  sanitizeTrackingDataSummary({
+    utm_source: 'sms',
+    cz_click: CLICK_B,
+    presentation_at: PRESENTED,
+    jt: VALID_JT,
+  }),
+  null,
+  {},
+);
+assert.strictEqual(filled.tracking_data_summary.cz_click, CLICK_B);
+assert.strictEqual(filled.tracking_data_summary.presentation_at, PRESENTED);
+assert.strictEqual(filled.tracking_data_summary.utm_source, 'sms');
+assert.strictEqual(filled.tracking_data_summary.jt, VALID_JT);
 
 console.log('OK unit-cz-funnel-sanitize');

@@ -347,6 +347,56 @@ function conflictWarns() {
   ]);
   assert.strictEqual(other.solicitudes.get(2001).tracking_data_summary.jt, JT_B);
 
+  const CLICK_A = '22222222-2222-4222-8222-222222222222';
+  const CLICK_B = '33333333-3333-4333-8333-333333333333';
+  const PRESENTED = '2026-10-21T11:21:00-03:00';
+  const affiliate = createStore();
+  await upsertSolicitudes([
+    item({
+      id: 3001,
+      tracking_data: JSON.stringify({
+        utm_source: 'sms',
+        utm_medium: 'sms',
+        jt: JT_A,
+        cz_click: CLICK_A,
+        presentation_at: PRESENTED,
+        ip: '203.0.113.9',
+      }),
+    }),
+  ]);
+  const first = affiliate.solicitudes.get(3001).tracking_data_summary;
+  assert.strictEqual(first.cz_click, CLICK_A);
+  assert.strictEqual(first.presentation_at, PRESENTED);
+  assert.strictEqual(first.utm_source, 'sms');
+  assert.strictEqual(first.jt, JT_A);
+  assert.strictEqual(first.ip, undefined);
+  await upsertSolicitudes([
+    item({
+      id: 3001,
+      tracking_data: JSON.stringify({
+        utm_source: 'email',
+        utm_medium: 'email',
+        jt: JT_B,
+        cz_click: CLICK_B,
+        presentation_at: '2026-11-01T11:21:00-03:00',
+      }),
+    }),
+  ]);
+  const second = affiliate.solicitudes.get(3001).tracking_data_summary;
+  assert.strictEqual(second.utm_source, 'email');
+  assert.strictEqual(second.utm_medium, 'email');
+  assert.strictEqual(second.jt, JT_A);
+  assert.strictEqual(second.cz_click, CLICK_A);
+  assert.strictEqual(second.presentation_at, PRESENTED);
+
+  const historical = createStore();
+  await upsertSolicitudes([
+    item({ id: 3002, tracking_data: JSON.stringify({ utm_source: 'sms' }) }),
+  ]);
+  assert.deepStrictEqual(historical.solicitudes.get(3002).tracking_data_summary, {
+    utm_source: 'sms',
+  });
+
   console.log('OK unit-cz-funnel-jt');
 })().catch(function (err) {
   console.error(err && err.stack ? err.stack : err);

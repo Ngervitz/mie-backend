@@ -37,6 +37,7 @@ const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
+const { runAffiliateAttribution } = require('../jobs/affiliateAttributionRun');
 const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
 const { runMiplanDebtOptinSync } = require('../jobs/miplanDebtOptinSync');
 const { runSmsNotifymePoll } = require('../jobs/smsNotifymePoll');
@@ -1313,6 +1314,47 @@ router.post('/run-cz-data-sync', async (req, res) => {
       hasTokenDiagnostic: Boolean(payload.tokenDiagnostic),
     });
     return res.status(500).json(payload);
+  }
+});
+
+/**
+ * Affiliate attribution. Separate from POST /jobs/run-cz-data-sync:
+ * the funnel cron does not call this, and this does not pull Credizona.
+ * Auth: session cookie (cz-funnel) or X-Cron-Key.
+ * Idle unless AFFILIATE_ATTRIBUTION_ENABLED is exactly "true".
+ * No cron is registered here.
+ */
+router.post('/run-affiliate-attribution', async (req, res) => {
+  logger.info('POST /jobs/run-affiliate-attribution — started');
+  try {
+    const result = await runAffiliateAttribution({
+      enabled: env.affiliateAttributionEnabled === true,
+    });
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('affiliate_attribution finished', {
+      ok: result.ok,
+      enabled: result.enabled,
+      processed: result.processed,
+      attributed: result.attributed,
+      excludedByReason: result.excludedByReason,
+      pending: result.pending,
+      skipped: result.skipped,
+      errors: result.errors,
+    });
+    if (!result.ok) {
+      return res.status(500).json(result);
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error('affiliate_attribution failed', {
+      error: err && err.message ? err.message : 'unknown',
+    });
+    return res.status(500).json({
+      ok: false,
+      error: err && err.message ? err.message : 'unknown',
+    });
   }
 });
 

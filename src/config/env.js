@@ -120,4 +120,14 @@ module.exports = {
   googleAdsRefreshToken: optionalTrimmedEnv('GOOGLE_ADS_REFRESH_TOKEN'),
   googleAdsCustomerId: optionalTrimmedEnv('GOOGLE_ADS_CUSTOMER_ID'),
   googleAdsLoginCustomerId: optionalTrimmedEnv('GOOGLE_ADS_LOGIN_CUSTOMER_ID'),
+  // Optional at boot. Required at request time for GET/HEAD /a/:code.
+  // Missing or invalid → 503 on that route only.
+  affiliateDestUrl: optionalTrimmedEnv('AFFILIATE_DEST_URL'),
+  // Optional at boot. HMAC key for affiliate_clicks.ip_hash. Never store the raw IP.
+  // Missing at request time → log an error, record no click, 302 without cz_click.
+  affiliateIpHashSecret: optionalTrimmedEnv('AFFILIATE_IP_HASH_SECRET'),
+  // Optional at boot. Exact "true" runs POST /jobs/run-affiliate-attribution.
+  // Unset or any other value leaves that job idle. The funnel sync does not read it.
+  affiliateAttributionEnabled:
+    optionalTrimmedEnv('AFFILIATE_ATTRIBUTION_ENABLED') === 'true',
 };

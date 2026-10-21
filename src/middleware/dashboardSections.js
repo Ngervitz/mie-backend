@@ -110,6 +110,7 @@ const SECTION_ROUTE_PREFIXES = Object.freeze({
     '/reports/cz-funnel-summary',
     '/reports/cz-funnel-channel-utility',
     '/jobs/run-cz-data-sync',
+    '/jobs/run-affiliate-attribution',
     '/jobs/run-bcu-usd-rate-sync',
   ]),
   rechazados: Object.freeze(['/rechazados', '/jobs/run-miplan-debt-optin-sync']),
