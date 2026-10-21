@@ -52,10 +52,12 @@
   var NOTICE_TEXTS = {
     elm_date_of_birth_omitted: 'Se envía sin fecha de nacimiento: el dato de Credizona no es válido.',
     elm_activity_type_raw: 'Actividad enviada con el código original de Credizona (OTR).',
+    elm_cdv_possibly_active: 'CDV puede seguir trabajando esta solicitud (estado 8). El envío a ELM no cancela esa operación.',
   };
   var NOTICE_SHORT = {
     elm_date_of_birth_omitted: 'Sin fecha nac.',
     elm_activity_type_raw: 'Actividad OTR',
+    elm_cdv_possibly_active: 'CDV activo',
   };
   var CI_HOLD_REASONS = [
     'elm_ci_active',

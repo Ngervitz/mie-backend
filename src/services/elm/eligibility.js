@@ -15,11 +15,12 @@
  * CDV "still working this lead" has no reliable signal yet (depends on observing the CDV
  * webhook with real traffic). Not automated here.
  *
- * Consent: enabling real sends requires reviewing the applicable consent (incl. historical
- * leads) first. Out of scope for this technical check.
+ * Commercial consent for the Preaprobados manual send is a business decision, not a
+ * technical gate on this path. Estado 8 is sendable and only adds a notice: CDV may
+ * still be active.
  */
 
-const { isGrantedForSolicitud } = require('../../lib/preaprobadosRead');
+const { isGrantedForSolicitud, PREAPROBADOS_ESTADO_ID } = require('../../lib/preaprobadosRead');
 const { CODES } = require('./constants');
 const {
   missingRequiredFields,
@@ -55,12 +56,17 @@ function normalizeCommercialOrigin(baseLabel) {
  */
 function evaluateElmEligibility(input) {
   const blockers = [];
+  const notices = [];
   const sol = input && input.solicitud ? input.solicitud : null;
   if (!sol) {
     return {
       eligible: false,
       blockers: [{ code: CODES.SOLICITUD_NOT_FOUND }],
+      notices: [],
     };
+  }
+  if (Number(sol.solicitudes_estados_id) === PREAPROBADOS_ESTADO_ID) {
+    notices.push('elm_cdv_possibly_active');
   }
 
   const grantedByCzId = new Map();
@@ -89,7 +95,7 @@ function evaluateElmEligibility(input) {
     blockers.push({ code: CODES.ACTIVITY_TYPE_MAPPING_MISSING });
   }
 
-  return { eligible: blockers.length === 0, blockers: blockers, s2_withheld: s2Withheld };
+  return { eligible: blockers.length === 0, blockers: blockers, s2_withheld: s2Withheld, notices: notices };
 }
 
 /**
