@@ -106,6 +106,9 @@ function makeEligibilitySupabase(opts) {
         order: function () {
           return q;
         },
+        range: function () {
+          return q;
+        },
         limit: function () {
           return q;
         },
