@@ -9,7 +9,6 @@ const { normalizeCi } = require('./rejectedOps');
 const {
   PURPOSE,
   REASONS,
-  REJECTED_ESTADO_ID,
   evaluateRejectedSurveyInviteEligibility,
   resolveCurrentLastRejectionForCi,
   nullableTrimmedText,
@@ -130,18 +129,16 @@ async function getRejectedSurveyInviteEligibility(supabase, ciRaw, opts) {
   const hasExplicitEpisode =
     explicitCz != null && Number.isFinite(explicitCz);
 
-  const { data: estadoRows, error: estErr } = await supabase
-    .from('cz_funnel_solicitud_estados')
-    .select(
-      'cz_historico_id, cz_solicitud_id, fechahora_src, solicitudes_estados_id',
-    )
-    .eq('solicitudes_estados_id', REJECTED_ESTADO_ID);
-  if (estErr) throw new Error('eligibility estados: ' + estErr.message);
-
-  const { data: solicitudRows, error: solErr } = await supabase
-    .from('cz_funnel_solicitudes')
-    .select('cz_id, ci, email, lrw_id, nombre');
-  if (solErr) throw new Error('eligibility solicitudes: ' + solErr.message);
+  let estadoRows;
+  let solicitudRows;
+  try {
+    const surveyContext = await resolveSurveyInviteListContext(supabase);
+    estadoRows = surveyContext.estadoRows || [];
+    solicitudRows = surveyContext.solicitudRows || [];
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    throw new Error('eligibility survey context: ' + msg);
+  }
 
   /** @type {{ cz_solicitud_id: number, ci: number, cz_historico_id: number, fechahora_src: string|null }|null} */
   let last = null;

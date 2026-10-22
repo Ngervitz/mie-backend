@@ -238,6 +238,9 @@ function makeInClient(handler) {
           order: function () {
             return chain;
           },
+          range: function () {
+            return chain;
+          },
           limit: function () {
             return chain;
           },
@@ -394,6 +397,12 @@ function makeInClient(handler) {
             return chain;
           },
           is: function () {
+            return chain;
+          },
+          order: function () {
+            return chain;
+          },
+          range: function () {
             return chain;
           },
           then: function (resolve, reject) {

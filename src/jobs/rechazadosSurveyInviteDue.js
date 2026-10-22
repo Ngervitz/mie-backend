@@ -13,7 +13,6 @@ const logger = require('../lib/logger');
 const {
   PURPOSE,
   REASONS,
-  REJECTED_ESTADO_ID,
   resolveLastRejectionByCi,
   nullableTrimmedText,
 } = require('../lib/rejectedSurveyInvite');
@@ -40,6 +39,66 @@ const {
 const {
   loadEmailSuppressionsByEmails,
 } = require('../lib/emailSuppressionsRead');
+const {
+  PAGE_SIZE,
+  resolveSurveyInviteListContext,
+} = require('../lib/rejectedSurveyInviteListContext');
+
+/** Same width the ELM survey gate uses for `.in()` lists. */
+const ID_CHUNK = 200;
+
+function uniqueBy(rows, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < (rows || []).length; i += 1) {
+    const row = rows[i];
+    const key = keyFn(row);
+    if (key == null || seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Every matching recipient for these episodes. Pages by recipient id inside
+ * each episode chunk so a PostgREST 1000-row cap cannot drop a prior STEP.
+ * @param {object} supabase
+ * @param {Array<string|number>} campaignIds
+ * @param {number[]} episodeIds
+ */
+async function loadSurveyInviteRecipients(supabase, campaignIds, episodeIds) {
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < episodeIds.length; i += ID_CHUNK) {
+    const chunk = episodeIds.slice(i, i + ID_CHUNK);
+    let from = 0;
+    for (;;) {
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from('email_campaign_recipients')
+        .select(
+          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
+        )
+        .in('campaign_id', campaignIds)
+        .eq('purpose', PURPOSE)
+        .in('cz_solicitud_id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to);
+      if (error) throw new Error('job recipients: ' + error.message);
+      const rows = data || [];
+      for (let r = 0; r < rows.length; r += 1) {
+        const id = rows[r] && rows[r].id != null ? String(rows[r].id) : null;
+        if (id == null || seen.has(id)) continue;
+        seen.add(id);
+        out.push(rows[r]);
+      }
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  }
+  return out;
+}
 
 const JOB_NAME = 'rechazados_survey_invite_due';
 const JOB_LOCK_TTL_SECONDS = 10 * 60;
@@ -192,18 +251,21 @@ async function runRechazadosSurveyInviteDue(opts) {
     const materializeFn =
       options.materializeFn || materializeRejectedSurveyInvite;
 
-    const { data: estadoRows, error: estErr } = await supabase
-      .from('cz_funnel_solicitud_estados')
-      .select(
-        'cz_historico_id, cz_solicitud_id, fechahora_src, solicitudes_estados_id',
-      )
-      .eq('solicitudes_estados_id', REJECTED_ESTADO_ID);
-    if (estErr) throw new Error('job estados: ' + estErr.message);
-
-    const { data: solicitudRows, error: solErr } = await supabase
-      .from('cz_funnel_solicitudes')
-      .select('cz_id, ci, email, lrw_id, nombre');
-    if (solErr) throw new Error('job solicitudes: ' + solErr.message);
+    let surveyContext;
+    try {
+      surveyContext = await resolveSurveyInviteListContext(supabase);
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      throw new Error('job survey context: ' + msg);
+    }
+    const estadoRows = uniqueBy(surveyContext.estadoRows, function (row) {
+      return row && row.cz_historico_id != null
+        ? String(row.cz_historico_id)
+        : null;
+    });
+    const solicitudRows = uniqueBy(surveyContext.solicitudRows, function (row) {
+      return row && row.cz_id != null ? String(row.cz_id) : null;
+    });
 
     const lastByCi = resolveLastRejectionByCi(
       estadoRows || [],
@@ -293,16 +355,12 @@ async function runRechazadosSurveyInviteDue(opts) {
       episodeIds.push(ep);
     }
     if (configuredIds.length && episodeIds.length) {
-      const { data: priors, error: pErr } = await supabase
-        .from('email_campaign_recipients')
-        .select(
-          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
-        )
-        .in('campaign_id', configuredIds)
-        .eq('purpose', PURPOSE)
-        .in('cz_solicitud_id', episodeIds);
-      if (pErr) throw new Error('job recipients: ' + pErr.message);
-      for (const p of priors || []) {
+      const priors = await loadSurveyInviteRecipients(
+        supabase,
+        configuredIds,
+        episodeIds,
+      );
+      for (const p of priors) {
         const key =
           String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
         const prev = priorByCampaignEpisode.get(key);
@@ -423,6 +481,9 @@ async function runRechazadosSurveyInviteDue(opts) {
           supabase,
           ci,
           decision.campaign_id,
+          episodeId != null && Number.isFinite(episodeId)
+            ? { czSolicitudId: episodeId }
+            : undefined,
         );
         const materialized =
           outcome &&
@@ -466,6 +527,8 @@ async function runRechazadosSurveyInviteDue(opts) {
 
 module.exports = {
   JOB_NAME,
+  ID_CHUNK,
   runRechazadosSurveyInviteDue,
   emptyCounters,
+  loadSurveyInviteRecipients,
 };
