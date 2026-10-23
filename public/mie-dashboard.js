@@ -14100,6 +14100,17 @@ init();
     return formatMoney(num / den);
   }
 
+  /* cz-funnel-channels-start */
+  const CZ_FUNNEL_CHANNELS = [
+    { id: 'meta', label: 'Meta' },
+    { id: 'sms', label: 'SMS' },
+    { id: 'social_organico', label: 'Social orgánico' },
+    { id: 'social_no_confirmado', label: 'Social no confirmado' },
+    { id: 'busqueda_organica', label: 'Búsqueda orgánica' },
+    { id: 'origen_no_confirmado', label: 'Origen no confirmado' },
+    { id: 'sin_atribuir', label: 'Sin atribuir' },
+  ];
+
   function emptyChannelMetrics() {
     return {
       granted_count: 0,
@@ -14132,26 +14143,39 @@ init();
     };
   }
 
+  function czFunnelChannelsFor(by) {
+    const known = {};
+    const list = CZ_FUNNEL_CHANNELS.map(function (ch) {
+      known[ch.id] = true;
+      return ch;
+    });
+    Object.keys(by || {}).forEach(function (id) {
+      if (!known[id]) list.push({ id: id, label: id });
+    });
+    return list;
+  }
+
   function currentMonthChannelMetrics(utilRowsRaw, monthKey) {
-    const by = {
-      meta: emptyChannelMetrics(),
-      sms: emptyChannelMetrics(),
-      sin_atribuir: emptyChannelMetrics(),
-    };
+    const by = {};
+    CZ_FUNNEL_CHANNELS.forEach(function (ch) {
+      by[ch.id] = emptyChannelMetrics();
+    });
     (utilRowsRaw || []).forEach(function (r) {
       const monthRaw = r.period_month == null ? '' : String(r.period_month);
       const month = monthRaw.length >= 7 ? monthRaw.slice(0, 7) : monthRaw;
       if (month !== monthKey) return;
       const ch = r.channel == null ? '' : String(r.channel);
-      if (ch === 'meta' || ch === 'sms' || ch === 'sin_atribuir') {
-        by[ch] = metricsFromUtilRow(r);
-      }
+      if (!ch) return;
+      if (!by[ch]) by[ch] = emptyChannelMetrics();
+      by[ch] = metricsFromUtilRow(r);
     });
-    return {
-      by: by,
-      total: addMetrics(addMetrics(by.meta, by.sms), by.sin_atribuir),
-    };
+    let total = emptyChannelMetrics();
+    Object.keys(by).forEach(function (id) {
+      total = addMetrics(total, by[id]);
+    });
+    return { by: by, total: total };
   }
+  /* cz-funnel-channels-end */
 
   function renderKpiCard(value, label, tone) {
     const t = tone || 'neutral';
@@ -14264,6 +14288,15 @@ init();
     if (channel === 'sms') {
       return '<i class="ti ti-message-circle cz-funnel-channel-icon" aria-hidden="true"></i>';
     }
+    if (channel === 'social_organico') {
+      return '<i class="ti ti-users cz-funnel-channel-icon" aria-hidden="true"></i>';
+    }
+    if (channel === 'busqueda_organica') {
+      return '<i class="ti ti-search cz-funnel-channel-icon" aria-hidden="true"></i>';
+    }
+    if (channel === 'origen_no_confirmado' || channel === 'social_no_confirmado') {
+      return '<i class="ti ti-help cz-funnel-channel-icon" aria-hidden="true"></i>';
+    }
     return '<span class="cz-funnel-kpi-emoji" aria-hidden="true">❓</span>';
   }
 
@@ -14289,21 +14322,16 @@ init();
 
   function renderMetricRow(opts) {
     const kind = opts.kind || 'neutral';
-    const emoji = opts.emoji;
-    return (
+    const channels = czFunnelChannelsFor(opts.by);
+    let html =
       '<div class="cz-funnel-metric-row">' +
-      renderKpiTotalCard(emoji, opts.total, opts.label, kind, opts.totalRaw) +
-      renderKpiBreakdownCard('meta', opts.meta, 'Meta', kind, opts.metaRaw) +
-      renderKpiBreakdownCard('sms', opts.sms, 'SMS', kind, opts.smsRaw) +
-      renderKpiBreakdownCard(
-        'sin',
-        opts.sin,
-        'sin_atribuir',
-        kind,
-        opts.sinRaw,
-      ) +
-      '</div>'
-    );
+      renderKpiTotalCard(opts.emoji, opts.total, opts.label, kind, opts.totalRaw);
+    channels.forEach(function (ch) {
+      const metrics = opts.by[ch.id] || emptyChannelMetrics();
+      const cell = opts.cell(metrics);
+      html += renderKpiBreakdownCard(ch.id, cell.text, ch.label, kind, cell.raw);
+    });
+    return html + '</div>';
   }
 
   function renderResultado(by, tot) {
@@ -14315,21 +14343,21 @@ init();
         label: 'Utilidad',
         total: formatMoney(tot.utility),
         totalRaw: tot.utility,
-        meta: formatMoney(by.meta.utility),
-        metaRaw: by.meta.utility,
-        sms: formatMoney(by.sms.utility),
-        smsRaw: by.sms.utility,
-        sin: formatMoney(by.sin_atribuir.utility),
-        sinRaw: by.sin_atribuir.utility,
+        by: by,
+        cell: function (m) {
+          return { text: formatMoney(m.utility), raw: m.utility };
+        },
       }) +
         renderMetricRow({
           kind: 'neutral',
           emoji: '💸',
           label: 'Gasto',
           total: formatMoney(tot.spend),
-          meta: formatMoney(by.meta.spend),
-          sms: formatMoney(by.sms.spend),
-          sin: formatMoney(by.sin_atribuir.spend),
+          totalRaw: tot.spend,
+          by: by,
+          cell: function (m) {
+            return { text: formatMoney(m.spend), raw: m.spend };
+          },
         }),
       'cz-funnel-metric-stack',
     );
@@ -14343,39 +14371,53 @@ init();
         emoji: '🏦',
         label: 'Monto colocado',
         total: formatMoney(tot.monto_total_otorgado),
-        meta: formatMoney(by.meta.monto_total_otorgado),
-        sms: formatMoney(by.sms.monto_total_otorgado),
-        sin: formatMoney(by.sin_atribuir.monto_total_otorgado),
+        totalRaw: tot.monto_total_otorgado,
+        by: by,
+        cell: function (m) {
+          return {
+            text: formatMoney(m.monto_total_otorgado),
+            raw: m.monto_total_otorgado,
+          };
+        },
       }) +
         renderMetricRow({
           kind: 'neutral',
           emoji: '🔢',
           label: 'Otorgados',
           total: String(tot.granted_count),
-          meta: String(by.meta.granted_count),
-          sms: String(by.sms.granted_count),
-          sin: String(by.sin_atribuir.granted_count),
+          totalRaw: tot.granted_count,
+          by: by,
+          cell: function (m) {
+            return { text: String(m.granted_count), raw: m.granted_count };
+          },
         }) +
         renderMetricRow({
           kind: 'neutral',
           emoji: '💳',
           label: 'Ticket promedio',
           total: perGranted(tot.monto_total_otorgado, tot.granted_count),
-          meta: perGranted(by.meta.monto_total_otorgado, by.meta.granted_count),
-          sms: perGranted(by.sms.monto_total_otorgado, by.sms.granted_count),
-          sin: perGranted(
-            by.sin_atribuir.monto_total_otorgado,
-            by.sin_atribuir.granted_count,
-          ),
+          totalRaw: tot.monto_total_otorgado,
+          by: by,
+          cell: function (m) {
+            return {
+              text: perGranted(m.monto_total_otorgado, m.granted_count),
+              raw: m.monto_total_otorgado,
+            };
+          },
         }) +
         renderMetricRow({
           kind: 'neutral',
           emoji: '🎯',
           label: 'Costo por otorgado',
           total: perGranted(tot.spend, tot.granted_count),
-          meta: perGranted(by.meta.spend, by.meta.granted_count),
-          sms: perGranted(by.sms.spend, by.sms.granted_count),
-          sin: perGranted(by.sin_atribuir.spend, by.sin_atribuir.granted_count),
+          totalRaw: tot.spend,
+          by: by,
+          cell: function (m) {
+            return {
+              text: perGranted(m.spend, m.granted_count),
+              raw: m.spend,
+            };
+          },
         }),
       'cz-funnel-metric-stack',
     );
