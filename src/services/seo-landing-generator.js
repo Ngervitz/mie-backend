@@ -1,5 +1,6 @@
 const supabase = require('../clients/supabase');
 const logger = require('../lib/logger');
+const { normalizeSeoLanding } = require('../lib/sanitizeCzTrackingData');
 const {
   SEO_LANDING_CTA_URL,
   SEO_LANDING_CLAUDE_SYSTEM_PROMPT,
@@ -218,6 +219,21 @@ function buildHeroBackgroundCss() {
   ].join('\n      ');
 }
 
+function seoLandingSlug(term) {
+  const slug = normalizeSeoLanding(slugifyTerm(term));
+  if (!slug) {
+    throw new Error('SEO landing slug is empty or invalid');
+  }
+  return slug;
+}
+
+function seoFormCtaUrl(term, cta) {
+  const url = new URL(SEO_LANDING_CTA_URL);
+  url.searchParams.set('seo_landing', seoLandingSlug(term));
+  url.searchParams.set('seo_cta', cta);
+  return url.toString();
+}
+
 function renderLandingHtml(term, content) {
   const metaTitle = content.metaTitle || `${term} | Credizona`;
   const metaDescription = content.metaDescription || '';
@@ -360,7 +376,7 @@ function renderLandingHtml(term, content) {
     <div class="brand"><span class="dot" aria-hidden="true"></span>Credizona</div>
     <h1>${escapeHtml(h1)}</h1>
     <p>${escapeHtml(heroText)}</p>
-    <a class="cta-btn" href="${SEO_LANDING_CTA_URL}">${escapeHtml(ctaLabel)}</a>
+    <a class="cta-btn" href="${escapeHtml(seoFormCtaUrl(term, 'hero'))}">${escapeHtml(ctaLabel)}</a>
   </header>
   <main>
 ${sectionsHtml}
@@ -376,7 +392,7 @@ ${faqHtml}
     </section>
     <div class="cta-block">
       <h2>¿Listo para dar el paso?</h2>
-      <a class="cta-btn" href="${SEO_LANDING_CTA_URL}">${escapeHtml(ctaLabel)}</a>
+      <a class="cta-btn" href="${escapeHtml(seoFormCtaUrl(term, 'footer'))}">${escapeHtml(ctaLabel)}</a>
     </div>
   </main>
   <footer>
@@ -422,6 +438,14 @@ async function hasActiveDraft(termId) {
  */
 async function generateSeoLandingDraft({ termId, term }) {
   logger.info('SEO landing generation started', { termId, term });
+
+  try {
+    seoLandingSlug(term);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'SEO landing slug is empty or invalid';
+    await recordFailure(termId, message);
+    return { status: 'failed', termId, term, error: message };
+  }
 
   // Defensive re-check (the /decide route also checks): a draft/reviewed/
   // published row for this term means we never auto-regenerate.
@@ -520,6 +544,14 @@ async function regenerateSeoLandingDraft({ draftId, termId, term, customInstruct
       logger.error('Failed to record SEO landing regen failure', { draftId, error: err.message });
     }
   };
+
+  try {
+    seoLandingSlug(term);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'SEO landing slug is empty or invalid';
+    await recordRegenFailure(message);
+    return { status: 'failed', draftId, termId, term, error: message };
+  }
 
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENAI_API_KEY) {
     const message = 'Missing ANTHROPIC_API_KEY / OPENAI_API_KEY';

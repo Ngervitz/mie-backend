@@ -1,7 +1,8 @@
 /**
  * Allowlist-only sanitizer for Credizona solicitudes.tracking_data.
  * Never persist raw tracking_data — only these keys, if present.
- * `jt` is allowlisted but validated structurally; not copied like UTMs.
+ * `jt`, `seo_landing` and `seo_cta` are allowlisted and validated.
+ * They are not copied like UTMs.
  */
 
 const TRACKING_SUMMARY_ALLOWLIST = Object.freeze([
@@ -12,11 +13,17 @@ const TRACKING_SUMMARY_ALLOWLIST = Object.freeze([
   'utm_term',
   'submitted_at',
   'jt',
+  'seo_landing',
+  'seo_cta',
 ]);
+
+const SEO_LANDING_MAX = 200;
+const SEO_LANDING_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SEO_CTA_VALUES = Object.freeze({ hero: true, footer: true });
 
 const TRACKING_SUMMARY_COPY_KEYS = Object.freeze(
   TRACKING_SUMMARY_ALLOWLIST.filter(function (k) {
-    return k !== 'jt';
+    return k !== 'jt' && k !== 'seo_landing' && k !== 'seo_cta';
   }),
 );
 
@@ -26,6 +33,21 @@ function normalizeJt(raw) {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   if (!JT_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeSeoLanding(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed || trimmed.length > SEO_LANDING_MAX) return null;
+  if (!SEO_LANDING_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeSeoCta(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (!SEO_CTA_VALUES[trimmed]) return null;
   return trimmed;
 }
 
@@ -69,6 +91,10 @@ function sanitizeTrackingDataSummary(raw) {
     const jt = normalizeJt(obj.jt);
     if (jt) out.jt = jt;
   }
+  const seoLanding = normalizeSeoLanding(obj.seo_landing);
+  if (seoLanding) out.seo_landing = seoLanding;
+  const seoCta = normalizeSeoCta(obj.seo_cta);
+  if (seoCta) out.seo_cta = seoCta;
   return out;
 }
 
@@ -106,6 +132,7 @@ module.exports = {
   TRACKING_SUMMARY_COPY_KEYS,
   JT_RE,
   normalizeJt,
+  normalizeSeoLanding,
   applyJtFirstValidWins,
   sanitizeTrackingDataSummary,
 };
