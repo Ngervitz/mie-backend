@@ -83,14 +83,40 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function callClaudeDraft(term, customInstructions) {
-  logger.info('SEO landing Claude request started', { term, model: MODEL_ARCHITECT });
+function buildClaudeUserContent(term, customInstructions, suggestedTitle) {
   let userContent = `Término de búsqueda objetivo (Google Uruguay): "${term}"\n\nGenerá el contenido JSON de la landing.`;
+  const title = String(suggestedTitle || '').trim();
+  if (title) {
+    userContent +=
+      `\n\nTÍTULO SUGERIDO POR EL OPERADOR (preferencia de H1 y metaTitle; no es un dato regulatorio ni una promesa comercial):\n${title}`;
+  }
   const extra = String(customInstructions || '').trim();
   if (extra) {
     userContent +=
       `\n\nINSTRUCCIONES ADICIONALES PARA ESTA GENERACIÓN (no permanentes):\n${extra}`;
   }
+  return userContent;
+}
+
+function buildGptUserContent(term, claudeContent, customInstructions, suggestedTitle) {
+  let userContent = `Término objetivo: "${term}"\n\nContenido a auditar:\n${JSON.stringify(claudeContent)}`;
+  const title = String(suggestedTitle || '').trim();
+  if (title) {
+    userContent +=
+      `\n\nTÍTULO SUGERIDO POR EL OPERADOR (preferencia de H1 y metaTitle; no es un dato regulatorio ni una promesa comercial):\n${title}`;
+  }
+  const extra = String(customInstructions || '').trim();
+  if (extra) {
+    userContent +=
+      `\n\nINSTRUCCIONES ADICIONALES PARA ESTA GENERACIÓN (no permanentes):\n${extra}\n` +
+      'Respetá estas instrucciones al auditar, sin contradecir las restricciones factuales permanentes.';
+  }
+  return userContent;
+}
+
+async function callClaudeDraft(term, customInstructions, suggestedTitle) {
+  logger.info('SEO landing Claude request started', { term, model: MODEL_ARCHITECT });
+  const userContent = buildClaudeUserContent(term, customInstructions, suggestedTitle);
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -128,15 +154,14 @@ async function callClaudeDraft(term, customInstructions) {
   return parsed.value;
 }
 
-async function callGptAudit(term, claudeContent, customInstructions) {
+async function callGptAudit(term, claudeContent, customInstructions, suggestedTitle) {
   logger.info('SEO landing GPT request started', { term, model: MODEL_AUDITOR });
-  let userContent = `Término objetivo: "${term}"\n\nContenido a auditar:\n${JSON.stringify(claudeContent)}`;
-  const extra = String(customInstructions || '').trim();
-  if (extra) {
-    userContent +=
-      `\n\nINSTRUCCIONES ADICIONALES PARA ESTA GENERACIÓN (no permanentes):\n${extra}\n` +
-      'Respetá estas instrucciones al auditar, sin contradecir las restricciones factuales permanentes.';
-  }
+  const userContent = buildGptUserContent(
+    term,
+    claudeContent,
+    customInstructions,
+    suggestedTitle,
+  );
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -192,7 +217,59 @@ function buildFaqJsonLd(faq) {
     '@type': 'FAQPage',
     mainEntity: entities,
   };
-  return `<script type="application/ld+json">${JSON.stringify(schema)}</script>`;
+  return `<script type="application/ld+json">${JSON.stringify(schema).replace(/</g, '\\u003c')}</script>`;
+}
+
+function plainLandingText(value, max, strict) {
+  if (value == null) return '';
+  if (typeof value !== 'string') {
+    if (strict) {
+      throw new Error('editable field must be a string');
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value).slice(0, max);
+    }
+    return '';
+  }
+  return value.trim().slice(0, max);
+}
+
+function normalizeLandingContent(input, options) {
+  const strict = Boolean(options && options.strict);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('content must be an object');
+  }
+  const sections = asArray(input.sections)
+    .slice(0, 8)
+    .map((section) => ({
+      heading: plainLandingText(section && section.heading, 160, strict),
+      paragraphs: asArray(section && section.paragraphs)
+        .slice(0, 4)
+        .map((paragraph) => plainLandingText(paragraph, 1200, strict))
+        .filter(Boolean),
+    }))
+    .filter((section) => section.heading || section.paragraphs.length);
+  const faq = asArray(input.faq)
+    .slice(0, 8)
+    .map((item) => ({
+      question: plainLandingText(item && item.question, 200, strict),
+      answer: plainLandingText(item && item.answer, 800, strict),
+    }))
+    .filter((item) => item.question || item.answer);
+  return {
+    metaTitle: plainLandingText(input.metaTitle, 70, strict),
+    metaDescription: plainLandingText(input.metaDescription, 180, strict),
+    h1: plainLandingText(input.h1, 160, strict),
+    heroText: plainLandingText(input.heroText, 800, strict),
+    sections,
+    bullets: asArray(input.bullets)
+      .slice(0, 8)
+      .map((bullet) => plainLandingText(bullet, 300, strict))
+      .filter(Boolean),
+    faq,
+    ctaLabel: plainLandingText(input.ctaLabel, 80, strict),
+    legalDisclaimer: plainLandingText(input.legalDisclaimer, 2000, strict),
+  };
 }
 
 /**
@@ -235,14 +312,15 @@ function seoFormCtaUrl(term, cta) {
 }
 
 function renderLandingHtml(term, content) {
-  const metaTitle = content.metaTitle || `${term} | Credizona`;
-  const metaDescription = content.metaDescription || '';
-  const h1 = content.h1 || term;
-  const heroText = content.heroText || '';
-  const ctaLabel = content.ctaLabel || 'Solicitá tu préstamo';
-  const legal = content.legalDisclaimer || '';
+  const safe = normalizeLandingContent(content || {}, { strict: false });
+  const metaTitle = safe.metaTitle || `${term} | Credizona`;
+  const metaDescription = safe.metaDescription || '';
+  const h1 = safe.h1 || term;
+  const heroText = safe.heroText || '';
+  const ctaLabel = safe.ctaLabel || 'Solicitá tu préstamo';
+  const legal = safe.legalDisclaimer || '';
 
-  const sectionsHtml = asArray(content.sections)
+  const sectionsHtml = asArray(safe.sections)
     .map((s) => {
       const paragraphs = asArray(s && s.paragraphs)
         .map((p) => `<p>${escapeHtml(p)}</p>`)
@@ -255,11 +333,11 @@ function renderLandingHtml(term, content) {
     })
     .join('\n');
 
-  const bulletsHtml = asArray(content.bullets)
+  const bulletsHtml = asArray(safe.bullets)
     .map((b) => `<li>${escapeHtml(b)}</li>`)
     .join('\n          ');
 
-  const faqHtml = asArray(content.faq)
+  const faqHtml = asArray(safe.faq)
     .map(
       (f) => `
         <details class="faq-item">
@@ -279,7 +357,7 @@ function renderLandingHtml(term, content) {
   <meta property="og:title" content="${escapeHtml(metaTitle)}" />
   <meta property="og:description" content="${escapeHtml(metaDescription)}" />
   <meta property="og:type" content="website" />
-  ${buildFaqJsonLd(content.faq)}
+  ${buildFaqJsonLd(safe.faq)}
   <style>
     :root {
       --cz-primary: ${BRAND.primary};
@@ -436,11 +514,24 @@ async function hasActiveDraft(termId) {
  * generation failures; records them on the row instead.
  * Returns { status: 'draft'|'failed'|'skipped_existing', ... }.
  */
+async function findSlugOwner(slug) {
+  const { data, error } = await supabase
+    .from('seo_landing_drafts')
+    .select('id')
+    .eq('slug', slug)
+    .limit(1);
+  if (error) {
+    throw new Error(`Failed to check landing slug: ${error.message}`);
+  }
+  return data && data[0] ? data[0].id : null;
+}
+
 async function generateSeoLandingDraft({ termId, term }) {
   logger.info('SEO landing generation started', { termId, term });
 
+  let slug;
   try {
-    seoLandingSlug(term);
+    slug = seoLandingSlug(term);
   } catch (err) {
     const message = err && err.message ? err.message : 'SEO landing slug is empty or invalid';
     await recordFailure(termId, message);
@@ -454,6 +545,13 @@ async function generateSeoLandingDraft({ termId, term }) {
     return { status: 'skipped_existing', termId, term };
   }
 
+  const slugOwner = await findSlugOwner(slug);
+  if (slugOwner) {
+    const message = `SEO landing slug already exists: ${slug}`;
+    await recordFailure(termId, message);
+    return { status: 'failed', termId, term, error: message };
+  }
+
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENAI_API_KEY) {
     const message = 'Missing ANTHROPIC_API_KEY / OPENAI_API_KEY';
     await recordFailure(termId, message);
@@ -463,7 +561,8 @@ async function generateSeoLandingDraft({ termId, term }) {
   try {
     const draft = await callClaudeDraft(term);
     const audited = await callGptAudit(term, draft);
-    const html = renderLandingHtml(term, audited);
+    const content = normalizeLandingContent(audited, { strict: false });
+    const html = renderLandingHtml(term, content);
 
     // Storage upload is best-effort: the DB row (html_content) is the
     // primary asset; a missing storage_path is visible and recoverable.
@@ -479,6 +578,10 @@ async function generateSeoLandingDraft({ termId, term }) {
       .from('seo_landing_drafts')
       .insert({
         term_id: termId,
+        origin: 'discovered',
+        topic: String(term).trim(),
+        slug,
+        content_json: content,
         html_content: html,
         storage_path: upload.path,
         status: 'draft',
@@ -516,7 +619,13 @@ async function generateSeoLandingDraft({ termId, term }) {
  * 'reviewed' draft must go through review again after regeneration).
  * Never throws for generation failures; records status='failed' on the row.
  */
-async function regenerateSeoLandingDraft({ draftId, termId, term, customInstructions }) {
+async function regenerateSeoLandingDraft({
+  draftId,
+  termId,
+  term,
+  customInstructions,
+  suggestedTitle,
+}) {
   logger.info('SEO landing regeneration started', {
     draftId,
     termId,
@@ -563,9 +672,15 @@ async function regenerateSeoLandingDraft({ draftId, termId, term, customInstruct
     const instructions = customInstructions && String(customInstructions).trim()
       ? String(customInstructions).trim()
       : null;
-    const draft = await callClaudeDraft(term, instructions);
-    const audited = await callGptAudit(term, draft, instructions);
-    const html = renderLandingHtml(term, audited);
+    const draft = await callClaudeDraft(term, instructions, suggestedTitle);
+    const audited = await callGptAudit(term, draft, instructions, suggestedTitle);
+    const content = normalizeLandingContent(audited, { strict: false });
+    const html = renderLandingHtml(term, content);
+    const slug = seoLandingSlug(term);
+    const slugOwner = await findSlugOwner(slug);
+    if (slugOwner && slugOwner !== draftId) {
+      throw new Error(`SEO landing slug already exists: ${slug}`);
+    }
 
     // Same slug+date naming convention: same-day regeneration overwrites the
     // file (upsert: true); a later-day regeneration gets a fresh date suffix
@@ -578,17 +693,27 @@ async function regenerateSeoLandingDraft({ draftId, termId, term, customInstruct
       });
     }
 
+    const patch = {
+      html_content: html,
+      content_json: content,
+      topic: String(term).trim(),
+      slug,
+      custom_instructions: instructions,
+      storage_path: upload.path,
+      status: 'draft',
+      generation_error: null,
+      generated_at: new Date().toISOString(),
+      reviewed_at: null,
+      published_at: null,
+    };
+    if (suggestedTitle !== undefined) {
+      patch.suggested_title = suggestedTitle
+        ? String(suggestedTitle).trim().slice(0, 180)
+        : null;
+    }
     const { error } = await supabase
       .from('seo_landing_drafts')
-      .update({
-        html_content: html,
-        storage_path: upload.path,
-        status: 'draft',
-        generation_error: null,
-        generated_at: new Date().toISOString(),
-        reviewed_at: null,
-        published_at: null,
-      })
+      .update(patch)
       .eq('id', draftId);
 
     if (error) {
@@ -609,6 +734,77 @@ async function regenerateSeoLandingDraft({ draftId, termId, term, customInstruct
     await recordRegenFailure(message);
     return { status: 'failed', draftId, termId, term, error: message };
   }
+}
+
+async function createManualLandingDraft({ topic, suggestedTitle, customInstructions }) {
+  const topicText = String(topic || '').trim();
+  const slug = seoLandingSlug(topicText);
+  const owner = await findSlugOwner(slug);
+  if (owner) {
+    return { status: 'slug_taken', slug, error: `SEO landing slug already exists: ${slug}` };
+  }
+  const title = suggestedTitle ? String(suggestedTitle).trim().slice(0, 180) : null;
+  const instructions = customInstructions
+    ? String(customInstructions).trim().slice(0, 4000)
+    : null;
+  const { data, error } = await supabase
+    .from('seo_landing_drafts')
+    .insert({
+      term_id: null,
+      origin: 'manual',
+      topic: topicText,
+      slug,
+      suggested_title: title,
+      custom_instructions: instructions,
+      content_json: null,
+      html_content: null,
+      storage_path: null,
+      status: 'draft',
+    })
+    .select('id')
+    .single();
+  if (error) {
+    if (error.code === '23505') {
+      return { status: 'slug_taken', slug, error: `SEO landing slug already exists: ${slug}` };
+    }
+    throw new Error(`Failed to insert manual SEO landing draft: ${error.message}`);
+  }
+  return {
+    status: 'started',
+    draftId: data.id,
+    slug,
+    topic: topicText,
+    suggestedTitle: title,
+    customInstructions: instructions,
+  };
+}
+
+async function saveStructuredLandingContent({ draftId, term, content }) {
+  const slug = seoLandingSlug(term);
+  const owner = await findSlugOwner(slug);
+  if (owner && owner !== draftId) {
+    const err = new Error(`SEO landing slug already exists: ${slug}`);
+    err.code = 'slug_taken';
+    throw err;
+  }
+  const structured = normalizeLandingContent(content, { strict: true });
+  const html = renderLandingHtml(term, structured);
+  const upload = await uploadDraftToStorage(slug, html);
+  const { error } = await supabase
+    .from('seo_landing_drafts')
+    .update({
+      html_content: html,
+      content_json: structured,
+      storage_path: upload.path,
+      status: 'draft',
+      reviewed_at: null,
+      published_at: null,
+    })
+    .eq('id', draftId);
+  if (error) {
+    throw new Error(`Failed to save structured landing content: ${error.message}`);
+  }
+  return { draftId, slug, html, content: structured, storagePath: upload.path };
 }
 
 async function recordFailure(termId, message) {
@@ -632,7 +828,13 @@ async function recordFailure(termId, message) {
 module.exports = {
   generateSeoLandingDraft,
   regenerateSeoLandingDraft,
+  createManualLandingDraft,
+  saveStructuredLandingContent,
   hasActiveDraft,
   renderLandingHtml,
   slugifyTerm,
+  seoLandingSlug,
+  normalizeLandingContent,
+  buildClaudeUserContent,
+  buildGptUserContent,
 };

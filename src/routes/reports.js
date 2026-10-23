@@ -9,7 +9,10 @@ const {
 const {
   generateSeoLandingDraft,
   regenerateSeoLandingDraft,
+  createManualLandingDraft,
+  saveStructuredLandingContent,
   hasActiveDraft,
+  seoLandingSlug,
 } = require('../services/seo-landing-generator');
 const {
   MAX_FILE_BYTES,
@@ -1620,6 +1623,53 @@ router.post('/coverage-suggestions/decide', async (req, res) => {
   }
 });
 
+function landingTopicFromRow(row) {
+  if (row && typeof row.topic === 'string' && row.topic.trim()) return row.topic.trim();
+  if (row && row.confirmed_search_terms && typeof row.confirmed_search_terms.term === 'string') {
+    return row.confirmed_search_terms.term.trim() || null;
+  }
+  return null;
+}
+
+function landingSlugFromRow(row) {
+  if (row && typeof row.slug === 'string' && row.slug.trim()) return row.slug.trim();
+  const topic = landingTopicFromRow(row);
+  if (!topic) return null;
+  try {
+    return seoLandingSlug(topic);
+  } catch (err) {
+    return null;
+  }
+}
+
+function presentLandingDraft(row) {
+  const joinedTerm =
+    row.confirmed_search_terms && row.confirmed_search_terms.term
+      ? row.confirmed_search_terms.term
+      : null;
+  return {
+    id: row.id,
+    termId: row.term_id,
+    term: joinedTerm,
+    topic: landingTopicFromRow(row),
+    origin: row.origin === 'manual' ? 'manual' : 'discovered',
+    slug: landingSlugFromRow(row),
+    hasStructuredContent: row.content_json != null,
+    online: false,
+    publicUrl: null,
+    status: row.status,
+    generationError: row.generation_error || null,
+    storagePath: row.storage_path || null,
+    generatedAt: row.generated_at,
+    reviewedAt: row.reviewed_at,
+    publishedAt: row.published_at,
+    createdAt: row.created_at,
+  };
+}
+
+const SEO_LANDING_LIST_COLUMNS =
+  'id, term_id, origin, topic, slug, content_json, status, generation_error, storage_path, generated_at, reviewed_at, published_at, created_at, confirmed_search_terms(term)';
+
 /**
  * GET /reports/seo-landing-drafts
  * Read-only list for the drafts review section.
@@ -1628,34 +1678,84 @@ router.get('/seo-landing-drafts', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('seo_landing_drafts')
-      .select(
-        'id, term_id, status, generation_error, storage_path, generated_at, reviewed_at, published_at, created_at, confirmed_search_terms(term)',
-      )
+      .select(SEO_LANDING_LIST_COLUMNS)
       .order('created_at', { ascending: false })
       .limit(100);
     if (error) {
       throw new Error(`Failed to fetch seo_landing_drafts: ${error.message}`);
     }
 
-    const drafts = (data || []).map((row) => ({
-      id: row.id,
-      termId: row.term_id,
-      term:
-        row.confirmed_search_terms && row.confirmed_search_terms.term
-          ? row.confirmed_search_terms.term
-          : null,
-      status: row.status,
-      generationError: row.generation_error || null,
-      storagePath: row.storage_path || null,
-      generatedAt: row.generated_at,
-      reviewedAt: row.reviewed_at,
-      publishedAt: row.published_at,
-      createdAt: row.created_at,
-    }));
+    const drafts = (data || []).map(presentLandingDraft);
     return res.json({ drafts, total: drafts.length });
   } catch (err) {
     logger.error('Reports seo-landing-drafts failed', { error: err.message });
     return res.status(500).json({ error: 'Failed to fetch landing drafts' });
+  }
+});
+
+/**
+ * POST /reports/seo-landing-drafts/manual
+ * Creates a landing that is not tied to a discovered term, then reuses the
+ * existing generator. The row stays a JANUS draft: nothing is published.
+ */
+router.post('/seo-landing-drafts/manual', async (req, res) => {
+  try {
+    const topic = req.body && typeof req.body.topic === 'string' ? req.body.topic.trim() : '';
+    if (!topic) {
+      return res.status(400).json({ error: 'El tema es obligatorio' });
+    }
+    const suggestedTitle =
+      req.body && typeof req.body.suggestedTitle === 'string'
+        ? req.body.suggestedTitle.trim().slice(0, 180)
+        : '';
+    const customInstructions =
+      req.body && typeof req.body.customInstructions === 'string'
+        ? req.body.customInstructions.trim().slice(0, 4000)
+        : '';
+
+    let created;
+    try {
+      created = await createManualLandingDraft({
+        topic,
+        suggestedTitle: suggestedTitle || null,
+        customInstructions: customInstructions || null,
+      });
+    } catch (err) {
+      if (err && /empty or invalid/.test(err.message || '')) {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+    if (created.status === 'slug_taken') {
+      return res.status(409).json({ error: created.error, slug: created.slug });
+    }
+
+    regenerateSeoLandingDraft({
+      draftId: created.draftId,
+      termId: null,
+      term: created.topic,
+      customInstructions: created.customInstructions,
+      suggestedTitle: created.suggestedTitle,
+    }).catch((err) => {
+      logger.error('Async manual SEO landing generation crashed', {
+        draftId: created.draftId,
+        topic: created.topic,
+        error: err && err.message,
+      });
+    });
+
+    return res.status(202).json({
+      draftId: created.draftId,
+      topic: created.topic,
+      slug: created.slug,
+      origin: 'manual',
+      generation: 'started',
+      online: false,
+      publicUrl: null,
+    });
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts/manual failed', { error: err.message });
+    return res.status(500).json({ error: 'Failed to create manual landing' });
   }
 });
 
@@ -1806,7 +1906,7 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('seo_landing_drafts')
-      .select('id, term_id, confirmed_search_terms(term)')
+      .select('id, term_id, topic, suggested_title, custom_instructions, confirmed_search_terms(term)')
       .eq('id', req.params.id)
       .limit(1);
     if (error) {
@@ -1817,10 +1917,7 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
     }
 
     const row = data[0];
-    const term =
-      row.confirmed_search_terms && row.confirmed_search_terms.term
-        ? row.confirmed_search_terms.term
-        : null;
+    const term = landingTopicFromRow(row);
     if (!term) {
       return res.status(422).json({ error: 'Draft has no associated term' });
     }
@@ -1829,7 +1926,11 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       req.body && typeof req.body.customInstructions === 'string'
         ? req.body.customInstructions.trim()
         : '';
-    const customInstructions = rawInstructions ? rawInstructions.slice(0, 4000) : null;
+    const storedInstructions =
+      typeof row.custom_instructions === 'string' ? row.custom_instructions.trim() : '';
+    const customInstructions = rawInstructions
+      ? rawInstructions.slice(0, 4000)
+      : storedInstructions || null;
 
     // Fire-and-forget: the HTTP caller never waits for Claude+GPT.
     regenerateSeoLandingDraft({
@@ -1837,6 +1938,7 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       termId: row.term_id,
       term,
       customInstructions,
+      suggestedTitle: row.suggested_title || null,
     }).catch((err) => {
       logger.error('Async SEO landing regeneration crashed', {
         draftId: row.id,
@@ -1850,6 +1952,8 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       term,
       regeneration: 'started',
       customInstructionsApplied: Boolean(customInstructions),
+      online: false,
+      publicUrl: null,
     });
   } catch (err) {
     logger.error('Reports seo-landing-drafts/:id/regenerate failed', {
@@ -1857,6 +1961,112 @@ router.post('/seo-landing-drafts/:id/regenerate', async (req, res) => {
       error: err.message,
     });
     return res.status(500).json({ error: 'Failed to start regeneration' });
+  }
+});
+
+/**
+ * GET /reports/seo-landing-drafts/:id/content
+ * Structured fields for the editor. Old rows without content_json cannot be edited.
+ */
+router.get('/seo-landing-drafts/:id/content', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('seo_landing_drafts')
+      .select('id, topic, slug, origin, content_json, confirmed_search_terms(term)')
+      .eq('id', req.params.id)
+      .limit(1);
+    if (error) {
+      throw new Error(`Failed to fetch landing content: ${error.message}`);
+    }
+    if (!data || !data.length) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    const row = data[0];
+    if (row.content_json == null) {
+      return res.status(409).json({
+        error: 'Esta landing no tiene contenido estructurado. No se regeneró su HTML.',
+      });
+    }
+    return res.json({
+      id: row.id,
+      topic: landingTopicFromRow(row),
+      slug: landingSlugFromRow(row),
+      origin: row.origin === 'manual' ? 'manual' : 'discovered',
+      content: row.content_json,
+      online: false,
+      publicUrl: null,
+    });
+  } catch (err) {
+    logger.error('Reports seo-landing-drafts/:id/content failed', {
+      id: req.params.id,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to fetch landing content' });
+  }
+});
+
+/**
+ * PATCH /reports/seo-landing-drafts/:id/content
+ * Saves structured fields and rebuilds HTML through renderLandingHtml.
+ * Free HTML is rejected.
+ */
+router.patch('/seo-landing-drafts/:id/content', async (req, res) => {
+  try {
+    if (
+      req.body &&
+      (Object.prototype.hasOwnProperty.call(req.body, 'html') ||
+        Object.prototype.hasOwnProperty.call(req.body, 'html_content'))
+    ) {
+      return res.status(400).json({ error: 'HTML libre no es editable' });
+    }
+    const { data, error } = await supabase
+      .from('seo_landing_drafts')
+      .select('id, topic, content_json, confirmed_search_terms(term)')
+      .eq('id', req.params.id)
+      .limit(1);
+    if (error) {
+      throw new Error(`Failed to fetch landing content: ${error.message}`);
+    }
+    if (!data || !data.length) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    const row = data[0];
+    if (row.content_json == null) {
+      return res.status(409).json({
+        error: 'Esta landing no tiene contenido estructurado. No se regeneró su HTML.',
+      });
+    }
+    const term = landingTopicFromRow(row);
+    if (!term) {
+      return res.status(422).json({ error: 'Draft has no topic' });
+    }
+    const saved = await saveStructuredLandingContent({
+      draftId: row.id,
+      term,
+      content: req.body && req.body.content,
+    });
+    return res.json({
+      draftId: saved.draftId,
+      slug: saved.slug,
+      status: 'draft',
+      online: false,
+      publicUrl: null,
+    });
+  } catch (err) {
+    if (
+      err &&
+      (err.message === 'editable field must be a string' ||
+        err.message === 'content must be an object' ||
+        err.code === 'slug_taken')
+    ) {
+      const status = err.code === 'slug_taken' ? 409 : 400;
+      return res.status(status).json({ error: err.message });
+    }
+    logger.error('Reports seo-landing-drafts/:id/content update failed', {
+      id: req.params.id,
+      error: err.message,
+    });
+    return res.status(500).json({ error: 'Failed to save landing content' });
   }
 });
 

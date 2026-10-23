@@ -5796,7 +5796,7 @@ init();
     const map = {
       draft: ['Borrador', 'is-draft'],
       reviewed: ['Revisado', 'is-reviewed'],
-      published: ['Publicado', 'is-published'],
+      published: ['Estado publicado', 'is-published'],
       failed: ['Falló', 'is-failed'],
     };
     const [label, cls] = map[draft.status] || [draft.status, ''];
@@ -5827,8 +5827,11 @@ init();
           : '';
         const publishedNote =
           d.status === 'published' && publishedWhen
-            ? `<span class="cov-draft-date">Publicado ${escapeHtml(publishedWhen)}</span>`
+            ? `<span class="cov-draft-date">Estado publicado en JANUS ${escapeHtml(publishedWhen)}. Sin página pública.</span>`
             : '';
+        const editButton = d.hasStructuredContent
+          ? `<button type="button" class="btn seo-edit-btn" data-draft-id="${escapeHtml(d.id)}">Editar</button>`
+          : `<button type="button" class="btn seo-edit-btn" data-draft-id="${escapeHtml(d.id)}" disabled title="El contenido estructurado queda disponible después de generar. Los borradores ya existentes no se regeneran desde esta pantalla.">Editar</button>`;
         let statusAction = '';
         if (d.status === 'draft') {
           statusAction = `<button type="button" class="btn cov-status-btn" data-draft-id="${escapeHtml(d.id)}" data-next-status="reviewed">Marcar revisado</button>`;
@@ -5838,21 +5841,26 @@ init();
         return `
           <div class="cov-draft-card" data-draft-card="${escapeHtml(d.id)}">
             <div class="cov-draft-main">
-              <span class="cov-draft-term">${escapeHtml(d.term || '(término desconocido)')}</span>
+              <span class="cov-draft-term">${escapeHtml(d.topic || d.term || '(sin tema)')}</span>
+              <span class="cov-draft-date">${escapeHtml(d.origin === 'manual' ? 'Manual' : 'Término descubierto')}</span>
+              <span class="cov-draft-date">Slug ${escapeHtml(d.slug || '—')}</span>
               ${draftStatusBadge(d)}
               <span class="cov-draft-date">${escapeHtml(when)}</span>
               ${publishedNote}
             </div>
+            <p class="cov-section-sub">Borrador en JANUS. No está online y no tiene URL pública.</p>
             ${errorNote}
             <div class="cov-draft-actions">
               ${previewLink}
               ${downloadLink}
+              ${editButton}
               ${statusAction}
               <button type="button" class="btn cov-regenerate-btn" data-draft-id="${escapeHtml(d.id)}"
                 title="Vuelve a generar el contenido con los prompts actuales (el borrador vuelve a revisión)">
                 Regenerar
               </button>
             </div>
+            <div class="seo-editor-host"></div>
             <label class="cov-regen-instructions">
               <span class="cov-regen-instructions-label">Instrucciones para esta regeneración (opcional)</span>
               <textarea
@@ -5869,9 +5877,146 @@ init();
     draftsEl.querySelectorAll('.cov-regenerate-btn').forEach((btn) => {
       btn.addEventListener('click', () => regenerateDraft(btn));
     });
+    draftsEl.querySelectorAll('.seo-edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openStructuredEditor(btn));
+    });
     draftsEl.querySelectorAll('.cov-status-btn').forEach((btn) => {
       btn.addEventListener('click', () => updateDraftStatus(btn));
     });
+  }
+
+  function editorField(label, name, value, multiline) {
+    const safe = escapeHtml(value || '');
+    if (multiline) {
+      return `<label class="mcl-field"><span class="mcl-field-label">${label}</span><textarea class="input" name="${name}" rows="3">${safe}</textarea></label>`;
+    }
+    return `<label class="mcl-field"><span class="mcl-field-label">${label}</span><input class="input" name="${name}" value="${safe}" /></label>`;
+  }
+
+  function structuredEditorHtml(draftId, content) {
+    const sections = Array.isArray(content.sections) && content.sections.length
+      ? content.sections
+      : [{ heading: '', paragraphs: [] }];
+    const faqs = Array.isArray(content.faq) && content.faq.length
+      ? content.faq
+      : [{ question: '', answer: '' }];
+    const sectionHtml = sections
+      .map(
+        (section) => `
+          <div class="seo-editor-block" data-section>
+            ${editorField('Título de sección', 'sectionHeading', section.heading, false).replace('name="sectionHeading"', 'data-heading')}
+            <label class="mcl-field"><span class="mcl-field-label">Párrafos (uno por línea)</span><textarea class="input" data-paragraphs rows="3">${escapeHtml((section.paragraphs || []).join('\n'))}</textarea></label>
+          </div>`,
+      )
+      .join('');
+    const faqHtml = faqs
+      .map(
+        (item) => `
+          <div class="seo-editor-block" data-faq>
+            <label class="mcl-field"><span class="mcl-field-label">Pregunta</span><input class="input" data-question value="${escapeHtml(item.question || '')}" /></label>
+            <label class="mcl-field"><span class="mcl-field-label">Respuesta</span><textarea class="input" data-answer rows="3">${escapeHtml(item.answer || '')}</textarea></label>
+          </div>`,
+      )
+      .join('');
+    return `
+      <form class="seo-editor" data-draft-id="${escapeHtml(draftId)}">
+        ${editorField('Título', 'metaTitle', content.metaTitle, false)}
+        ${editorField('Descripción', 'metaDescription', content.metaDescription, true)}
+        ${editorField('Encabezado', 'h1', content.h1, false)}
+        ${editorField('Texto principal', 'heroText', content.heroText, true)}
+        ${editorField('Texto del botón', 'ctaLabel', content.ctaLabel, false)}
+        ${editorField('Aviso legal', 'legalDisclaimer', content.legalDisclaimer, true)}
+        <label class="mcl-field"><span class="mcl-field-label">Viñetas (una por línea)</span><textarea class="input" name="bullets" rows="4">${escapeHtml((content.bullets || []).join('\n'))}</textarea></label>
+        <div data-sections>${sectionHtml}</div>
+        <div data-faqs>${faqHtml}</div>
+        <div class="cov-draft-actions">
+          <button type="button" class="btn seo-add-section">Agregar sección</button>
+          <button type="button" class="btn seo-add-faq">Agregar pregunta</button>
+          <button type="submit" class="btn btn-primary">Guardar borrador</button>
+        </div>
+      </form>`;
+  }
+
+  function readStructuredEditor(form) {
+    return {
+      metaTitle: form.querySelector('[name="metaTitle"]').value,
+      metaDescription: form.querySelector('[name="metaDescription"]').value,
+      h1: form.querySelector('[name="h1"]').value,
+      heroText: form.querySelector('[name="heroText"]').value,
+      ctaLabel: form.querySelector('[name="ctaLabel"]').value,
+      legalDisclaimer: form.querySelector('[name="legalDisclaimer"]').value,
+      bullets: form.querySelector('[name="bullets"]').value.split('\n').map((line) => line.trim()).filter(Boolean),
+      sections: Array.from(form.querySelectorAll('[data-section]')).map((block) => ({
+        heading: block.querySelector('[data-heading]').value,
+        paragraphs: block.querySelector('[data-paragraphs]').value.split('\n').map((line) => line.trim()).filter(Boolean),
+      })),
+      faq: Array.from(form.querySelectorAll('[data-faq]')).map((block) => ({
+        question: block.querySelector('[data-question]').value,
+        answer: block.querySelector('[data-answer]').value,
+      })),
+    };
+  }
+
+  async function openStructuredEditor(btn) {
+    const draftId = btn.getAttribute('data-draft-id');
+    if (!draftId || btn.disabled) return;
+    const card = btn.closest('.cov-draft-card');
+    const host = card ? card.querySelector('.seo-editor-host') : null;
+    if (!host) return;
+    host.innerHTML = '<p class="cov-section-sub">Cargando contenido…</p>';
+    try {
+      const res = await fetch(
+        `${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(draftId)}/content`,
+        { headers: { Accept: 'application/json' } },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      host.innerHTML = structuredEditorHtml(draftId, body.content || {});
+      const form = host.querySelector('form');
+      form.querySelector('.seo-add-section').addEventListener('click', () => {
+        if (form.querySelectorAll('[data-section]').length >= 8) return;
+        form.querySelector('[data-sections]').insertAdjacentHTML(
+          'beforeend',
+          `<div class="seo-editor-block" data-section><label class="mcl-field"><span class="mcl-field-label">Título de sección</span><input class="input" data-heading value="" /></label><label class="mcl-field"><span class="mcl-field-label">Párrafos (uno por línea)</span><textarea class="input" data-paragraphs rows="3"></textarea></label></div>`,
+        );
+      });
+      form.querySelector('.seo-add-faq').addEventListener('click', () => {
+        if (form.querySelectorAll('[data-faq]').length >= 8) return;
+        form.querySelector('[data-faqs]').insertAdjacentHTML(
+          'beforeend',
+          `<div class="seo-editor-block" data-faq><label class="mcl-field"><span class="mcl-field-label">Pregunta</span><input class="input" data-question value="" /></label><label class="mcl-field"><span class="mcl-field-label">Respuesta</span><textarea class="input" data-answer rows="3"></textarea></label></div>`,
+        );
+      });
+      form.addEventListener('submit', (event) => saveStructuredEditor(event, form));
+    } catch (err) {
+      host.innerHTML = `<p class="cov-draft-error">${escapeHtml(err && err.message ? err.message : 'No se pudo abrir el editor.')}</p>`;
+    }
+  }
+
+  async function saveStructuredEditor(event, form) {
+    event.preventDefault();
+    const draftId = form.getAttribute('data-draft-id');
+    const submit = form.querySelector('[type="submit"]');
+    if (!draftId || submit.disabled) return;
+    submit.disabled = true;
+    submit.textContent = 'Guardando…';
+    try {
+      const res = await fetch(
+        `${API_BASE}/reports/seo-landing-drafts/${encodeURIComponent(draftId)}/content`,
+        {
+          method: 'PATCH',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: readStructuredEditor(form) }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      await loadDrafts();
+    } catch (err) {
+      submit.disabled = false;
+      submit.textContent = 'Guardar borrador';
+      window.alert(err && err.message ? err.message : 'No se pudo guardar el borrador.');
+    }
   }
 
   // Regeneration runs async server-side (same fire-and-forget pattern as the
@@ -5978,6 +6123,7 @@ init();
   }
 
   async function loadDrafts() {
+    if (draftsEl.querySelector('form.seo-editor')) return [];
     try {
       const res = await fetch(`${API_BASE}/reports/seo-landing-drafts`, {
         headers: { Accept: 'application/json' },
@@ -6308,7 +6454,7 @@ init();
       ];
       if (landingsStarted) {
         parts.push(
-          `${landingsStarted} borrador(es) de landing en generación — aparecerán abajo en "Borradores de landing SEO" en unos segundos`,
+          `${landingsStarted} borrador(es) de landing en generación — aparecerán en Gestión de landings en unos segundos`,
         );
         schedulePoll();
       }
@@ -6333,11 +6479,62 @@ init();
 
   applyBtn.addEventListener('click', applyDecisions);
 
+  const creatorForm = document.getElementById('seo-creator-form');
+  const creatorFeedback = document.getElementById('seo-creator-feedback');
+  const creatorSubmit = document.getElementById('seo-creator-submit');
+  if (creatorForm && creatorSubmit) {
+    creatorForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (creatorSubmit.disabled) return;
+      const topic = document.getElementById('seo-creator-topic').value.trim();
+      const suggestedTitle = document.getElementById('seo-creator-title').value.trim();
+      const customInstructions = document.getElementById('seo-creator-instructions').value.trim();
+      if (!topic) {
+        if (creatorFeedback) creatorFeedback.textContent = 'El tema es obligatorio.';
+        return;
+      }
+      creatorSubmit.disabled = true;
+      creatorSubmit.textContent = 'Generando…';
+      if (creatorFeedback) creatorFeedback.textContent = '';
+      try {
+        const res = await fetch(`${API_BASE}/reports/seo-landing-drafts/manual`, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic,
+            suggestedTitle,
+            customInstructions,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        if (creatorFeedback) {
+          creatorFeedback.textContent = `Borrador creado (${body.slug || 'sin slug'}). No está online. Aparece en Gestión de landings.`;
+        }
+        creatorForm.reset();
+        schedulePoll();
+      } catch (err) {
+        if (creatorFeedback) {
+          creatorFeedback.textContent = err && err.message ? err.message : 'No se pudo crear la landing.';
+        }
+      } finally {
+        creatorSubmit.disabled = false;
+        creatorSubmit.textContent = 'Generar borrador';
+      }
+    });
+  }
+
+  window.__seoLandings = { load: () => loadDrafts() };
+
   // Loading and teardown are driven by the unified discoveries controller.
   window.__discPending = {
     load: () => {
       loadSuggestions();
-      loadDrafts();
+    },
+    pauseWizard: () => {
+      if (typeof covState.cancelWizard === 'function') {
+        covState.cancelWizard();
+      }
     },
     stop: () => {
       if (typeof covState.cancelWizard === 'function') {
@@ -6557,38 +6754,50 @@ init();
  * ------------------------------------------------------------------------- */
 (function initDiscoveriesLanding() {
   const landing = document.getElementById('discoveries-landing');
-  const tabPending = document.getElementById('disc-tab-pending');
-  const tabResearch = document.getElementById('disc-tab-research');
-  const panePending = document.getElementById('disc-pane-pending');
-  const paneResearch = document.getElementById('disc-pane-research');
+  const views = {
+    pending: {
+      tab: document.getElementById('disc-tab-pending'),
+      pane: document.getElementById('disc-pane-pending'),
+    },
+    research: {
+      tab: document.getElementById('disc-tab-research'),
+      pane: document.getElementById('disc-pane-research'),
+    },
+    creator: {
+      tab: document.getElementById('disc-tab-creator'),
+      pane: document.getElementById('disc-pane-creator'),
+    },
+    landings: {
+      tab: document.getElementById('disc-tab-landings'),
+      pane: document.getElementById('disc-pane-landings'),
+    },
+  };
 
-  if (!landing || !tabPending || !tabResearch || !panePending || !paneResearch) {
+  if (!landing || Object.keys(views).some((name) => !views[name].tab || !views[name].pane)) {
     return;
   }
 
   function activateTab(name) {
-    const isPending = name === 'pending';
-    tabPending.classList.toggle('active', isPending);
-    tabResearch.classList.toggle('active', !isPending);
-    tabPending.setAttribute('aria-selected', isPending ? 'true' : 'false');
-    tabResearch.setAttribute('aria-selected', isPending ? 'false' : 'true');
-
-    panePending.classList.toggle('hidden', !isPending);
-    paneResearch.classList.toggle('hidden', isPending);
-    if (isPending) {
-      panePending.removeAttribute('hidden');
-      paneResearch.setAttribute('hidden', '');
-      if (window.__discPending) window.__discPending.load();
-    } else {
-      paneResearch.removeAttribute('hidden');
-      panePending.setAttribute('hidden', '');
-      if (window.__discPending) window.__discPending.stop();
-      if (window.__discResearch) window.__discResearch.load();
+    if (!views[name]) return;
+    Object.keys(views).forEach((key) => {
+      const active = key === name;
+      views[key].tab.classList.toggle('active', active);
+      views[key].tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      views[key].pane.classList.toggle('hidden', !active);
+      if (active) views[key].pane.removeAttribute('hidden');
+      else views[key].pane.setAttribute('hidden', '');
+    });
+    if (name !== 'pending' && window.__discPending && window.__discPending.pauseWizard) {
+      window.__discPending.pauseWizard();
     }
+    if (name === 'pending' && window.__discPending) window.__discPending.load();
+    if (name === 'research' && window.__discResearch) window.__discResearch.load();
+    if (name === 'landings' && window.__seoLandings) window.__seoLandings.load();
   }
 
-  tabPending.addEventListener('click', () => activateTab('pending'));
-  tabResearch.addEventListener('click', () => activateTab('research'));
+  Object.keys(views).forEach((name) => {
+    views[name].tab.addEventListener('click', () => activateTab(name));
+  });
 
   // Enter/leave hooks for the top-level tab controller (the section is now a
   // primary panel — visibility itself is handled by the dashboard tabs).

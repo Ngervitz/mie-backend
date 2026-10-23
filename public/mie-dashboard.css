@@ -3180,6 +3180,7 @@
 /* ---------- Unified discoveries landing: internal tabs + decision badges ---------- */
 #mie-dashboard-app .disc-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 16px 0 20px;
   border-bottom: 1px solid var(--border);
@@ -3204,7 +3205,21 @@
 }
 
 #mie-dashboard-app #disc-pane-pending.hidden,
-#mie-dashboard-app #disc-pane-research.hidden { display: none; }
+#mie-dashboard-app #disc-pane-research.hidden,
+#mie-dashboard-app #disc-pane-creator.hidden,
+#mie-dashboard-app #disc-pane-landings.hidden { display: none; }
+
+#mie-dashboard-app .seo-editor {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+#mie-dashboard-app .seo-editor-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
 
 #mie-dashboard-app .kw-decision.is-monitored { background: var(--accent-success-soft); color: var(--accent-success); }
 #mie-dashboard-app .kw-decision.is-competitor { background: var(--accent-info-soft); color: var(--accent-info); }
