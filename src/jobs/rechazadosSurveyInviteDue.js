@@ -100,6 +100,55 @@ async function loadSurveyInviteRecipients(supabase, campaignIds, episodeIds) {
   return out;
 }
 
+/**
+ * Encuesta CIs for these candidates. One `.in()` per ID_CHUNK so the GET
+ * stays under the HTTP header limit. Duplicate CIs across batches collapse.
+ * A failed batch throws before any materialize.
+ * @param {object} supabase
+ * @param {number[]} candidateCis
+ * @returns {Promise<Array<{ ci: number }>>}
+ */
+async function loadEncuestaCiRows(supabase, candidateCis) {
+  const out = [];
+  const seen = new Set();
+  const list = candidateCis || [];
+  for (let i = 0; i < list.length; i += ID_CHUNK) {
+    const chunk = list.slice(i, i + ID_CHUNK);
+    const { data, error } = await supabase
+      .from('cz_funnel_encuestas')
+      .select('ci')
+      .in('ci', chunk);
+    if (error) throwJobRead('job encuestas', error);
+    const rows = data || [];
+    for (let r = 0; r < rows.length; r += 1) {
+      const ci = Number(rows[r] && rows[r].ci);
+      if (!Number.isFinite(ci) || seen.has(ci)) continue;
+      seen.add(ci);
+      out.push({ ci: ci });
+    }
+  }
+  return out;
+}
+
+/**
+ * @param {string} label
+ * @param {{ message?: string, hint?: string }|null|undefined} error
+ */
+function throwJobRead(label, error) {
+  const message = error && error.message ? String(error.message) : 'unknown';
+  const hint =
+    error && error.hint != null && String(error.hint) !== ''
+      ? String(error.hint)
+      : null;
+  logger.error(label + ' failed', {
+    error: message,
+    hint: hint,
+  });
+  const err = new Error(label + ': ' + message);
+  if (hint) err.hint = hint;
+  throw err;
+}
+
 const JOB_NAME = 'rechazados_survey_invite_due';
 const JOB_LOCK_TTL_SECONDS = 10 * 60;
 
@@ -288,11 +337,7 @@ async function runRechazadosSurveyInviteDue(opts) {
       return Object.assign({ job: JOB_NAME }, counters);
     }
 
-    const { data: encuestas, error: encErr } = await supabase
-      .from('cz_funnel_encuestas')
-      .select('ci')
-      .in('ci', candidateCis);
-    if (encErr) throw new Error('job encuestas: ' + encErr.message);
+    const encuestas = await loadEncuestaCiRows(supabase, candidateCis);
 
     const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
     const elmBlocks = await loadElmBlocks(supabase, candidateCis);
