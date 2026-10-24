@@ -46,6 +46,8 @@ const {
 
 /** Same width the ELM survey gate uses for `.in()` lists. */
 const ID_CHUNK = 200;
+/** Independent CIs only. The job lock still serializes whole runs. */
+const MATERIALIZE_CONCURRENCY = 4;
 
 function uniqueBy(rows, keyFn) {
   const seen = new Set();
@@ -203,8 +205,32 @@ function emptyCounters() {
     config_missing: 0,
     sequence_complete: 0,
     elm_in_progress: 0,
+    missing_email: 0,
     errors: 0,
   };
+}
+
+/**
+ * @param {Array<object>} items
+ * @param {number} limit
+ * @param {(item: object) => Promise<void>} worker
+ */
+async function mapPool(items, limit, worker) {
+  const list = items || [];
+  if (!list.length) return;
+  let cursor = 0;
+  const width = Math.max(1, Math.min(limit, list.length));
+  async function run() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= list.length) return;
+      await worker(list[index]);
+    }
+  }
+  const runners = [];
+  for (let i = 0; i < width; i += 1) runners.push(run());
+  await Promise.all(runners);
 }
 
 function bumpAlreadyAttempted(counters, reason) {
@@ -381,6 +407,9 @@ async function runRechazadosSurveyInviteDue(opts) {
     }
     const suppressed = loaded.emails;
 
+    /** @type {Array<object>} */
+    const pending = [];
+
     const configuredIds = [1, 2, 3]
       .map(function (s) {
         return stepCampaignIds[s];
@@ -513,6 +542,10 @@ async function runRechazadosSurveyInviteDue(opts) {
           counters.suppressed += 1;
           continue;
         }
+        if (decision.result === REASONS.MISSING_EMAIL) {
+          counters.missing_email += 1;
+          continue;
+        }
         if (bumpAlreadyAttempted(counters, decision.result)) {
           continue;
         }
@@ -521,14 +554,50 @@ async function runRechazadosSurveyInviteDue(opts) {
           continue;
         }
 
-        counters.eligible += 1;
+        const snapshot =
+          solicitud && episodeId != null && Number.isFinite(episodeId)
+            ? {
+                eligible: true,
+                reason: REASONS.ELIGIBLE,
+                ci: ci,
+                cz_solicitud_id: episodeId,
+                email: nullableTrimmedText(solicitud.email),
+                email_masked: decision.email_masked,
+                lrw_id: nullableTrimmedText(solicitud.lrw_id),
+                nombre: solicitud.nombre != null ? solicitud.nombre : null,
+              }
+            : null;
+        pending.push({
+          ci: ci,
+          dueStep: decision.due_step,
+          campaignId: decision.campaign_id,
+          episodeId: episodeId,
+          snapshot: snapshot,
+        });
+      } catch (err) {
+        counters.errors += 1;
+        logger.error('rechazados_survey_invite_due CI failed', {
+          ci: ci,
+          error: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
+        });
+      }
+    }
+
+    await mapPool(pending, MATERIALIZE_CONCURRENCY, async function (item) {
+      counters.eligible += 1;
+      try {
         const outcome = await materializeFn(
           supabase,
-          ci,
-          decision.campaign_id,
-          episodeId != null && Number.isFinite(episodeId)
-            ? { czSolicitudId: episodeId }
-            : undefined,
+          item.ci,
+          item.campaignId,
+          item.snapshot
+            ? {
+                czSolicitudId: item.episodeId,
+                eligibilitySnapshot: item.snapshot,
+              }
+            : item.episodeId != null && Number.isFinite(item.episodeId)
+              ? { czSolicitudId: item.episodeId }
+              : undefined,
         );
         const materialized =
           outcome &&
@@ -536,9 +605,9 @@ async function runRechazadosSurveyInviteDue(opts) {
           (outcome.result === 'queued' ||
             outcome.result === REASONS.ALREADY_PENDING);
         if (materialized && outcome.result === 'queued') {
-          if (decision.due_step === 1) counters.materialized_step1 += 1;
-          else if (decision.due_step === 2) counters.materialized_step2 += 1;
-          else if (decision.due_step === 3) counters.materialized_step3 += 1;
+          if (item.dueStep === 1) counters.materialized_step1 += 1;
+          else if (item.dueStep === 2) counters.materialized_step2 += 1;
+          else if (item.dueStep === 3) counters.materialized_step3 += 1;
         } else if (
           outcome &&
           bumpAlreadyAttempted(counters, outcome.result)
@@ -556,11 +625,11 @@ async function runRechazadosSurveyInviteDue(opts) {
       } catch (err) {
         counters.errors += 1;
         logger.error('rechazados_survey_invite_due CI failed', {
-          ci: ci,
+          ci: item.ci,
           error: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
         });
       }
-    }
+    });
 
     return Object.assign({ job: JOB_NAME }, counters);
   } finally {
@@ -573,6 +642,7 @@ async function runRechazadosSurveyInviteDue(opts) {
 module.exports = {
   JOB_NAME,
   ID_CHUNK,
+  MATERIALIZE_CONCURRENCY,
   runRechazadosSurveyInviteDue,
   emptyCounters,
   loadSurveyInviteRecipients,

@@ -221,9 +221,15 @@ async function repairSurveyInviteRecipient(supabase, args) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {unknown} ciRaw
  * @param {string|number|null|undefined} [campaignId]
- * @param {{ czSolicitudId?: string|number|null }} [opts]
+ * @param {{
+ *   czSolicitudId?: string|number|null,
+ *   eligibilitySnapshot?: object|null,
+ * }} [opts]
  *   czSolicitudId — optional explicit episode for historical pilot materialize.
  *   When omitted, eligibility uses global last-rejection-by-CI (normal flow).
+ *   eligibilitySnapshot — job-only. Skips the full eligibility reload.
+ *   The RPC does not read cz_funnel_encuestas, so this path still does the
+ *   same per-CI head count eligibility already did before the write.
  */
 async function materializeRejectedSurveyInvite(
   supabase,
@@ -247,11 +253,40 @@ async function materializeRejectedSurveyInvite(
     eligOpts.czSolicitudId = options.czSolicitudId;
   }
 
-  const elig = await eligibility.getRejectedSurveyInviteEligibility(
-    supabase,
-    ciRaw,
-    eligOpts,
-  );
+  const snapshot =
+    options.eligibilitySnapshot &&
+    options.eligibilitySnapshot.eligible === true
+      ? options.eligibilitySnapshot
+      : null;
+
+  let elig;
+  if (snapshot) {
+    const snapCi = snapshot.ci != null ? snapshot.ci : ciRaw;
+    const { count: encCount, error: encErr } = await supabase
+      .from('cz_funnel_encuestas')
+      .select('cz_id', { count: 'exact', head: true })
+      .eq('ci', snapCi);
+    if (encErr) {
+      throw new Error('survey invite encuesta recheck: ' + encErr.message);
+    }
+    if (Number(encCount) > 0) {
+      return {
+        ok: false,
+        result: REASONS.SURVEY_ALREADY_COMPLETED,
+        email_masked: snapshot.email_masked || null,
+        recipient_id: null,
+        campaign_id: resolvedCampaignId,
+        due_step: null,
+      };
+    }
+    elig = snapshot;
+  } else {
+    elig = await eligibility.getRejectedSurveyInviteEligibility(
+      supabase,
+      ciRaw,
+      eligOpts,
+    );
+  }
 
   if (!elig.eligible) {
     return {
