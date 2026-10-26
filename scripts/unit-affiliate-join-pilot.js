@@ -8,7 +8,9 @@ const assert = require('assert');
 const {
   readAffiliateJoinPilotCi,
   isCiAllowedForAffiliateJoin,
+  resolvePilotSmsPhoneOverride,
 } = require('../src/lib/affiliateJoinPilot');
+const { resolveAffiliateSmsPhone } = require('../src/lib/affiliatePhoneResolve');
 const {
   parseArgvCi,
   assertValidPhone,
@@ -54,6 +56,16 @@ async function main() {
   assert.strictEqual(readAffiliateJoinPilotCi(), PILOT_CI);
   assert.strictEqual(isCiAllowedForAffiliateJoin(PILOT_CI), true);
   assert.strictEqual(isCiAllowedForAffiliateJoin(OTHER_CI), false);
+  delete process.env.AFFILIATE_JOIN_PILOT_CI;
+
+  process.env.AFFILIATE_JOIN_PILOT_CI = String(PILOT_CI);
+  process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE = '097100035';
+  assert.strictEqual(resolvePilotSmsPhoneOverride(PILOT_CI), '097100035');
+  assert.strictEqual(resolvePilotSmsPhoneOverride(OTHER_CI), null);
+  const storePhone = mockStoreForPilot();
+  const overridePhone = await resolveAffiliateSmsPhone(storePhone, PILOT_CI);
+  assert.strictEqual(overridePhone, '097100035');
+  delete process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE;
   delete process.env.AFFILIATE_JOIN_PILOT_CI;
 
   assert.strictEqual(parseArgvCi(['node', 'script', '12345678']), 12345678);

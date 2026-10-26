@@ -5,6 +5,7 @@
  */
 
 const { parseCi } = require('./affiliateDirectory');
+const { resolvePilotSmsPhoneOverride } = require('./affiliateJoinPilot');
 
 function normalizeDigits(raw) {
   return String(raw == null ? '' : raw).replace(/\D/g, '');
@@ -17,6 +18,9 @@ function normalizeDigits(raw) {
 async function resolveAffiliateSmsPhone(supabase, ci) {
   const parsed = parseCi(ci);
   if (parsed == null) return null;
+
+  const pilotPhone = resolvePilotSmsPhoneOverride(parsed);
+  if (pilotPhone) return pilotPhone;
 
   const { data, error } = await supabase
     .from('cz_funnel_solicitudes')
