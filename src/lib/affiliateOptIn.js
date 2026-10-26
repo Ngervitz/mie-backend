@@ -165,6 +165,18 @@ async function getActiveAffiliateByCi(supabase, ci) {
   return data || null;
 }
 
+async function expireAffiliateOtpChallenge(supabase, challengeId, at) {
+  const acceptedAt = at instanceof Date ? at.toISOString() : String(at);
+  await supabase
+    .from('affiliate_otp_challenges')
+    .update({
+      status: 'expired',
+      updated_at: acceptedAt,
+    })
+    .eq('id', challengeId)
+    .eq('status', 'pending');
+}
+
 async function loadRecentOtpChallengesForCi(supabase, ci) {
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
@@ -252,17 +264,24 @@ async function requestOtpForInviteRecord(supabase, invite, phone, now, deps) {
     throw error;
   }
 
-  const sms = await (deps.queueSms || queueAffiliateTransactionalSms)({
-    kind: 'otp',
-    phone: phone,
-    text: 'Credizona: tu codigo de afiliados es ' + code + '. Valido 5 minutos.',
-    ci: ci,
-    sourceRecordId: challenge.id,
-    dryRun: deps.dryRun,
-    sendBatch: deps.sendBatch,
-  });
+  let sms;
+  try {
+    sms = await (deps.queueSms || queueAffiliateTransactionalSms)({
+      kind: 'otp',
+      phone: phone,
+      text: 'Credizona: tu codigo de afiliados es ' + code + '. Valido 5 minutos.',
+      ci: ci,
+      sourceRecordId: challenge.id,
+      dryRun: deps.dryRun,
+      sendBatch: deps.sendBatch,
+    });
+  } catch (_sendErr) {
+    await expireAffiliateOtpChallenge(supabase, challenge.id, now);
+    return { ok: false, status: 503, error: 'sms_failed' };
+  }
 
   if (!sms.ok) {
+    await expireAffiliateOtpChallenge(supabase, challenge.id, now);
     return { ok: false, status: 503, error: sms.error || 'sms_failed' };
   }
 

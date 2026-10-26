@@ -259,6 +259,35 @@ function validateMessagesInput(messages) {
   return normalized;
 }
 
+function isSubmissionOrderDuplicateError(error) {
+  const code = error && error.code != null ? String(error.code) : '';
+  const msg = error && error.message ? String(error.message) : '';
+  return code === '23505' && /submission_order/i.test(msg);
+}
+
+/**
+ * Next available submission_order for a campaign (0 when empty).
+ * @param {string} campaignId
+ */
+async function nextSubmissionOrderStart(campaignId) {
+  const { data, error } = await supabase
+    .from('sms_messages')
+    .select('submission_order')
+    .eq('campaign_id', campaignId)
+    .order('submission_order', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new NotifymeError(`Failed to read sms_messages order: ${error.message}`, {
+      kind: 'database',
+      status: 500,
+    });
+  }
+  if (!data || !data.length) return 0;
+  const max = Number(data[0].submission_order);
+  return Number.isFinite(max) ? max + 1 : 0;
+}
+
 async function updateCampaignStatus(campaignId, status) {
   const { error } = await supabase
     .from('sms_campaigns')
@@ -311,47 +340,62 @@ function mapSoapFault(err) {
  * sorted by submission_order (never trust insert-return array order alone).
  */
 async function insertCampaignMessages(campaignId, normalizedMessages) {
-  const rows = normalizedMessages.map((m) => ({
-    campaign_id: campaignId,
-    submission_order: m.submission_order,
-    phone: m.phone,
-    text: m.text,
-    scheduled_at: m.scheduledAt,
-    status: 'pending',
-    contact_id: m.contact_id,
-    source_system: m.source_system,
-    source_record_id: m.source_record_id,
-    czuid: m.czuid,
-    marketing_impact_id: m.marketing_impact_id,
-  }));
+  const MAX_ORDER_ATTEMPTS = 5;
 
-  const { data, error } = await supabase
-    .from('sms_messages')
-    .insert(rows)
-    .select(
-      'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, contact_id, source_system, source_record_id, czuid',
-    );
+  for (let attempt = 0; attempt < MAX_ORDER_ATTEMPTS; attempt += 1) {
+    const startOrder = await nextSubmissionOrderStart(campaignId);
+    const rows = normalizedMessages.map((m, idx) => ({
+      campaign_id: campaignId,
+      submission_order: startOrder + idx,
+      phone: m.phone,
+      text: m.text,
+      scheduled_at: m.scheduledAt,
+      status: 'pending',
+      contact_id: m.contact_id,
+      source_system: m.source_system,
+      source_record_id: m.source_record_id,
+      czuid: m.czuid,
+      marketing_impact_id: m.marketing_impact_id,
+    }));
 
-  if (error) {
+    const { data, error } = await supabase
+      .from('sms_messages')
+      .insert(rows)
+      .select(
+        'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, contact_id, source_system, source_record_id, czuid',
+      );
+
+    if (!error) {
+      if (!data || data.length !== rows.length) {
+        throw new NotifymeError('Insert returned unexpected row count', {
+          kind: 'database',
+          status: 500,
+        });
+      }
+
+      const withIds = data.map((row) => ({
+        ...row,
+        unique_id: assertUniqueIdString(String(row.unique_id), 'insert returning'),
+      }));
+
+      withIds.sort((a, b) => a.submission_order - b.submission_order);
+      return withIds;
+    }
+
+    if (isSubmissionOrderDuplicateError(error) && attempt < MAX_ORDER_ATTEMPTS - 1) {
+      continue;
+    }
+
     throw new NotifymeError(`Failed to insert sms_messages: ${error.message}`, {
       kind: 'database',
       status: 500,
     });
   }
-  if (!data || data.length !== rows.length) {
-    throw new NotifymeError('Insert returned unexpected row count', {
-      kind: 'database',
-      status: 500,
-    });
-  }
 
-  const withIds = data.map((row) => ({
-    ...row,
-    unique_id: assertUniqueIdString(String(row.unique_id), 'insert returning'),
-  }));
-
-  withIds.sort((a, b) => a.submission_order - b.submission_order);
-  return withIds;
+  throw new NotifymeError('Failed to allocate sms_messages submission_order', {
+    kind: 'database',
+    status: 500,
+  });
 }
 
 function buildDataSmsPayload(rows) {
@@ -795,4 +839,6 @@ module.exports = {
   assertUniqueIdString,
   validateMessagesInput,
   buildDataSmsPayload,
+  nextSubmissionOrderStart,
+  isSubmissionOrderDuplicateError,
 };
