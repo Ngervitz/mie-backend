@@ -31,6 +31,8 @@ const miplanInterestRouter = require('./routes/miplan-interest');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 const emailClickRouter = require('./routes/email-click');
 const affiliateLinksRouter = require('./routes/affiliate-links');
+const affiliateJoinPublicRouter = require('./routes/affiliate-join-public');
+const affiliateJoinPagesRouter = require('./routes/affiliate-join-pages');
 
 const app = express();
 
@@ -86,6 +88,15 @@ app.use(emailUnsubscribeRouter);
 app.use(emailClickRouter);
 // Public affiliate redirects — own tables, no marketing_impacts. Before requireAuth.
 app.use(affiliateLinksRouter);
+// Public affiliate landing + terms (/affiliates/join, /affiliates/terms). Does not expose all of public/.
+app.use('/affiliates', affiliateJoinPagesRouter);
+// Public affiliate opt-in API (/affiliates/v1/*). Admin /affiliates stays behind auth in server.js.
+app.use(
+  '/affiliates',
+  express.json({ limit: '2kb' }),
+  affiliateJoinPublicRouter,
+  affiliateJoinPublicRouter.jsonErrorHandler,
+);
 // Public email HTML assets only (Encuesta STEP1–3). Must run before requireAuth.
 // Does NOT expose the rest of public/ — that remains behind requireAuth below.
 app.use(

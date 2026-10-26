@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Programa de Afiliados — Credizona</title>
+  <link rel="stylesheet" href="/affiliates/affiliates.css" />
+</head>
+<body>
+  <header class="site-header">
+    <img src="/affiliates/logo.svg" alt="Credizona" width="200" height="40" />
+  </header>
+  <main class="page">
+    <section class="card" id="program-info">
+      <h1>Recomendá Credizona y ganá $500</h1>
+      <p class="lead">
+        Por cada persona nueva que recomiendes y que efectivamente obtenga su préstamo,
+        podés ganar $500.
+      </p>
+      <ol class="steps">
+        <li>Registrate gratuitamente.</li>
+        <li>Compartí tu enlace personal.</li>
+        <li>Ganá $500 por cada préstamo elegible efectivamente otorgado.</li>
+      </ol>
+      <p class="disclaimer">
+        Las solicitudes de préstamo están sujetas a evaluación crediticia.
+        No se paga comisión por clics, visitas ni preaprobaciones: la recompensa
+        aplica solo cuando el préstamo elegible es efectivamente otorgado, conforme
+        a los términos del programa.
+      </p>
+      <a class="terms-link" href="/affiliates/terms" target="_blank" rel="noopener">
+        Leer términos y condiciones completos
+      </a>
+    </section>
+
+    <section class="card panel" id="join-panel" hidden>
+      <div id="join-status" class="status-msg status-msg--info" hidden></div>
+
+      <div id="step-terms">
+        <p class="phone-hint" id="phone-masked" hidden></p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="accept-terms" />
+          <span>
+            Leí y acepto los
+            <a href="/affiliates/terms" target="_blank" rel="noopener">Términos y Condiciones</a>
+            del Programa de Afiliados Credizona (versión <span id="terms-version-label">affiliate_v1</span>).
+          </span>
+        </label>
+        <div class="btn-row" style="margin-top: 16px">
+          <button type="button" class="btn btn--primary" id="btn-send-otp" disabled>
+            Enviar código por SMS
+          </button>
+        </div>
+      </div>
+
+      <div id="step-otp" hidden>
+        <p class="phone-hint">Ingresá el código de 6 dígitos que enviamos a tu celular.</p>
+        <div class="field">
+          <label for="otp-input">Código</label>
+          <input type="text" id="otp-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" />
+        </div>
+        <button type="button" class="btn btn--primary" id="btn-verify-otp">
+          Verificar y completar registro
+        </button>
+      </div>
+
+      <div id="step-success" hidden>
+        <p><strong>¡Listo!</strong> Este es tu enlace personal para recomendar Credizona:</p>
+        <div class="referral-box" id="referral-url"></div>
+        <div class="btn-row btn-row--split">
+          <button type="button" class="btn btn--secondary" id="btn-copy-link">Copiar enlace</button>
+          <a class="btn btn--primary" id="btn-whatsapp" href="#" rel="noopener" target="_blank">
+            Compartir por WhatsApp
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/affiliates/join.js" defer></script>
+</body>
+</html>

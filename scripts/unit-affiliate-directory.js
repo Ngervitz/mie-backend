@@ -3,6 +3,7 @@
 const assert = require('assert');
 const {
   planAffiliateInsert,
+  planAffiliateLandingOptInInsert,
   listCell,
   describeOutcome,
   splitAttributions,
@@ -30,6 +31,22 @@ const AT = '2026-10-22T18:00:00.000Z';
   assert.strictEqual(real.row.status, 'active');
   assert.strictEqual(real.row.accepted_at, AT);
   assert.strictEqual(real.row.acceptance_evidence, 'acta-mesa-14');
+}
+
+{
+  const landing = planAffiliateLandingOptInInsert(
+    {
+      ci: 87654321,
+      code: 'LAND01',
+      terms_version: 'affiliate_v1',
+      invite_token_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      otp_challenge_id: 'ffffffff-1111-4222-8222-222222222222',
+    },
+    AT,
+  );
+  assert.strictEqual(landing.ok, true);
+  assert.strictEqual(landing.row.acceptance_channel, 'affiliate_landing_otp');
+  assert.ok(landing.row.acceptance_evidence.indexOf('|otp:') > 0);
 }
 
 {

@@ -8,7 +8,12 @@
 const { CODE_RE } = require('./affiliateRedirect');
 
 const CI_MAX = 999999999;
-const CHANNELS = Object.freeze(['dashboard', 'presencial']);
+const CHANNELS = Object.freeze([
+  'dashboard',
+  'presencial',
+  'affiliate_landing_otp',
+]);
+const LANDING_OPT_IN_CHANNEL = 'affiliate_landing_otp';
 const TERMS_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const EVIDENCE_MAX = 500;
 const LIST_CAP = 200;
@@ -139,6 +144,24 @@ function listCell(input) {
   };
 }
 
+/**
+ * @param {{ invite_token_id: string, otp_challenge_id: string, terms_version: string }} parts
+ */
+function buildLandingOptInEvidence(parts) {
+  const inviteId = text(parts && parts.invite_token_id);
+  const otpId = text(parts && parts.otp_challenge_id);
+  const terms = text(parts && parts.terms_version);
+  if (!inviteId || !otpId || !TERMS_RE.test(terms)) {
+    return { ok: false, error: 'Evidencia de opt-in inválida' };
+  }
+  const evidence =
+    'invite:' + inviteId + '|otp:' + otpId + '|terms:' + terms;
+  if (evidence.length > EVIDENCE_MAX) {
+    return { ok: false, error: 'Evidencia de opt-in inválida' };
+  }
+  return { ok: true, evidence: evidence };
+}
+
 function acceptanceFrom(body) {
   const channel = text(body && body.acceptance_channel);
   const terms = text(body && body.terms_version);
@@ -207,6 +230,42 @@ function planAffiliateInsert(body, acceptedAt) {
   return { ok: true, row: row };
 }
 
+/**
+ * Landing opt-in row after OTP verification. Code is generated server-side.
+ * @param {{ ci: number, code: string, terms_version: string, invite_token_id: string, otp_challenge_id: string }} input
+ * @param {string} acceptedAt ISO timestamp from the server
+ */
+function planAffiliateLandingOptInInsert(input, acceptedAt) {
+  const ci = parseCi(input && input.ci);
+  const code = text(input && input.code);
+  const terms = text(input && input.terms_version);
+  if (ci == null) return { ok: false, error: 'CI inválida' };
+  if (!CODE_RE.test(code)) return { ok: false, error: 'Código inválido' };
+  if (!TERMS_RE.test(terms)) {
+    return { ok: false, error: 'Versión de bases inválida' };
+  }
+  const evidence = buildLandingOptInEvidence({
+    invite_token_id: input.invite_token_id,
+    otp_challenge_id: input.otp_challenge_id,
+    terms_version: terms,
+  });
+  if (!evidence.ok) return { ok: false, error: evidence.error };
+
+  return {
+    ok: true,
+    row: {
+      code: code,
+      status: 'active',
+      is_test: false,
+      ci: ci,
+      accepted_at: acceptedAt,
+      acceptance_channel: LANDING_OPT_IN_CHANNEL,
+      terms_version: terms,
+      acceptance_evidence: evidence.evidence,
+    },
+  };
+}
+
 function splitAttributions(rows) {
   const attributed = [];
   const excluded = [];
@@ -239,11 +298,14 @@ function splitAttributions(rows) {
 module.exports = {
   CI_MAX,
   CHANNELS,
+  LANDING_OPT_IN_CHANNEL,
   EXCLUSION_OUTCOMES,
   LIST_CAP,
   parseCi,
   describeOutcome,
   listCell,
+  buildLandingOptInEvidence,
   planAffiliateInsert,
+  planAffiliateLandingOptInInsert,
   splitAttributions,
 };

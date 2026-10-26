@@ -130,4 +130,21 @@ module.exports = {
   // Unset or any other value leaves that job idle. The funnel sync does not read it.
   affiliateAttributionEnabled:
     optionalTrimmedEnv('AFFILIATE_ATTRIBUTION_ENABLED') === 'true',
+  // HMAC for affiliate OTP codes (never store raw OTP). Required at OTP verify/send time.
+  affiliateOtpHmacSecret: optionalTrimmedEnv('AFFILIATE_OTP_HMAC_SECRET'),
+  // Notifyme sms_campaigns.id for affiliate OTP/welcome. Optional until SMS enabled.
+  affiliateTxSmsCampaignId: optionalTrimmedEnv('AFFILIATE_TX_SMS_CAMPAIGN_ID'),
+  // Exact "true" delivers via Notifyme; anything else dry-runs (safe default for tests/dev).
+  affiliateTxSmsEnabled:
+    optionalTrimmedEnv('AFFILIATE_TX_SMS_ENABLED') === 'true',
+  affiliateJoinSessionHmacSecret: optionalTrimmedEnv(
+    'AFFILIATE_JOIN_SESSION_HMAC_SECRET',
+  ),
+  affiliateTermsVersion: optionalTrimmedEnv('AFFILIATE_TERMS_VERSION'),
+  affiliatePublicReferralOrigin: optionalTrimmedEnv(
+    'AFFILIATE_PUBLIC_REFERRAL_ORIGIN',
+  ),
+  // Exact "true" allows public opt-in (/affiliates/v1 invite, terms, OTP). Default off.
+  affiliateJoinEnabled:
+    optionalTrimmedEnv('AFFILIATE_JOIN_ENABLED') === 'true',
 };
