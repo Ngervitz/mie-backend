@@ -35,11 +35,17 @@ const {
 const { isInviteTokenUsable } = require('../lib/affiliateInviteToken');
 const { resolveAffiliateSmsPhone } = require('../lib/affiliatePhoneResolve');
 const { isAffiliateJoinEnabled } = require('../lib/affiliateJoinEnabled');
+const { isCiAllowedForAffiliateJoin } = require('../lib/affiliateJoinPilot');
 
 const router = express.Router();
 
 function joinRegistrationDisabled(res) {
   if (isAffiliateJoinEnabled()) return false;
+  return publicFail(res, 403);
+}
+
+function joinPilotCiBlocked(ci, res) {
+  if (isCiAllowedForAffiliateJoin(ci)) return false;
   return publicFail(res, 403);
 }
 
@@ -173,6 +179,8 @@ router.post('/v1/invite/validate', async function validateInvite(req, res) {
       return publicFail(res, 400);
     }
 
+    if (joinPilotCiBlocked(boot.invite.ci, res)) return;
+
     if (isCiRateLimited(boot.invite.ci, now.getTime())) {
       return publicFail(res, 429);
     }
@@ -241,6 +249,8 @@ router.post('/v1/terms/accept', async function acceptTerms(req, res) {
       return publicFail(res, inviteState.status === 503 ? 503 : 400);
     }
 
+    if (joinPilotCiBlocked(inviteState.invite.ci, res)) return;
+
     if (isCiRateLimited(inviteState.invite.ci, now.getTime())) {
       return publicFail(res, 429);
     }
@@ -301,6 +311,8 @@ router.post('/v1/otp/send', async function sendOtp(req, res) {
     if (!inviteState.ok) {
       return publicFail(res, inviteState.status === 503 ? 503 : 400);
     }
+
+    if (joinPilotCiBlocked(inviteState.invite.ci, res)) return;
 
     if (isCiRateLimited(inviteState.invite.ci, now.getTime())) {
       return publicFail(res, 429);
@@ -391,6 +403,8 @@ router.post('/v1/otp/verify', async function verifyOtp(req, res) {
     if (!inviteState.ok) {
       return publicFail(res, inviteState.status === 503 ? 503 : 400);
     }
+
+    if (joinPilotCiBlocked(inviteState.invite.ci, res)) return;
 
     if (isCiRateLimited(inviteState.invite.ci, now.getTime())) {
       return publicFail(res, 429);
