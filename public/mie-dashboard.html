@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/tabler-icons.min.css" />
-  <link rel="stylesheet" href="mie-dashboard.css?v=20261016-gestion-elm" />
+  <link rel="stylesheet" href="mie-dashboard.css?v=20261023-seo-landing-creator" />
   <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
@@ -625,6 +625,12 @@
           <button type="button" id="disc-tab-research" class="disc-tab" role="tab" aria-selected="false">
             Investigación
           </button>
+          <button type="button" id="disc-tab-creator" class="disc-tab" role="tab" aria-selected="false">
+            Creador de landings
+          </button>
+          <button type="button" id="disc-tab-landings" class="disc-tab" role="tab" aria-selected="false">
+            Gestión de landings
+          </button>
         </div>
 
         <div id="disc-pane-pending" role="tabpanel">
@@ -637,11 +643,40 @@
             </button>
             <span id="cov-apply-feedback" class="cov-apply-feedback" aria-live="polite"></span>
           </div>
+        </div>
 
+        <div id="disc-pane-creator" class="hidden" role="tabpanel" hidden>
           <section class="cov-drafts-section">
-            <h2 class="cov-section-title">Borradores de landing SEO</h2>
+            <h2 class="cov-section-title">Creador de landings</h2>
             <p class="cov-section-sub">
-              Generados automáticamente al confirmar un término. Nunca se publican solos: revisar, descargar y subir manualmente.
+              Genera un borrador en JANUS sin un término descubierto. El resultado no queda online.
+            </p>
+            <form id="seo-creator-form" class="cov-suggestions">
+              <label class="mcl-field">
+                <span class="mcl-field-label">Tema o palabra clave principal</span>
+                <input class="input" id="seo-creator-topic" name="topic" required maxlength="180" />
+              </label>
+              <label class="mcl-field">
+                <span class="mcl-field-label">Título sugerido (opcional)</span>
+                <input class="input" id="seo-creator-title" name="suggestedTitle" maxlength="180" />
+              </label>
+              <label class="mcl-field">
+                <span class="mcl-field-label">Instrucciones para la IA (opcional)</span>
+                <textarea class="input" id="seo-creator-instructions" name="customInstructions" rows="5" maxlength="4000"></textarea>
+              </label>
+              <div class="cov-actions">
+                <button type="submit" class="btn btn-primary" id="seo-creator-submit">Generar borrador</button>
+                <span id="seo-creator-feedback" class="cov-apply-feedback" aria-live="polite"></span>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        <div id="disc-pane-landings" class="hidden" role="tabpanel" hidden>
+          <section class="cov-drafts-section">
+            <h2 class="cov-section-title">Gestión de landings</h2>
+            <p class="cov-section-sub">
+              Borradores manuales y de términos descubiertos. Un registro en JANUS no está online y no tiene URL pública.
             </p>
             <div id="cov-drafts" class="cov-drafts"></div>
           </section>
@@ -1678,7 +1713,7 @@
   <script src="mi-deuda-helpers.js"></script>
   <script src="elm-ui-helpers.js?v=20261011-s2-technical"></script>
   <script src="elm-ops.js?v=20261017-gestion-elm-send-modal"></script>
-  <script src="mie-dashboard.js?v=20261016-gestion-elm"></script>
+  <script src="mie-dashboard.js?v=20261023-seo-landing-creator"></script>
   <script src="meta-agent.js"></script>
   <script src="janus-assist.js"></script>
   <script>

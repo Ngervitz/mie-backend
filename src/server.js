@@ -7,6 +7,7 @@ const emailRouter = require('./routes/email');
 const aiVisibilityRouter = require('./routes/ai-visibility');
 const rechazadosRouter = require('./routes/rechazados');
 const preaprobadosRouter = require('./routes/preaprobados');
+const affiliatesAdminRouter = require('./routes/affiliates-admin');
 const {
   requireDashboardPermission,
 } = require('./middleware/requireDashboardPermission');
@@ -32,6 +33,11 @@ app.use(
   '/preaprobados',
   requireDashboardPermission('preaprobados'),
   preaprobadosRouter,
+);
+app.use(
+  '/affiliates',
+  requireDashboardPermission('cz-funnel'),
+  affiliatesAdminRouter,
 );
 app.listen(env.port, () => {
   logger.info('MIE Backend listening', { port: env.port, nodeEnv: env.nodeEnv });

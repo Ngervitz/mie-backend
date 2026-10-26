@@ -1520,6 +1520,7 @@ router.post('/run-rechazados-survey-invite-due', async (req, res) => {
   } catch (err) {
     logger.error('rechazados_survey_invite_due failed', {
       error: err && err.message ? err.message : 'unknown',
+      hint: err && err.hint ? err.hint : null,
     });
     return res.status(500).json({
       ok: false,

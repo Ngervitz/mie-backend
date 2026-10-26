@@ -359,6 +359,12 @@ assert.strictEqual(
         is: function () {
           return chain;
         },
+        order: function () {
+          return chain;
+        },
+        range: function () {
+          return chain;
+        },
         then: function (resolve, reject) {
           return Promise.resolve(result).then(resolve, reject);
         },

@@ -13,7 +13,6 @@ const logger = require('../lib/logger');
 const {
   PURPOSE,
   REASONS,
-  REJECTED_ESTADO_ID,
   resolveLastRejectionByCi,
   nullableTrimmedText,
 } = require('../lib/rejectedSurveyInvite');
@@ -40,6 +39,117 @@ const {
 const {
   loadEmailSuppressionsByEmails,
 } = require('../lib/emailSuppressionsRead');
+const {
+  PAGE_SIZE,
+  resolveSurveyInviteListContext,
+} = require('../lib/rejectedSurveyInviteListContext');
+
+/** Same width the ELM survey gate uses for `.in()` lists. */
+const ID_CHUNK = 200;
+/** Independent CIs only. The job lock still serializes whole runs. */
+const MATERIALIZE_CONCURRENCY = 4;
+
+function uniqueBy(rows, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < (rows || []).length; i += 1) {
+    const row = rows[i];
+    const key = keyFn(row);
+    if (key == null || seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Every matching recipient for these episodes. Pages by recipient id inside
+ * each episode chunk so a PostgREST 1000-row cap cannot drop a prior STEP.
+ * @param {object} supabase
+ * @param {Array<string|number>} campaignIds
+ * @param {number[]} episodeIds
+ */
+async function loadSurveyInviteRecipients(supabase, campaignIds, episodeIds) {
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < episodeIds.length; i += ID_CHUNK) {
+    const chunk = episodeIds.slice(i, i + ID_CHUNK);
+    let from = 0;
+    for (;;) {
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from('email_campaign_recipients')
+        .select(
+          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
+        )
+        .in('campaign_id', campaignIds)
+        .eq('purpose', PURPOSE)
+        .in('cz_solicitud_id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to);
+      if (error) throw new Error('job recipients: ' + error.message);
+      const rows = data || [];
+      for (let r = 0; r < rows.length; r += 1) {
+        const id = rows[r] && rows[r].id != null ? String(rows[r].id) : null;
+        if (id == null || seen.has(id)) continue;
+        seen.add(id);
+        out.push(rows[r]);
+      }
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  }
+  return out;
+}
+
+/**
+ * Encuesta CIs for these candidates. One `.in()` per ID_CHUNK so the GET
+ * stays under the HTTP header limit. Duplicate CIs across batches collapse.
+ * A failed batch throws before any materialize.
+ * @param {object} supabase
+ * @param {number[]} candidateCis
+ * @returns {Promise<Array<{ ci: number }>>}
+ */
+async function loadEncuestaCiRows(supabase, candidateCis) {
+  const out = [];
+  const seen = new Set();
+  const list = candidateCis || [];
+  for (let i = 0; i < list.length; i += ID_CHUNK) {
+    const chunk = list.slice(i, i + ID_CHUNK);
+    const { data, error } = await supabase
+      .from('cz_funnel_encuestas')
+      .select('ci')
+      .in('ci', chunk);
+    if (error) throwJobRead('job encuestas', error);
+    const rows = data || [];
+    for (let r = 0; r < rows.length; r += 1) {
+      const ci = Number(rows[r] && rows[r].ci);
+      if (!Number.isFinite(ci) || seen.has(ci)) continue;
+      seen.add(ci);
+      out.push({ ci: ci });
+    }
+  }
+  return out;
+}
+
+/**
+ * @param {string} label
+ * @param {{ message?: string, hint?: string }|null|undefined} error
+ */
+function throwJobRead(label, error) {
+  const message = error && error.message ? String(error.message) : 'unknown';
+  const hint =
+    error && error.hint != null && String(error.hint) !== ''
+      ? String(error.hint)
+      : null;
+  logger.error(label + ' failed', {
+    error: message,
+    hint: hint,
+  });
+  const err = new Error(label + ': ' + message);
+  if (hint) err.hint = hint;
+  throw err;
+}
 
 const JOB_NAME = 'rechazados_survey_invite_due';
 const JOB_LOCK_TTL_SECONDS = 10 * 60;
@@ -95,8 +205,32 @@ function emptyCounters() {
     config_missing: 0,
     sequence_complete: 0,
     elm_in_progress: 0,
+    missing_email: 0,
     errors: 0,
   };
+}
+
+/**
+ * @param {Array<object>} items
+ * @param {number} limit
+ * @param {(item: object) => Promise<void>} worker
+ */
+async function mapPool(items, limit, worker) {
+  const list = items || [];
+  if (!list.length) return;
+  let cursor = 0;
+  const width = Math.max(1, Math.min(limit, list.length));
+  async function run() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= list.length) return;
+      await worker(list[index]);
+    }
+  }
+  const runners = [];
+  for (let i = 0; i < width; i += 1) runners.push(run());
+  await Promise.all(runners);
 }
 
 function bumpAlreadyAttempted(counters, reason) {
@@ -192,18 +326,21 @@ async function runRechazadosSurveyInviteDue(opts) {
     const materializeFn =
       options.materializeFn || materializeRejectedSurveyInvite;
 
-    const { data: estadoRows, error: estErr } = await supabase
-      .from('cz_funnel_solicitud_estados')
-      .select(
-        'cz_historico_id, cz_solicitud_id, fechahora_src, solicitudes_estados_id',
-      )
-      .eq('solicitudes_estados_id', REJECTED_ESTADO_ID);
-    if (estErr) throw new Error('job estados: ' + estErr.message);
-
-    const { data: solicitudRows, error: solErr } = await supabase
-      .from('cz_funnel_solicitudes')
-      .select('cz_id, ci, email, lrw_id, nombre');
-    if (solErr) throw new Error('job solicitudes: ' + solErr.message);
+    let surveyContext;
+    try {
+      surveyContext = await resolveSurveyInviteListContext(supabase);
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      throw new Error('job survey context: ' + msg);
+    }
+    const estadoRows = uniqueBy(surveyContext.estadoRows, function (row) {
+      return row && row.cz_historico_id != null
+        ? String(row.cz_historico_id)
+        : null;
+    });
+    const solicitudRows = uniqueBy(surveyContext.solicitudRows, function (row) {
+      return row && row.cz_id != null ? String(row.cz_id) : null;
+    });
 
     const lastByCi = resolveLastRejectionByCi(
       estadoRows || [],
@@ -226,11 +363,7 @@ async function runRechazadosSurveyInviteDue(opts) {
       return Object.assign({ job: JOB_NAME }, counters);
     }
 
-    const { data: encuestas, error: encErr } = await supabase
-      .from('cz_funnel_encuestas')
-      .select('ci')
-      .in('ci', candidateCis);
-    if (encErr) throw new Error('job encuestas: ' + encErr.message);
+    const encuestas = await loadEncuestaCiRows(supabase, candidateCis);
 
     const loadElmBlocks = options.loadElmBlocks || loadElmSurveyBlocksByCi;
     const elmBlocks = await loadElmBlocks(supabase, candidateCis);
@@ -274,6 +407,9 @@ async function runRechazadosSurveyInviteDue(opts) {
     }
     const suppressed = loaded.emails;
 
+    /** @type {Array<object>} */
+    const pending = [];
+
     const configuredIds = [1, 2, 3]
       .map(function (s) {
         return stepCampaignIds[s];
@@ -293,16 +429,12 @@ async function runRechazadosSurveyInviteDue(opts) {
       episodeIds.push(ep);
     }
     if (configuredIds.length && episodeIds.length) {
-      const { data: priors, error: pErr } = await supabase
-        .from('email_campaign_recipients')
-        .select(
-          'id, campaign_id, ci, email, status, error_reason, purpose, created_at, last_attempt_at, next_attempt_at, cz_solicitud_id',
-        )
-        .in('campaign_id', configuredIds)
-        .eq('purpose', PURPOSE)
-        .in('cz_solicitud_id', episodeIds);
-      if (pErr) throw new Error('job recipients: ' + pErr.message);
-      for (const p of priors || []) {
+      const priors = await loadSurveyInviteRecipients(
+        supabase,
+        configuredIds,
+        episodeIds,
+      );
+      for (const p of priors) {
         const key =
           String(p.campaign_id) + ':' + String(p.cz_solicitud_id);
         const prev = priorByCampaignEpisode.get(key);
@@ -410,6 +542,10 @@ async function runRechazadosSurveyInviteDue(opts) {
           counters.suppressed += 1;
           continue;
         }
+        if (decision.result === REASONS.MISSING_EMAIL) {
+          counters.missing_email += 1;
+          continue;
+        }
         if (bumpAlreadyAttempted(counters, decision.result)) {
           continue;
         }
@@ -418,11 +554,50 @@ async function runRechazadosSurveyInviteDue(opts) {
           continue;
         }
 
-        counters.eligible += 1;
+        const snapshot =
+          solicitud && episodeId != null && Number.isFinite(episodeId)
+            ? {
+                eligible: true,
+                reason: REASONS.ELIGIBLE,
+                ci: ci,
+                cz_solicitud_id: episodeId,
+                email: nullableTrimmedText(solicitud.email),
+                email_masked: decision.email_masked,
+                lrw_id: nullableTrimmedText(solicitud.lrw_id),
+                nombre: solicitud.nombre != null ? solicitud.nombre : null,
+              }
+            : null;
+        pending.push({
+          ci: ci,
+          dueStep: decision.due_step,
+          campaignId: decision.campaign_id,
+          episodeId: episodeId,
+          snapshot: snapshot,
+        });
+      } catch (err) {
+        counters.errors += 1;
+        logger.error('rechazados_survey_invite_due CI failed', {
+          ci: ci,
+          error: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
+        });
+      }
+    }
+
+    await mapPool(pending, MATERIALIZE_CONCURRENCY, async function (item) {
+      counters.eligible += 1;
+      try {
         const outcome = await materializeFn(
           supabase,
-          ci,
-          decision.campaign_id,
+          item.ci,
+          item.campaignId,
+          item.snapshot
+            ? {
+                czSolicitudId: item.episodeId,
+                eligibilitySnapshot: item.snapshot,
+              }
+            : item.episodeId != null && Number.isFinite(item.episodeId)
+              ? { czSolicitudId: item.episodeId }
+              : undefined,
         );
         const materialized =
           outcome &&
@@ -430,9 +605,9 @@ async function runRechazadosSurveyInviteDue(opts) {
           (outcome.result === 'queued' ||
             outcome.result === REASONS.ALREADY_PENDING);
         if (materialized && outcome.result === 'queued') {
-          if (decision.due_step === 1) counters.materialized_step1 += 1;
-          else if (decision.due_step === 2) counters.materialized_step2 += 1;
-          else if (decision.due_step === 3) counters.materialized_step3 += 1;
+          if (item.dueStep === 1) counters.materialized_step1 += 1;
+          else if (item.dueStep === 2) counters.materialized_step2 += 1;
+          else if (item.dueStep === 3) counters.materialized_step3 += 1;
         } else if (
           outcome &&
           bumpAlreadyAttempted(counters, outcome.result)
@@ -450,11 +625,11 @@ async function runRechazadosSurveyInviteDue(opts) {
       } catch (err) {
         counters.errors += 1;
         logger.error('rechazados_survey_invite_due CI failed', {
-          ci: ci,
+          ci: item.ci,
           error: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
         });
       }
-    }
+    });
 
     return Object.assign({ job: JOB_NAME }, counters);
   } finally {
@@ -466,6 +641,9 @@ async function runRechazadosSurveyInviteDue(opts) {
 
 module.exports = {
   JOB_NAME,
+  ID_CHUNK,
+  MATERIALIZE_CONCURRENCY,
   runRechazadosSurveyInviteDue,
   emptyCounters,
+  loadSurveyInviteRecipients,
 };

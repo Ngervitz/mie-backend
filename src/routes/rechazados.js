@@ -19,6 +19,7 @@ const {
   fetchCiHasRejectedHistorico,
 } = require('../lib/rejectedOpsRead');
 const { loadRejectedListResponse } = require('../lib/rejectedListServe');
+const { decorateCiRows } = require('../lib/affiliateDirectoryRead');
 const { parseSnapshotPayload, parseCreatedBy } = require('../lib/rejectedBcuValidate');
 const {
   MAX_FILE_BYTES,
@@ -165,6 +166,30 @@ router.get('/', async function getRechazadosList(req, res) {
       listView: getElmListView(),
       logger: logger,
     });
+    let affiliateAvailable = false;
+    try {
+      affiliateAvailable = await decorateCiRows(supabase, data.rows, {
+        ciOf: function (row) {
+          return row.ci;
+        },
+        czIdsOf: function (row) {
+          return (row.rejected_solicitudes || []).map(function (solicitud) {
+            return solicitud.cz_solicitud_id;
+          });
+        },
+        stamp: function (row, czId, described) {
+          (row.rejected_solicitudes || []).forEach(function (solicitud) {
+            if (Number(solicitud.cz_solicitud_id) === czId) {
+              solicitud.affiliate_ref = described;
+            }
+          });
+        },
+      });
+    } catch (err) {
+      logger.warn('rechazados affiliate badges unavailable', {
+        error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+      });
+    }
     if (!data.mi_deuda_optin_available) {
       logger.warn('GET /rechazados mi_deuda_optin unavailable', {
         code: data.mi_deuda_optin_error_code,
@@ -180,6 +205,7 @@ router.get('/', async function getRechazadosList(req, res) {
         mi_deuda_optin_available: data.mi_deuda_optin_available,
         elm_available: data.elm_available,
         survey_invite_available: data.survey_invite_available,
+        affiliate_available: affiliateAvailable === true,
       },
     });
   } catch (err) {
@@ -779,6 +805,30 @@ router.get('/:ci', async function getRechazadosDetail(req, res) {
       },
       logger: logger,
     });
+    try {
+      detail.affiliate_available = await decorateCiRows(supabase, [detail], {
+        ciOf: function (row) {
+          return row.ci;
+        },
+        czIdsOf: function (row) {
+          return (row.rejections || []).map(function (rejection) {
+            return rejection.cz_solicitud_id;
+          });
+        },
+        stamp: function (row, czId, described) {
+          (row.rejections || []).forEach(function (rejection) {
+            if (Number(rejection.cz_solicitud_id) === czId) {
+              rejection.affiliate_ref = described;
+            }
+          });
+        },
+      });
+    } catch (err) {
+      logger.warn('rechazados detail affiliate badge unavailable', {
+        error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+      });
+      detail.affiliate_available = false;
+    }
     return res.json({ ok: true, data: detail });
   } catch (err) {
     logger.error('GET /rechazados/:ci failed', {

@@ -38,6 +38,7 @@ const { createPreaprobadosElmRouter } = require('./preaprobadosElm');
 const { createElmOpsRouter } = require('./elmOps');
 const { createElmRepository } = require('../services/elm/repository');
 const { createElmListView, attachElmCells } = require('../services/elm/listView');
+const { decorateCiRows } = require('../lib/affiliateDirectoryRead');
 
 const router = express.Router();
 
@@ -120,7 +121,33 @@ async function loadGroupedList(filters) {
   await attachElmCells(solicitudes, getElmListView(), logger, { allowSend: true });
   await attachPreaprobadosElmSendHolds(solicitudes, { supabase: supabase, logger: logger });
   refreshElmFocus(assembled.rows);
+  assembled.affiliate_available = await attachAffiliateBadges(assembled.rows, function (row) {
+    return (row.solicitudes || []).map(function (solicitud) {
+      return solicitud.cz_id;
+    });
+  }, function (row, czId, described) {
+    (row.solicitudes || []).forEach(function (solicitud) {
+      if (Number(solicitud.cz_id) === czId) solicitud.affiliate_ref = described;
+    });
+  });
   return { assembled: assembled, elmAvailable: elm.available };
+}
+
+async function attachAffiliateBadges(rows, czIdsOf, stamp) {
+  try {
+    return await decorateCiRows(supabase, rows, {
+      ciOf: function (row) {
+        return row.ci;
+      },
+      czIdsOf: czIdsOf,
+      stamp: stamp,
+    });
+  } catch (err) {
+    logger.warn('preaprobados affiliate badges unavailable', {
+      error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+    });
+    return false;
+  }
 }
 
 router.use('/elm-ops', createElmOpsRouter());
@@ -188,6 +215,7 @@ router.get('/', async function getPreaprobadosList(req, res) {
         kpis_elm: assembled.kpis_elm,
         kpis_ci: assembled.kpis_ci,
         elm_available: out.elmAvailable,
+        affiliate_available: assembled.affiliate_available === true,
         rows: assembled.rows,
         total: assembled.total,
         total_solicitudes: assembled.total_solicitudes,
@@ -220,7 +248,16 @@ router.get('/ci/:ci', async function getPreaprobadosCi(req, res) {
     if (!group) {
       return res.status(404).json({ error: 'No encontrado' });
     }
-    return res.json({ ok: true, data: Object.assign({ elm_available: out.elmAvailable }, group) });
+    return res.json({
+      ok: true,
+      data: Object.assign(
+        {
+          elm_available: out.elmAvailable,
+          affiliate_available: out.assembled.affiliate_available === true,
+        },
+        group,
+      ),
+    });
   } catch (err) {
     logger.error('GET /preaprobados/ci/:ci failed', {
       error: err && err.message ? err.message : 'unknown',
@@ -280,6 +317,25 @@ router.get('/:czId', async function getPreaprobadosDetail(req, res) {
       logger.warn('GET /preaprobados/:czId elm membership unavailable', {
         error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
       });
+    }
+    try {
+      detail.affiliate_available = await decorateCiRows(supabase, [detail], {
+        ciOf: function (row) {
+          return row.ci;
+        },
+        czIdsOf: function (row) {
+          return [row.cz_id];
+        },
+        stamp: function (row, _czId, described) {
+          row.affiliate_ref = described;
+        },
+      });
+    } catch (err) {
+      logger.warn('preaprobados detail affiliate badge unavailable', {
+        error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+      });
+      detail.affiliate_available = false;
+      detail.affiliate_ref = null;
     }
     return res.json({ ok: true, data: detail });
   } catch (err) {

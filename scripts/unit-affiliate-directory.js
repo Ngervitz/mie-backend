@@ -1,0 +1,93 @@
+'use strict';
+
+const assert = require('assert');
+const {
+  planAffiliateInsert,
+  listCell,
+  describeOutcome,
+  splitAttributions,
+} = require('../src/lib/affiliateDirectory');
+
+const AT = '2026-10-22T18:00:00.000Z';
+
+{
+  const missing = planAffiliateInsert({ code: 'real01', ci: 12345678 }, AT);
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.error, 'Falta la aceptación documentada');
+}
+
+{
+  const real = planAffiliateInsert({
+    code: 'real01',
+    ci: '12345678',
+    acceptance_channel: 'dashboard',
+    terms_version: '2026-10-22',
+    acceptance_evidence: 'acta-mesa-14',
+  }, AT);
+  assert.strictEqual(real.ok, true);
+  assert.strictEqual(real.row.is_test, false);
+  assert.strictEqual(real.row.ci, 12345678);
+  assert.strictEqual(real.row.status, 'active');
+  assert.strictEqual(real.row.accepted_at, AT);
+  assert.strictEqual(real.row.acceptance_evidence, 'acta-mesa-14');
+}
+
+{
+  const test = planAffiliateInsert({ code: 'test01', is_test: true }, AT);
+  assert.strictEqual(test.ok, true);
+  assert.strictEqual(test.row.ci, null);
+  assert.strictEqual(test.row.accepted_at, null);
+  assert.strictEqual(test.row.is_test, true);
+}
+
+{
+  const external = planAffiliateInsert({ code: 'ext001', ci: null }, AT);
+  assert.strictEqual(external.ok, false);
+}
+
+{
+  const pending = describeOutcome(null);
+  assert.strictEqual(pending.kind, 'pending');
+  assert.strictEqual(pending.detail, 'Sin evaluar');
+  const plain = describeOutcome('no_click');
+  assert.strictEqual(plain.kind, 'recorded');
+  assert.strictEqual(plain.detail, 'Sin clic');
+  const excluded = describeOutcome('excluded_prior_solicitud');
+  assert.strictEqual(excluded.kind, 'excluded');
+  assert.ok(excluded.detail.indexOf('REF · Excluido · ') === 0);
+}
+
+{
+  const cell = listCell({
+    isAffiliate: true,
+    isTest: false,
+    status: 'active',
+    attributedCzIds: [30, 10],
+  });
+  assert.strictEqual(cell.ref, 'REF 2');
+  assert.deepStrictEqual(cell.attributed_cz_ids, [10, 30]);
+  assert.ok(cell.tooltip.indexOf('10, 30') !== -1);
+  assert.ok(cell.tooltip.indexOf('No marca al resto de solicitudes de la CI.') !== -1);
+  const one = listCell({
+    isAffiliate: false,
+    isTest: false,
+    status: null,
+    attributedCzIds: [10],
+  });
+  assert.strictEqual(one.is_affiliate, false);
+  assert.strictEqual(one.ref, 'REF');
+}
+
+{
+  const split = splitAttributions([
+    { cz_id: 1, ci: 9, outcome: 'attributed' },
+    { cz_id: 2, ci: 9, outcome: 'expired' },
+    { cz_id: 3, ci: 9, outcome: 'no_click' },
+  ]);
+  assert.strictEqual(split.attributed_count, 1);
+  assert.strictEqual(split.excluded_count, 1);
+  assert.strictEqual(split.recorded_count, 1);
+  assert.strictEqual(split.recorded[0].detail, 'Sin clic');
+}
+
+console.log('unit-affiliate-directory: ok');

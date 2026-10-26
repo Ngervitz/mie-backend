@@ -24,6 +24,7 @@ const API_PATH_PREFIXES = [
   '/reports',
   '/rechazados',
   '/preaprobados',
+  '/affiliates',
 ];
 
 function authConfigured() {

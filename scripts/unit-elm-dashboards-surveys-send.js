@@ -404,6 +404,7 @@ function surveySupabase(opts) {
         in() { return q; },
         is() { return q; },
         order() { return q; },
+        range() { return q; },
         limit() { return q; },
         async maybeSingle() { return { data: null, error: null }; },
         then(resolve, reject) {

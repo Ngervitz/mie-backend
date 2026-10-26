@@ -18,9 +18,13 @@ const CLICK_B = '33333333-3333-4333-8333-333333333333';
 const PRESENTED = '2026-10-21T11:21:00-03:00';
 
 assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('jt'));
+assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('seo_landing'));
+assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('seo_cta'));
 assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('cz_click'));
 assert.ok(TRACKING_SUMMARY_ALLOWLIST.includes('presentation_at'));
 assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('jt'));
+assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('seo_landing'));
+assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('seo_cta'));
 assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('cz_click'));
 assert.ok(!TRACKING_SUMMARY_COPY_KEYS.includes('presentation_at'));
 assert.ok(JT_RE.test('AAAAAAAAAAAAAAAAAAAAAA'));
@@ -155,5 +159,76 @@ assert.strictEqual(filled.tracking_data_summary.cz_click, CLICK_B);
 assert.strictEqual(filled.tracking_data_summary.presentation_at, PRESENTED);
 assert.strictEqual(filled.tracking_data_summary.utm_source, 'sms');
 assert.strictEqual(filled.tracking_data_summary.jt, VALID_JT);
+
+const tagged = sanitizeTrackingDataSummary(
+  Object.assign({}, raw, {
+    seo_landing: '  Prestamo-Cedula  ',
+    seo_cta: ' HERO ',
+    attribution_source: 'utm',
+  }),
+);
+assert.strictEqual(tagged.seo_landing, 'prestamo-cedula');
+assert.strictEqual(tagged.seo_cta, 'hero');
+assert.strictEqual(tagged.utm_source, 'fb');
+assert.strictEqual(tagged.utm_medium, 'cpc');
+assert.strictEqual(tagged.utm_campaign, 'x');
+assert.strictEqual(tagged.utm_content, 'y');
+assert.strictEqual(tagged.utm_term, 'z');
+assert.strictEqual(tagged.submitted_at, '2026-01-01T00:00:00Z');
+assert.strictEqual(tagged.attribution_source, undefined);
+assert.strictEqual(tagged.fbclid, undefined);
+
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'otra-landing', seo_cta: 'footer' }).seo_cta,
+  'footer',
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ utm_source: 'sms', seo_cta: 'button' }).seo_cta,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ utm_source: 'sms', seo_cta: 'button' }).utm_source,
+  'sms',
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'a_b', seo_cta: 'hero' }).seo_landing,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: '-bad', seo_cta: 'hero' }).seo_landing,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'a--b', seo_cta: 'hero' }).seo_landing,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'a'.repeat(201), seo_cta: 'hero' }).seo_landing,
+  undefined,
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'a'.repeat(200), seo_cta: 'hero' }).seo_landing,
+  'a'.repeat(200),
+);
+assert.strictEqual(sanitizeTrackingDataSummary({ seo_landing: 12, seo_cta: null }).seo_landing, undefined);
+assert.strictEqual(sanitizeTrackingDataSummary({ seo_cta: null }).seo_cta, undefined);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'prestamo-cedula', seo_cta: 'side' }).seo_landing,
+  'prestamo-cedula',
+);
+assert.strictEqual(
+  sanitizeTrackingDataSummary({ seo_landing: 'prestamo-cedula', seo_cta: 'side' }).seo_cta,
+  undefined,
+);
+
+const previous = sanitizeTrackingDataSummary({
+  utm_source: 'fb',
+  utm_medium: 'paid',
+  submitted_at: '2026-01-01T00:00:00Z',
+});
+assert.strictEqual(previous.utm_source, 'fb');
+assert.strictEqual(previous.utm_medium, 'paid');
+assert.strictEqual(previous.seo_landing, undefined);
+assert.strictEqual(previous.seo_cta, undefined);
 
 console.log('OK unit-cz-funnel-sanitize');

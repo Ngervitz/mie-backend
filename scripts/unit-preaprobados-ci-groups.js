@@ -356,7 +356,7 @@ test('dashboard: CZ column, CDV amount, CDV cohort KPI section (no ELM ops panel
   const start = dash.indexOf('(function initPreaprobados()');
   const pre = dash.slice(start, dash.indexOf('\n})();', start));
   assert.ok(pre.includes('<th class="preaprobados-col-cz" title="Estado actual en CZ de la solicitud más reciente">Estado CDV</th>'));
-  assert.ok(/'<th class="preaprobados-col-ci">CI<\/th>' \+\s*'<th class="preaprobados-col-cz"[^']*' \+\s*'<th class="preaprobados-col-elm">Estado ELM<\/th>'/.test(pre), '«Estado CDV» (CZ state) between CI and Estado ELM');
+  assert.ok(/'<th class="preaprobados-col-ci">CI<\/th>' \+\s*'<th class="af-col"[^']*' \+\s*'<th class="preaprobados-col-cz"[^']*' \+\s*'<th class="preaprobados-col-elm">Estado ELM<\/th>'/.test(pre), 'AF between CI and Estado CDV; Estado CDV immediately before Estado ELM');
   assert.ok(!pre.includes('preaprobados-col-cdv'), 'the former CDV result column is gone from the list');
   assert.ok(/czStateCell\(row\) \+\s*'<td class="preaprobados-col-elm">'/.test(pre), 'row cells match the headers');
   assert.ok(pre.includes('const s = findSolicitud(group, group.cz_id) || solicitudesOf(group)[0];'), 'row solicitud (newest listed)');

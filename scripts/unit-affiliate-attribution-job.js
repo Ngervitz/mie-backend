@@ -472,6 +472,7 @@ async function run(state, funnelOrder) {
       '20261020_affiliates_clicks.sql',
       '20261021_affiliate_attributions.sql',
       '20261022_affiliate_persist_plan.sql',
+      '20261023_affiliates_identity_consent.sql',
     ]);
     const jobSrc = fs.readFileSync(
       path.join(root, 'src', 'jobs', 'affiliateAttributionRun.js'),
