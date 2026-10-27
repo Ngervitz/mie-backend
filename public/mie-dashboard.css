@@ -5499,6 +5499,68 @@
 #mie-dashboard-app .af-mark + .af-mark {
   margin-left: 6px;
 }
+#mie-dashboard-app .affiliates-pending {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 193, 7, 0.12);
+  border: 1px solid rgba(255, 193, 7, 0.35);
+  font-size: 13px;
+}
+#mie-dashboard-app .affiliates-create-wrap {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+}
+#mie-dashboard-app .affiliates-create-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+#mie-dashboard-app .affiliates-create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, #9aa3b2);
+}
+#mie-dashboard-app .affiliates-create-form input,
+#mie-dashboard-app .affiliates-create-form select,
+#mie-dashboard-app .affiliates-create-form textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #2a2f3a);
+  background: var(--surface, #1a1d24);
+  color: inherit;
+}
+#mie-dashboard-app .affiliates-check {
+  flex-direction: row;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+#mie-dashboard-app .affiliates-detail-root {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #2a2f3a);
+}
+#mie-dashboard-app .affiliates-detail-block {
+  margin-bottom: 18px;
+}
+#mie-dashboard-app .affiliates-detail-block h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+#mie-dashboard-app .affiliates-muted {
+  font-size: 12px;
+  color: var(--muted, #9aa3b2);
+  margin-bottom: 8px;
+}
+#mie-dashboard-app .affiliates-link-cell a {
+  word-break: break-all;
+}
 #mie-dashboard-app .ga4-table.rechazados-table .rechazados-col-name {
   width: 15%;
   text-align: left;

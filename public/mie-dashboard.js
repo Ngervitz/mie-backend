@@ -19569,3 +19569,381 @@ init();
     if (desk && typeof desk.load === 'function') desk.load();
   };
 })();
+
+/* ------------------------------------------------------------------------- *
+ * Afiliados V1 — directorio admin (GET/POST /affiliates). Sin lógica de motor.
+ * ------------------------------------------------------------------------- */
+(function initAffiliatesPanel() {
+  const panel = document.getElementById('affiliates-panel');
+  const statusEl = document.getElementById('affiliates-status');
+  const pendingEl = document.getElementById('affiliates-pending');
+  const listRoot = document.getElementById('affiliates-list-root');
+  const detailRoot = document.getElementById('affiliates-detail-root');
+  const reloadBtn = document.getElementById('affiliates-reload-btn');
+  const createForm = document.getElementById('affiliates-create-form');
+  const isTestInput = document.getElementById('affiliates-is-test');
+  if (!panel || !statusEl || !listRoot || !detailRoot) return;
+
+  const API = typeof API_BASE === 'string' ? API_BASE : '';
+  const linkBase =
+    window.location.protocol === 'file:'
+      ? 'https://s.credizona.net'
+      : window.location.origin;
+
+  const afState = {
+    loading: false,
+    affiliates: [],
+    selectedId: null,
+    detail: null,
+    clicks: null,
+    solicitudes: null,
+    pendingCount: null,
+  };
+
+  function setStatus(msg, tone) {
+    statusEl.textContent = msg || '';
+    statusEl.className = 'mcl-status' + (tone ? ' is-' + tone : '');
+  }
+
+  function personalLink(code) {
+    const c = code == null ? '' : String(code).trim();
+    if (!c) return '';
+    return linkBase + '/a/' + encodeURIComponent(c);
+  }
+
+  async function afFetch(path, opts) {
+    const res = await fetch(API + path, Object.assign(
+      {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      },
+      opts || {},
+    ));
+    const body = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok) {
+      const err = body && body.error ? String(body.error) : 'HTTP ' + res.status;
+      throw new Error(err);
+    }
+    return body;
+  }
+
+  function renderPending() {
+    if (!pendingEl) return;
+    if (afState.pendingCount == null) {
+      pendingEl.textContent = '';
+      return;
+    }
+    pendingEl.innerHTML =
+      '<strong>Con clic, sin evaluar:</strong> ' +
+      escapeHtml(String(afState.pendingCount)) +
+      ' solicitudes con <code>cz_click</code> almacenado y sin fila en atribuciones.';
+  }
+
+  function statusBadge(row) {
+    const parts = [];
+    if (row.is_test) parts.push('prueba');
+    parts.push(row.status || '—');
+    return parts.join(' · ');
+  }
+
+  function renderList() {
+    const rows = afState.affiliates || [];
+    if (!rows.length) {
+      listRoot.innerHTML =
+        '<p class="affiliates-muted">No hay afiliados registrados.</p>';
+      return;
+    }
+    const body = rows
+      .map(function (row) {
+        const url = personalLink(row.code);
+        return (
+          '<tr data-affiliate-id="' +
+          escapeHtml(String(row.id)) +
+          '">' +
+          '<td><code>' +
+          escapeHtml(String(row.code)) +
+          '</code></td>' +
+          '<td>' +
+          escapeHtml(statusBadge(row)) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(row.ci != null ? String(row.ci) : '—') +
+          '</td>' +
+          '<td class="affiliates-link-cell">' +
+          (url
+            ? '<a href="' +
+              escapeHtml(url) +
+              '" target="_blank" rel="noopener">' +
+              escapeHtml(url) +
+              '</a>'
+            : '—') +
+          '</td>' +
+          '<td><button type="button" class="btn" data-action="affiliate-view">Ver</button></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    listRoot.innerHTML =
+      '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
+      '<thead><tr><th>Código</th><th>Estado</th><th>CI</th><th>Enlace personal</th><th></th></tr></thead><tbody>' +
+      body +
+      '</tbody></table></div>';
+  }
+
+  function solTable(title, note, items, emptyLabel) {
+    const list = items || [];
+    if (!list.length) {
+      return (
+        '<div class="affiliates-detail-block"><h3>' +
+        escapeHtml(title) +
+        '</h3>' +
+        (note ? '<p class="affiliates-muted">' + escapeHtml(note) + '</p>' : '') +
+        '<p class="affiliates-muted">' +
+        escapeHtml(emptyLabel) +
+        '</p></div>'
+      );
+    }
+    const body = list
+      .map(function (item) {
+        return (
+          '<tr><td>' +
+          escapeHtml(String(item.cz_id != null ? item.cz_id : '—')) +
+          '</td><td>' +
+          escapeHtml(item.ci != null ? String(item.ci) : '—') +
+          '</td><td>' +
+          escapeHtml(item.label || item.detail || '—') +
+          '</td><td>' +
+          escapeHtml(item.detail || '—') +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="affiliates-detail-block"><h3>' +
+      escapeHtml(title) +
+      '</h3>' +
+      (note ? '<p class="affiliates-muted">' + escapeHtml(note) + '</p>' : '') +
+      '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
+      '<thead><tr><th>CZ</th><th>CI</th><th>Motivo</th><th>Detalle</th></tr></thead><tbody>' +
+      body +
+      '</tbody></table></div></div>'
+    );
+  }
+
+  function renderDetail() {
+    const row = afState.detail;
+    if (!row) {
+      detailRoot.hidden = true;
+      detailRoot.innerHTML = '';
+      return;
+    }
+    detailRoot.hidden = false;
+    const url = personalLink(row.code);
+    const clicks = afState.clicks || {};
+    const sol = afState.solicitudes || {};
+    let clicksHtml =
+      '<p class="affiliates-muted">Sin datos de clics.</p>';
+    if (clicks.note) {
+      const clickRows = (clicks.clicks || [])
+        .map(function (c) {
+          return (
+            '<tr><td><code>' +
+            escapeHtml(String(c.click_id || '—')) +
+            '</code></td><td>' +
+            escapeHtml(c.occurred_at || '—') +
+            '</td><td title="' +
+            escapeHtml(c.user_agent || '') +
+            '">' +
+            escapeHtml(
+              c.user_agent ? String(c.user_agent).slice(0, 48) + '…' : '—',
+            ) +
+            '</td><td title="' +
+            escapeHtml(c.referer || '') +
+            '">' +
+            escapeHtml(c.referer ? String(c.referer).slice(0, 40) : '—') +
+            '</td></tr>'
+          );
+        })
+        .join('');
+      clicksHtml =
+        '<div class="affiliates-detail-block"><h3>Clics (' +
+        escapeHtml(String(clicks.filter || 'sin_filtrar')) +
+        ')</h3><p class="affiliates-muted">' +
+        escapeHtml(clicks.note) +
+        ' Total: ' +
+        escapeHtml(String(clicks.count != null ? clicks.count : 0)) +
+        '</p>' +
+        (clickRows
+          ? '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
+            '<thead><tr><th>click_id</th><th>Fecha</th><th>UA</th><th>Referer</th></tr></thead><tbody>' +
+            clickRows +
+            '</tbody></table></div>'
+          : '<p class="affiliates-muted">Sin clics registrados.</p>') +
+        '</div>';
+    }
+
+    detailRoot.innerHTML =
+      '<header class="mcl-header"><div class="mcl-header-left"><h2 class="mcl-title">' +
+      escapeHtml(String(row.code)) +
+      '</h2><p class="mcl-subtitle">' +
+      escapeHtml(statusBadge(row)) +
+      (row.acceptance_evidence
+        ? ' · Evidencia: ' + escapeHtml(String(row.acceptance_evidence))
+        : '') +
+      '</p></div><div class="mcl-header-actions"><button type="button" class="btn" data-action="affiliate-close">Cerrar</button></div></header>' +
+      '<p class="affiliates-muted">Enlace: ' +
+      (url
+        ? '<a href="' +
+          escapeHtml(url) +
+          '" target="_blank" rel="noopener">' +
+          escapeHtml(url) +
+          '</a>'
+        : '—') +
+      '</p>' +
+      clicksHtml +
+      solTable(
+        'Atribuidas (' + (sol.attributed_count || 0) + ')',
+        null,
+        sol.attributed,
+        'Ninguna solicitud atribuida.',
+      ) +
+      solTable(
+        'Excluidas (' + (sol.excluded_count || 0) + ')',
+        'Motivos de exclusión según outcome almacenado.',
+        sol.excluded,
+        'Ninguna exclusión registrada.',
+      ) +
+      solTable(
+        'Registradas (' + (sol.recorded_count || 0) + ')',
+        'Outcomes almacenados que no son atribución ni exclusión.',
+        sol.recorded,
+        'Ningún otro outcome.',
+      ) +
+      solTable(
+        'Pendientes (' + (sol.in_progress_count || 0) + ')',
+        'Clic del afiliado en solicitud sin fila de atribución.',
+        sol.in_progress,
+        'Ninguna pendiente.',
+      );
+  }
+
+  async function loadPending() {
+    try {
+      const body = await afFetch('/affiliates/pending-attributions');
+      afState.pendingCount =
+        body.data && body.data.count != null ? Number(body.data.count) : 0;
+    } catch (_err) {
+      afState.pendingCount = null;
+    }
+    renderPending();
+  }
+
+  async function loadList() {
+    const body = await afFetch('/affiliates');
+    afState.affiliates =
+      body.data && Array.isArray(body.data.affiliates)
+        ? body.data.affiliates
+        : [];
+    renderList();
+  }
+
+  async function loadDetail(id) {
+    afState.selectedId = id;
+    afState.detail = null;
+    afState.clicks = null;
+    afState.solicitudes = null;
+    renderDetail();
+    setStatus('Cargando detalle…', 'info');
+    const enc = encodeURIComponent(id);
+    const [detailRes, clicksRes, solRes] = await Promise.all([
+      afFetch('/affiliates/' + enc),
+      afFetch('/affiliates/' + enc + '/clicks'),
+      afFetch('/affiliates/' + enc + '/solicitudes'),
+    ]);
+    afState.detail = detailRes.data || null;
+    afState.clicks = clicksRes.data || null;
+    afState.solicitudes = solRes.data || null;
+    setStatus('', null);
+    renderDetail();
+  }
+
+  async function reloadAll() {
+    if (afState.loading) return;
+    afState.loading = true;
+    setStatus('Cargando…', 'info');
+    try {
+      await Promise.all([loadPending(), loadList()]);
+      if (afState.selectedId) {
+        await loadDetail(afState.selectedId);
+      }
+      setStatus('', null);
+    } catch (err) {
+      setStatus(err.message || 'Error al cargar', 'error');
+    } finally {
+      afState.loading = false;
+    }
+  }
+
+  listRoot.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('[data-action="affiliate-view"]');
+    if (!btn) return;
+    const tr = btn.closest('tr[data-affiliate-id]');
+    if (!tr) return;
+    const id = tr.getAttribute('data-affiliate-id');
+    if (!id) return;
+    loadDetail(id).catch(function (err) {
+      setStatus(err.message || 'Error', 'error');
+    });
+  });
+
+  detailRoot.addEventListener('click', function (ev) {
+    if (ev.target.closest('[data-action="affiliate-close"]')) {
+      afState.selectedId = null;
+      afState.detail = null;
+      renderDetail();
+    }
+  });
+
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', function () {
+      reloadAll();
+    });
+  }
+
+  if (createForm) {
+    createForm.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      const fd = new FormData(createForm);
+      const payload = {
+        code: String(fd.get('code') || '').trim(),
+        is_test: isTestInput && isTestInput.checked === true,
+      };
+      const ci = String(fd.get('ci') || '').trim();
+      if (ci) payload.ci = ci;
+      if (!payload.is_test) {
+        payload.acceptance_channel = String(fd.get('acceptance_channel') || '').trim();
+        payload.terms_version = String(fd.get('terms_version') || '').trim();
+        payload.acceptance_evidence = String(fd.get('acceptance_evidence') || '').trim();
+      }
+      setStatus('Creando…', 'info');
+      try {
+        await afFetch('/affiliates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        createForm.reset();
+        setStatus('Afiliado creado.', 'success');
+        await reloadAll();
+      } catch (err) {
+        setStatus(err.message || 'No se pudo crear', 'error');
+      }
+    });
+  }
+
+  window.__openAffiliates = function () {
+    reloadAll();
+  };
+})();

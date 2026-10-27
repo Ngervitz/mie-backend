@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/tabler-icons.min.css" />
-  <link rel="stylesheet" href="mie-dashboard.css?v=20261023-seo-landing-creator" />
+  <link rel="stylesheet" href="mie-dashboard.css?v=20261026-affiliates-af" />
   <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
@@ -127,6 +127,15 @@
         data-dashboard-tab="cz-funnel"
         id="tab-cz-funnel">
         📊 Funnel CZ
+      </button>
+      <button
+        type="button"
+        class="dashboard-tab"
+        role="tab"
+        aria-selected="false"
+        data-dashboard-tab="affiliates"
+        id="tab-affiliates">
+        🤝 Afiliados
       </button>
       <button
         type="button"
@@ -777,6 +786,63 @@
         <div id="cz-funnel-status" class="mcl-status" aria-live="polite"></div>
         <div id="cz-funnel-month-kpis"></div>
         <div id="cz-funnel-results"></div>
+      </div>
+    </div>
+
+    <!-- Afiliados V1: directorio admin (permiso cz-funnel). -->
+    <div
+      class="dashboard-panel hidden"
+      id="affiliates-panel"
+      role="tabpanel"
+      aria-labelledby="tab-affiliates"
+      hidden>
+      <div id="affiliates-landing" class="mcl-landing affiliates-landing">
+        <header class="mcl-header">
+          <div class="mcl-header-left">
+            <h1 class="mcl-title">Afiliados</h1>
+            <p class="mcl-subtitle">
+              Directorio, enlaces personales y lectura de clics y atribuciones almacenadas
+            </p>
+          </div>
+          <div class="mcl-header-actions">
+            <button type="button" id="affiliates-reload-btn" class="btn">
+              Recargar
+            </button>
+          </div>
+        </header>
+        <div id="affiliates-pending" class="affiliates-pending" aria-live="polite"></div>
+        <div id="affiliates-status" class="mcl-status" aria-live="polite"></div>
+        <details id="affiliates-create-wrap" class="affiliates-create-wrap">
+          <summary class="affiliates-create-summary">Alta de afiliado</summary>
+          <form id="affiliates-create-form" class="affiliates-create-form">
+            <label>Código (4–32, A–Z a–z 0–9)
+              <input type="text" name="code" required maxlength="32" autocomplete="off" />
+            </label>
+            <label class="affiliates-check">
+              <input type="checkbox" name="is_test" id="affiliates-is-test" />
+              Afiliado de prueba (sin CI ni aceptación)
+            </label>
+            <label>CI (obligatoria si no es prueba)
+              <input type="text" name="ci" inputmode="numeric" maxlength="9" autocomplete="off" />
+            </label>
+            <label>Canal de aceptación
+              <select name="acceptance_channel">
+                <option value="">—</option>
+                <option value="dashboard">dashboard</option>
+                <option value="presencial">presencial</option>
+              </select>
+            </label>
+            <label>Versión de bases
+              <input type="text" name="terms_version" maxlength="64" autocomplete="off" placeholder="2026-10-22" />
+            </label>
+            <label>Evidencia de aceptación
+              <textarea name="acceptance_evidence" rows="2" maxlength="500" placeholder="Acta, ticket o referencia interna"></textarea>
+            </label>
+            <button type="submit" class="btn btn-primary">Crear afiliado</button>
+          </form>
+        </details>
+        <div id="affiliates-list-root"></div>
+        <div id="affiliates-detail-root" class="affiliates-detail-root" hidden></div>
       </div>
     </div>
 
@@ -1713,7 +1779,7 @@
   <script src="mi-deuda-helpers.js"></script>
   <script src="elm-ui-helpers.js?v=20261011-s2-technical"></script>
   <script src="elm-ops.js?v=20261017-gestion-elm-send-modal"></script>
-  <script src="mie-dashboard.js?v=20261023-seo-landing-creator"></script>
+  <script src="mie-dashboard.js?v=20261026-affiliates-af"></script>
   <script src="meta-agent.js"></script>
   <script src="janus-assist.js"></script>
   <script>
@@ -1734,11 +1800,12 @@
         'ai-visibility': document.getElementById('ai-visibility-panel'),
         admin: document.getElementById('admin-panel'),
         'cz-funnel': document.getElementById('cz-funnel-panel'),
+        affiliates: document.getElementById('affiliates-panel'),
         rechazados: document.getElementById('rechazados-panel'),
         preaprobados: document.getElementById('preaprobados-panel'),
         'elm-gestion': document.getElementById('elm-gestion-panel'),
       };
-      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.rechazados || !panels.preaprobados || !panels['elm-gestion'] || !tabs.length) return;
+      if (!panels.market || !panels.discoveries || !panels.ga4 || !panels.searchconsole || !panels.meta || !panels.sms || !panels.email || !panels.inbox || !panels['ai-visibility'] || !panels.admin || !panels['cz-funnel'] || !panels.affiliates || !panels.rechazados || !panels.preaprobados || !panels['elm-gestion'] || !tabs.length) return;
 
       var SECTION_ORDER = [
         'market',
@@ -1747,6 +1814,7 @@
         'ga4',
         'searchconsole',
         'cz-funnel',
+        'affiliates',
         'rechazados',
         'preaprobados',
         'elm-gestion',
@@ -1775,6 +1843,10 @@
           }
           if (!allowedSet) return true;
           return isAdminUser === true || allowedSet.preaprobados === true;
+        }
+        if (sectionKey === 'affiliates') {
+          if (!allowedSet) return true;
+          return isAdminUser === true || allowedSet['cz-funnel'] === true;
         }
         if (!allowedSet) return true;
         return allowedSet[sectionKey] === true;
@@ -1829,6 +1901,7 @@
         }
         if (name === 'ga4' && window.__openGa4) window.__openGa4();
         if (name === 'cz-funnel' && window.__openCzFunnel) window.__openCzFunnel();
+        if (name === 'affiliates' && window.__openAffiliates) window.__openAffiliates();
         if (name === 'rechazados' && window.__openRechazados) {
           window.__openRechazados();
         }
