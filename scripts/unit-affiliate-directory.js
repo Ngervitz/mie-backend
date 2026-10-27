@@ -6,6 +6,7 @@ const {
   planAffiliateLandingOptInInsert,
   listCell,
   describeOutcome,
+  describeAffiliateAdhesion,
   splitAttributions,
 } = require('../src/lib/affiliateDirectory');
 
@@ -105,6 +106,27 @@ const AT = '2026-10-22T18:00:00.000Z';
   assert.strictEqual(split.excluded_count, 1);
   assert.strictEqual(split.recorded_count, 1);
   assert.strictEqual(split.recorded[0].detail, 'Sin clic');
+}
+
+{
+  const otp = describeAffiliateAdhesion({
+    is_test: false,
+    status: 'active',
+    accepted_at: AT,
+    acceptance_channel: 'affiliate_landing_otp',
+    terms_version: 'affiliate_v1',
+    acceptance_evidence:
+      'invite:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee|otp:ffffffff-1111-4222-8222-222222222222|terms:affiliate_v1',
+  });
+  assert.ok(otp.summary.indexOf('Bases affiliate_v1') >= 0);
+  assert.ok(otp.summary.indexOf('OTP documentado') >= 0);
+  assert.ok(otp.detail.indexOf('Canal de inscripción') >= 0);
+  assert.ok(otp.detail.indexOf('evidencia almacenada') >= 0);
+}
+
+{
+  const test = describeAffiliateAdhesion({ is_test: true, status: 'active' });
+  assert.strictEqual(test.summary, 'Prueba');
 }
 
 console.log('unit-affiliate-directory: ok');

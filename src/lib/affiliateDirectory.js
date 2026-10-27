@@ -266,6 +266,70 @@ function planAffiliateLandingOptInInsert(input, acceptedAt) {
   };
 }
 
+/**
+ * Human-readable adhesion for directory rows (stored fields only).
+ * @param {{ is_test?: boolean, status?: string, accepted_at?: string|null, acceptance_channel?: string|null, terms_version?: string|null, acceptance_evidence?: string|null }} row
+ */
+function describeAffiliateAdhesion(row) {
+  if (!row) {
+    return { summary: '—', detail: '' };
+  }
+  if (row.is_test === true) {
+    return {
+      summary: 'Prueba',
+      detail: 'Afiliado de prueba sin adhesión formal documentada.',
+    };
+  }
+  const status = text(row.status).toLowerCase();
+  if (status === 'inactive') {
+    return {
+      summary: 'Inactivo',
+      detail: 'Registro inactivo en el directorio.',
+    };
+  }
+  if (!row.accepted_at) {
+    return {
+      summary: 'Sin aceptación',
+      detail: 'No hay fecha de aceptación (accepted_at) registrada.',
+    };
+  }
+  const channel = text(row.acceptance_channel);
+  const terms = text(row.terms_version);
+  const evidence = text(row.acceptance_evidence);
+  const hasTerms = TERMS_RE.test(terms);
+  const hasOtpEvidence =
+    evidence.indexOf('invite:') >= 0 &&
+    evidence.indexOf('|otp:') >= 0 &&
+    evidence.indexOf('|terms:') >= 0;
+
+  const summaryParts = [];
+  if (hasTerms) summaryParts.push('Bases ' + terms);
+  else summaryParts.push('Adherido');
+  if (hasOtpEvidence) summaryParts.push('OTP documentado');
+
+  const detailParts = ['Aceptado: ' + String(row.accepted_at)];
+  if (channel) {
+    let channelNote = channel;
+    if (channel === LANDING_OPT_IN_CHANNEL) channelNote = 'landing (opt-in)';
+    else if (channel === 'dashboard') channelNote = 'dashboard (alta manual)';
+    else if (channel === 'presencial') channelNote = 'presencial';
+    detailParts.push('Canal de inscripción: ' + channelNote);
+  }
+  if (hasTerms) detailParts.push('Términos aceptados: ' + terms);
+  if (hasOtpEvidence) {
+    detailParts.push('Validación OTP respaldada por evidencia almacenada');
+  } else if (channel === LANDING_OPT_IN_CHANNEL) {
+    detailParts.push('Sin evidencia OTP persistida en el registro');
+  }
+  if (evidence && !hasOtpEvidence) {
+    detailParts.push('Evidencia: ' + evidence);
+  }
+  return {
+    summary: summaryParts.join(' · '),
+    detail: detailParts.join(' · '),
+  };
+}
+
 function splitAttributions(rows) {
   const attributed = [];
   const excluded = [];
@@ -307,5 +371,6 @@ module.exports = {
   buildLandingOptInEvidence,
   planAffiliateInsert,
   planAffiliateLandingOptInInsert,
+  describeAffiliateAdhesion,
   splitAttributions,
 };

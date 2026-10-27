@@ -18,7 +18,7 @@ const supabase = require('../clients/supabase');
 const {
   schemaMissing,
   createAffiliate,
-  listAffiliates,
+  listAffiliatesWithRowStats,
   getAffiliate,
   listClicks,
   countClicksWithoutAttribution,
@@ -60,7 +60,7 @@ function parseId(raw) {
 
 router.get('/', async function list(req, res) {
   try {
-    const affiliates = await listAffiliates(supabase);
+    const affiliates = await listAffiliatesWithRowStats(supabase);
     return res.json({ ok: true, data: { affiliates: affiliates } });
   } catch (err) {
     return sendError(res, err, 'GET /affiliates failed');

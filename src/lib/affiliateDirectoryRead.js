@@ -9,6 +9,7 @@ const { normalizeCzClick } = require('./sanitizeCzTrackingData');
 const {
   parseCi,
   describeOutcome,
+  describeAffiliateAdhesion,
   listCell,
   planAffiliateInsert,
   splitAttributions,
@@ -116,6 +117,64 @@ async function listAffiliates(supabase) {
       .range(from, to);
   });
   return rows;
+}
+
+function incrementCount(map, affiliateId) {
+  if (!affiliateId) return;
+  const key = String(affiliateId);
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+async function aggregateClickCountsByAffiliate(supabase) {
+  const counts = new Map();
+  const rows = await pageAll(function (from, to) {
+    return supabase
+      .from('affiliate_clicks')
+      .select('affiliate_id')
+      .order('click_id', { ascending: true })
+      .range(from, to);
+  });
+  rows.forEach(function (row) {
+    incrementCount(counts, row.affiliate_id);
+  });
+  return counts;
+}
+
+async function aggregateAttributedCountsByAffiliate(supabase) {
+  const counts = new Map();
+  const rows = await pageAll(function (from, to) {
+    return supabase
+      .from('affiliate_attributions')
+      .select('affiliate_id, outcome')
+      .eq('outcome', 'attributed')
+      .order('cz_id', { ascending: true })
+      .range(from, to);
+  });
+  rows.forEach(function (row) {
+    incrementCount(counts, row.affiliate_id);
+  });
+  return counts;
+}
+
+/**
+ * Directory list with per-row click and attributed counts (read-only aggregates).
+ */
+async function listAffiliatesWithRowStats(supabase) {
+  const affiliates = await listAffiliates(supabase);
+  const [clickCounts, attributedCounts] = await Promise.all([
+    aggregateClickCountsByAffiliate(supabase),
+    aggregateAttributedCountsByAffiliate(supabase),
+  ]);
+  return affiliates.map(function (row) {
+    const id = String(row.id);
+    return Object.assign({}, row, {
+      click_count: clickCounts.get(id) || 0,
+      attributed_count: attributedCounts.get(id) || 0,
+      adhesion: describeAffiliateAdhesion(row),
+      loans_granted: null,
+      commissions: null,
+    });
+  });
 }
 
 async function getAffiliate(supabase, id) {
@@ -338,6 +397,7 @@ module.exports = {
   schemaMissing,
   createAffiliate,
   listAffiliates,
+  listAffiliatesWithRowStats,
   getAffiliate,
   listClicks,
   countClicksWithoutAttribution,

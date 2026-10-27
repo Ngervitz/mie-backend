@@ -19602,13 +19602,53 @@ init();
 
   function setStatus(msg, tone) {
     statusEl.textContent = msg || '';
-    statusEl.className = 'mcl-status' + (tone ? ' is-' + tone : '');
+    statusEl.className = 'mcl-status affiliates-status' + (tone ? ' is-' + tone : '');
   }
 
   function personalLink(code) {
     const c = code == null ? '' : String(code).trim();
     if (!c) return '';
     return linkBase + '/a/' + encodeURIComponent(c);
+  }
+
+  function afCopyText(text, btn) {
+    const t = String(text || '');
+    if (!t) return;
+    const done = function () {
+      if (!btn) return;
+      const prev = btn.textContent;
+      btn.textContent = 'Copiado';
+      setTimeout(function () {
+        btn.textContent = prev;
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(done).catch(function () {
+        window.prompt('Copiar enlace:', t);
+      });
+    } else {
+      window.prompt('Copiar enlace:', t);
+    }
+  }
+
+  function linkCopyRow(url) {
+    if (!url) return '<span class="affiliates-muted">—</span>';
+    const safe = escapeHtml(url);
+    return (
+      '<div class="affiliates-link-row">' +
+      '<input type="text" class="affiliates-link-input" readonly value="' +
+      safe +
+      '" title="' +
+      safe +
+      '" aria-label="Enlace personal" />' +
+      '<button type="button" class="btn affiliates-copy-btn" data-action="affiliate-copy-link" data-url="' +
+      safe +
+      '">Copiar</button>' +
+      '<a class="affiliates-muted" href="' +
+      safe +
+      '" target="_blank" rel="noopener" title="Abrir enlace">Abrir</a>' +
+      '</div>'
+    );
   }
 
   async function afFetch(path, opts) {
@@ -19629,23 +19669,56 @@ init();
     return body;
   }
 
+  function afCountCell(value) {
+    if (value == null || value === '') return '—';
+    return escapeHtml(String(value));
+  }
+
+  function afMissingIntegrationCell(value) {
+    if (value == null || value === undefined) return '—';
+    return escapeHtml(String(value));
+  }
+
+  function adhesionCell(row) {
+    const adhesion = row && row.adhesion;
+    if (adhesion && adhesion.summary) {
+      return (
+        '<span class="affiliates-adhesion-text" title="' +
+        escapeHtml(adhesion.detail || adhesion.summary) +
+        '">' +
+        escapeHtml(adhesion.summary) +
+        '</span>'
+      );
+    }
+    return '<span class="affiliates-muted">—</span>';
+  }
+
   function renderPending() {
     if (!pendingEl) return;
-    if (afState.pendingCount == null) {
+    if (afState.pendingCount == null || afState.pendingCount === 0) {
+      pendingEl.hidden = true;
       pendingEl.textContent = '';
       return;
     }
+    pendingEl.hidden = false;
     pendingEl.innerHTML =
-      '<strong>Con clic, sin evaluar:</strong> ' +
+      '<strong>Funnel sin evaluar:</strong> ' +
       escapeHtml(String(afState.pendingCount)) +
-      ' solicitudes con <code>cz_click</code> almacenado y sin fila en atribuciones.';
+      ' solicitudes con <code>cz_click</code> y sin fila en atribuciones (global).';
   }
 
-  function statusBadge(row) {
-    const parts = [];
-    if (row.is_test) parts.push('prueba');
-    parts.push(row.status || '—');
-    return parts.join(' · ');
+  function statusPill(row) {
+    const status = String(row.status || '—');
+    const active = status.toLowerCase() === 'active';
+    let label = status;
+    if (row.is_test) label += ' · prueba';
+    return (
+      '<span class="affiliates-status-pill' +
+      (active ? ' is-active' : '') +
+      '">' +
+      escapeHtml(label) +
+      '</span>'
+    );
   }
 
   function renderList() {
@@ -19657,78 +19730,156 @@ init();
     }
     const body = rows
       .map(function (row) {
-        const url = personalLink(row.code);
+        const selected =
+          afState.selectedId && String(afState.selectedId) === String(row.id);
         return (
           '<tr data-affiliate-id="' +
           escapeHtml(String(row.id)) +
-          '">' +
-          '<td><code>' +
-          escapeHtml(String(row.code)) +
-          '</code></td>' +
-          '<td>' +
-          escapeHtml(statusBadge(row)) +
-          '</td>' +
-          '<td>' +
+          '"' +
+          (selected ? ' class="is-selected"' : '') +
+          '>' +
+          '<td class="num affiliates-col-ci">' +
           escapeHtml(row.ci != null ? String(row.ci) : '—') +
           '</td>' +
-          '<td class="affiliates-link-cell">' +
-          (url
-            ? '<a href="' +
-              escapeHtml(url) +
-              '" target="_blank" rel="noopener">' +
-              escapeHtml(url) +
-              '</a>'
-            : '—') +
+          '<td class="affiliates-col-adhesion">' +
+          adhesionCell(row) +
           '</td>' +
-          '<td><button type="button" class="btn" data-action="affiliate-view">Ver</button></td>' +
+          '<td class="num affiliates-col-stat">' +
+          afCountCell(row.click_count) +
+          '</td>' +
+          '<td class="num affiliates-col-stat">' +
+          afCountCell(row.attributed_count) +
+          '</td>' +
+          '<td class="num affiliates-col-stat affiliates-col-na">' +
+          afMissingIntegrationCell(row.loans_granted) +
+          '</td>' +
+          '<td class="num affiliates-col-stat affiliates-col-na">' +
+          afMissingIntegrationCell(row.commissions) +
+          '</td>' +
+          '<td class="affiliates-col-action"><button type="button" class="btn btn-primary affiliates-detail-btn" data-action="affiliate-view">Detalle</button></td>' +
           '</tr>'
         );
       })
       .join('');
     listRoot.innerHTML =
-      '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
-      '<thead><tr><th>Código</th><th>Estado</th><th>CI</th><th>Enlace personal</th><th></th></tr></thead><tbody>' +
+      '<div class="table-wrap affiliates-table-wrap"><table class="ga4-table rechazados-table affiliates-directory-table affiliates-compact-table">' +
+      '<thead><tr>' +
+      '<th>CI</th><th>Adhesión al plan</th><th class="num">Clics</th>' +
+      '<th class="num">Solicitudes atribuidas</th><th class="num">Préstamos otorgados</th>' +
+      '<th class="num">Comisiones</th><th>Detalle</th>' +
+      '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>';
   }
 
-  function solTable(title, note, items, emptyLabel) {
+  function solFold(title, note, items, emptyLabel, openDefault) {
     const list = items || [];
-    if (!list.length) {
-      return (
-        '<div class="affiliates-detail-block"><h3>' +
-        escapeHtml(title) +
-        '</h3>' +
+    const openAttr = openDefault ? ' open' : '';
+    let inner =
+      '<p class="affiliates-muted">' + escapeHtml(emptyLabel) + '</p>';
+    if (list.length) {
+      const body = list
+        .map(function (item) {
+          return (
+            '<tr><td class="num">' +
+            escapeHtml(String(item.cz_id != null ? item.cz_id : '—')) +
+            '</td><td class="num">' +
+            escapeHtml(item.ci != null ? String(item.ci) : '—') +
+            '</td><td>' +
+            escapeHtml(item.label || item.detail || '—') +
+            '</td><td>' +
+            escapeHtml(item.detail || '—') +
+            '</td></tr>'
+          );
+        })
+        .join('');
+      inner =
         (note ? '<p class="affiliates-muted">' + escapeHtml(note) + '</p>' : '') +
+        '<div class="table-wrap affiliates-fold-body"><table class="ga4-table rechazados-table">' +
+        '<thead><tr><th>CZ</th><th>CI</th><th>Motivo</th><th>Detalle</th></tr></thead><tbody>' +
+        body +
+        '</tbody></table></div>';
+    } else if (note) {
+      inner =
         '<p class="affiliates-muted">' +
+        escapeHtml(note) +
+        '</p><p class="affiliates-muted">' +
         escapeHtml(emptyLabel) +
-        '</p></div>'
+        '</p>';
+    }
+    return (
+      '<details class="affiliates-fold affiliates-detail-fold"' +
+      openAttr +
+      '><summary>' +
+      escapeHtml(title) +
+      '</summary>' +
+      inner +
+      '</details>'
+    );
+  }
+
+  function clicksFold(clicks) {
+    const data = clicks || {};
+    const count = data.count != null ? Number(data.count) : 0;
+    const title = 'Clics (' + count + ')';
+    if (!data.note) {
+      return (
+        '<details class="affiliates-fold affiliates-detail-fold"><summary>' +
+        escapeHtml(title) +
+        '</summary><p class="affiliates-muted">Sin datos de clics.</p></details>'
       );
     }
-    const body = list
-      .map(function (item) {
+    const rows = (data.clicks || [])
+      .map(function (c) {
+        const tech =
+          '<details class="affiliates-tech-fold"><summary>Datos técnicos</summary>' +
+          '<div class="affiliates-tech-block"><div><strong>click_id</strong><br><code>' +
+          escapeHtml(String(c.click_id || '—')) +
+          '</code></div>' +
+          (c.user_agent
+            ? '<div style="margin-top:8px"><strong>User-Agent</strong><br>' +
+              escapeHtml(String(c.user_agent)) +
+              '</div>'
+            : '') +
+          (c.referer
+            ? '<div style="margin-top:8px"><strong>Referer</strong><br>' +
+              escapeHtml(String(c.referer)) +
+              '</div>'
+            : '') +
+          '</div></details>';
+        const refShort = c.referer
+          ? escapeHtml(String(c.referer).slice(0, 56)) +
+            (String(c.referer).length > 56 ? '…' : '')
+          : '—';
         return (
           '<tr><td>' +
-          escapeHtml(String(item.cz_id != null ? item.cz_id : '—')) +
+          escapeHtml(c.occurred_at || '—') +
           '</td><td>' +
-          escapeHtml(item.ci != null ? String(item.ci) : '—') +
+          refShort +
           '</td><td>' +
-          escapeHtml(item.label || item.detail || '—') +
-          '</td><td>' +
-          escapeHtml(item.detail || '—') +
+          tech +
           '</td></tr>'
         );
       })
       .join('');
+    const inner =
+      '<p class="affiliates-muted">' +
+      escapeHtml(data.note) +
+      ' Filtro: ' +
+      escapeHtml(String(data.filter || 'sin_filtrar')) +
+      '.</p>' +
+      (rows
+        ? '<div class="table-wrap affiliates-fold-body"><table class="ga4-table rechazados-table">' +
+          '<thead><tr><th>Fecha</th><th>Referer</th><th></th></tr></thead><tbody>' +
+          rows +
+          '</tbody></table></div>'
+        : '<p class="affiliates-muted">Sin clics registrados.</p>');
     return (
-      '<div class="affiliates-detail-block"><h3>' +
+      '<details class="affiliates-fold affiliates-detail-fold"><summary>' +
       escapeHtml(title) +
-      '</h3>' +
-      (note ? '<p class="affiliates-muted">' + escapeHtml(note) + '</p>' : '') +
-      '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
-      '<thead><tr><th>CZ</th><th>CI</th><th>Motivo</th><th>Detalle</th></tr></thead><tbody>' +
-      body +
-      '</tbody></table></div></div>'
+      '</summary>' +
+      inner +
+      '</details>'
     );
   }
 
@@ -19737,96 +19888,90 @@ init();
     if (!row) {
       detailRoot.hidden = true;
       detailRoot.innerHTML = '';
+      renderList();
       return;
     }
     detailRoot.hidden = false;
     const url = personalLink(row.code);
     const clicks = afState.clicks || {};
     const sol = afState.solicitudes || {};
-    let clicksHtml =
-      '<p class="affiliates-muted">Sin datos de clics.</p>';
-    if (clicks.note) {
-      const clickRows = (clicks.clicks || [])
-        .map(function (c) {
-          return (
-            '<tr><td><code>' +
-            escapeHtml(String(c.click_id || '—')) +
-            '</code></td><td>' +
-            escapeHtml(c.occurred_at || '—') +
-            '</td><td title="' +
-            escapeHtml(c.user_agent || '') +
-            '">' +
-            escapeHtml(
-              c.user_agent ? String(c.user_agent).slice(0, 48) + '…' : '—',
-            ) +
-            '</td><td title="' +
-            escapeHtml(c.referer || '') +
-            '">' +
-            escapeHtml(c.referer ? String(c.referer).slice(0, 40) : '—') +
-            '</td></tr>'
-          );
-        })
-        .join('');
-      clicksHtml =
-        '<div class="affiliates-detail-block"><h3>Clics (' +
-        escapeHtml(String(clicks.filter || 'sin_filtrar')) +
-        ')</h3><p class="affiliates-muted">' +
-        escapeHtml(clicks.note) +
-        ' Total: ' +
-        escapeHtml(String(clicks.count != null ? clicks.count : 0)) +
-        '</p>' +
-        (clickRows
-          ? '<div class="table-wrap"><table class="ga4-table rechazados-table">' +
-            '<thead><tr><th>click_id</th><th>Fecha</th><th>UA</th><th>Referer</th></tr></thead><tbody>' +
-            clickRows +
-            '</tbody></table></div>'
-          : '<p class="affiliates-muted">Sin clics registrados.</p>') +
-        '</div>';
-    }
+    const techBlock =
+      '<details class="affiliates-fold affiliates-tech-fold"><summary>Identificadores y evidencia</summary>' +
+      '<div class="affiliates-tech-block">' +
+      '<div><strong>UUID</strong><br><code>' +
+      escapeHtml(String(row.id || '—')) +
+      '</code></div>' +
+      (row.acceptance_evidence
+        ? '<div style="margin-top:10px"><strong>Evidencia de aceptación</strong><br>' +
+          escapeHtml(String(row.acceptance_evidence)) +
+          '</div>'
+        : '') +
+      (row.created_at
+        ? '<div style="margin-top:10px"><strong>Alta</strong><br>' +
+          escapeHtml(String(row.created_at)) +
+          '</div>'
+        : '') +
+      '</div></details>';
 
     detailRoot.innerHTML =
-      '<header class="mcl-header"><div class="mcl-header-left"><h2 class="mcl-title">' +
+      '<div class="affiliates-detail-header">' +
+      '<div><h2 class="affiliates-detail-title">' +
       escapeHtml(String(row.code)) +
-      '</h2><p class="mcl-subtitle">' +
-      escapeHtml(statusBadge(row)) +
-      (row.acceptance_evidence
-        ? ' · Evidencia: ' + escapeHtml(String(row.acceptance_evidence))
-        : '') +
-      '</p></div><div class="mcl-header-actions"><button type="button" class="btn" data-action="affiliate-close">Cerrar</button></div></header>' +
-      '<p class="affiliates-muted">Enlace: ' +
-      (url
-        ? '<a href="' +
-          escapeHtml(url) +
-          '" target="_blank" rel="noopener">' +
-          escapeHtml(url) +
-          '</a>'
-        : '—') +
-      '</p>' +
-      clicksHtml +
-      solTable(
+      '</h2>' +
+      statusPill(row) +
+      '</div>' +
+      '<button type="button" class="btn" data-action="affiliate-close">Cerrar</button></div>' +
+      '<dl class="affiliates-commercial-grid">' +
+      '<div><dt>CI</dt><dd>' +
+      escapeHtml(row.ci != null ? String(row.ci) : '—') +
+      '</dd></div>' +
+      '<div><dt>Canal</dt><dd>' +
+      escapeHtml(row.acceptance_channel || '—') +
+      '</dd></div>' +
+      '<div><dt>Bases</dt><dd>' +
+      escapeHtml(row.terms_version || '—') +
+      '</dd></div>' +
+      '<div><dt>Aceptación</dt><dd>' +
+      escapeHtml(row.accepted_at || '—') +
+      '</dd></div>' +
+      '</dl>' +
+      '<div style="margin-bottom:14px">' +
+      '<div class="affiliates-muted" style="margin-bottom:6px">Enlace personal</div>' +
+      linkCopyRow(url) +
+      '</div>' +
+      techBlock +
+      '<div class="affiliates-detail-folds">' +
+      clicksFold(clicks) +
+      solFold(
         'Atribuidas (' + (sol.attributed_count || 0) + ')',
         null,
         sol.attributed,
         'Ninguna solicitud atribuida.',
+        false,
       ) +
-      solTable(
+      solFold(
         'Excluidas (' + (sol.excluded_count || 0) + ')',
         'Motivos de exclusión según outcome almacenado.',
         sol.excluded,
         'Ninguna exclusión registrada.',
+        false,
       ) +
-      solTable(
-        'Registradas (' + (sol.recorded_count || 0) + ')',
-        'Outcomes almacenados que no son atribución ni exclusión.',
-        sol.recorded,
-        'Ningún otro outcome.',
-      ) +
-      solTable(
+      solFold(
         'Pendientes (' + (sol.in_progress_count || 0) + ')',
         'Clic del afiliado en solicitud sin fila de atribución.',
         sol.in_progress,
         'Ninguna pendiente.',
-      );
+        false,
+      ) +
+      solFold(
+        'Registradas (' + (sol.recorded_count || 0) + ')',
+        'Outcomes almacenados que no son atribución ni exclusión.',
+        sol.recorded,
+        'Ningún otro outcome.',
+        false,
+      ) +
+      '</div>';
+    renderList();
   }
 
   async function loadPending() {
@@ -19875,9 +20020,6 @@ init();
     setStatus('Cargando…', 'info');
     try {
       await Promise.all([loadPending(), loadList()]);
-      if (afState.selectedId) {
-        await loadDetail(afState.selectedId);
-      }
       setStatus('', null);
     } catch (err) {
       setStatus(err.message || 'Error al cargar', 'error');
@@ -19891,6 +20033,7 @@ init();
     if (!btn) return;
     const tr = btn.closest('tr[data-affiliate-id]');
     if (!tr) return;
+    ev.preventDefault();
     const id = tr.getAttribute('data-affiliate-id');
     if (!id) return;
     loadDetail(id).catch(function (err) {
@@ -19899,6 +20042,11 @@ init();
   });
 
   detailRoot.addEventListener('click', function (ev) {
+    const copyBtn = ev.target.closest('[data-action="affiliate-copy-link"]');
+    if (copyBtn) {
+      afCopyText(copyBtn.getAttribute('data-url'), copyBtn);
+      return;
+    }
     if (ev.target.closest('[data-action="affiliate-close"]')) {
       afState.selectedId = null;
       afState.detail = null;
@@ -19944,6 +20092,11 @@ init();
   }
 
   window.__openAffiliates = function () {
+    afState.selectedId = null;
+    afState.detail = null;
+    afState.clicks = null;
+    afState.solicitudes = null;
+    renderDetail();
     reloadAll();
   };
 })();

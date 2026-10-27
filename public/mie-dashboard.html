@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MIE — Market Intelligence Center</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/tabler-icons.min.css" />
-  <link rel="stylesheet" href="mie-dashboard.css?v=20261026-affiliates-af" />
+  <link rel="stylesheet" href="mie-dashboard.css?v=20261027-affiliates-table" />
   <link rel="stylesheet" href="meta-agent.css" />
 </head>
 <body>
@@ -797,7 +797,8 @@
       aria-labelledby="tab-affiliates"
       hidden>
       <div id="affiliates-landing" class="mcl-landing affiliates-landing">
-        <header class="mcl-header">
+        <div class="affiliates-inner">
+        <header class="mcl-header affiliates-header">
           <div class="mcl-header-left">
             <h1 class="mcl-title">Afiliados</h1>
             <p class="mcl-subtitle">
@@ -810,9 +811,9 @@
             </button>
           </div>
         </header>
-        <div id="affiliates-pending" class="affiliates-pending" aria-live="polite"></div>
-        <div id="affiliates-status" class="mcl-status" aria-live="polite"></div>
-        <details id="affiliates-create-wrap" class="affiliates-create-wrap">
+        <div id="affiliates-pending" class="affiliates-pending-banner" aria-live="polite" hidden></div>
+        <div id="affiliates-status" class="mcl-status affiliates-status" aria-live="polite"></div>
+        <details id="affiliates-create-wrap" class="affiliates-create-wrap affiliates-fold">
           <summary class="affiliates-create-summary">Alta de afiliado</summary>
           <form id="affiliates-create-form" class="affiliates-create-form">
             <label>Código (4–32, A–Z a–z 0–9)
@@ -841,8 +842,12 @@
             <button type="submit" class="btn btn-primary">Crear afiliado</button>
           </form>
         </details>
-        <div id="affiliates-list-root"></div>
+        <section class="affiliates-section affiliates-directory-section" aria-labelledby="affiliates-directory-title">
+          <h2 id="affiliates-directory-title" class="affiliates-section-title">Directorio</h2>
+          <div id="affiliates-list-root" class="affiliates-list-root"></div>
+        </section>
         <div id="affiliates-detail-root" class="affiliates-detail-root" hidden></div>
+        </div>
       </div>
     </div>
 
@@ -1779,7 +1784,7 @@
   <script src="mi-deuda-helpers.js"></script>
   <script src="elm-ui-helpers.js?v=20261011-s2-technical"></script>
   <script src="elm-ops.js?v=20261017-gestion-elm-send-modal"></script>
-  <script src="mie-dashboard.js?v=20261026-affiliates-af"></script>
+  <script src="mie-dashboard.js?v=20261027-affiliates-table"></script>
   <script src="meta-agent.js"></script>
   <script src="janus-assist.js"></script>
   <script>
