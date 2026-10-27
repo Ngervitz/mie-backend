@@ -1275,6 +1275,28 @@ router.post('/run-cz-data-sync', async (req, res) => {
     if (result && result.reason === 'lock_not_acquired') {
       return res.status(409).json(result);
     }
+    if (result && result.ok === true && result.skipped !== true) {
+      const sol = result.solicitudes;
+      if (!sol || sol.status !== 'error') {
+        try {
+          result.affiliateAttribution = await runAffiliateAttribution({
+            enabled: env.affiliateAttributionEnabled === true,
+          });
+        } catch (attErr) {
+          const message =
+            attErr && attErr.message ? String(attErr.message) : 'unknown';
+          logger.error('affiliate_attribution post-sync failed', {
+            error: message,
+          });
+          result.affiliateAttribution = {
+            ok: false,
+            enabled: env.affiliateAttributionEnabled === true,
+            errors: 1,
+            error: message.slice(0, 300),
+          };
+        }
+      }
+    }
     logger.info('cz_funnel_data_sync finished', {
       ok: result.ok,
       grantedLoans: result.grantedLoans && {
@@ -1318,8 +1340,8 @@ router.post('/run-cz-data-sync', async (req, res) => {
 });
 
 /**
- * Affiliate attribution. Separate from POST /jobs/run-cz-data-sync:
- * the funnel cron does not call this, and this does not pull Credizona.
+ * Affiliate attribution. Does not pull Credizona.
+ * Also runs fail-open after a successful POST /jobs/run-cz-data-sync when enabled.
  * Auth: session cookie (cz-funnel) or X-Cron-Key.
  * Idle unless AFFILIATE_ATTRIBUTION_ENABLED is exactly "true".
  * No cron is registered here.

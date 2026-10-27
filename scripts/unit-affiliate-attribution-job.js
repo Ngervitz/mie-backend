@@ -445,7 +445,8 @@ async function run(state, funnelOrder) {
     const attrStart = jobs.indexOf("router.post('/run-affiliate-attribution'");
     assert.ok(syncStart !== -1 && attrStart > syncStart);
     const syncHandler = jobs.slice(syncStart, attrStart);
-    assert.ok(syncHandler.indexOf('runAffiliateAttribution') === -1);
+    assert.ok(syncHandler.indexOf('runAffiliateAttribution') !== -1);
+    assert.ok(syncHandler.indexOf('affiliateAttributionEnabled') !== -1);
     assert.ok(syncHandler.indexOf('affiliate_attributions') === -1);
     assert.ok(jobs.indexOf('env.affiliateAttributionEnabled === true') !== -1);
     const sync = fs.readFileSync(path.join(root, 'src', 'jobs', 'czFunnelSync.js'), 'utf8');
@@ -473,6 +474,7 @@ async function run(state, funnelOrder) {
       '20261021_affiliate_attributions.sql',
       '20261022_affiliate_persist_plan.sql',
       '20261023_affiliates_identity_consent.sql',
+      '20261026_affiliate_join_tokens_otp.sql',
     ]);
     const jobSrc = fs.readFileSync(
       path.join(root, 'src', 'jobs', 'affiliateAttributionRun.js'),
