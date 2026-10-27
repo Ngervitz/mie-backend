@@ -19679,18 +19679,72 @@ init();
     return escapeHtml(String(value));
   }
 
+  const AF_TERMS_RE = /^[A-Za-z0-9._-]{1,64}$/;
+  const AF_LANDING_OTP_CHANNEL = 'affiliate_landing_otp';
+
+  function adhesionEvidenceFlags(row) {
+    const terms = row && row.terms_version != null ? String(row.terms_version).trim() : '';
+    const evidence =
+      row && row.acceptance_evidence != null
+        ? String(row.acceptance_evidence).trim()
+        : '';
+    const hasTerms = AF_TERMS_RE.test(terms);
+    const hasOtpEvidence =
+      evidence.indexOf('invite:') >= 0 &&
+      evidence.indexOf('|otp:') >= 0 &&
+      evidence.indexOf('|terms:') >= 0;
+    return { hasTerms: hasTerms, hasOtpEvidence: hasOtpEvidence };
+  }
+
+  function adhesionTableLabel(row) {
+    if (!row) return { text: '—', valid: false };
+    if (row.is_test === true) {
+      return { text: 'Prueba', valid: false };
+    }
+    const status = String(row.status || '').toLowerCase();
+    if (status === 'inactive') {
+      return { text: 'Inactivo', valid: false };
+    }
+    if (!row.accepted_at) {
+      return { text: 'Sin aceptación', valid: false };
+    }
+    const flags = adhesionEvidenceFlags(row);
+    if (flags.hasTerms && flags.hasOtpEvidence) {
+      return { text: 'Adhesión validada', valid: true };
+    }
+    if (flags.hasTerms && !flags.hasOtpEvidence) {
+      const channel = String(row.acceptance_channel || '').trim();
+      if (channel === AF_LANDING_OTP_CHANNEL) {
+        return { text: 'Falta validación OTP', valid: false };
+      }
+      return { text: 'Términos aceptados', valid: false };
+    }
+    return { text: 'Sin términos documentados', valid: false };
+  }
+
   function adhesionCell(row) {
     const adhesion = row && row.adhesion;
-    if (adhesion && adhesion.summary) {
+    const title = adhesion && adhesion.detail ? adhesion.detail : '';
+    const label = adhesionTableLabel(row);
+    if (label.text === '—') {
+      return '<span class="affiliates-muted">—</span>';
+    }
+    if (label.valid) {
       return (
-        '<span class="affiliates-adhesion-text" title="' +
-        escapeHtml(adhesion.detail || adhesion.summary) +
+        '<span class="affiliates-adhesion-valid" title="' +
+        escapeHtml(title) +
         '">' +
-        escapeHtml(adhesion.summary) +
+        escapeHtml(label.text) +
         '</span>'
       );
     }
-    return '<span class="affiliates-muted">—</span>';
+    return (
+      '<span class="affiliates-adhesion-text" title="' +
+      escapeHtml(title) +
+      '">' +
+      escapeHtml(label.text) +
+      '</span>'
+    );
   }
 
   function renderPending() {
@@ -19764,9 +19818,12 @@ init();
     listRoot.innerHTML =
       '<div class="table-wrap affiliates-table-wrap"><table class="ga4-table rechazados-table affiliates-directory-table affiliates-compact-table">' +
       '<thead><tr>' +
-      '<th>CI</th><th>Adhesión al plan</th><th class="num">Clics</th>' +
-      '<th class="num">Solicitudes atribuidas</th><th class="num">Préstamos otorgados</th>' +
-      '<th class="num">Comisiones</th><th>Detalle</th>' +
+      '<th>CI</th><th>Adhesión al plan</th>' +
+      '<th class="affiliates-col-stat">Clics</th>' +
+      '<th class="affiliates-col-stat">Solicitudes atribuidas</th>' +
+      '<th class="affiliates-col-stat">Préstamos otorgados</th>' +
+      '<th class="affiliates-col-stat">Comisiones</th>' +
+      '<th>Detalle</th>' +
       '</tr></thead><tbody>' +
       body +
       '</tbody></table></div>';

@@ -5529,10 +5529,28 @@
   line-height: 1.35;
   color: var(--text);
 }
+#mie-dashboard-app .affiliates-adhesion-valid {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #9ccc9c;
+  background: rgba(76, 175, 80, 0.14);
+  border: 1px solid rgba(76, 175, 80, 0.45);
+}
+#mie-dashboard-app .affiliates-compact-table th.affiliates-col-stat,
+#mie-dashboard-app .affiliates-compact-table td.affiliates-col-stat {
+  text-align: center;
+  vertical-align: middle;
+}
 #mie-dashboard-app .affiliates-col-stat {
-  width: 4.5rem;
-  text-align: right;
+  min-width: 4.5rem;
   font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .affiliates-col-ci {
+  text-align: left;
 }
 #mie-dashboard-app .affiliates-col-action {
   width: 6.5rem;

@@ -23,8 +23,8 @@ const css = fs.readFileSync(
 );
 
 assert.ok(
-  html.indexOf('?v=20261027-affiliates-table') !== -1,
-  'cache bust affiliates-table',
+  html.indexOf('?v=20261027-affiliates-adhesion') !== -1,
+  'cache bust affiliates-adhesion',
 );
 assert.ok(html.indexOf('data-dashboard-tab="affiliates"') !== -1);
 assert.ok(html.indexOf('id="affiliates-panel"') !== -1);
@@ -32,6 +32,10 @@ assert.ok(js.indexOf('affiliates-compact-table') !== -1);
 assert.ok(js.indexOf('Adhesión al plan') !== -1);
 assert.ok(js.indexOf('Préstamos otorgados') !== -1);
 assert.ok(js.indexOf('loadOverviewTotals') === -1);
+assert.ok(js.indexOf('Adhesión validada') !== -1);
+assert.ok(js.indexOf('affiliates-adhesion-valid') !== -1);
+assert.ok(css.indexOf('.affiliates-col-stat') !== -1);
+assert.ok(css.indexOf('text-align: center') !== -1);
 assert.ok(
   html.indexOf("affiliates: document.getElementById('affiliates-panel')") !== -1,
 );
