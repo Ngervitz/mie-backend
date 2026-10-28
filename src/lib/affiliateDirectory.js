@@ -330,6 +330,24 @@ function describeAffiliateAdhesion(row) {
   };
 }
 
+/**
+ * Same rule as the Afiliados directory table ("Adhesión validada").
+ * @param {{ is_test?: boolean, status?: string, accepted_at?: string|null, terms_version?: string|null, acceptance_evidence?: string|null }} row
+ */
+function isAffiliateAdhesionValidated(row) {
+  if (!row || row.is_test === true) return false;
+  if (text(row.status).toLowerCase() === 'inactive') return false;
+  if (!row.accepted_at) return false;
+  const terms = text(row.terms_version);
+  const evidence = text(row.acceptance_evidence);
+  const hasTerms = TERMS_RE.test(terms);
+  const hasOtpEvidence =
+    evidence.indexOf('invite:') >= 0 &&
+    evidence.indexOf('|otp:') >= 0 &&
+    evidence.indexOf('|terms:') >= 0;
+  return hasTerms && hasOtpEvidence;
+}
+
 function splitAttributions(rows) {
   const attributed = [];
   const excluded = [];
@@ -372,5 +390,6 @@ module.exports = {
   planAffiliateInsert,
   planAffiliateLandingOptInInsert,
   describeAffiliateAdhesion,
+  isAffiliateAdhesionValidated,
   splitAttributions,
 };

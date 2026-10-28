@@ -19580,6 +19580,7 @@ init();
   const listRoot = document.getElementById('affiliates-list-root');
   const detailRoot = document.getElementById('affiliates-detail-root');
   const reloadBtn = document.getElementById('affiliates-reload-btn');
+  const summaryRoot = document.getElementById('affiliates-summary-root');
   const createForm = document.getElementById('affiliates-create-form');
   const isTestInput = document.getElementById('affiliates-is-test');
   if (!panel || !statusEl || !listRoot || !detailRoot) return;
@@ -19598,6 +19599,7 @@ init();
     clicks: null,
     solicitudes: null,
     pendingCount: null,
+    summary: null,
   };
 
   function setStatus(msg, tone) {
@@ -20042,6 +20044,55 @@ init();
     renderPending();
   }
 
+  function afSummaryDisplay(value) {
+    if (value == null || value === '') return '—';
+    return escapeHtml(String(value));
+  }
+
+  function renderSummary() {
+    if (!summaryRoot) return;
+    const data = afState.summary;
+    if (!data) {
+      summaryRoot.innerHTML = '';
+      return;
+    }
+    const cards = [
+      { emoji: '📧', label: 'Invitaciones', title: 'Invitaciones enviadas', value: data.invitations_sent },
+      { emoji: '✓', label: 'Validados', title: 'Afiliados con adhesión validada', value: data.registered_validated },
+      { emoji: '👆', label: 'Clics', title: 'Clics en enlaces', value: data.clicks },
+      { emoji: '◎', label: 'Atribuidas', title: 'Solicitudes atribuidas', value: data.attributed_solicitudes },
+      { emoji: '⊘', label: 'Excluidas', title: 'Solicitudes excluidas', value: data.excluded_solicitudes },
+    ];
+    summaryRoot.innerHTML =
+      '<div class="affiliates-kpi-grid">' +
+      cards
+        .map(function (card) {
+          return (
+            '<div class="affiliates-kpi-card" title="' +
+            escapeHtml(card.title) +
+            '">' +
+            '<span class="affiliates-kpi-emoji" aria-hidden="true">' +
+            card.emoji +
+            '</span>' +
+            '<div class="affiliates-kpi-body">' +
+            '<div class="affiliates-kpi-value">' +
+            afSummaryDisplay(card.value) +
+            '</div>' +
+            '<div class="affiliates-kpi-label">' +
+            escapeHtml(card.label) +
+            '</div></div></div>'
+          );
+        })
+        .join('') +
+      '</div>';
+  }
+
+  async function loadSummary() {
+    const body = await afFetch('/affiliates/summary');
+    afState.summary = body.data || null;
+    renderSummary();
+  }
+
   async function loadList() {
     const body = await afFetch('/affiliates');
     afState.affiliates =
@@ -20076,7 +20127,7 @@ init();
     afState.loading = true;
     setStatus('Cargando…', 'info');
     try {
-      await Promise.all([loadPending(), loadList()]);
+      await Promise.all([loadPending(), loadSummary(), loadList()]);
       setStatus('', null);
     } catch (err) {
       setStatus(err.message || 'Error al cargar', 'error');

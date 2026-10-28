@@ -23,9 +23,14 @@ const css = fs.readFileSync(
 );
 
 assert.ok(
-  html.indexOf('?v=20261027-affiliates-adhesion') !== -1,
-  'cache bust affiliates-adhesion',
+  html.indexOf('?v=20261028-affiliates-kpi-compact') !== -1,
+  'cache bust affiliates kpi compact',
 );
+assert.ok(html.indexOf('id="affiliates-summary-root"') !== -1);
+assert.ok(js.indexOf("afFetch('/affiliates/summary')") !== -1);
+assert.ok(js.indexOf('affiliates-kpi-grid') !== -1);
+assert.ok(js.indexOf('Invitaciones enviadas') !== -1);
+assert.ok(js.indexOf("'Validados'") !== -1);
 assert.ok(html.indexOf('data-dashboard-tab="affiliates"') !== -1);
 assert.ok(html.indexOf('id="affiliates-panel"') !== -1);
 assert.ok(js.indexOf('affiliates-compact-table') !== -1);
@@ -52,6 +57,7 @@ assert.ok(js.indexOf('/affiliates/') !== -1);
 assert.ok(js.indexOf('affiliateListHtml') !== -1);
 
 assert.ok(css.indexOf('.affiliates-pending') !== -1);
+assert.ok(css.indexOf('.affiliates-kpi-grid') !== -1);
 assert.ok(css.indexOf('.af-col') !== -1);
 
 console.log('unit-affiliates-dashboard-ui: ok');

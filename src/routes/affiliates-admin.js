@@ -5,6 +5,7 @@
  * section. Does not evaluate attribution and does not pay prizes.
  *
  *   GET  /affiliates
+ *   GET  /affiliates/summary
  *   POST /affiliates
  *   GET  /affiliates/pending-attributions
  *   GET  /affiliates/:id
@@ -19,6 +20,7 @@ const {
   schemaMissing,
   createAffiliate,
   listAffiliatesWithRowStats,
+  aggregateAffiliateDashboardSummary,
   getAffiliate,
   listClicks,
   countClicksWithoutAttribution,
@@ -87,6 +89,15 @@ router.get('/pending-attributions', async function pending(req, res) {
     return res.json({ ok: true, data: data });
   } catch (err) {
     return sendError(res, err, 'GET /affiliates/pending-attributions failed');
+  }
+});
+
+router.get('/summary', async function summary(req, res) {
+  try {
+    const data = await aggregateAffiliateDashboardSummary(supabase);
+    return res.json({ ok: true, data: data });
+  } catch (err) {
+    return sendError(res, err, 'GET /affiliates/summary failed');
   }
 });
 

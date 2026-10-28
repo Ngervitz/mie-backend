@@ -10,14 +10,18 @@ const {
   parseCi,
   describeOutcome,
   describeAffiliateAdhesion,
+  isAffiliateAdhesionValidated,
   listCell,
   planAffiliateInsert,
   splitAttributions,
+  EXCLUSION_OUTCOMES,
   LIST_CAP,
 } = require('./affiliateDirectory');
 
 const PAGE = 500;
 const IN_CHUNK = 200;
+/** Affiliate invite rows in email_campaign_recipients (2-recipient + 7-recipient pilots). */
+const AFFILIATE_INVITE_IDEMPOTENCY_LIKE = 'affiliate-pilot%';
 
 function schemaMissing(err) {
   const code = err && err.code != null ? String(err.code) : '';
@@ -138,6 +142,95 @@ async function aggregateClickCountsByAffiliate(supabase) {
     incrementCount(counts, row.affiliate_id);
   });
   return counts;
+}
+
+async function countExactHead(supabase, table, applyFilters) {
+  let query = supabase.from(table).select('*', { count: 'exact', head: true });
+  if (applyFilters) query = applyFilters(query);
+  const { count, error } = await query;
+  if (error) throw error;
+  return typeof count === 'number' ? count : null;
+}
+
+async function countAffiliateInviteEmailsSent(supabase) {
+  try {
+    return await countExactHead(supabase, 'email_campaign_recipients', function (q) {
+      return q.eq('status', 'sent').like('idempotency_key', AFFILIATE_INVITE_IDEMPOTENCY_LIKE);
+    });
+  } catch (err) {
+    if (schemaMissing(err)) return null;
+    throw err;
+  }
+}
+
+async function countValidatedAffiliates(supabase) {
+  try {
+    const rows = await listAffiliates(supabase);
+    let n = 0;
+    rows.forEach(function (row) {
+      if (isAffiliateAdhesionValidated(row)) n += 1;
+    });
+    return n;
+  } catch (err) {
+    if (schemaMissing(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Global KPI aggregates for the Afiliados dashboard (read-only).
+ */
+async function aggregateAffiliateDashboardSummary(supabase) {
+  const summary = {
+    invitations_sent: null,
+    registered_validated: null,
+    clicks: null,
+    attributed_solicitudes: null,
+    excluded_solicitudes: null,
+  };
+
+  summary.invitations_sent = await countAffiliateInviteEmailsSent(supabase);
+
+  try {
+    summary.registered_validated = await countValidatedAffiliates(supabase);
+  } catch (err) {
+    if (!schemaMissing(err)) throw err;
+  }
+
+  try {
+    summary.clicks = await countExactHead(supabase, 'affiliate_clicks');
+  } catch (err) {
+    if (schemaMissing(err)) summary.clicks = null;
+    else throw err;
+  }
+
+  try {
+    summary.attributed_solicitudes = await countExactHead(
+      supabase,
+      'affiliate_attributions',
+      function (q) {
+        return q.eq('outcome', 'attributed');
+      },
+    );
+  } catch (err) {
+    if (schemaMissing(err)) summary.attributed_solicitudes = null;
+    else throw err;
+  }
+
+  try {
+    summary.excluded_solicitudes = await countExactHead(
+      supabase,
+      'affiliate_attributions',
+      function (q) {
+        return q.in('outcome', EXCLUSION_OUTCOMES);
+      },
+    );
+  } catch (err) {
+    if (schemaMissing(err)) summary.excluded_solicitudes = null;
+    else throw err;
+  }
+
+  return summary;
 }
 
 async function aggregateAttributedCountsByAffiliate(supabase) {
@@ -398,6 +491,7 @@ module.exports = {
   createAffiliate,
   listAffiliates,
   listAffiliatesWithRowStats,
+  aggregateAffiliateDashboardSummary,
   getAffiliate,
   listClicks,
   countClicksWithoutAttribution,
