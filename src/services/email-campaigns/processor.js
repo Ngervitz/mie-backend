@@ -726,9 +726,14 @@ async function recalculateCampaignStatus(campaignId) {
 /**
  * Process up to QUEUE_LIMIT queued recipients behind a job_locks mutex.
  *
+ * @param {{ campaignId?: string|number|null }} [options]
  * @returns {Promise<object>}
  */
-async function processQueue() {
+async function processQueue(options) {
+  const campaignIdFilter =
+    options && options.campaignId != null && String(options.campaignId).trim() !== ''
+      ? String(options.campaignId).trim()
+      : null;
   const lockedBy = randomUUID();
   const acquired = await acquireProcessQueueLock(lockedBy);
   if (!acquired) {
@@ -759,11 +764,15 @@ async function processQueue() {
     const fromAddr = (process.env.EMAIL_CAMPAIGNS_FROM || '').trim();
 
     const nowIso = new Date().toISOString();
-    const { data: recipients, error: queueErr } = await supabase
+    let queueQuery = supabase
       .from('email_campaign_recipients')
       .select('*')
       .eq('status', 'queued')
-      .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`);
+    if (campaignIdFilter != null) {
+      queueQuery = queueQuery.eq('campaign_id', campaignIdFilter);
+    }
+    const { data: recipients, error: queueErr } = await queueQuery
       .order('created_at', { ascending: true })
       .limit(QUEUE_LIMIT);
 

@@ -4,3 +4,6 @@ node_modules/
 *.log
 coverage/
 _tmp_*
+samples/email-drafts/affiliate-invite-controlled-*.preview.html
+samples/email-drafts/affiliate-invite-controlled-manifest.json
+samples/email-drafts/affiliate-invite-v1.preview.html

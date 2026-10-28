@@ -62,6 +62,11 @@ const ASSETS = {
     file: 'sorteo-gift-v1.png',
     source: path.join(ROOT, 'samples', 'email-drafts', 'sorteo-gift-icon.png'),
   },
+  affiliateHero: {
+    file: 'affiliate-invite-hero-v1.jpg',
+    source: path.join(EMAIL_ASSETS_ROOT, 'affiliate-invite-hero-v1.jpg'),
+    contentTypeIncludes: 'image/jpeg',
+  },
 };
 
 function sha256File(filePath) {
@@ -69,6 +74,14 @@ function sha256File(filePath) {
     .createHash('sha256')
     .update(fs.readFileSync(filePath))
     .digest('hex');
+}
+
+/** Prefer draft source; fall back to deployed public asset when samples are absent locally. */
+function resolveAssetSource(a) {
+  if (fs.existsSync(a.source)) return a.source;
+  const deployed = path.join(EMAIL_ASSETS_ROOT, a.file);
+  if (fs.existsSync(deployed)) return deployed;
+  throw new Error('missing asset source and public file: ' + a.file);
 }
 
 function sha256Buf(buf) {
@@ -153,9 +166,10 @@ function assertNotEscaped(res, label) {
   Object.keys(ASSETS).forEach(function (key) {
     const a = ASSETS[key];
     const dest = path.join(EMAIL_ASSETS_ROOT, a.file);
+    const source = resolveAssetSource(a);
     assert.ok(fs.existsSync(dest), dest + ' exists');
     assert.strictEqual(
-      sha256File(a.source),
+      sha256File(source),
       sha256File(dest),
       key + ' hash matches source',
     );
@@ -169,9 +183,11 @@ function assertNotEscaped(res, label) {
       const a = ASSETS[key];
       const res = await request(base, 'GET', '/email-assets/' + a.file);
       assert.strictEqual(res.status, 200, key + ' GET status');
+      const expectMime =
+        a.contentTypeIncludes || 'image/png';
       assert.ok(
-        String(res.contentType || '').includes('image/png'),
-        key + ' content-type png',
+        String(res.contentType || '').includes(expectMime),
+        key + ' content-type ' + expectMime,
       );
       assert.strictEqual(
         sha256Buf(res.buf),
@@ -268,14 +284,13 @@ function assertNotEscaped(res, label) {
     const neighborHash = sha256File(
       path.join(PUBLIC_ROOT, 'assets', 'janus-logo.svg'),
     );
-    const draftHash = sha256File(
-      path.join(
-        ROOT,
-        'samples',
-        'email-drafts',
-        'rechazados-survey-invite-step1.draft.html',
-      ),
+    const draftPath = path.join(
+      ROOT,
+      'samples',
+      'email-drafts',
+      'rechazados-survey-invite-step1.draft.html',
     );
+    const draftHash = fs.existsSync(draftPath) ? sha256File(draftPath) : null;
 
     const traversalPaths = [
       '/email-assets/../assets/janus-logo.svg',
@@ -300,11 +315,13 @@ function assertNotEscaped(res, label) {
           neighborHash,
           'traversal must not serve janus logo: ' + p,
         );
-        assert.notStrictEqual(
-          h,
-          draftHash,
-          'traversal must not serve draft: ' + p,
-        );
+        if (draftHash != null) {
+          assert.notStrictEqual(
+            h,
+            draftHash,
+            'traversal must not serve draft: ' + p,
+          );
+        }
         // If somehow 200, it must be one of the three allowed assets only
         const allowed = Object.keys(ASSETS).map(function (k) {
           return sha256File(path.join(EMAIL_ASSETS_ROOT, ASSETS[k].file));

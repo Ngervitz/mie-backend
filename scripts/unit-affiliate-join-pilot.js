@@ -21,8 +21,13 @@ const {
   startLocalAffiliateJoinServer,
 } = require('./affiliate-join-local-server');
 
-const PILOT_CI = 42424242;
+const {
+  AFFILIATE_PILOT_AUTHORIZED_JOIN_CI,
+} = require('../src/lib/affiliateJoinPilotRoster');
+
+const PILOT_CI = AFFILIATE_PILOT_AUTHORIZED_JOIN_CI;
 const OTHER_CI = 51515151;
+const PILOT_SMS = '59893885859';
 
 async function post(base, path, body, headers) {
   const res = await fetch(base + path, {
@@ -42,7 +47,7 @@ async function post(base, path, body, headers) {
 function mockStoreForPilot() {
   const { createAffiliateJoinStore } = require('./affiliate-join-local-store');
   const store = createAffiliateJoinStore();
-  store.addSolicitud({ ci: PILOT_CI, celular: '099111222' });
+  store.addSolicitud({ ci: PILOT_CI, celular: '093885859' });
   store.addSolicitud({ ci: OTHER_CI, celular: '099333444' });
   return store;
 }
@@ -56,15 +61,17 @@ async function main() {
   assert.strictEqual(readAffiliateJoinPilotCi(), PILOT_CI);
   assert.strictEqual(isCiAllowedForAffiliateJoin(PILOT_CI), true);
   assert.strictEqual(isCiAllowedForAffiliateJoin(OTHER_CI), false);
+  process.env.AFFILIATE_JOIN_PILOT_CI = '42424242';
+  assert.strictEqual(isCiAllowedForAffiliateJoin(PILOT_CI), false);
   delete process.env.AFFILIATE_JOIN_PILOT_CI;
 
   process.env.AFFILIATE_JOIN_PILOT_CI = String(PILOT_CI);
-  process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE = '097100035';
-  assert.strictEqual(resolvePilotSmsPhoneOverride(PILOT_CI), '097100035');
+  process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE = PILOT_SMS;
+  assert.strictEqual(resolvePilotSmsPhoneOverride(PILOT_CI), PILOT_SMS);
   assert.strictEqual(resolvePilotSmsPhoneOverride(OTHER_CI), null);
   const storePhone = mockStoreForPilot();
   const overridePhone = await resolveAffiliateSmsPhone(storePhone, PILOT_CI);
-  assert.strictEqual(overridePhone, '097100035');
+  assert.strictEqual(overridePhone, PILOT_SMS);
   delete process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE;
   delete process.env.AFFILIATE_JOIN_PILOT_CI;
 

@@ -30,6 +30,18 @@ function isValidTermsVersion(version) {
 }
 
 /**
+ * Matches public join API configuredTermsVersion() (env AFFILIATE_TERMS_VERSION).
+ * @param {unknown} envValue
+ */
+function resolveConfiguredTermsVersion(envValue) {
+  const raw =
+    envValue == null || String(envValue).trim() === ''
+      ? DEFAULT_TERMS_VERSION
+      : String(envValue).trim();
+  return isValidTermsVersion(raw) ? raw : DEFAULT_TERMS_VERSION;
+}
+
+/**
  * @param {unknown} phone
  */
 function maskAffiliatePhone(phone) {
@@ -45,5 +57,6 @@ module.exports = {
   readReferralOrigin,
   buildReferralUrl,
   isValidTermsVersion,
+  resolveConfiguredTermsVersion,
   maskAffiliatePhone,
 };

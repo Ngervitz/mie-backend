@@ -6,6 +6,10 @@
  */
 
 const { parseCi } = require('./affiliateDirectory');
+const {
+  AFFILIATE_PILOT_AUTHORIZED_JOIN_CI,
+  AFFILIATE_PILOT_AUTHORIZED_SMS_DIGITS,
+} = require('./affiliateJoinPilotRoster');
 
 function normalizeDigits(raw) {
   return String(raw == null ? '' : raw).replace(/\D/g, '');
@@ -24,9 +28,12 @@ function readAffiliateJoinPilotCi() {
 function isCiAllowedForAffiliateJoin(ci) {
   const pilot = readAffiliateJoinPilotCi();
   if (pilot == null) return true;
+  if (pilot !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) {
+    return false;
+  }
   const parsed = parseCi(ci);
   if (parsed == null) return false;
-  return parsed === pilot;
+  return parsed === AFFILIATE_PILOT_AUTHORIZED_JOIN_CI;
 }
 
 /**
@@ -39,17 +46,21 @@ function isCiAllowedForAffiliateJoin(ci) {
 function resolvePilotSmsPhoneOverride(ci) {
   const pilot = readAffiliateJoinPilotCi();
   if (pilot == null) return null;
+  if (pilot !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) return null;
   const parsed = parseCi(ci);
-  if (parsed == null || parsed !== pilot) return null;
+  if (parsed == null || parsed !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) {
+    return null;
+  }
 
   const raw = process.env.AFFILIATE_JOIN_PILOT_SMS_PHONE;
   if (raw == null || String(raw).trim() === '') return null;
   const digits = normalizeDigits(String(raw).trim());
-  if (digits.length < 8) return null;
-  return digits;
+  if (digits !== AFFILIATE_PILOT_AUTHORIZED_SMS_DIGITS) return null;
+  return AFFILIATE_PILOT_AUTHORIZED_SMS_DIGITS;
 }
 
 module.exports = {
+  AFFILIATE_PILOT_AUTHORIZED_JOIN_CI,
   readAffiliateJoinPilotCi,
   isCiAllowedForAffiliateJoin,
   resolvePilotSmsPhoneOverride,

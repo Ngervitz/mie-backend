@@ -17,6 +17,7 @@ const {
   maskAffiliatePhone,
   buildReferralUrl,
   readReferralOrigin,
+  resolveConfiguredTermsVersion,
 } = require('../lib/affiliateJoinContract');
 const {
   mintPreOtpSession,
@@ -76,9 +77,7 @@ function readOtpSecret() {
 }
 
 function configuredTermsVersion() {
-  const raw = env.affiliateTermsVersion;
-  const v = raw == null || String(raw).trim() === '' ? DEFAULT_TERMS_VERSION : String(raw).trim();
-  return isValidTermsVersion(v) ? v : DEFAULT_TERMS_VERSION;
+  return resolveConfiguredTermsVersion(env.affiliateTermsVersion);
 }
 
 function referralOrigin() {

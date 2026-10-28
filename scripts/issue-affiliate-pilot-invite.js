@@ -13,6 +13,9 @@ const readline = require('readline');
 const { parseCi } = require('../src/lib/affiliateDirectory');
 const { resolveAffiliateSmsPhone, normalizeDigits } = require('../src/lib/affiliatePhoneResolve');
 const { readAffiliateJoinPilotCi } = require('../src/lib/affiliateJoinPilot');
+const {
+  AFFILIATE_PILOT_AUTHORIZED_JOIN_CI,
+} = require('../src/lib/affiliateJoinPilotRoster');
 const { issueInviteToken, getActiveAffiliateByCi } = require('../src/lib/affiliateOptIn');
 const { ciExistsInFunnel } = require('../src/lib/affiliateOptInDbHelpers');
 const { INVITE_TTL_MS } = require('../src/lib/affiliateInviteToken');
@@ -96,6 +99,13 @@ async function validateCiForPilotInvite(supabase, ci) {
   if (pilotEnv != null && pilotEnv !== ci) {
     throw new Error(
       'AFFILIATE_JOIN_PILOT_CI no coincide con la CI solicitada; ajuste env o CI',
+    );
+  }
+  if (ci !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) {
+    throw new Error(
+      'Solo la CI autorizada del piloto (' +
+        String(AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) +
+        ') puede recibir invite token',
     );
   }
 
