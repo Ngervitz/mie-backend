@@ -4,7 +4,7 @@
  * Public affiliate join API contract (pure constants + URL helpers).
  */
 
-const DEFAULT_TERMS_VERSION = 'affiliate_v1';
+const DEFAULT_TERMS_VERSION = 'affiliate_v2';
 const DEFAULT_REFERRAL_ORIGIN = 'https://s.credizona.net';
 
 const TERMS_RE = /^[A-Za-z0-9._-]{1,64}$/;

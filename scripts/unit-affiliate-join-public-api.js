@@ -16,7 +16,7 @@ const {
 
 const SESSION_SECRET = 'unit-affiliate-join-session-secret-xx';
 const OTP_SECRET = 'unit-affiliate-otp-hmac-secret-xxxxx';
-const TERMS = 'affiliate_v1';
+const TERMS = 'affiliate_v2';
 const CI = 12345678;
 const PHONE = '099123456';
 

@@ -105,14 +105,14 @@ const NOW = '2026-10-26T15:00:00.000Z';
   const ev = buildLandingOptInEvidence({
     invite_token_id: '11111111-1111-4111-8111-111111111111',
     otp_challenge_id: '22222222-2222-4222-8222-222222222222',
-    terms_version: 'affiliate_v1',
+    terms_version: 'affiliate_v2',
   });
   assert.strictEqual(ev.ok, true);
   const plan = planAffiliateLandingOptInInsert(
     {
       ci: 12345678,
       code: 'ABCD2345',
-      terms_version: 'affiliate_v1',
+      terms_version: 'affiliate_v2',
       invite_token_id: '11111111-1111-4111-8111-111111111111',
       otp_challenge_id: '22222222-2222-4222-8222-222222222222',
     },
@@ -332,7 +332,7 @@ function createMockSupabase() {
     raw,
     otpReq.challenge_id,
     '000000',
-    'affiliate_v1',
+    'affiliate_v2',
     '099111222',
     NOW,
     { otpHmacSecret: SECRET, dryRun: true },
@@ -345,7 +345,7 @@ function createMockSupabase() {
     raw,
     otpReq.challenge_id,
     plainOtp,
-    'affiliate_v1',
+    'affiliate_v2',
     '099111222',
     NOW,
     { otpHmacSecret: SECRET, dryRun: true },
@@ -360,7 +360,7 @@ function createMockSupabase() {
     raw,
     otpReq.challenge_id,
     plainOtp,
-    'affiliate_v1',
+    'affiliate_v2',
     '099111222',
     NOW,
     { otpHmacSecret: SECRET, dryRun: true },

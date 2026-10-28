@@ -12,7 +12,7 @@ const express = require('express');
 const router = express.Router();
 
 const AFFILIATES_ROOT = path.join(__dirname, '..', '..', 'public', 'affiliates');
-const TERMS_INC = path.join(AFFILIATES_ROOT, 'affiliate-terms-v1.inc.html');
+const TERMS_V2_INC = path.join(AFFILIATES_ROOT, 'affiliate-terms-v2.inc.html');
 const TERMS_SHELL = path.join(AFFILIATES_ROOT, 'terms-shell.html');
 const JOIN_HTML = path.join(AFFILIATES_ROOT, 'join.html');
 const CACHE = {
@@ -24,20 +24,28 @@ function readUtf8(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
-function buildTermsHtml() {
-  const shell = readUtf8(TERMS_SHELL);
-  const body = fs.existsSync(TERMS_INC) ? readUtf8(TERMS_INC) : '';
-  return shell.replace('<!-- AFFILIATE_TERMS_V1_BODY -->', body);
+function buildTermsHtml(shellPath, incPath, placeholder) {
+  const shell = readUtf8(shellPath);
+  const body = fs.existsSync(incPath) ? readUtf8(incPath) : '';
+  return shell.replace(placeholder, body);
 }
 
 function termsHtml() {
   if (process.env.NODE_ENV === 'production') {
     if (!CACHE.termsHtml) {
-      CACHE.termsHtml = buildTermsHtml();
+      CACHE.termsHtml = buildTermsHtml(
+        TERMS_SHELL,
+        TERMS_V2_INC,
+        '<!-- AFFILIATE_TERMS_V2_BODY -->',
+      );
     }
     return CACHE.termsHtml;
   }
-  return buildTermsHtml();
+  return buildTermsHtml(
+    TERMS_SHELL,
+    TERMS_V2_INC,
+    '<!-- AFFILIATE_TERMS_V2_BODY -->',
+  );
 }
 
 function joinHtml() {
