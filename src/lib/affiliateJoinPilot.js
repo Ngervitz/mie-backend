@@ -1,8 +1,10 @@
 'use strict';
 
 /**
- * Optional single-CI gate for affiliate join pilot (env AFFILIATE_JOIN_PILOT_CI).
- * When unset, all CIs allowed (subject to AFFILIATE_JOIN_ENABLED and invite rules).
+ * Optional affiliate join pilot gates:
+ * - AFFILIATE_JOIN_PILOT_ALLOWLIST: comma-separated CIs (7-recipient pilot)
+ * - AFFILIATE_JOIN_PILOT_CI: single Nelson CI (mutually exclusive with allowlist)
+ * When both unset, all CIs allowed (subject to AFFILIATE_JOIN_ENABLED and invite rules).
  */
 
 const { parseCi } = require('./affiliateDirectory');
@@ -22,10 +24,38 @@ function readAffiliateJoinPilotCi() {
 }
 
 /**
+ * @returns {Set<number>|null}
+ */
+function readAffiliateJoinPilotAllowlist() {
+  const raw = process.env.AFFILIATE_JOIN_PILOT_ALLOWLIST;
+  if (raw == null || String(raw).trim() === '') return null;
+  const parts = String(raw)
+    .split(/[,;\s]+/)
+    .map(function (p) {
+      return p.trim();
+    })
+    .filter(Boolean);
+  const set = new Set();
+  for (let i = 0; i < parts.length; i += 1) {
+    const ci = parseCi(parts[i]);
+    if (ci == null) return null;
+    set.add(ci);
+  }
+  return set.size ? set : null;
+}
+
+/**
  * @param {number|string} ci
  * @returns {boolean}
  */
 function isCiAllowedForAffiliateJoin(ci) {
+  const allowlist = readAffiliateJoinPilotAllowlist();
+  if (allowlist) {
+    const parsed = parseCi(ci);
+    if (parsed == null) return false;
+    return allowlist.has(parsed);
+  }
+
   const pilot = readAffiliateJoinPilotCi();
   if (pilot == null) return true;
   if (pilot !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) {
@@ -37,13 +67,15 @@ function isCiAllowedForAffiliateJoin(ci) {
 }
 
 /**
- * Optional SMS destination for the pilot CI only (env AFFILIATE_JOIN_PILOT_SMS_PHONE).
- * Used instead of cz_funnel_solicitudes when pilot CI matches. Unset → funnel only.
+ * Optional SMS destination for the Nelson pilot CI only (env AFFILIATE_JOIN_PILOT_SMS_PHONE).
+ * Allowlist pilot uses funnel celular per CI (no override).
  *
  * @param {number|string} ci
  * @returns {string|null} digits-only phone
  */
 function resolvePilotSmsPhoneOverride(ci) {
+  if (readAffiliateJoinPilotAllowlist()) return null;
+
   const pilot = readAffiliateJoinPilotCi();
   if (pilot == null) return null;
   if (pilot !== AFFILIATE_PILOT_AUTHORIZED_JOIN_CI) return null;
@@ -62,6 +94,7 @@ function resolvePilotSmsPhoneOverride(ci) {
 module.exports = {
   AFFILIATE_PILOT_AUTHORIZED_JOIN_CI,
   readAffiliateJoinPilotCi,
+  readAffiliateJoinPilotAllowlist,
   isCiAllowedForAffiliateJoin,
   resolvePilotSmsPhoneOverride,
 };
