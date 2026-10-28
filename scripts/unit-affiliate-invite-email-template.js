@@ -54,7 +54,7 @@ assert.ok(
   out.html.indexOf('participá acá en el programa de afiliados') !== -1,
   'text fallback link',
 );
-assert.ok(out.html.indexOf('affiliate_v2') !== -1, 'terms footer mentions version');
+assert.ok(out.html.indexOf('affiliate_v3') !== -1, 'terms footer mentions version');
 
 const extraBtn = out.html.match(/<a[^>]+class="[^"]*btn[^"]*"/gi);
 assert.strictEqual(extraBtn, null, 'no extra HTML button');

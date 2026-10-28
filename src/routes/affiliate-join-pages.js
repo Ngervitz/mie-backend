@@ -12,7 +12,7 @@ const express = require('express');
 const router = express.Router();
 
 const AFFILIATES_ROOT = path.join(__dirname, '..', '..', 'public', 'affiliates');
-const TERMS_V2_INC = path.join(AFFILIATES_ROOT, 'affiliate-terms-v2.inc.html');
+const TERMS_V3_INC = path.join(AFFILIATES_ROOT, 'affiliate-terms-v3.inc.html');
 const TERMS_SHELL = path.join(AFFILIATES_ROOT, 'terms-shell.html');
 const JOIN_HTML = path.join(AFFILIATES_ROOT, 'join.html');
 const CACHE = {
@@ -35,16 +35,16 @@ function termsHtml() {
     if (!CACHE.termsHtml) {
       CACHE.termsHtml = buildTermsHtml(
         TERMS_SHELL,
-        TERMS_V2_INC,
-        '<!-- AFFILIATE_TERMS_V2_BODY -->',
+        TERMS_V3_INC,
+        '<!-- AFFILIATE_TERMS_V3_BODY -->',
       );
     }
     return CACHE.termsHtml;
   }
   return buildTermsHtml(
     TERMS_SHELL,
-    TERMS_V2_INC,
-    '<!-- AFFILIATE_TERMS_V2_BODY -->',
+    TERMS_V3_INC,
+    '<!-- AFFILIATE_TERMS_V3_BODY -->',
   );
 }
 

@@ -40,11 +40,12 @@ const { AFFILIATE_INVITE_EMAIL_SUBJECT } = require('../src/lib/affiliateInviteEm
 const { DEFAULT_TERMS_VERSION, resolveConfiguredTermsVersion, buildReferralUrl } = require('../src/lib/affiliateJoinContract');
 
 assert.strictEqual(AFFILIATE_INVITE_EMAIL_SUBJECT, 'Ganá plata con Credizona');
-assert.strictEqual(DEFAULT_TERMS_VERSION, 'affiliate_v2');
-assert.strictEqual(resolveConfiguredTermsVersion(undefined), 'affiliate_v2');
-assert.strictEqual(resolveConfiguredTermsVersion('affiliate_v2'), 'affiliate_v2');
+assert.strictEqual(DEFAULT_TERMS_VERSION, 'affiliate_v3');
+assert.strictEqual(resolveConfiguredTermsVersion(undefined), 'affiliate_v3');
+assert.strictEqual(resolveConfiguredTermsVersion('affiliate_v3'), 'affiliate_v3');
 assert.strictEqual(resolveConfiguredTermsVersion('affiliate_v1'), 'affiliate_v1');
-assert.strictEqual(resolveConfiguredTermsVersion('not valid!'), 'affiliate_v2');
+assert.strictEqual(resolveConfiguredTermsVersion('affiliate_v2'), 'affiliate_v2');
+assert.strictEqual(resolveConfiguredTermsVersion('not valid!'), 'affiliate_v3');
 
 const nelsonUrl = resolvePilotClickUrl('nelson', { publicBaseUrl: 'https://s.credizona.net' });
 assert.ok(nelsonUrl.indexOf('/affiliates/join?t=') !== -1);
@@ -66,7 +67,7 @@ assert.strictEqual(nelsonMail.ok, true);
 assert.strictEqual(nelsonMail.email, PILOT_NELSON.email);
 assert.strictEqual(nelsonMail.ci, PILOT_NELSON.ci);
 assert.strictEqual(nelsonMail.join_token_pending, true);
-assert.ok(nelsonMail.html.indexOf('affiliate_v2') !== -1);
+assert.ok(nelsonMail.html.indexOf('affiliate_v3') !== -1);
 
 const nicoMail = buildPilotInviteEmail('nico', { publicBaseUrl: 'https://s.credizona.net' });
 assert.strictEqual(nicoMail.ok, true);

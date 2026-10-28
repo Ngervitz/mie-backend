@@ -149,7 +149,7 @@ async function runDryRun() {
     nelson_join_token_pending: plan.nelson_join_token_pending,
     nelson_token_placeholder: NELSON_JOIN_TOKEN_PLACEHOLDER,
     recipients: plan.manifest.recipients,
-    affiliate_terms_default: 'affiliate_v2',
+    affiliate_terms_default: 'affiliate_v3',
   };
 
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');

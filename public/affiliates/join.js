@@ -4,7 +4,7 @@
   var API = '/affiliates/v1';
   var state = {
     sessionToken: null,
-    termsVersion: 'affiliate_v2',
+    termsVersion: 'affiliate_v3',
     joinEnabled: false,
     inviteToken: null,
   };

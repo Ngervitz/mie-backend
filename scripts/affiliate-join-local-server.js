@@ -24,7 +24,7 @@ function loadJoinRouter(store, joinEnabled) {
       sessionSecret: 'test-session',
       affiliateJoinSessionHmacSecret: 'unit-affiliate-join-session-secret-xx',
       affiliateOtpHmacSecret: 'unit-affiliate-otp-hmac-secret-xxxxx',
-      affiliateTermsVersion: 'affiliate_v2',
+      affiliateTermsVersion: 'affiliate_v3',
       affiliatePublicReferralOrigin: 'https://s.credizona.net',
       affiliateTxSmsEnabled: false,
       affiliateJoinEnabled: enabled,
@@ -33,7 +33,7 @@ function loadJoinRouter(store, joinEnabled) {
     const exp = require.cache[envPath].exports;
     exp.affiliateJoinSessionHmacSecret = 'unit-affiliate-join-session-secret-xx';
     exp.affiliateOtpHmacSecret = 'unit-affiliate-otp-hmac-secret-xxxxx';
-    exp.affiliateTermsVersion = 'affiliate_v2';
+    exp.affiliateTermsVersion = 'affiliate_v3';
     exp.affiliatePublicReferralOrigin = 'https://s.credizona.net';
     exp.affiliateTxSmsEnabled = false;
     exp.affiliateJoinEnabled = enabled;
