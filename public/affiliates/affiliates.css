@@ -11,6 +11,7 @@
   --cz-radius: 12px;
   --cz-shadow: 0 8px 28px rgba(26, 46, 36, 0.08);
   --cz-max: 640px;
+  --cz-hero-max: 960px;
   --cz-terms-max: 720px;
 }
 
@@ -70,6 +71,27 @@ a:hover {
 
 .card--terms {
   max-width: var(--cz-terms-max);
+}
+
+.join-hero {
+  margin: 0 auto 8px;
+  max-width: var(--cz-hero-max);
+  background: var(--cz-surface);
+  border: 1px solid var(--cz-border);
+  border-radius: var(--cz-radius);
+  box-shadow: var(--cz-shadow);
+  overflow: hidden;
+}
+
+.join-hero__picture,
+.join-hero__img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.join-hero__terms {
+  margin: 16px 22px 20px;
 }
 
 h1 {

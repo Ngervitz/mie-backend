@@ -51,10 +51,20 @@ async function main() {
 
   const join = await getText(origin, '/affiliates/join');
   assert.strictEqual(join.status, 200);
-  assert.ok(join.text.indexOf('Recomendá Credizona y ganá $500') !== -1);
+  assert.ok(join.text.indexOf('<picture') !== -1);
+  assert.ok(join.text.indexOf('/affiliates/assets/programa-afiliados-mobile.png') !== -1);
+  assert.ok(join.text.indexOf('/affiliates/assets/banner-afiliados-desktop.png') !== -1);
+  assert.ok(join.text.indexOf('Recomendá Credizona y ganá $500') === -1);
   assert.ok(join.text.indexOf('viewport') !== -1);
   assert.ok(join.text.indexOf('/affiliates/terms') !== -1);
   assert.ok(join.text.indexOf('affiliate_v3') !== -1);
+  assert.ok(join.text.indexOf('id="join-panel"') !== -1);
+  assert.ok(join.text.indexOf('id="btn-send-otp"') !== -1);
+
+  const mobileHero = await getText(origin, '/affiliates/assets/programa-afiliados-mobile.png');
+  assert.strictEqual(mobileHero.status, 200);
+  const desktopHero = await getText(origin, '/affiliates/assets/banner-afiliados-desktop.png');
+  assert.strictEqual(desktopHero.status, 200);
 
   const terms = await getText(origin, '/affiliates/terms');
   assert.strictEqual(terms.status, 200);
@@ -140,7 +150,7 @@ async function main() {
   assert.strictEqual(blocked.status, 403);
   const joinOff = await getText(hOff.origin, '/affiliates/join');
   assert.strictEqual(joinOff.status, 200);
-  assert.ok(joinOff.text.indexOf('Recomendá Credizona') !== -1);
+  assert.ok(joinOff.text.indexOf('/affiliates/assets/programa-afiliados-mobile.png') !== -1);
   await hOff.close();
 
   console.log('unit-affiliate-join-pages: ok');

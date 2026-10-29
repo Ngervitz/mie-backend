@@ -99,4 +99,21 @@ router.get('/join.js', function serveJoinJs(req, res, next) {
   });
 });
 
+const AFFILIATES_ASSETS_ROOT = path.join(AFFILIATES_ROOT, 'assets');
+router.use(
+  '/assets',
+  express.static(AFFILIATES_ASSETS_ROOT, {
+    index: false,
+    fallthrough: false,
+  }),
+  function affiliateAssetsStaticError(err, req, res, next) {
+    const code = Number(err && (err.statusCode || err.status)) || 0;
+    if (code >= 400 && code < 500) {
+      res.sendStatus(code);
+      return;
+    }
+    next(err);
+  },
+);
+
 module.exports = router;
