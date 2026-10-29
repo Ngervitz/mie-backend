@@ -41,7 +41,7 @@ const OUTCOME_LABELS = Object.freeze({
   click_ci_conflict: 'El clic aparece en otra CI',
   ambiguous_fecha_reg: 'fecha_reg no ordenable',
   blocked_ambiguous_history: 'Historial no ordenable',
-  excluded_prior_solicitud: 'Hay una solicitud anterior',
+  excluded_prior_solicitud: 'Solicitud anterior registrada',
   other_affiliate: 'Otra afiliación',
 });
 
@@ -348,6 +348,23 @@ function isAffiliateAdhesionValidated(row) {
   return hasTerms && hasOtpEvidence;
 }
 
+/**
+ * @param {unknown} nombre
+ * @param {unknown} apellido
+ * @param {number|null|undefined} ci
+ */
+function formatAffiliateDisplayName(nombre, apellido, ci) {
+  const parts = [];
+  if (nombre != null && String(nombre).trim()) parts.push(String(nombre).trim());
+  if (apellido != null && String(apellido).trim()) {
+    parts.push(String(apellido).trim());
+  }
+  const full = parts.join(' ').trim();
+  if (full) return full;
+  if (ci != null && parseCi(ci) != null) return String(parseCi(ci));
+  return null;
+}
+
 function splitAttributions(rows) {
   const attributed = [];
   const excluded = [];
@@ -392,4 +409,5 @@ module.exports = {
   describeAffiliateAdhesion,
   isAffiliateAdhesionValidated,
   splitAttributions,
+  formatAffiliateDisplayName,
 };

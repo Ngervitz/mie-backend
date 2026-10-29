@@ -19744,6 +19744,24 @@ init();
     return escapeHtml(String(value));
   }
 
+  function afDisplayName(row) {
+    if (!row) return '—';
+    if (row.display_name) return String(row.display_name);
+    if (row.ci != null) return String(row.ci);
+    if (row.code) return String(row.code);
+    return '—';
+  }
+
+  function affiliateStatusLabel(row) {
+    if (!row) return '—';
+    if (row.is_test === true) return 'Prueba';
+    const status = String(row.status || '').toLowerCase();
+    if (status === 'active') return 'Activo';
+    if (status === 'inactive') return 'Inactivo';
+    if (row.status) return String(row.status);
+    return '—';
+  }
+
   function afMissingIntegrationCell(value) {
     if (value == null || value === undefined) return '—';
     return escapeHtml(String(value));
@@ -19832,13 +19850,12 @@ init();
   }
 
   function statusPill(row) {
-    const status = String(row.status || '—');
-    const active = status.toLowerCase() === 'active';
-    let label = status;
-    if (row.is_test) label += ' · prueba';
+    const active = String(row.status || '').toLowerCase() === 'active';
+    const label = affiliateStatusLabel(row);
     return (
       '<span class="affiliates-status-pill' +
-      (active ? ' is-active' : '') +
+      (active && !row.is_test ? ' is-active' : '') +
+      (row.is_test ? ' is-test' : '') +
       '">' +
       escapeHtml(label) +
       '</span>'
@@ -19862,23 +19879,25 @@ init();
           '"' +
           (selected ? ' class="is-selected"' : '') +
           '>' +
-          '<td class="num affiliates-col-ci">' +
+          '<td class="affiliates-col-name">' +
+          '<div class="affiliates-person-name">' +
+          escapeHtml(afDisplayName(row)) +
+          '</div>' +
+          '<div class="affiliates-person-ci">' +
           escapeHtml(row.ci != null ? String(row.ci) : '—') +
+          '</div>' +
           '</td>' +
-          '<td class="affiliates-col-adhesion">' +
-          adhesionCell(row) +
+          '<td class="affiliates-col-status">' +
+          statusPill(row) +
           '</td>' +
           '<td class="num affiliates-col-stat">' +
           afCountCell(row.click_count) +
           '</td>' +
-          '<td class="num affiliates-col-stat">' +
+          '<td class="num affiliates-col-stat affiliates-col-stat-attributed">' +
           afCountCell(row.attributed_count) +
           '</td>' +
-          '<td class="num affiliates-col-stat affiliates-col-na">' +
-          afMissingIntegrationCell(row.loans_granted) +
-          '</td>' +
-          '<td class="num affiliates-col-stat affiliates-col-na">' +
-          afMissingIntegrationCell(row.commissions) +
+          '<td class="num affiliates-col-stat affiliates-col-stat-excluded">' +
+          afCountCell(row.excluded_count) +
           '</td>' +
           '<td class="affiliates-col-action"><button type="button" class="btn btn-primary affiliates-detail-btn" data-action="affiliate-view">Detalle</button></td>' +
           '</tr>'
@@ -19888,11 +19907,10 @@ init();
     listRoot.innerHTML =
       '<div class="table-wrap affiliates-table-wrap"><table class="ga4-table rechazados-table affiliates-directory-table affiliates-compact-table">' +
       '<thead><tr>' +
-      '<th>CI</th><th>Adhesión al plan</th>' +
-      '<th class="affiliates-col-stat">Clics referido</th>' +
+      '<th>Afiliado</th><th>Estado</th>' +
+      '<th class="affiliates-col-stat">Clics en enlaces de referido</th>' +
       '<th class="affiliates-col-stat">Solicitudes atribuidas</th>' +
-      '<th class="affiliates-col-stat">Préstamos otorgados</th>' +
-      '<th class="affiliates-col-stat">Comisiones</th>' +
+      '<th class="affiliates-col-stat">Solicitudes excluidas</th>' +
       '<th>Detalle</th>' +
       '</tr></thead><tbody>' +
       body +
@@ -20043,8 +20061,16 @@ init();
     detailRoot.innerHTML =
       '<div class="affiliates-detail-header">' +
       '<div><h2 class="affiliates-detail-title">' +
-      escapeHtml(String(row.code)) +
+      escapeHtml(afDisplayName(row)) +
       '</h2>' +
+      '<div class="affiliates-detail-subtitle">' +
+      '<span class="affiliates-muted">Código </span><code>' +
+      escapeHtml(String(row.code || '—')) +
+      '</code>' +
+      (row.ci != null
+        ? ' · <span class="affiliates-muted">CI </span>' + escapeHtml(String(row.ci))
+        : '') +
+      '</div>' +
       statusPill(row) +
       '</div>' +
       '<button type="button" class="btn" data-action="affiliate-close">Cerrar</button></div>' +
@@ -20070,18 +20096,18 @@ init();
       '<div class="affiliates-detail-folds">' +
       clicksFold(clicks) +
       solFold(
-        'Atribuidas (' + (sol.attributed_count || 0) + ')',
+        'Solicitudes atribuidas (' + (sol.attributed_count || 0) + ')',
         null,
         sol.attributed,
         'Ninguna solicitud atribuida.',
         false,
       ) +
       solFold(
-        'Excluidas (' + (sol.excluded_count || 0) + ')',
+        'Solicitudes excluidas (' + (sol.excluded_count || 0) + ')',
         'Motivos de exclusión según outcome almacenado.',
         sol.excluded,
         'Ninguna exclusión registrada.',
-        false,
+        (sol.excluded_count || 0) > 0,
       ) +
       solFold(
         'Pendientes (' + (sol.in_progress_count || 0) + ')',
@@ -20117,6 +20143,33 @@ init();
     return escapeHtml(String(value));
   }
 
+  function afKpiCardHtml(card, extraClass) {
+    const cls =
+      'affiliates-kpi-card' + (extraClass ? ' ' + extraClass : '');
+    return (
+      '<div class="' +
+      cls +
+      '" title="' +
+      escapeHtml(card.title || card.label) +
+      '">' +
+      (card.emoji
+        ? '<span class="affiliates-kpi-emoji" aria-hidden="true">' +
+          card.emoji +
+          '</span>'
+        : '') +
+      '<div class="affiliates-kpi-body">' +
+      '<div class="affiliates-kpi-value' +
+      (card.tone === 'excluded' ? ' is-excluded-stat' : '') +
+      (card.tone === 'attributed' ? ' is-attributed-stat' : '') +
+      '">' +
+      afSummaryDisplay(card.value) +
+      '</div>' +
+      '<div class="affiliates-kpi-label">' +
+      escapeHtml(card.label) +
+      '</div></div></div>'
+    );
+  }
+
   function renderSummary() {
     if (!summaryRoot) return;
     const data = afState.summary;
@@ -20133,16 +20186,46 @@ init();
         ? String(outreach.email.invite_clicks.label || 'No medidos')
         : null;
 
-    const cards = [
+    const primary = [
+      {
+        emoji: '👥',
+        label: 'Afiliados activos',
+        title: 'Afiliados con estado activo (sin contar prueba)',
+        value: data.active_affiliates_count,
+      },
+      {
+        emoji: '👆',
+        label: 'Clics en enlaces de referido',
+        title: 'Clics en enlaces personales /a/{código} (affiliate_clicks)',
+        value:
+          data.referral_link_clicks != null ? data.referral_link_clicks : data.clicks,
+      },
+      {
+        emoji: '◎',
+        label: 'Solicitudes atribuidas',
+        title: 'Solicitudes con outcome attributed',
+        value: data.attributed_solicitudes,
+        tone: 'attributed',
+      },
+      {
+        emoji: '⊘',
+        label: 'Solicitudes excluidas',
+        title: 'Solicitudes con outcome de exclusión (no cuentan como atribuidas)',
+        value: data.excluded_solicitudes,
+        tone: 'excluded',
+      },
+    ];
+
+    const outreachCards = [
       {
         emoji: '📧',
-        label: 'Invitaciones email',
+        label: 'Invitaciones enviadas por email',
         title: 'Invitaciones por email (piloto)',
         value: data.invitations_sent,
       },
       {
         emoji: '📱',
-        label: 'SMS invitación',
+        label: 'Invitaciones enviadas por SMS',
         title: 'SMS de invitación al programa (vertical afiliados)',
         value:
           outreach && outreach.sms && outreach.sms.available
@@ -20150,17 +20233,8 @@ init();
             : '—',
       },
       {
-        emoji: '✓',
-        label: 'SMS entregados',
-        title: 'SMS de invitación entregados (Notifyme DELIVERED)',
-        value:
-          outreach && outreach.sms && outreach.sms.available
-            ? outreach.sms.delivered
-            : '—',
-      },
-      {
         emoji: '🔗',
-        label: 'Clics invitación SMS',
+        label: 'Clics en invitaciones SMS',
         title: 'Clics únicos JT en enlaces de invitación SMS',
         value:
           outreach && outreach.sms && outreach.sms.available
@@ -20168,67 +20242,26 @@ init();
             : '—',
       },
       {
-        emoji: '👤',
-        label: 'Alta vía SMS',
-        title: 'Afiliados registrados atribuibles a invitación SMS',
-        value:
-          outreach && outreach.sms && outreach.sms.available
-            ? outreach.sms.affiliates_registered
-            : '—',
-      },
-      {
         emoji: '✉️',
-        label: 'Clics invitación email',
-        title: 'Clics en invitaciones email (piloto sin JT)',
+        label: 'Clics en invitaciones por email',
+        title: 'Clics en invitaciones email (piloto sin medición JT)',
         value: emailInviteClicks != null ? emailInviteClicks : '—',
       },
-      {
-        emoji: '✓',
-        label: 'Validados',
-        title: 'Afiliados con adhesión validada',
-        value: data.registered_validated,
-      },
-      {
-        emoji: '👆',
-        label: 'Clics referido',
-        title: 'Clics en enlaces personales de afiliados (préstamos)',
-        value: data.referral_link_clicks != null ? data.referral_link_clicks : data.clicks,
-      },
-      {
-        emoji: '◎',
-        label: 'Atribuidas',
-        title: 'Solicitudes atribuidas',
-        value: data.attributed_solicitudes,
-      },
-      {
-        emoji: '⊘',
-        label: 'Excluidas',
-        title: 'Solicitudes excluidas',
-        value: data.excluded_solicitudes,
-      },
     ];
+
     summaryRoot.innerHTML =
-      '<div class="affiliates-kpi-grid">' +
-      cards
-        .map(function (card) {
-          return (
-            '<div class="affiliates-kpi-card" title="' +
-            escapeHtml(card.title) +
-            '">' +
-            '<span class="affiliates-kpi-emoji" aria-hidden="true">' +
-            card.emoji +
-            '</span>' +
-            '<div class="affiliates-kpi-body">' +
-            '<div class="affiliates-kpi-value">' +
-            afSummaryDisplay(card.value) +
-            '</div>' +
-            '<div class="affiliates-kpi-label">' +
-            escapeHtml(card.label) +
-            '</div></div></div>'
-          );
-        })
-        .join('') +
-      '</div>';
+      '<div class="affiliates-kpi-section">' +
+      '<div class="affiliates-kpi-grid affiliates-kpi-grid--primary">' +
+      primary.map(function (card) {
+        return afKpiCardHtml(card, 'affiliates-kpi-card--primary');
+      }).join('') +
+      '</div>' +
+      '<div class="affiliates-kpi-section-label">Invitaciones y alcance</div>' +
+      '<div class="affiliates-kpi-grid affiliates-kpi-grid--outreach">' +
+      outreachCards.map(function (card) {
+        return afKpiCardHtml(card, '');
+      }).join('') +
+      '</div></div>';
   }
 
   async function loadSummary() {

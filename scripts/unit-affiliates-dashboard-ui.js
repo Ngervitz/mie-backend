@@ -23,24 +23,26 @@ const css = fs.readFileSync(
 );
 
 assert.ok(
-  html.indexOf('?v=20261028-affiliates-kpi-compact') !== -1,
-  'cache bust affiliates kpi compact',
+  html.indexOf('?v=20261029-affiliates-directory') !== -1,
+  'cache bust affiliates directory refresh',
 );
 assert.ok(html.indexOf('id="affiliates-summary-root"') !== -1);
 assert.ok(js.indexOf("afFetch('/affiliates/summary')") !== -1);
-assert.ok(js.indexOf('affiliates-kpi-grid') !== -1);
-assert.ok(js.indexOf('Invitaciones enviadas') !== -1);
-assert.ok(js.indexOf("'Validados'") !== -1);
+assert.ok(js.indexOf('affiliates-kpi-grid--primary') !== -1);
+assert.ok(js.indexOf('Invitaciones enviadas por email') !== -1);
+assert.ok(js.indexOf('Afiliados activos') !== -1);
+assert.ok(js.indexOf('Solicitudes excluidas') !== -1);
+assert.ok(js.indexOf('excluded_count') !== -1);
+assert.ok(js.indexOf('afDisplayName') !== -1);
 assert.ok(html.indexOf('data-dashboard-tab="affiliates"') !== -1);
 assert.ok(html.indexOf('id="affiliates-panel"') !== -1);
 assert.ok(js.indexOf('affiliates-compact-table') !== -1);
-assert.ok(js.indexOf('Adhesión al plan') !== -1);
-assert.ok(js.indexOf('Préstamos otorgados') !== -1);
-assert.ok(js.indexOf('loadOverviewTotals') === -1);
 assert.ok(js.indexOf('Adhesión validada') !== -1);
 assert.ok(js.indexOf('affiliates-adhesion-valid') !== -1);
+assert.ok(js.indexOf('loadOverviewTotals') === -1);
 assert.ok(css.indexOf('.affiliates-col-stat') !== -1);
-assert.ok(css.indexOf('text-align: center') !== -1);
+assert.ok(css.indexOf('.affiliates-person-name') !== -1);
+assert.ok(css.indexOf('.affiliates-kpi-grid--primary') !== -1);
 assert.ok(
   html.indexOf("affiliates: document.getElementById('affiliates-panel')") !== -1,
 );

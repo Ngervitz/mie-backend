@@ -18,4 +18,12 @@ const routeSrc = fs.readFileSync(
 assert.ok(routeSrc.indexOf('listAffiliatesWithRowStats') !== -1);
 assert.ok(routeSrc.indexOf('listAffiliates(supabase)') === -1);
 
+const readSrc = fs.readFileSync(
+  path.join(__dirname, '../src/lib/affiliateDirectoryRead.js'),
+  'utf8',
+);
+assert.ok(readSrc.indexOf('excluded_count') !== -1);
+assert.ok(readSrc.indexOf('attachAffiliateDisplayNames') !== -1);
+assert.ok(readSrc.indexOf('active_affiliates_count') !== -1);
+
 console.log('unit-affiliate-list-row-stats: ok');

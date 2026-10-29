@@ -14,6 +14,7 @@ const {
   listCell,
   planAffiliateInsert,
   splitAttributions,
+  formatAffiliateDisplayName,
   EXCLUSION_OUTCOMES,
   LIST_CAP,
 } = require('./affiliateDirectory');
@@ -181,11 +182,106 @@ async function countValidatedAffiliates(supabase) {
   }
 }
 
+async function countActiveAffiliates(supabase) {
+  try {
+    const rows = await listAffiliates(supabase);
+    let n = 0;
+    rows.forEach(function (row) {
+      if (row.is_test === true) return;
+      if (String(row.status || '').toLowerCase() === 'active') n += 1;
+    });
+    return n;
+  } catch (err) {
+    if (schemaMissing(err)) return null;
+    throw err;
+  }
+}
+
+async function latestPersonNamesByCi(supabase, cis) {
+  const parsed = [];
+  const seen = new Set();
+  (cis || []).forEach(function (raw) {
+    const ci = parseCi(raw);
+    if (ci == null || seen.has(ci)) return;
+    seen.add(ci);
+    parsed.push(ci);
+  });
+  if (!parsed.length) return new Map();
+  try {
+    const rows = await selectIn(
+      supabase,
+      'cz_funnel_solicitudes',
+      'ci, nombre, apellido, cz_id',
+      'ci',
+      parsed,
+    );
+    const best = new Map();
+    rows.forEach(function (row) {
+      const ci = parseCi(row.ci);
+      const czId = Number(row.cz_id);
+      if (ci == null || !Number.isSafeInteger(czId)) return;
+      const prev = best.get(ci);
+      if (!prev || czId > prev.cz_id) {
+        best.set(ci, {
+          cz_id: czId,
+          nombre: row.nombre,
+          apellido: row.apellido,
+        });
+      }
+    });
+    const out = new Map();
+    best.forEach(function (row, ci) {
+      const name = formatAffiliateDisplayName(row.nombre, row.apellido, ci);
+      if (name) out.set(ci, name);
+    });
+    return out;
+  } catch (err) {
+    if (schemaMissing(err)) return new Map();
+    throw err;
+  }
+}
+
+async function attachAffiliateDisplayNames(supabase, rows) {
+  const cis = (rows || []).map(function (row) {
+    return row.ci;
+  });
+  const names = await latestPersonNamesByCi(supabase, cis);
+  return (rows || []).map(function (row) {
+    const ci = parseCi(row.ci);
+    let display_name = null;
+    if (ci != null) {
+      display_name = names.get(ci) || String(ci);
+    } else if (row.code) {
+      display_name = String(row.code);
+    }
+    return Object.assign({}, row, {
+      display_name: display_name,
+    });
+  });
+}
+
+async function aggregateExcludedCountsByAffiliate(supabase) {
+  const counts = new Map();
+  const rows = await pageAll(function (from, to) {
+    return supabase
+      .from('affiliate_attributions')
+      .select('affiliate_id, outcome')
+      .in('outcome', EXCLUSION_OUTCOMES)
+      .order('cz_id', { ascending: true })
+      .range(from, to);
+  });
+  rows.forEach(function (row) {
+    incrementCount(counts, row.affiliate_id);
+  });
+  return counts;
+}
+
 /**
  * Global KPI aggregates for the Afiliados dashboard (read-only).
  */
 async function aggregateAffiliateDashboardSummary(supabase) {
   const summary = {
+    active_affiliates_count: null,
     invitations_sent: null,
     registered_validated: null,
     clicks: null,
@@ -196,6 +292,12 @@ async function aggregateAffiliateDashboardSummary(supabase) {
   };
 
   summary.invitations_sent = await countAffiliateInviteEmailsSent(supabase);
+
+  try {
+    summary.active_affiliates_count = await countActiveAffiliates(supabase);
+  } catch (err) {
+    if (!schemaMissing(err)) throw err;
+  }
 
   try {
     summary.invite_outreach = await aggregateAffiliateInviteOutreach(
@@ -272,20 +374,23 @@ async function aggregateAttributedCountsByAffiliate(supabase) {
  */
 async function listAffiliatesWithRowStats(supabase) {
   const affiliates = await listAffiliates(supabase);
-  const [clickCounts, attributedCounts] = await Promise.all([
+  const [clickCounts, attributedCounts, excludedCounts] = await Promise.all([
     aggregateClickCountsByAffiliate(supabase),
     aggregateAttributedCountsByAffiliate(supabase),
+    aggregateExcludedCountsByAffiliate(supabase),
   ]);
-  return affiliates.map(function (row) {
+  const enriched = affiliates.map(function (row) {
     const id = String(row.id);
     return Object.assign({}, row, {
       click_count: clickCounts.get(id) || 0,
       attributed_count: attributedCounts.get(id) || 0,
+      excluded_count: excludedCounts.get(id) || 0,
       adhesion: describeAffiliateAdhesion(row),
       loans_granted: null,
       commissions: null,
     });
   });
+  return attachAffiliateDisplayNames(supabase, enriched);
 }
 
 async function getAffiliate(supabase, id) {
@@ -295,7 +400,9 @@ async function getAffiliate(supabase, id) {
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
-  return data || null;
+  if (!data) return null;
+  const rows = await attachAffiliateDisplayNames(supabase, [data]);
+  return rows[0] || null;
 }
 
 async function listClicks(supabase, affiliateId) {

@@ -72,7 +72,14 @@ const AT = '2026-10-22T18:00:00.000Z';
   assert.strictEqual(plain.detail, 'Sin clic');
   const excluded = describeOutcome('excluded_prior_solicitud');
   assert.strictEqual(excluded.kind, 'excluded');
+  assert.strictEqual(excluded.label, 'Solicitud anterior registrada');
   assert.ok(excluded.detail.indexOf('REF · Excluido · ') === 0);
+}
+
+{
+  const { formatAffiliateDisplayName } = require('../src/lib/affiliateDirectory');
+  assert.strictEqual(formatAffiliateDisplayName('Ana', 'Pérez', 123), 'Ana Pérez');
+  assert.strictEqual(formatAffiliateDisplayName(null, null, 12345678), '12345678');
 }
 
 {

@@ -5520,6 +5520,69 @@
 #mie-dashboard-app .affiliates-compact-table tbody td {
   padding: 8px 10px;
 }
+#mie-dashboard-app .affiliates-col-name {
+  min-width: 10rem;
+  max-width: 220px;
+}
+#mie-dashboard-app .affiliates-person-name {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+}
+#mie-dashboard-app .affiliates-person-ci {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+#mie-dashboard-app .affiliates-col-status {
+  min-width: 5.5rem;
+}
+#mie-dashboard-app .affiliates-status-pill.is-test {
+  opacity: 0.92;
+}
+#mie-dashboard-app .affiliates-col-stat-excluded {
+  color: #e8b86d;
+}
+#mie-dashboard-app .affiliates-col-stat-attributed {
+  color: #9ccc9c;
+}
+#mie-dashboard-app .affiliates-kpi-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#mie-dashboard-app .affiliates-kpi-section-label {
+  margin: 4px 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+#mie-dashboard-app .affiliates-kpi-grid--primary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#mie-dashboard-app .affiliates-kpi-grid--outreach {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#mie-dashboard-app .affiliates-kpi-card--primary {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.045);
+}
+#mie-dashboard-app .affiliates-kpi-value.is-excluded-stat {
+  color: #e8b86d;
+}
+#mie-dashboard-app .affiliates-kpi-value.is-attributed-stat {
+  color: #9ccc9c;
+}
+#mie-dashboard-app .affiliates-detail-subtitle {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
 #mie-dashboard-app .affiliates-col-adhesion {
   min-width: 140px;
   max-width: 220px;
@@ -5618,8 +5681,10 @@
   text-overflow: ellipsis;
 }
 @media (max-width: 900px) {
-  #mie-dashboard-app .affiliates-kpi-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  #mie-dashboard-app .affiliates-kpi-grid,
+  #mie-dashboard-app .affiliates-kpi-grid--primary,
+  #mie-dashboard-app .affiliates-kpi-grid--outreach {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   #mie-dashboard-app .affiliates-kpi-card:nth-child(4),
   #mie-dashboard-app .affiliates-kpi-card:nth-child(5) {
