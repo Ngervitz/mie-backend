@@ -22,6 +22,10 @@ const {
 const {
   aggregateAffiliateInviteOutreach,
 } = require('./affiliateInviteOutreachMetrics');
+const {
+  isValidAffiliateEmail,
+  welcomeEmailDashboardLabel,
+} = require('./affiliateWelcomeEmail');
 
 const PAGE = 500;
 const IN_CHUNK = 200;
@@ -372,6 +376,86 @@ async function aggregateAttributedCountsByAffiliate(supabase) {
 /**
  * Directory list with per-row click and attributed counts (read-only aggregates).
  */
+async function validEmailByCi(supabase, cis) {
+  const parsed = [];
+  const seen = new Set();
+  (cis || []).forEach(function (raw) {
+    const ci = parseCi(raw);
+    if (ci == null || seen.has(ci)) return;
+    seen.add(ci);
+    parsed.push(ci);
+  });
+  const out = new Map();
+  if (!parsed.length) return out;
+  const rows = await selectIn(
+    supabase,
+    'cz_funnel_solicitudes',
+    'ci, email, cz_id',
+    'ci',
+    parsed,
+  );
+  rows.forEach(function (row) {
+    const ci = parseCi(row.ci);
+    if (ci == null || !isValidAffiliateEmail(row.email)) return;
+    out.set(ci, true);
+  });
+  return out;
+}
+
+async function welcomeRecipientsByAffiliate(supabase, rows) {
+  const byId = new Map();
+  const cis = [];
+  (rows || []).forEach(function (row) {
+    const ci = parseCi(row.ci);
+    if (ci != null) cis.push(String(ci));
+  });
+  if (!cis.length) return byId;
+  const data = await selectIn(
+    supabase,
+    'email_campaign_recipients',
+    'id, ci, status, provider_message_id, idempotency_key',
+    'ci',
+    cis,
+  );
+  data.forEach(function (row) {
+    const key = row.idempotency_key != null ? String(row.idempotency_key) : '';
+    if (key.indexOf('affiliate-welcome:') !== 0) return;
+    const affiliateId = key.slice('affiliate-welcome:'.length);
+    if (!affiliateId || byId.has(affiliateId)) return;
+    byId.set(affiliateId, row);
+  });
+  return byId;
+}
+
+async function attachWelcomeEmailState(supabase, rows) {
+  let recipients = new Map();
+  let emails = new Map();
+  try {
+    recipients = await welcomeRecipientsByAffiliate(supabase, rows);
+  } catch (err) {
+    if (!schemaMissing(err)) throw err;
+  }
+  try {
+    emails = await validEmailByCi(supabase, (rows || []).map(function (row) {
+      return row.ci;
+    }));
+  } catch (err) {
+    if (!schemaMissing(err)) throw err;
+  }
+  return (rows || []).map(function (row) {
+    const recipient = recipients.get(String(row.id)) || null;
+    const hasEmail = emails.get(parseCi(row.ci)) === true;
+    const label = welcomeEmailDashboardLabel(recipient, hasEmail);
+    return Object.assign({}, row, {
+      welcome_email: label,
+      welcome_email_detail:
+        label === 'OK'
+          ? 'El proveedor aceptó el envío. No confirma entrega al buzón.'
+          : '',
+    });
+  });
+}
+
 async function listAffiliatesWithRowStats(supabase) {
   const affiliates = await listAffiliates(supabase);
   const [clickCounts, attributedCounts, excludedCounts] = await Promise.all([
@@ -390,7 +474,8 @@ async function listAffiliatesWithRowStats(supabase) {
       commissions: null,
     });
   });
-  return attachAffiliateDisplayNames(supabase, enriched);
+  const named = await attachAffiliateDisplayNames(supabase, enriched);
+  return attachWelcomeEmailState(supabase, named);
 }
 
 async function getAffiliate(supabase, id) {

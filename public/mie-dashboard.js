@@ -19887,6 +19887,13 @@ init();
           escapeHtml(row.ci != null ? String(row.ci) : '—') +
           '</div>' +
           '</td>' +
+          '<td class="affiliates-col-welcome"' +
+          (row.welcome_email_detail
+            ? ' title="' + escapeHtml(row.welcome_email_detail) + '"'
+            : '') +
+          '>' +
+          escapeHtml(row.welcome_email || 'Pendiente') +
+          '</td>' +
           '<td class="affiliates-col-status">' +
           statusPill(row) +
           '</td>' +
@@ -19907,7 +19914,7 @@ init();
     listRoot.innerHTML =
       '<div class="table-wrap affiliates-table-wrap"><table class="ga4-table rechazados-table affiliates-directory-table affiliates-compact-table">' +
       '<thead><tr>' +
-      '<th>Afiliado</th><th>Estado</th>' +
+      '<th>Afiliado</th><th>Email bienvenida</th><th>Estado</th>' +
       '<th class="affiliates-col-stat">Clics en enlaces de referido</th>' +
       '<th class="affiliates-col-stat">Solicitudes atribuidas</th>' +
       '<th class="affiliates-col-stat">Solicitudes excluidas</th>' +

@@ -5524,6 +5524,10 @@
   min-width: 10rem;
   max-width: 220px;
 }
+#mie-dashboard-app .affiliates-col-welcome {
+  white-space: nowrap;
+  font-size: 13px;
+}
 #mie-dashboard-app .affiliates-person-name {
   font-weight: 600;
   font-size: 13px;

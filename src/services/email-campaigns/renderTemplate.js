@@ -115,6 +115,16 @@ function renderOutboundEmail(input) {
     }
   }
 
+  if (purpose === EMAIL_PURPOSES.AFFILIATE_WELCOME) {
+    const check = validateRequiredTemplateVars(vars, ['affiliate_url']);
+    if (!check.ok) {
+      return {
+        ok: false,
+        errorReason: 'missing_required_template_var:' + check.missing,
+      };
+    }
+  }
+
   const merge = buildMergeMap(vars, { nombreFallback: NOMBRE_FALLBACK });
   return {
     ok: true,

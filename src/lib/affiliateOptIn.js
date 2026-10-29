@@ -24,6 +24,8 @@ const {
 const { generateAffiliateCode, MAX_GENERATION_ATTEMPTS } = require('./affiliateCode');
 const { planAffiliateLandingOptInInsert, parseCi } = require('./affiliateDirectory');
 const { queueAffiliateTransactionalSms } = require('./affiliateTransactionalSms');
+const { sendAffiliateWelcomeEmail } = require('./affiliateWelcomeEmail');
+const logger = require('./logger');
 const { schemaMissing, ciExistsInFunnel } = require('./affiliateOptInDbHelpers');
 const { resolveAffiliateSmsPhone } = require('./affiliatePhoneResolve');
 const { buildReferralUrl } = require('./affiliateJoinContract');
@@ -480,6 +482,21 @@ async function verifyOtpAndRegisterForInvite(
 
   const affiliate = inserted.affiliate;
   const referralUrl = buildReferralUrl(affiliate.code, deps.referralOrigin);
+
+  if (!inserted.idempotent) {
+    try {
+      const sendWelcome = deps.queueWelcomeEmail || sendAffiliateWelcomeEmail;
+      await sendWelcome(supabase, affiliate, {
+        referralOrigin: deps.referralOrigin,
+        send: deps.sendWelcomeEmail,
+      });
+    } catch (welcomeErr) {
+      logger.error('affiliate welcome email failed after registration', {
+        affiliate_id: affiliate.id,
+        error: welcomeErr && welcomeErr.message ? welcomeErr.message : String(welcomeErr),
+      });
+    }
+  }
 
   if (phone) {
     await (deps.queueSms || queueAffiliateTransactionalSms)({
