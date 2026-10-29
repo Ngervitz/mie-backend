@@ -101,6 +101,45 @@ router.get('/summary', async function summary(req, res) {
   }
 });
 
+router.post('/sms-pilot10/prepare', async function pilot10Prepare(req, res) {
+  try {
+    const {
+      prepareAffiliateInviteSmsPilot10Batch,
+      isPilot10SendAuthorized,
+    } = require('../lib/affiliateInviteSmsPilot10Orchestration');
+    const dryRun = req.body && req.body.dry_run === false ? false : true;
+    if (!dryRun && !isPilot10SendAuthorized({ dryRun: false })) {
+      return fail(res, 403, 'pilot10_send_not_authorized');
+    }
+    const batch = await prepareAffiliateInviteSmsPilot10Batch(supabase, new Date(), {
+      dryRun: dryRun || !isPilot10SendAuthorized({ dryRun: false }),
+    });
+    return res.json({ ok: batch.ok, data: batch });
+  } catch (err) {
+    return sendError(res, err, 'POST /affiliates/sms-pilot10/prepare failed');
+  }
+});
+
+router.post('/sms-pilot10/dispatch', async function pilot10Dispatch(req, res) {
+  try {
+    const { dispatchAffiliateInviteSmsPilot10 } = require('../lib/affiliateInviteSmsPilot10Dispatch');
+    const forceDry = !(req.body && req.body.send === true);
+    const out = await dispatchAffiliateInviteSmsPilot10(supabase, {
+      dryRun: forceDry,
+    });
+    if (!out.ok) {
+      return res.status(out.errorReason === 'pilot10_pre_send_gates_failed' ? 412 : 400).json({
+        ok: false,
+        error: out.errorReason || 'dispatch_failed',
+        data: out,
+      });
+    }
+    return res.json({ ok: true, data: out });
+  } catch (err) {
+    return sendError(res, err, 'POST /affiliates/sms-pilot10/dispatch failed');
+  }
+});
+
 router.get('/:id', async function detail(req, res) {
   const id = parseId(req.params && req.params.id);
   if (!id) return fail(res, 400, 'Identificador inválido');

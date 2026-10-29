@@ -438,6 +438,156 @@ async function deliverChunk(client, credentials, chunkRows, meta) {
   }
 }
 
+async function patchSmsMessagesByUniqueIds(uniqueIds, patch) {
+  if (!Array.isArray(uniqueIds) || uniqueIds.length === 0) {
+    throw new NotifymeError('uniqueIds must be a non-empty array', {
+      kind: 'validation',
+      status: 400,
+    });
+  }
+  const ids = uniqueIds.map((id, i) => assertUniqueIdString(String(id), `patch[${i}]`));
+  const { error } = await supabase.from('sms_messages').update(patch).in('unique_id', ids);
+  if (error) {
+    throw new NotifymeError(`Failed to patch sms_messages: ${error.message}`, {
+      kind: 'database',
+      status: 500,
+    });
+  }
+}
+
+/**
+ * Deliver rows already persisted in sms_messages (same unique_id as Notifyme messageIds).
+ * Provider contract: deliverMessages is void; duplicate uniqueId behavior is not documented by Notifyme.
+ */
+async function deliverInsertedRows(campaignId, insertedRows) {
+  if (!insertedRows || !insertedRows.length) {
+    throw new NotifymeError('insertedRows must be non-empty', { kind: 'validation', status: 400 });
+  }
+  const credentials = requireCredentials();
+  const client = await getSoapClient();
+  await deliverChunk(client, credentials, insertedRows, { campaignId, chunkIndex: 0 });
+}
+
+/** @param {unknown} rawStatus */
+function classifyNotifymeDeliveryStatus(rawStatus) {
+  const st = rawStatus == null ? '' : String(rawStatus).trim();
+  if (!st) return 'ambiguous';
+  const upper = st.toUpperCase();
+  if (upper === 'UNKNOWN') return 'unknown';
+  if (DELIVERED_STATUS_VALUES && DELIVERED_STATUS_VALUES.has(st)) return 'delivered';
+  if (upper === 'DELIVERED') return 'delivered';
+  if (['ERROR', 'FAILED', 'REJECTED', 'UNDELIVERED', 'NOT_SENT', 'NOT DELIVERED'].includes(upper)) {
+    return 'not_received';
+  }
+  if (upper === 'PENDING' || upper === 'SENT' || upper === 'ENROUTE') return 'pending';
+  return 'ambiguous';
+}
+
+/**
+ * Insert (unless reusing existingUniqueId), deliver, reconcile ambiguous timeouts via getMessagesStatus.
+ */
+async function insertDeliverAndReconcileSingle(campaignId, message, opts) {
+  const o = opts || {};
+  let row = null;
+
+  if (o.existingUniqueId) {
+    const uid = assertUniqueIdString(String(o.existingUniqueId), 'existingUniqueId');
+    const { data, error } = await supabase
+      .from('sms_messages')
+      .select(
+        'unique_id, campaign_id, submission_order, phone, text, scheduled_at, status, contact_id, source_system, source_record_id, czuid, marketing_impact_id',
+      )
+      .eq('unique_id', uid)
+      .eq('campaign_id', campaignId)
+      .maybeSingle();
+    if (error) {
+      throw new NotifymeError(`Failed to load sms_messages row: ${error.message}`, {
+        kind: 'database',
+        status: 500,
+      });
+    }
+    if (!data) {
+      throw new NotifymeError('existingUniqueId not found for campaign', {
+        kind: 'validation',
+        status: 404,
+      });
+    }
+    row = data;
+  } else {
+    const normalized = validateMessagesInput([message]);
+    const inserted = await insertCampaignMessages(campaignId, normalized);
+    row = inserted[0];
+  }
+
+  await updateCampaignStatus(campaignId, 'sending');
+
+  try {
+    await deliverInsertedRows(campaignId, [row]);
+    await updateCampaignStatus(campaignId, 'sent');
+    return {
+      ok: true,
+      unique_id: String(row.unique_id),
+      delivery: 'submitted',
+      block_auto_resend: false,
+    };
+  } catch (err) {
+    const mapped = err instanceof NotifymeError ? err : mapSoapFault(err);
+    if (mapped.kind !== 'timeout') {
+      await updateCampaignStatus(campaignId, 'error');
+      throw mapped;
+    }
+
+    await patchSmsMessagesByUniqueIds([String(row.unique_id)], { status: 'unknown' });
+    const poll = await pollStatus([String(row.unique_id)]);
+    const { data: afterPoll, error: readErr } = await supabase
+      .from('sms_messages')
+      .select('unique_id, status, delivered_at, fail_reason')
+      .eq('unique_id', String(row.unique_id))
+      .maybeSingle();
+    if (readErr) {
+      throw new NotifymeError(`Failed to read sms_messages after poll: ${readErr.message}`, {
+        kind: 'database',
+        status: 500,
+      });
+    }
+
+    const outcome = classifyNotifymeDeliveryStatus(afterPoll && afterPoll.status);
+    if (outcome === 'delivered') {
+      await updateCampaignStatus(campaignId, 'sent');
+      return {
+        ok: true,
+        unique_id: String(row.unique_id),
+        delivery: 'delivered_after_timeout_poll',
+        poll: poll,
+        block_auto_resend: false,
+      };
+    }
+    if (outcome === 'not_received') {
+      await updateCampaignStatus(campaignId, 'error');
+      return {
+        ok: false,
+        unique_id: String(row.unique_id),
+        delivery: 'not_received_confirmed',
+        reason: 'notifyme_not_received',
+        poll: poll,
+        block_auto_resend: false,
+        may_retry_same_unique_id: true,
+      };
+    }
+
+    await updateCampaignStatus(campaignId, 'partial_error');
+    return {
+      ok: false,
+      unique_id: String(row.unique_id),
+      delivery: 'unknown',
+      reason: 'notifyme_delivery_unknown',
+      poll: poll,
+      block_auto_resend: true,
+      may_retry_same_unique_id: false,
+    };
+  }
+}
+
 /**
  * Send a campaign batch via Notifyme.
  * @param {string} campaignId
@@ -823,6 +973,11 @@ function jsonSafe(value) {
 
 module.exports = {
   sendBatch,
+  insertDeliverAndReconcileSingle,
+  insertCampaignMessages,
+  deliverInsertedRows,
+  patchSmsMessagesByUniqueIds,
+  classifyNotifymeDeliveryStatus,
   pollStatus,
   pollResponses,
   loadActiveCostConfig,

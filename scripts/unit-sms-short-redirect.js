@@ -333,7 +333,35 @@ function shortRow(dest, impactId) {
     assert.strictEqual(res.statusCode, 404);
   }
 
-  console.log('OK unit-sms-short-redirect (All cases A–F passed)');
+  // -------------------------------------------------------------------------
+  // TEST G: Affiliate join URL preserves invitation token t= when redirecting
+  // -------------------------------------------------------------------------
+  {
+    const inviteToken = 'INVITE_TOKEN_SAMPLE_12';
+    const joinDest =
+      'https://cz.uy/affiliates/join?t=' +
+      inviteToken +
+      '&jt=' +
+      TOKEN;
+    const mock = createMock({
+      shortLookup: function () {
+        return shortRow(joinDest, IMPACT_ID);
+      },
+      impactLookup: function () {
+        assert.fail('must not lookup impact when destination_url already has jt');
+      },
+    });
+    installSupabase(mock);
+    const res = await requestShort('AffJoin1');
+    await flush();
+    assert.strictEqual(res.statusCode, 302);
+    const loc = new URL(res.headers.Location);
+    assert.strictEqual(loc.pathname, '/affiliates/join');
+    assert.strictEqual(loc.searchParams.get('t'), inviteToken);
+    assert.strictEqual(loc.searchParams.get('jt'), TOKEN);
+  }
+
+  console.log('OK unit-sms-short-redirect (All cases A–G passed)');
 })().catch(function (err) {
   console.error(err);
   process.exit(1);

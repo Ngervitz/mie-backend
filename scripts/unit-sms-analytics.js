@@ -38,15 +38,94 @@ function installSupabase(mock) {
   Object.assign(supabaseClient, mock);
 }
 
+const DEFAULT_ANALYTICS_CAMPAIGN_ROWS = [
+  {
+    id: 'a5651b31-11a7-4814-85d9-db37c3418da2',
+    purpose: 'test',
+    vertical: 'loans',
+  },
+  {
+    id: 'b024cd01-3cb2-4e54-8e75-3c7f168c2e5b',
+    purpose: 'test',
+    vertical: 'loans',
+  },
+  {
+    id: 'c3333333-3333-3333-3333-333333333333',
+    purpose: 'loan_reactivation',
+    vertical: 'loans',
+  },
+  {
+    id: 'otp-camp-0000-0000-0000-000000000001',
+    purpose: 'transactional',
+    vertical: 'affiliates',
+  },
+  {
+    id: 'aff-camp-1',
+    purpose: 'affiliate_program_invite',
+    vertical: 'affiliates',
+  },
+  { id: 'camp-A', purpose: 'loan_reactivation', vertical: 'loans' },
+  { id: 'camp-B', purpose: 'loan_reactivation', vertical: 'loans' },
+  { id: 'camp-ANOMALY', purpose: 'loan_reactivation', vertical: 'loans' },
+];
+
+function installAnalyticsSupabase(rpcImpl, campaignRows) {
+  const rows = campaignRows || DEFAULT_ANALYTICS_CAMPAIGN_ROWS;
+  installSupabase({
+    rpc: rpcImpl,
+    from: function (table) {
+      if (table !== 'sms_campaigns') {
+        throw new Error('unexpected table ' + table);
+      }
+      return {
+        select: function (cols) {
+          if (cols === 'id') {
+            return {
+              eq: function (_field, value) {
+                const filtered = rows.filter(function (r) {
+                  return r.vertical === value;
+                });
+                return Promise.resolve({
+                  data: filtered.map(function (r) {
+                    return { id: r.id };
+                  }),
+                  error: null,
+                });
+              },
+            };
+          }
+          return Promise.resolve({ data: rows, error: null });
+        },
+      };
+    },
+  });
+}
+
 const smsRouter = require('../src/routes/sms');
 
 /**
  * Pure-JS functional replica of the SQL CTEs in get_sms_performance_analytics
  * Exercising actual distinct logic across granularities on raw simulated tables.
  */
-function simulateSqlPerformanceAnalytics({ smsMessages, smsCampaigns, marketingImpacts, marketingImpactEvents, czSolicitudes }) {
+function simulateSqlPerformanceAnalytics({
+  smsMessages,
+  smsCampaigns,
+  marketingImpacts,
+  marketingImpactEvents,
+  czSolicitudes,
+  p_commercial_only,
+  p_vertical,
+  p_purpose,
+}) {
+  const commercialOnly = p_commercial_only !== false;
+  const verticalFilter =
+    p_vertical == null || String(p_vertical).trim() === '' ? null : String(p_vertical).trim();
+  const purposeFilter =
+    p_purpose == null || String(p_purpose).trim() === '' ? null : String(p_purpose).trim();
+
   // 1. base_sms
-  const baseSms = smsMessages.map((m) => {
+  const baseSms = smsMessages
+    .map((m) => {
     const c = smsCampaigns.find((camp) => camp.id === m.campaign_id) || {};
     const i = marketingImpacts.find((imp) => imp.id === m.marketing_impact_id) || null;
     const dateObj = new Date(m.created_at);
@@ -56,13 +135,24 @@ function simulateSqlPerformanceAnalytics({ smsMessages, smsCampaigns, marketingI
       campaign_id: m.campaign_id,
       campaign_name: c.name || null,
       campaign_series_id: c.campaign_series_id || null,
+      campaign_vertical: c.vertical || null,
+      campaign_purpose: c.purpose || 'loan_reactivation',
       message_status: m.status,
       sms_created_at: m.created_at,
       cohort_month,
       marketing_impact_id: m.marketing_impact_id,
       tracking_token: i ? i.tracking_token : null,
     };
-  });
+  })
+    .filter(function (b) {
+      if (commercialOnly) {
+        const p = String(b.campaign_purpose || 'loan_reactivation').toLowerCase();
+        if (p === 'transactional' || p === 'test') return false;
+      }
+      if (verticalFilter && b.campaign_vertical !== verticalFilter) return false;
+      if (purposeFilter && b.campaign_purpose !== purposeFilter) return false;
+      return true;
+    });
 
   // 2. sms_events (group by impact_id)
   const eventsByImpact = {};
@@ -338,11 +428,10 @@ async function runTests() {
   // -------------------------------------------------------------------------
   console.log('Test 3: Supabase RPC error handling');
   {
-    installSupabase({
-      rpc: function (funcName, params) {
-        assert.strictEqual(funcName, 'get_sms_performance_analytics');
-        return Promise.resolve({ data: null, error: { message: 'Database connection failed' } });
-      },
+    installAnalyticsSupabase(function (funcName, params) {
+      assert.strictEqual(funcName, 'get_sms_performance_analytics');
+      assert.strictEqual(params.p_commercial_only, true);
+      return Promise.resolve({ data: null, error: { message: 'Database connection failed' } });
     });
 
     const res = await requestAnalyticsPerformance('');
@@ -359,44 +448,6 @@ async function runTests() {
     const currentMonthKey = formatYmdMontevideo(new Date()).slice(0, 7);
 
     const mockRpcRows = [
-      {
-        aggregation_level: 'campaign',
-        campaign_id: 'a5651b31-11a7-4814-85d9-db37c3418da2',
-        campaign_name: 'Canary SMS 2026-08-28 Tanda 1',
-        campaign_series_id: 'fd126de6-202d-4326-bbd8-c3cb10b0ce8e',
-        campaign_series_name: 'Canary SMS individual tracking 2026-08-28',
-        cohort_month: '2026-08',
-        messages_sent: '2',
-        messages_delivered: '0',
-        total_impacts: '2',
-        total_clicks: '1',
-        total_form_step_1: '0',
-        total_form_step_2: '0',
-        total_form_step_3: '0',
-        impacts_with_solicitud: '0',
-        total_solicitudes: '0',
-        first_sms_at: '2026-08-28T18:52:11.349444+00:00',
-        last_sms_at: '2026-08-28T18:52:11.349444+00:00',
-      },
-      {
-        aggregation_level: 'campaign',
-        campaign_id: 'b024cd01-3cb2-4e54-8e75-3c7f168c2e5b',
-        campaign_name: 'Canary SMS 2026-08-28 Tanda 2',
-        campaign_series_id: 'fd126de6-202d-4326-bbd8-c3cb10b0ce8e',
-        campaign_series_name: 'Canary SMS individual tracking 2026-08-28',
-        cohort_month: '2026-08',
-        messages_sent: '1',
-        messages_delivered: '0',
-        total_impacts: '1',
-        total_clicks: '1',
-        total_form_step_1: '1',
-        total_form_step_2: '0',
-        total_form_step_3: '0',
-        impacts_with_solicitud: '0',
-        total_solicitudes: '0',
-        first_sms_at: '2026-08-28T19:36:06.101612+00:00',
-        last_sms_at: '2026-08-28T19:36:06.101612+00:00',
-      },
       {
         aggregation_level: 'campaign',
         campaign_id: 'c3333333-3333-3333-3333-333333333333',
@@ -418,19 +469,6 @@ async function runTests() {
       },
       {
         aggregation_level: 'month',
-        cohort_month: '2026-08',
-        messages_sent: '3',
-        messages_delivered: '0',
-        total_impacts: '3',
-        total_clicks: '2',
-        total_form_step_1: '1',
-        total_form_step_2: '0',
-        total_form_step_3: '0',
-        impacts_with_solicitud: '0',
-        total_solicitudes: '0',
-      },
-      {
-        aggregation_level: 'month',
         cohort_month: '2026-07',
         messages_sent: '10',
         messages_delivered: '10',
@@ -444,9 +482,70 @@ async function runTests() {
       },
       {
         aggregation_level: 'overall',
-        messages_sent: '13',
+        messages_sent: '10',
         messages_delivered: '10',
-        total_impacts: '13',
+        total_impacts: '10',
+        total_clicks: '0',
+        total_form_step_1: '0',
+        total_form_step_2: '0',
+        total_form_step_3: '0',
+        impacts_with_solicitud: '0',
+        total_solicitudes: '0',
+      },
+    ];
+
+    installAnalyticsSupabase(function (funcName, params) {
+      assert.strictEqual(funcName, 'get_sms_performance_analytics');
+      assert.strictEqual(params.p_commercial_only, true);
+      return Promise.resolve({ data: mockRpcRows, error: null });
+    });
+
+    const res = await requestAnalyticsPerformance('');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.ok, true);
+
+    const data = res.body.data;
+    assert.strictEqual(data.current_cohort_month, currentMonthKey);
+    assert.strictEqual(data.campaign_breakdown.length, 1);
+    assert.strictEqual(data.campaign_breakdown[0].campaign_id, 'c3333333-3333-3333-3333-333333333333');
+    assert.strictEqual(data.totals.total_clicks, 0);
+    assert.strictEqual(data.totals.messages_delivered, 10);
+
+    const comp = data.campaign_breakdown[0];
+    assert.strictEqual(comp.messages_delivered, 10);
+    assert.strictEqual(comp.total_clicks, 0);
+    assert.strictEqual(comp.ctr_delivered_pct, 0.0, 'delivered=10 and clicks=0 must produce ctr_delivered_pct = 0.0');
+  }
+  console.log('  ✓ Passed full analytics endpoint & ratio tests');
+
+  // -------------------------------------------------------------------------
+  // Test 4b: RPC commercial filter — test/OTP clicks must not appear in totals
+  // -------------------------------------------------------------------------
+  console.log('Test 4b: Commercial RPC excludes test campaign clicks from totals');
+  {
+    const mockRpcRowsCommercial = [
+      {
+        aggregation_level: 'campaign',
+        campaign_id: 'c3333333-3333-3333-3333-333333333333',
+        campaign_name: 'Loan only',
+        campaign_series_id: null,
+        campaign_series_name: null,
+        cohort_month: '2026-08',
+        messages_sent: '5',
+        messages_delivered: '5',
+        total_impacts: '5',
+        total_clicks: '2',
+        total_form_step_1: '1',
+        total_form_step_2: '0',
+        total_form_step_3: '0',
+        impacts_with_solicitud: '0',
+        total_solicitudes: '0',
+      },
+      {
+        aggregation_level: 'overall',
+        messages_sent: '5',
+        messages_delivered: '5',
+        total_impacts: '5',
         total_clicks: '2',
         total_form_step_1: '1',
         total_form_step_2: '0',
@@ -456,59 +555,24 @@ async function runTests() {
       },
     ];
 
-    installSupabase({
-      rpc: function (funcName, params) {
-        assert.strictEqual(funcName, 'get_sms_performance_analytics');
-        return Promise.resolve({ data: mockRpcRows, error: null });
-      },
+    installAnalyticsSupabase(function (funcName, params) {
+      assert.strictEqual(params.p_commercial_only, true);
+      return Promise.resolve({ data: mockRpcRowsCommercial, error: null });
     });
 
     const res = await requestAnalyticsPerformance('');
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.ok, true);
-
-    const data = res.body.data;
-    assert.strictEqual(data.current_cohort_month, currentMonthKey);
-    assert(Array.isArray(data.monthly_summary), 'monthly_summary should be an array');
-    assert(Array.isArray(data.campaign_breakdown), 'campaign_breakdown should be an array');
-
-    // Check Tanda 1 ratios (delivered=0, clicks=1)
-    const tanda1 = data.campaign_breakdown.find((c) => c.campaign_id === 'a5651b31-11a7-4814-85d9-db37c3418da2');
-    assert(tanda1, 'Tanda 1 breakdown must exist');
-    assert.strictEqual(tanda1.messages_delivered, 0);
-    assert.strictEqual(tanda1.total_clicks, 1);
-    assert.strictEqual(tanda1.ctr_delivered_pct, null, 'delivered=0 must produce ctr_delivered_pct = null');
-    assert.strictEqual(tanda1.step_1_pct, null, 'delivered=0 must produce step_1_pct = null');
-    assert.strictEqual(tanda1.step_1_from_click_pct, 0.0, 'step1=0 and clicks=1 must produce step_1_from_click_pct = 0.0');
-
-    // Check Tanda 2 ratios (delivered=0, clicks=1, step1=1, step2=0)
-    const tanda2 = data.campaign_breakdown.find((c) => c.campaign_id === 'b024cd01-3cb2-4e54-8e75-3c7f168c2e5b');
-    assert(tanda2, 'Tanda 2 breakdown must exist');
-    assert.strictEqual(tanda2.total_form_step_1, 1);
-    assert.strictEqual(tanda2.total_form_step_2, 0);
-    assert.strictEqual(tanda2.step_1_from_click_pct, 100.0, '1 step1 from 1 click = 100.0%');
-    assert.strictEqual(tanda2.step_2_from_step_1_pct, 0.0, 'step1=1 and step2=0 must produce step_2_from_step_1_pct = 0.0');
-    assert.strictEqual(tanda2.step_3_from_step_2_pct, null, 'step2=0 must produce step_3_from_step_2_pct = null');
-
-    // Check Completed campaign (delivered=10, clicks=0)
-    const comp = data.campaign_breakdown.find((c) => c.campaign_id === 'c3333333-3333-3333-3333-333333333333');
-    assert(comp, 'Completed campaign breakdown must exist');
-    assert.strictEqual(comp.messages_delivered, 10);
-    assert.strictEqual(comp.total_clicks, 0);
-    assert.strictEqual(comp.ctr_delivered_pct, 0.0, 'delivered=10 and clicks=0 must produce ctr_delivered_pct = 0.0');
-
-    // Check Monthly Summary
-    const augEntry = data.monthly_summary.find((m) => m.cohort_month === '2026-08');
-    assert(augEntry, '2026-08 monthly summary must exist');
-    assert.strictEqual(augEntry.messages_sent, 3);
-    assert.strictEqual(augEntry.messages_delivered, 0);
-    assert.strictEqual(augEntry.total_clicks, 2);
-    assert.strictEqual(augEntry.total_form_step_1, 1);
-    assert.strictEqual(augEntry.step_1_from_click_pct, 50.0);
-    assert.strictEqual(augEntry.step_2_from_step_1_pct, 0.0);
-    assert.strictEqual(augEntry.step_3_from_step_2_pct, null);
+    assert.strictEqual(res.body.data.totals.total_clicks, 2);
+    assert.strictEqual(res.body.data.totals.total_form_step_1, 1);
+    assert.strictEqual(
+      res.body.data.campaign_breakdown.find(function (c) {
+        return c.campaign_id === 'a5651b31-11a7-4814-85d9-db37c3418da2';
+      }),
+      undefined,
+      'Canary test campaign must not appear when RPC uses commercial filter',
+    );
   }
-  console.log('  ✓ Passed full analytics endpoint & ratio tests');
+  console.log('  ✓ Passed commercial RPC exclusion test');
 
   // -------------------------------------------------------------------------
   // Test 5: Distinct cz_id Granularity Engine Test (Shared cz_id across 2 campaigns)
@@ -539,10 +603,8 @@ async function runTests() {
 
     const simulatedRows = simulateSqlPerformanceAnalytics(rawData);
 
-    installSupabase({
-      rpc: function () {
-        return Promise.resolve({ data: simulatedRows, error: null });
-      },
+    installAnalyticsSupabase(function () {
+      return Promise.resolve({ data: simulatedRows, error: null });
     });
 
     const res = await requestAnalyticsPerformance('');
@@ -590,10 +652,8 @@ async function runTests() {
 
     const simulatedRows = simulateSqlPerformanceAnalytics(rawData);
 
-    installSupabase({
-      rpc: function () {
-        return Promise.resolve({ data: simulatedRows, error: null });
-      },
+    installAnalyticsSupabase(function () {
+      return Promise.resolve({ data: simulatedRows, error: null });
     });
 
     const res = await requestAnalyticsPerformance('');
@@ -638,10 +698,8 @@ async function runTests() {
 
     const simulatedRows = simulateSqlPerformanceAnalytics(rawData);
 
-    installSupabase({
-      rpc: function () {
-        return Promise.resolve({ data: simulatedRows, error: null });
-      },
+    installAnalyticsSupabase(function () {
+      return Promise.resolve({ data: simulatedRows, error: null });
     });
 
     const res = await requestAnalyticsPerformance('');
@@ -658,6 +716,170 @@ async function runTests() {
     assert.strictEqual(camp.total_solicitudes, 1, 'total_solicitudes = 1');
   }
   console.log('  ✓ Passed distinct marketing_impact_id deduplication test');
+
+  // -------------------------------------------------------------------------
+  // Test 6: vertical filter on analytics performance
+  // -------------------------------------------------------------------------
+  console.log('Test 6: vertical filter on analytics performance');
+  {
+    const mockRpcRows = [
+      {
+        aggregation_level: 'campaign',
+        campaign_id: 'loan-camp-1',
+        campaign_name: 'Loan camp',
+        campaign_series_id: null,
+        campaign_series_name: null,
+        cohort_month: '2026-08',
+        messages_sent: '5',
+        messages_delivered: '4',
+        total_impacts: '4',
+        total_clicks: '2',
+        total_form_step_1: '1',
+        total_form_step_2: '0',
+        total_form_step_3: '0',
+        impacts_with_solicitud: '0',
+        total_solicitudes: '0',
+      },
+      {
+        aggregation_level: 'campaign',
+        campaign_id: 'aff-camp-1',
+        campaign_name: 'Affiliate camp',
+        campaign_series_id: null,
+        campaign_series_name: null,
+        cohort_month: '2026-08',
+        messages_sent: '10',
+        messages_delivered: '10',
+        total_impacts: '10',
+        total_clicks: '3',
+        total_form_step_1: '0',
+        total_form_step_2: '0',
+        total_form_step_3: '0',
+        impacts_with_solicitud: '0',
+        total_solicitudes: '0',
+      },
+      {
+        aggregation_level: 'overall',
+        messages_sent: '15',
+        messages_delivered: '14',
+        total_impacts: '14',
+        total_clicks: '5',
+        total_form_step_1: '1',
+        total_form_step_2: '0',
+        total_form_step_3: '0',
+        impacts_with_solicitud: '0',
+        total_solicitudes: '0',
+      },
+    ];
+
+    installAnalyticsSupabase(function (_funcName, params) {
+      assert.strictEqual(params.p_commercial_only, true);
+      assert.strictEqual(params.p_vertical, 'affiliates');
+      return Promise.resolve({
+        data: [
+          {
+            aggregation_level: 'campaign',
+            campaign_id: 'aff-camp-1',
+            campaign_name: 'Affiliate camp',
+            campaign_series_id: null,
+            campaign_series_name: null,
+            cohort_month: '2026-08',
+            messages_sent: '10',
+            messages_delivered: '10',
+            total_impacts: '10',
+            total_clicks: '3',
+            total_form_step_1: '0',
+            total_form_step_2: '0',
+            total_form_step_3: '0',
+            impacts_with_solicitud: '0',
+            total_solicitudes: '0',
+          },
+          {
+            aggregation_level: 'overall',
+            messages_sent: '10',
+            messages_delivered: '10',
+            total_impacts: '10',
+            total_clicks: '3',
+            total_form_step_1: '0',
+            total_form_step_2: '0',
+            total_form_step_3: '0',
+            impacts_with_solicitud: '0',
+            total_solicitudes: '0',
+          },
+        ],
+        error: null,
+      });
+    });
+
+    const res = await requestAnalyticsPerformance('vertical=affiliates');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.data.filter.vertical, 'affiliates');
+    assert.strictEqual(res.body.data.campaign_breakdown.length, 1);
+    assert.strictEqual(res.body.data.campaign_breakdown[0].campaign_id, 'aff-camp-1');
+    assert.strictEqual(res.body.data.totals.messages_sent, 10);
+    assert.strictEqual(res.body.data.totals.total_clicks, 3);
+  }
+  console.log('  ✓ Passed vertical filter test');
+
+  // -------------------------------------------------------------------------
+  // Test 4d: Cross-vertical same cz_id dedupes within vertical-filtered RPC base
+  // -------------------------------------------------------------------------
+  console.log('Test 4d: Cross-vertical cz_id deduplication under vertical filter');
+  {
+    const sharedJt = 'JT_CROSS_VERTICAL_0001';
+    const raw = {
+      smsCampaigns: [
+        { id: 'loan-v', name: 'Loan', vertical: 'loans', purpose: 'loan_reactivation' },
+        { id: 'aff-v', name: 'Aff', vertical: 'affiliates', purpose: 'affiliate_program_invite' },
+      ],
+      marketingImpacts: [
+        { id: 'imp-loan', tracking_token: sharedJt },
+        { id: 'imp-aff', tracking_token: sharedJt },
+      ],
+      smsMessages: [
+        {
+          unique_id: '201',
+          campaign_id: 'loan-v',
+          marketing_impact_id: 'imp-loan',
+          status: 'DELIVERED',
+          created_at: '2026-08-10T15:00:00Z',
+        },
+        {
+          unique_id: '202',
+          campaign_id: 'aff-v',
+          marketing_impact_id: 'imp-aff',
+          status: 'DELIVERED',
+          created_at: '2026-08-11T15:00:00Z',
+        },
+      ],
+      marketingImpactEvents: [],
+      czSolicitudes: [{ cz_id: 7777, tracking_data_summary: { jt: sharedJt } }],
+    };
+
+    const loansOnly = simulateSqlPerformanceAnalytics(
+      Object.assign({}, raw, { p_vertical: 'loans', p_commercial_only: true }),
+    );
+    const affOnly = simulateSqlPerformanceAnalytics(
+      Object.assign({}, raw, { p_vertical: 'affiliates', p_commercial_only: true }),
+    );
+    const overall = simulateSqlPerformanceAnalytics(
+      Object.assign({}, raw, { p_commercial_only: true }),
+    );
+
+    const loansOverall = loansOnly.find(function (r) {
+      return r.aggregation_level === 'overall';
+    });
+    const affOverall = affOnly.find(function (r) {
+      return r.aggregation_level === 'overall';
+    });
+    const allOverall = overall.find(function (r) {
+      return r.aggregation_level === 'overall';
+    });
+
+    assert.strictEqual(loansOverall.total_solicitudes, 1);
+    assert.strictEqual(affOverall.total_solicitudes, 1);
+    assert.strictEqual(allOverall.total_solicitudes, 1, 'distinct cz_id across verticals');
+  }
+  console.log('  ✓ Passed cross-vertical deduplication test');
 
   console.log('\n--- ALL SMS PERFORMANCE ANALYTICS TESTS PASSED ---\n');
 }

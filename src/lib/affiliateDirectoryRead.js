@@ -18,6 +18,10 @@ const {
   LIST_CAP,
 } = require('./affiliateDirectory');
 
+const {
+  aggregateAffiliateInviteOutreach,
+} = require('./affiliateInviteOutreachMetrics');
+
 const PAGE = 500;
 const IN_CHUNK = 200;
 /** Affiliate invite rows in email_campaign_recipients (2-recipient + 7-recipient pilots). */
@@ -185,11 +189,22 @@ async function aggregateAffiliateDashboardSummary(supabase) {
     invitations_sent: null,
     registered_validated: null,
     clicks: null,
+    referral_link_clicks: null,
     attributed_solicitudes: null,
     excluded_solicitudes: null,
+    invite_outreach: null,
   };
 
   summary.invitations_sent = await countAffiliateInviteEmailsSent(supabase);
+
+  try {
+    summary.invite_outreach = await aggregateAffiliateInviteOutreach(
+      supabase,
+      countAffiliateInviteEmailsSent,
+    );
+  } catch (err) {
+    if (!schemaMissing(err)) throw err;
+  }
 
   try {
     summary.registered_validated = await countValidatedAffiliates(supabase);
@@ -198,10 +213,13 @@ async function aggregateAffiliateDashboardSummary(supabase) {
   }
 
   try {
-    summary.clicks = await countExactHead(supabase, 'affiliate_clicks');
+    summary.referral_link_clicks = await countExactHead(supabase, 'affiliate_clicks');
+    summary.clicks = summary.referral_link_clicks;
   } catch (err) {
-    if (schemaMissing(err)) summary.clicks = null;
-    else throw err;
+    if (schemaMissing(err)) {
+      summary.clicks = null;
+      summary.referral_link_clicks = null;
+    } else throw err;
   }
 
   try {
@@ -492,6 +510,7 @@ module.exports = {
   listAffiliates,
   listAffiliatesWithRowStats,
   aggregateAffiliateDashboardSummary,
+  countAffiliateInviteEmailsSent,
   getAffiliate,
   listClicks,
   countClicksWithoutAttribution,

@@ -9467,6 +9467,7 @@ init();
   const createStatus = document.getElementById('sms-create-status');
   const listStatus = document.getElementById('sms-list-status');
   const listEl = document.getElementById('sms-list');
+  const verticalFilterSelect = document.getElementById('sms-vertical-filter');
   const reloadBtn = document.getElementById('sms-reload-list-btn');
   const detailSection = document.getElementById('sms-detail-section');
   const listSection = document.getElementById('sms-list-section');
@@ -9509,6 +9510,7 @@ init();
   let openedOnce = false;
   let activeCampaignId = null;
   let smsIndividualTracking = false;
+  let smsVerticalFilter = 'all';
   const smsSeriesById = {};
 
   // GSM 03.38 basic character set (includes ñ/Ñ — does NOT force UCS-2 alone).
@@ -10319,6 +10321,55 @@ init();
     return id;
   }
 
+  function smsVerticalQuerySuffix() {
+    if (!smsVerticalFilter || smsVerticalFilter === 'all') return '';
+    return '?vertical=' + encodeURIComponent(smsVerticalFilter);
+  }
+
+  async function ensureSmsVerticalFilterOptions() {
+    if (!verticalFilterSelect || verticalFilterSelect.dataset.taxonomyLoaded === '1') {
+      return;
+    }
+    try {
+      const res = await fetch(API_BASE + '/sms/campaigns/taxonomy', {
+        headers: { Accept: 'application/json' },
+      });
+      const body = await readJsonSafe(res);
+      if (!res.ok || !body || !Array.isArray(body.verticals)) return;
+      const current = smsVerticalFilter;
+      verticalFilterSelect.innerHTML =
+        '<option value="all">Todas las verticales</option>' +
+        body.verticals
+          .map(function (v) {
+            return (
+              '<option value="' +
+              escapeHtml(String(v.id)) +
+              '">' +
+              escapeHtml(String(v.label || v.id)) +
+              '</option>'
+            );
+          })
+          .join('');
+      verticalFilterSelect.value = current;
+      verticalFilterSelect.dataset.taxonomyLoaded = '1';
+    } catch (_err) {
+      /* keep default option */
+    }
+  }
+
+  function formatCampaignVerticalLabel(c) {
+    if (c && c.is_transactional) {
+      return (c.vertical_label || formatCampaignVerticalLabelBase(c)) + ' · Transaccional';
+    }
+    return formatCampaignVerticalLabelBase(c);
+  }
+
+  function formatCampaignVerticalLabelBase(c) {
+    if (c && c.vertical_label) return String(c.vertical_label);
+    if (c && c.vertical) return String(c.vertical);
+    return '—';
+  }
+
   function formatPct(val) {
     if (val === null || val === undefined || typeof val !== 'number' || Number.isNaN(val)) {
       return '—';
@@ -10362,7 +10413,9 @@ init();
           '" aria-label="Abrir detalle de campaña">' +
           '<td>' +
           escapeHtml(dash(c && c.name)) +
-          '</td>' +
+          '<div class="sms-cost-note">' +
+          escapeHtml(formatCampaignVerticalLabel(c)) +
+          '</div></td>' +
           '<td>' +
           escapeHtml(dash(c && c.created_at)) +
           '</td>' +
@@ -10493,13 +10546,13 @@ init();
     }
     try {
       const [costRes, sessionsRes, analyticsRes] = await Promise.all([
-        fetch(API_BASE + '/sms/campaigns/summary/monthly', {
+        fetch(API_BASE + '/sms/campaigns/summary/monthly' + smsVerticalQuerySuffix(), {
           headers: { Accept: 'application/json' },
         }),
-        fetch(API_BASE + '/sms/campaigns/summary/monthly/sessions', {
+        fetch(API_BASE + '/sms/campaigns/summary/monthly/sessions' + smsVerticalQuerySuffix(), {
           headers: { Accept: 'application/json' },
         }),
-        fetch(API_BASE + '/sms/analytics/performance', {
+        fetch(API_BASE + '/sms/analytics/performance' + smsVerticalQuerySuffix(), {
           headers: { Accept: 'application/json' },
         }).catch(() => null),
       ]);
@@ -10541,6 +10594,10 @@ init();
         if (sessionsBody.query_status === 'success') {
           sessionsValue = formatCount(sessionsBody.sessions);
           sessionsNote = '';
+        } else if (sessionsBody.query_status === 'unavailable_vertical') {
+          sessionsValue = 'No disponible';
+          sessionsNote =
+            '<div class="sms-monthly-cost-note">Sesiones GA4 no atribuibles por vertical</div>';
         } else if (sessionsBody.query_status === 'error') {
           sessionsValue = '—';
           sessionsNote =
@@ -10708,10 +10765,10 @@ init();
     setStatus(listStatus, 'Cargando campañas…', false);
     try {
       const [res, analyticsRes] = await Promise.all([
-        fetch(API_BASE + '/sms/campaigns', {
+        fetch(API_BASE + '/sms/campaigns' + smsVerticalQuerySuffix(), {
           headers: { Accept: 'application/json' },
         }),
-        fetch(API_BASE + '/sms/analytics/performance', {
+        fetch(API_BASE + '/sms/analytics/performance' + smsVerticalQuerySuffix(), {
           headers: { Accept: 'application/json' },
         }).catch(() => null),
       ]);
@@ -11230,7 +11287,16 @@ init();
 
   reloadBtn.addEventListener('click', () => {
     loadCampaignList();
+    loadMonthlySummary();
   });
+
+  if (verticalFilterSelect) {
+    verticalFilterSelect.addEventListener('change', function () {
+      smsVerticalFilter = String(verticalFilterSelect.value || 'all');
+      loadCampaignList();
+      loadMonthlySummary();
+    });
+  }
 
   detailBackBtn.addEventListener('click', () => {
     showListView();
@@ -11265,9 +11331,11 @@ init();
 
   window.__openSms = () => {
     showListView();
-    loadMonthlySummary();
-    loadCampaignList();
-    loadSeriesBootstrap();
+    ensureSmsVerticalFilterOptions().then(function () {
+      loadMonthlySummary();
+      loadCampaignList();
+      loadSeriesBootstrap();
+    });
     openedOnce = true;
   };
 })();
@@ -19821,7 +19889,7 @@ init();
       '<div class="table-wrap affiliates-table-wrap"><table class="ga4-table rechazados-table affiliates-directory-table affiliates-compact-table">' +
       '<thead><tr>' +
       '<th>CI</th><th>Adhesión al plan</th>' +
-      '<th class="affiliates-col-stat">Clics</th>' +
+      '<th class="affiliates-col-stat">Clics referido</th>' +
       '<th class="affiliates-col-stat">Solicitudes atribuidas</th>' +
       '<th class="affiliates-col-stat">Préstamos otorgados</th>' +
       '<th class="affiliates-col-stat">Comisiones</th>' +
@@ -20056,12 +20124,88 @@ init();
       summaryRoot.innerHTML = '';
       return;
     }
+    const outreach = data.invite_outreach;
+    const emailInviteClicks =
+      outreach &&
+      outreach.email &&
+      outreach.email.invite_clicks &&
+      outreach.email.invite_clicks.measured === false
+        ? String(outreach.email.invite_clicks.label || 'No medidos')
+        : null;
+
     const cards = [
-      { emoji: '📧', label: 'Invitaciones', title: 'Invitaciones enviadas', value: data.invitations_sent },
-      { emoji: '✓', label: 'Validados', title: 'Afiliados con adhesión validada', value: data.registered_validated },
-      { emoji: '👆', label: 'Clics', title: 'Clics en enlaces', value: data.clicks },
-      { emoji: '◎', label: 'Atribuidas', title: 'Solicitudes atribuidas', value: data.attributed_solicitudes },
-      { emoji: '⊘', label: 'Excluidas', title: 'Solicitudes excluidas', value: data.excluded_solicitudes },
+      {
+        emoji: '📧',
+        label: 'Invitaciones email',
+        title: 'Invitaciones por email (piloto)',
+        value: data.invitations_sent,
+      },
+      {
+        emoji: '📱',
+        label: 'SMS invitación',
+        title: 'SMS de invitación al programa (vertical afiliados)',
+        value:
+          outreach && outreach.sms && outreach.sms.available
+            ? outreach.sms.invitations_sent
+            : '—',
+      },
+      {
+        emoji: '✓',
+        label: 'SMS entregados',
+        title: 'SMS de invitación entregados (Notifyme DELIVERED)',
+        value:
+          outreach && outreach.sms && outreach.sms.available
+            ? outreach.sms.delivered
+            : '—',
+      },
+      {
+        emoji: '🔗',
+        label: 'Clics invitación SMS',
+        title: 'Clics únicos JT en enlaces de invitación SMS',
+        value:
+          outreach && outreach.sms && outreach.sms.available
+            ? outreach.sms.invite_clicks_unique
+            : '—',
+      },
+      {
+        emoji: '👤',
+        label: 'Alta vía SMS',
+        title: 'Afiliados registrados atribuibles a invitación SMS',
+        value:
+          outreach && outreach.sms && outreach.sms.available
+            ? outreach.sms.affiliates_registered
+            : '—',
+      },
+      {
+        emoji: '✉️',
+        label: 'Clics invitación email',
+        title: 'Clics en invitaciones email (piloto sin JT)',
+        value: emailInviteClicks != null ? emailInviteClicks : '—',
+      },
+      {
+        emoji: '✓',
+        label: 'Validados',
+        title: 'Afiliados con adhesión validada',
+        value: data.registered_validated,
+      },
+      {
+        emoji: '👆',
+        label: 'Clics referido',
+        title: 'Clics en enlaces personales de afiliados (préstamos)',
+        value: data.referral_link_clicks != null ? data.referral_link_clicks : data.clicks,
+      },
+      {
+        emoji: '◎',
+        label: 'Atribuidas',
+        title: 'Solicitudes atribuidas',
+        value: data.attributed_solicitudes,
+      },
+      {
+        emoji: '⊘',
+        label: 'Excluidas',
+        title: 'Solicitudes excluidas',
+        value: data.excluded_solicitudes,
+      },
     ];
     summaryRoot.innerHTML =
       '<div class="affiliates-kpi-grid">' +

@@ -52,11 +52,47 @@ const {
 } = require('../lib/smsMarketingImpacts');
 const { normalizeJt } = require('../lib/sanitizeCzTrackingData');
 const { formatYmdMontevideo } = require('../lib/montevideo-week');
+const {
+  SMS_VERTICALS,
+  SMS_PURPOSES,
+  parseSmsVertical,
+  resolveSmsCampaignClassification,
+  labelSmsVertical,
+  labelSmsPurpose,
+} = require('../lib/smsCampaignClassification');
+const { isAffiliateOtpCampaignId } = require('../lib/smsCampaignHistoricalRegistry');
+const { isSmsTransactionalPurpose } = require('../lib/smsCampaignAnalyticsPolicy');
 
 const router = express.Router();
 
 const SMS_CAMPAIGN_SELECT =
-  'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url, campaign_series_id';
+  'id, name, created_at, total_messages, status, destination_url, utm_campaign_value, short_url, campaign_series_id, vertical, purpose';
+
+function parseVerticalFilterQuery(raw) {
+  if (raw == null || String(raw).trim() === '' || String(raw).trim() === 'all') {
+    return { ok: true, vertical: null };
+  }
+  const parsed = parseSmsVertical(raw);
+  if (!parsed.ok) return parsed;
+  return { ok: true, vertical: parsed.vertical };
+}
+
+async function loadCampaignIdsForVertical(vertical) {
+  if (!vertical) return null;
+  const { data, error } = await supabase
+    .from('sms_campaigns')
+    .select('id')
+    .eq('vertical', vertical);
+  if (error) {
+    throw new NotifymeError(`Failed to load campaigns for vertical: ${error.message}`, {
+      kind: 'database',
+      status: 500,
+    });
+  }
+  return (data || []).map(function (row) {
+    return row.id;
+  });
+}
 
 /**
  * Empirically confirmed Notifyme raw delivered statuses (case-sensitive).
@@ -249,6 +285,13 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
     short_url: campaign.short_url != null ? campaign.short_url : null,
     campaign_series_id:
       campaign.campaign_series_id != null ? campaign.campaign_series_id : null,
+    vertical: campaign.vertical != null ? campaign.vertical : null,
+    purpose: campaign.purpose != null ? campaign.purpose : null,
+    vertical_label: labelSmsVertical(campaign.vertical),
+    purpose_label: labelSmsPurpose(campaign.purpose),
+    is_transactional:
+      isAffiliateOtpCampaignId(campaign.id) ||
+      isSmsTransactionalPurpose(campaign.purpose),
     aggregates,
     cost,
   };
@@ -556,12 +599,18 @@ function buildPerformanceRatios(m) {
   };
 }
 
+
 /**
  * GET /sms/analytics/performance
  * Métricas agregadas de embudo por campaña y cohorte mensual (America/Montevideo).
  */
 router.get('/analytics/performance', async (req, res) => {
   try {
+    const vf = parseVerticalFilterQuery(req.query && req.query.vertical);
+    if (!vf.ok) {
+      return res.status(400).json({ error: vf.error, kind: 'validation' });
+    }
+
     const rawSeries = req.query && req.query.series_id;
     const parsedSeries = parseCampaignSeriesId(rawSeries);
     if (parsedSeries.error) {
@@ -573,6 +622,9 @@ router.get('/analytics/performance', async (req, res) => {
     const { data: rows, error } = await supabase.rpc('get_sms_performance_analytics', {
       p_series_id: seriesId,
       p_campaign_id: campaignId,
+      p_commercial_only: true,
+      p_vertical: vf.vertical,
+      p_purpose: null,
     });
 
     if (error) {
@@ -649,6 +701,7 @@ router.get('/analytics/performance', async (req, res) => {
         filter: {
           series_id: seriesId,
           campaign_id: campaignId,
+          vertical: vf.vertical,
         },
         current_cohort_month: currentMonthKey,
         totals: overallItem,
@@ -715,6 +768,11 @@ router.post('/campaigns', async (req, res) => {
     return res.status(400).json({ error: 'name must be a non-empty string' });
   }
 
+  const classif = resolveSmsCampaignClassification(req.body || {});
+  if (!classif.ok) {
+    return res.status(400).json({ error: classif.error, kind: 'validation' });
+  }
+
   const waveSize = parseWaveSize(req.body && req.body.wave_size);
   if (waveSize === undefined) {
     return res.status(400).json({
@@ -775,6 +833,8 @@ router.post('/campaigns', async (req, res) => {
           name: name.trim(),
           total_messages: messages.length,
           status: 'sending',
+          vertical: classif.vertical,
+          purpose: classif.purpose,
         })
         .select(
           SMS_CAMPAIGN_SELECT,
@@ -898,6 +958,8 @@ router.post('/campaigns', async (req, res) => {
             utm_campaign_value: utmCampaignValue,
             short_url: null,
             campaign_series_id: seriesId,
+            vertical: classif.vertical,
+            purpose: classif.purpose,
           })
           .select(
             SMS_CAMPAIGN_SELECT,
@@ -1058,6 +1120,8 @@ router.post('/campaigns', async (req, res) => {
             destination_url: storedDestinationUrl,
             utm_campaign_value: utmCampaignValue,
             short_url: shortUrl,
+            vertical: classif.vertical,
+            purpose: classif.purpose,
           })
           .select(
             SMS_CAMPAIGN_SELECT,
@@ -1199,12 +1263,20 @@ router.post('/campaigns', async (req, res) => {
  */
 router.get('/campaigns', async (req, res) => {
   try {
-    const { data: campaigns, error } = await supabase
+    const vf = parseVerticalFilterQuery(req.query && req.query.vertical);
+    if (!vf.ok) {
+      return res.status(400).json({ error: vf.error, kind: 'validation' });
+    }
+
+    let query = supabase
       .from('sms_campaigns')
-      .select(
-        SMS_CAMPAIGN_SELECT,
-      )
+      .select(SMS_CAMPAIGN_SELECT)
       .order('created_at', { ascending: false });
+    if (vf.vertical) {
+      query = query.eq('vertical', vf.vertical);
+    }
+
+    const { data: campaigns, error } = await query;
 
     if (error) {
       throw new NotifymeError(`Failed to list campaigns: ${error.message}`, {
@@ -1220,7 +1292,7 @@ router.get('/campaigns', async (req, res) => {
       enriched.push(await enrichCampaign(campaign, rows, costConfig));
     }
 
-    return res.json(jsonSafe({ campaigns: enriched }));
+    return res.json(jsonSafe({ campaigns: enriched, vertical_filter: vf.vertical }));
   } catch (err) {
     return mapServiceError(err, res);
   }
@@ -1295,6 +1367,11 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
   }
 
   try {
+    const vf = parseVerticalFilterQuery(req.query && req.query.vertical);
+    if (!vf.ok) {
+      return res.status(400).json({ error: vf.error, kind: 'validation' });
+    }
+
     const { startIso, endExclusiveIso, costAsOfDate } = monthBoundsUtc(month);
 
     // Same convention as per-campaign cost metrics: no delivered mapping → nulls.
@@ -1304,18 +1381,36 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
           month,
           messages_delivered: null,
           estimated_cost: null,
+          vertical_filter: vf.vertical,
         }),
       );
     }
 
     const deliveredStatuses = Array.from(deliveredStatusSet);
-    const { count, error: countError } = await supabase
+    let countQuery = supabase
       .from('sms_messages')
       .select('unique_id', { count: 'exact', head: true })
       .not('delivered_at', 'is', null)
       .gte('delivered_at', startIso)
       .lt('delivered_at', endExclusiveIso)
       .in('status', deliveredStatuses);
+
+    if (vf.vertical) {
+      const campaignIds = await loadCampaignIdsForVertical(vf.vertical);
+      if (!campaignIds.length) {
+        return res.json(
+          jsonSafe({
+            month,
+            messages_delivered: 0,
+            estimated_cost: 0,
+            vertical_filter: vf.vertical,
+          }),
+        );
+      }
+      countQuery = countQuery.in('campaign_id', campaignIds);
+    }
+
+    const { count, error: countError } = await countQuery;
 
     if (countError) {
       throw new NotifymeError(
@@ -1340,6 +1435,7 @@ router.get('/campaigns/summary/monthly', async (req, res) => {
         month,
         messages_delivered: messagesDelivered,
         estimated_cost: estimatedCost,
+        vertical_filter: vf.vertical,
       }),
     );
   } catch (err) {
@@ -1356,6 +1452,21 @@ router.get('/campaigns/summary/monthly/sessions', async (req, res) => {
   const month = parseMonthParam(req.query.month);
   if (!month) {
     return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+
+  const vf = parseVerticalFilterQuery(req.query && req.query.vertical);
+  if (!vf.ok) {
+    return res.status(400).json({ error: vf.error, kind: 'validation' });
+  }
+  if (vf.vertical) {
+    return res.json(
+      jsonSafe({
+        month,
+        sessions: null,
+        query_status: 'unavailable_vertical',
+        vertical_filter: vf.vertical,
+      }),
+    );
   }
 
   const { startDate, endDate } = monthBoundsUtc(month);
@@ -1433,6 +1544,24 @@ router.get('/campaigns/summary/monthly/sessions', async (req, res) => {
       }),
     );
   }
+});
+
+/**
+ * GET /sms/campaigns/taxonomy
+ * Vertical + purpose labels for dashboard filters (must precede /campaigns/:id).
+ */
+router.get('/campaigns/taxonomy', (req, res) => {
+  return res.json(
+    jsonSafe({
+      ok: true,
+      verticals: SMS_VERTICALS.map(function (v) {
+        return { id: v, label: labelSmsVertical(v) };
+      }),
+      purposes: Object.values(SMS_PURPOSES).map(function (p) {
+        return { id: p, label: labelSmsPurpose(p) };
+      }),
+    }),
+  );
 });
 
 /**

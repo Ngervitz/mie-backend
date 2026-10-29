@@ -625,6 +625,20 @@ async function runChunkedHappyPath(count) {
   }
   assert.ok(failed, 'prep must fail when reconcile cannot close N impacts');
 
+  const { resolvePlanDestinationUrl } = require('../src/lib/smsMarketingImpacts');
+  const perPlan = buildRecipientPlans([
+    { phone: '1', destination_url: 'https://cz.uy/affiliates/join?t=AAA' },
+    { phone: '2', destination_url: 'https://cz.uy/affiliates/join?t=BBB' },
+  ]);
+  assert.strictEqual(
+    resolvePlanDestinationUrl(perPlan[0], { destinationUrl: 'https://cz.uy/shared' }),
+    'https://cz.uy/affiliates/join?t=AAA',
+  );
+  assert.strictEqual(
+    resolvePlanDestinationUrl(perPlan[1], { destinationUrl: 'https://cz.uy/shared' }),
+    'https://cz.uy/affiliates/join?t=BBB',
+  );
+
   console.log('OK unit-sms-marketing-impacts');
 })().catch(function (err) {
   console.error(err);

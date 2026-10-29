@@ -64,6 +64,11 @@ function buildRecipientPlans(recipients) {
     } while (codes.has(short_code));
     codes.add(short_code);
 
+    const destination_url =
+      r.destination_url != null && String(r.destination_url).trim()
+        ? String(r.destination_url).trim()
+        : null;
+
     return {
       index: index,
       phone: r.phone,
@@ -71,11 +76,28 @@ function buildRecipientPlans(recipients) {
       source_system: r.source_system != null ? r.source_system : null,
       source_record_id: r.source_record_id != null ? r.source_record_id : null,
       nombre: r.nombre,
+      destination_url: destination_url,
       tracking_token: tracking_token,
       short_code: short_code,
       impact_id: null,
     };
   });
+}
+
+function resolvePlanDestinationUrl(plan, opts) {
+  if (plan && plan.destination_url) {
+    return plan.destination_url;
+  }
+  if (opts && typeof opts.destinationUrlForPlan === 'function') {
+    const url = opts.destinationUrlForPlan(plan, plan.index);
+    if (url != null && String(url).trim()) {
+      return String(url).trim();
+    }
+  }
+  if (opts && opts.destinationUrl) {
+    return String(opts.destinationUrl).trim();
+  }
+  return null;
 }
 
 async function selectInChunks(supabase, table, column, values, selectCols) {
@@ -251,7 +273,7 @@ async function persistImpactChunk(supabase, chunk) {
   throw new TrackingPrepError(lastMessage);
 }
 
-async function persistShortChunk(supabase, campaignId, destinationUrl, chunk, allPlans) {
+async function persistShortChunk(supabase, campaignId, opts, chunk, allPlans) {
   const usedCodes = new Set(
     allPlans.map(function (p) {
       return p.short_code;
@@ -280,10 +302,11 @@ async function persistShortChunk(supabase, campaignId, destinationUrl, chunk, al
         .from('sms_short_links')
         .insert(
           missing.map(function (p) {
+            const base = resolvePlanDestinationUrl(p, opts);
             return {
               short_code: p.short_code,
-              destination_url: destinationUrl
-                ? appendTrackingToken(destinationUrl, p.tracking_token)
+              destination_url: base
+                ? appendTrackingToken(base, p.tracking_token)
                 : null,
               campaign_id: campaignId,
               impact_id: p.impact_id,
@@ -443,21 +466,33 @@ async function prepareIndividualSmsTracking(opts) {
   await reconcileAllImpacts(supabase, plans);
 
   if (!skipShorts) {
-    const destinationUrl = opts && opts.destinationUrl;
     const campaignId = opts && opts.campaignId;
-    if (!destinationUrl || !campaignId) {
+    const hasSharedDest = opts && opts.destinationUrl;
+    const hasPerRecipient = plans.some(function (p) {
+      return Boolean(p.destination_url);
+    });
+    const hasResolver =
+      opts && typeof opts.destinationUrlForPlan === 'function';
+    if (!campaignId) {
+      throw new TrackingPrepError('campaignId required to create per-impact shorts');
+    }
+    if (!hasSharedDest && !hasPerRecipient && !hasResolver) {
       throw new TrackingPrepError(
-        'destinationUrl and campaignId required to create per-impact shorts',
+        'destinationUrl, recipient.destination_url, or destinationUrlForPlan required',
       );
     }
     for (let i = 0; i < plans.length; i += IMPACT_INSERT_CHUNK) {
-      await persistShortChunk(
-        supabase,
-        campaignId,
-        destinationUrl,
-        plans.slice(i, i + IMPACT_INSERT_CHUNK),
-        plans,
-      );
+      const slice = plans.slice(i, i + IMPACT_INSERT_CHUNK);
+      for (const plan of slice) {
+        const base = resolvePlanDestinationUrl(plan, opts);
+        if (!base) {
+          throw new TrackingPrepError(
+            'Individual tracking missing destination_url for recipient index ' +
+              String(plan.index),
+          );
+        }
+      }
+      await persistShortChunk(supabase, campaignId, opts, slice, plans);
     }
     await reconcileAllShorts(supabase, plans);
   }
@@ -498,6 +533,7 @@ module.exports = {
   generateTrackingToken,
   classifyInsertOutcome,
   buildRecipientPlans,
+  resolvePlanDestinationUrl,
   prepareIndividualSmsTracking,
   markCampaignPrepError,
   composePublicShortUrl,
