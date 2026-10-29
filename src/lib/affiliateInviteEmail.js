@@ -33,7 +33,83 @@ const REQUIRED_TEMPLATE_VARS = Object.freeze([
   'hero_image_url',
 ]);
 
+/** Must appear in template/rendered HTML (UTF-8 Spanish, not Latin-1 mojibake). */
+const AFFILIATE_INVITE_REQUIRED_SPANISH = Object.freeze([
+  'Invitación al programa de afiliados',
+  'participá acá en el programa de afiliados',
+  'préstamos',
+  'según los',
+  'términos y condiciones',
+  'recomendá',
+  'ganá',
+  'Tocá para participar',
+]);
+
+/** Typical UTF-8→Latin-1 mis-read markers (e.g. PowerShell Out-File on git show output). */
+const AFFILIATE_INVITE_MOJIBAKE_MARKERS = Object.freeze([
+  'particip├í',
+  'pr├®stamos',
+  'Invitaci├│n',
+  't├®rminos',
+  'seg├║n',
+  'recomend├í',
+  'gan├í',
+  'Toc├í para participar',
+  'ac├í',
+]);
+
 let cachedTemplateBody = null;
+
+/**
+ * Fail closed if invite HTML/subject lost UTF-8 Spanish accents (mojibake).
+ *
+ * @param {string} text
+ * @returns {{ ok: true }|{ ok: false, reason: string }}
+ */
+function validateAffiliateInviteSpanishUtf8(text) {
+  const s = String(text == null ? '' : text);
+  for (let i = 0; i < AFFILIATE_INVITE_MOJIBAKE_MARKERS.length; i += 1) {
+    const bad = AFFILIATE_INVITE_MOJIBAKE_MARKERS[i];
+    if (s.indexOf(bad) !== -1) {
+      return { ok: false, reason: 'mojibake_marker:' + bad };
+    }
+  }
+  if (/├/.test(s)) {
+    return { ok: false, reason: 'mojibake_box_drawing_char' };
+  }
+  if (/Ã[¡©­³º]/.test(s)) {
+    return { ok: false, reason: 'latin1_mojibake_sequence' };
+  }
+  for (let j = 0; j < AFFILIATE_INVITE_REQUIRED_SPANISH.length; j += 1) {
+    const req = AFFILIATE_INVITE_REQUIRED_SPANISH[j];
+    if (s.indexOf(req) === -1) {
+      return { ok: false, reason: 'missing_spanish_utf8:' + req };
+    }
+  }
+  return { ok: true };
+}
+
+function validateAffiliateInviteSubjectUtf8() {
+  const subj = AFFILIATE_INVITE_EMAIL_SUBJECT;
+  if (subj.indexOf('Ganá') === -1) {
+    return { ok: false, reason: 'subject_missing_accent' };
+  }
+  if (/├/.test(subj) || subj.indexOf('GanÃ') !== -1) {
+    return { ok: false, reason: 'subject_mojibake' };
+  }
+  return { ok: true };
+}
+
+function assertAffiliateInviteSpanishUtf8(text, context) {
+  const check = validateAffiliateInviteSpanishUtf8(text);
+  if (!check.ok) {
+    throw new Error(
+      'affiliate_invite_template_invalid:' +
+        (context ? context + ':' : '') +
+        check.reason,
+    );
+  }
+}
 
 function readPublicBaseUrl(raw) {
   const trimmed = raw == null ? '' : String(raw).trim();
@@ -74,6 +150,7 @@ function buildAffiliateInviteHeroImageUrl(origin) {
 function loadTemplateBody() {
   if (cachedTemplateBody) return cachedTemplateBody;
   cachedTemplateBody = fs.readFileSync(TEMPLATE_PATH, 'utf8');
+  assertAffiliateInviteSpanishUtf8(cachedTemplateBody, 'template_file');
   return cachedTemplateBody;
 }
 
@@ -121,6 +198,11 @@ function buildAffiliateInviteEmailVars(input) {
  * @returns {{ ok: true, subject: string, html: string }|{ ok: false, errorReason: string }}
  */
 function renderAffiliateInviteEmail(input) {
+  const subjectCheck = validateAffiliateInviteSubjectUtf8();
+  if (!subjectCheck.ok) {
+    return { ok: false, errorReason: subjectCheck.reason };
+  }
+
   const vars = buildAffiliateInviteEmailVars(input);
   const check = validateAffiliateInviteTemplateVars(vars);
   if (!check.ok) {
@@ -130,10 +212,15 @@ function renderAffiliateInviteEmail(input) {
     };
   }
   const body = loadTemplateBody();
+  const html = applyTemplate(body, vars);
+  const utf8Check = validateAffiliateInviteSpanishUtf8(html);
+  if (!utf8Check.ok) {
+    return { ok: false, errorReason: utf8Check.reason };
+  }
   return {
     ok: true,
     subject: AFFILIATE_INVITE_EMAIL_SUBJECT,
-    html: applyTemplate(body, vars),
+    html: html,
   };
 }
 
@@ -151,6 +238,9 @@ module.exports = {
   buildAffiliateInviteHeroImageUrl,
   buildAffiliateInviteEmailVars,
   validateAffiliateInviteTemplateVars,
+  validateAffiliateInviteSpanishUtf8,
+  validateAffiliateInviteSubjectUtf8,
+  AFFILIATE_INVITE_REQUIRED_SPANISH,
   renderAffiliateInviteEmail,
   loadTemplateBody,
 };

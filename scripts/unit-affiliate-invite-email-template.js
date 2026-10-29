@@ -15,6 +15,8 @@ const {
   buildAffiliateInviteHeroImageUrl,
   renderAffiliateInviteEmail,
   loadTemplateBody,
+  validateAffiliateInviteSpanishUtf8,
+  validateAffiliateInviteSubjectUtf8,
   TEMPLATE_PATH,
 } = require('../src/lib/affiliateInviteEmail');
 
@@ -55,6 +57,23 @@ assert.ok(
   'text fallback link',
 );
 assert.ok(out.html.indexOf('affiliate_v3') !== -1, 'terms footer mentions version');
+
+assert.strictEqual(validateAffiliateInviteSubjectUtf8().ok, true, 'subject UTF-8');
+assert.strictEqual(
+  validateAffiliateInviteSpanishUtf8(out.html).ok,
+  true,
+  'rendered HTML UTF-8 Spanish',
+);
+assert.strictEqual(
+  validateAffiliateInviteSpanishUtf8(
+    'particip├í ac├í en el programa de pr├®stamos seg├║n t├®rminos',
+  ).ok,
+  false,
+  'detects common mojibake',
+);
+assert.ok(
+  validateAffiliateInviteSpanishUtf8('particip├í ac├í').reason.indexOf('mojibake') !== -1,
+);
 
 const extraBtn = out.html.match(/<a[^>]+class="[^"]*btn[^"]*"/gi);
 assert.strictEqual(extraBtn, null, 'no extra HTML button');
