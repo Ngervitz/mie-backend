@@ -15,6 +15,8 @@ const AFFILIATE_EMAIL_INVITE_CLICKS = Object.freeze({
 
 const AFFILIATE_SMS_SOURCE_SYSTEM = 'affiliate_invite_sms';
 const AFFILIATE_SMS_INVITE_PURPOSE = 'affiliate_program_invite';
+/** PostgREST `.in()` URL limit; keep aligned with impact_id chunking below. */
+const AFFILIATE_OUTREACH_IN_CHUNK = 100;
 
 async function countExactHead(supabase, table, applyFilters) {
   let query = supabase.from(table).select('*', { count: 'exact', head: true });
@@ -118,12 +120,18 @@ async function countAffiliatesRegisteredFromSmsInvite(supabase, campaignIds) {
   });
   if (!inviteIds.size) return 0;
 
-  const { data: tokens, error: tErr } = await supabase
-    .from('affiliate_invite_tokens')
-    .select('id, ci, status')
-    .in('id', Array.from(inviteIds))
-    .eq('status', 'consumed');
-  if (tErr) throw tErr;
+  const inviteIdList = Array.from(inviteIds);
+  const tokens = [];
+  for (let i = 0; i < inviteIdList.length; i += AFFILIATE_OUTREACH_IN_CHUNK) {
+    const slice = inviteIdList.slice(i, i + AFFILIATE_OUTREACH_IN_CHUNK);
+    const { data, error: tErr } = await supabase
+      .from('affiliate_invite_tokens')
+      .select('id, ci, status')
+      .in('id', slice)
+      .eq('status', 'consumed');
+    if (tErr) throw tErr;
+    if (data && data.length) tokens.push.apply(tokens, data);
+  }
 
   const { data: affs, error: aErr } = await supabase
     .from('affiliates')
