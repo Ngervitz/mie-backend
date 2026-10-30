@@ -10,6 +10,7 @@
  */
 
 const supabaseDefault = require('../clients/supabase');
+const { affiliateOtpIdsIncludingEnv } = require('./smsCampaignHistoricalRegistry');
 const {
   pollStatus,
   pollResponses,
@@ -165,7 +166,24 @@ async function listAutoPollCampaigns(opts) {
   if (error) {
     throw new Error(`listAutoPollCampaigns failed: ${error.message}`);
   }
-  return data || [];
+
+  const recent = data || [];
+  const extraIds = affiliateOtpIdsIncludingEnv().filter(function (id) {
+    return recent.every(function (row) {
+      return !row || String(row.id) !== String(id);
+    });
+  });
+  if (!extraIds.length) return recent;
+
+  const { data: extra, error: extraErr } = await supabase
+    .from('sms_campaigns')
+    .select('id, name, created_at, total_messages, status')
+    .in('id', extraIds)
+    .in('status', CANDIDATE_CAMPAIGN_STATUSES.slice());
+  if (extraErr) {
+    throw new Error(`listAutoPollCampaigns transactional lookup failed: ${extraErr.message}`);
+  }
+  return recent.concat(extra || []);
 }
 
 /**

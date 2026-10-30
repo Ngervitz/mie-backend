@@ -74,6 +74,28 @@ async function queueAffiliateTransactionalSms(args) {
     },
   ]);
 
+  try {
+    const supabase = require('../clients/supabase');
+    const { pollStatus } = require('../services/notifyme-client');
+    const { data, error } = await supabase
+      .from('sms_messages')
+      .select('unique_id, status')
+      .eq('campaign_id', campaignId)
+      .eq('source_system', sourceSystem)
+      .eq('source_record_id', String(args.sourceRecordId || ''))
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (!error && data && data[0] && data[0].unique_id && String(data[0].status) !== 'DELIVERED') {
+      await pollStatus([String(data[0].unique_id)]);
+    }
+  } catch (pollErr) {
+    logger.error('affiliate transactional SMS status poll failed', {
+      kind: args.kind || 'unknown',
+      ci: args.ci,
+      error: pollErr && pollErr.message ? pollErr.message : String(pollErr),
+    });
+  }
+
   return {
     ok: true,
     dry_run: false,

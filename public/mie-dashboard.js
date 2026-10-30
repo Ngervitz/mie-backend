@@ -10827,7 +10827,7 @@ init();
         ? '<p class="sms-cost-note">Costo pendiente de configurar</p>'
         : '';
 
-    const metaCards = [
+    const metaCardPairs = [
       ['Nombre', dash(campaign.name)],
       ['Serie', dash(campaignSeriesLabel(campaign))],
       ['Creada', dash(campaign.created_at)],
@@ -10837,7 +10837,18 @@ init();
       ['Enviados (costo)', formatCount(agg.messages_sent)],
       ['Entregados (costo)', formatCount(agg.messages_delivered)],
       ['Costo estimado', formatCost(agg.estimated_cost, agg.currency)],
-    ]
+    ];
+    if (campaign.acquisition_cost) {
+      const ac = campaign.acquisition_cost;
+      metaCardPairs.push(
+        ['OTP entregados del lote', formatCount(ac.otp_delivered)],
+        ['Costo OTP', formatCost(ac.otp_cost_ex_vat, agg.currency)],
+        ['SMS bienvenida entregados', formatCount(ac.welcome_sms_delivered)],
+        ['Costo SMS bienvenida', formatCost(ac.welcome_sms_cost_ex_vat, agg.currency)],
+        ['Costo del lote (SMS)', formatCost(ac.lote_sms_cost_ex_vat, agg.currency)],
+      );
+    }
+    const metaCards = metaCardPairs
       .map(
         (pair) =>
           '<div class="sms-detail-card">' +

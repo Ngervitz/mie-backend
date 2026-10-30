@@ -140,7 +140,9 @@ async function ensureWelcomeCampaign(supabase) {
       name: AFFILIATE_WELCOME_CAMPAIGN_NAME,
       subject: AFFILIATE_WELCOME_SUBJECT,
       body_html: WELCOME_BODY_TEMPLATE,
-      segment_rules_snapshot: { source: 'affiliate_welcome' },
+      audience_mode: 'DIRECTED',
+      segment_id: null,
+      segment_rules_snapshot: null,
       status: 'sending',
     })
     .select('id, name')

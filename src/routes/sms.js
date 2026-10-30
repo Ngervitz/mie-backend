@@ -62,6 +62,10 @@ const {
 } = require('../lib/smsCampaignClassification');
 const { isAffiliateOtpCampaignId } = require('../lib/smsCampaignHistoricalRegistry');
 const { isSmsTransactionalPurpose } = require('../lib/smsCampaignAnalyticsPolicy');
+const {
+  summarizeAcquisitionCost,
+  loteSmsCostExVat,
+} = require('../lib/affiliateSmsAcquisitionCost');
 
 const router = express.Router();
 
@@ -265,6 +269,21 @@ function buildCostMetrics({ totalMessages, statusCounts, costConfig }) {
   };
 }
 
+async function loadRelatedTransactionalRows(cis) {
+  const rows = [];
+  for (let i = 0; i < cis.length; i += 100) {
+    const slice = cis.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from('sms_messages')
+      .select('czuid, status, source_system')
+      .in('czuid', slice)
+      .in('source_system', ['affiliate_otp', 'affiliate_welcome']);
+    if (error) throw error;
+    rows.push.apply(rows, data || []);
+  }
+  return rows;
+}
+
 async function enrichCampaign(campaign, messageRows, costConfig) {
   const aggregates = aggregateMessageStats(messageRows);
   const cost = buildCostMetrics({
@@ -272,6 +291,22 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
     statusCounts: aggregates.status_counts,
     costConfig,
   });
+  let acquisition_cost = null;
+  if (campaign.purpose === SMS_PURPOSES.AFFILIATE_PROGRAM_INVITE) {
+    const cis = [];
+    const seen = new Set();
+    (messageRows || []).forEach(function (row) {
+      const ci = row && row.czuid != null ? String(row.czuid) : '';
+      if (!ci || seen.has(ci)) return;
+      seen.add(ci);
+      cis.push(ci);
+    });
+    const related = cis.length ? await loadRelatedTransactionalRows(cis) : [];
+    const summary = summarizeAcquisitionCost(messageRows, related, cost.cost_per_sms_ex_vat);
+    acquisition_cost = Object.assign({}, summary, {
+      lote_sms_cost_ex_vat: loteSmsCostExVat(cost.estimated_cost, summary),
+    });
+  }
   return {
     id: campaign.id,
     name: campaign.name,
@@ -294,6 +329,7 @@ async function enrichCampaign(campaign, messageRows, costConfig) {
       isSmsTransactionalPurpose(campaign.purpose),
     aggregates,
     cost,
+    acquisition_cost,
   };
 }
 
