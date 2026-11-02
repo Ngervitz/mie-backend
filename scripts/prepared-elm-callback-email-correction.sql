@@ -1,0 +1,34 @@
+-- PREPARED. DO NOT RUN without explicit authorization.
+-- ELM callback invite V1 — email typo correction for CI 49698187 / cz_solicitud_id 2716.
+--
+-- Source of the live value:
+--   public.cz_funnel_solicitudes.email
+--   (JANUS mirror of the CZ solicitud email; czFunnelSync overwrites this on the next sync
+--    from Credizona. A funnel-only UPDATE will not survive sync unless CZ is also corrected.)
+--
+-- Intended correction: replace domain gmail.cm → gmail.com, keep the local-part unchanged.
+-- After any authorized UPDATE, re-check email_suppressions and the lightweight email shape
+-- validator before sending. Do not assume deliverability from a valid domain.
+--
+-- Runtime send path already applies this correction in memory (src/lib/elmCallbackInvite.js)
+-- without writing production data.
+--
+-- BEGIN;
+--
+-- SELECT cz_id, ci, email
+-- FROM public.cz_funnel_solicitudes
+-- WHERE cz_id = 2716
+--   AND ci = 49698187;
+--
+-- UPDATE public.cz_funnel_solicitudes
+-- SET email = regexp_replace(email, '@gmail\.cm$', '@gmail.com', 'i')
+-- WHERE cz_id = 2716
+--   AND ci = 49698187
+--   AND email ~* '@gmail\.cm$';
+--
+-- SELECT cz_id, ci, email
+-- FROM public.cz_funnel_solicitudes
+-- WHERE cz_id = 2716
+--   AND ci = 49698187;
+--
+-- COMMIT;

@@ -104,7 +104,14 @@ function createElmOpsRouter(opts) {
 
   router.get('/processes', async function (req, res) {
     try {
-      return res.json({ ok: true, items: await svc().listOpenProcesses(limitOf(req.query.limit)) });
+      const callbackRequested =
+        req.query.callback_requested === '1' || req.query.callback_requested === 'true';
+      return res.json({
+        ok: true,
+        items: await svc().listOpenProcesses(limitOf(req.query.limit), {
+          callbackRequested: callbackRequested,
+        }),
+      });
     } catch (err) {
       return fail(res, 'GET elm-ops/processes failed', err);
     }
@@ -218,6 +225,7 @@ function createElmOpsRouter(opts) {
         situation: req.query.situation,
         vintage: req.query.vintage,
         lane: req.query.lane,
+        callback_requested: req.query.callback_requested,
       });
       return res.json({
         ok: true,

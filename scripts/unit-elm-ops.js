@@ -172,6 +172,9 @@ function fakeOpsRepo(state) {
       calls.push(['c1Referrals', staleHours, limit]);
       return state.c1Referrals || [];
     },
+    async listElmCallbackConfirmed() {
+      return state.callbacks instanceof Map ? state.callbacks : new Map();
+    },
     async listOpenFallbackRequests() {
       return state.queued || [];
     },

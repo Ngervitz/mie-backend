@@ -8,6 +8,7 @@
 const EMAIL_PURPOSES = Object.freeze({
   RECHAZADOS_SURVEY_INVITE: 'rechazados_survey_invite',
   AFFILIATE_WELCOME: 'affiliate_welcome',
+  ELM_CALLBACK_INVITE: 'elm_callback_invite',
 });
 
 const EMAIL_PURPOSE_SET = new Set(Object.values(EMAIL_PURPOSES));

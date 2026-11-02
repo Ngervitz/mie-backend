@@ -30,6 +30,7 @@ const { createElmPostbackRouter } = require('./routes/elmPostback');
 const miplanInterestRouter = require('./routes/miplan-interest');
 const emailUnsubscribeRouter = require('./routes/email-unsubscribe');
 const emailClickRouter = require('./routes/email-click');
+const emailCallbackRouter = require('./routes/email-callback');
 const affiliateLinksRouter = require('./routes/affiliate-links');
 const affiliateJoinPublicRouter = require('./routes/affiliate-join-public');
 const affiliateJoinPagesRouter = require('./routes/affiliate-join-pages');
@@ -86,6 +87,8 @@ app.use(smsShortLinksRouter);
 app.use(emailUnsubscribeRouter);
 // Public email click redirect (GET records event; HEAD does not) — before requireAuth.
 app.use(emailClickRouter);
+// Public ELM callback confirm (GET page / POST event). GET must not write intent.
+app.use(emailCallbackRouter);
 // Public affiliate redirects — own tables, no marketing_impacts. Before requireAuth.
 app.use(affiliateLinksRouter);
 // Public affiliate landing + terms (/affiliates/join, /affiliates/terms). Does not expose all of public/.

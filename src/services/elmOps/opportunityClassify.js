@@ -292,7 +292,12 @@ function filterOpportunities(items, query) {
   const situation = q.situation && SITUATION_LABELS[q.situation] ? q.situation : '';
   const vintage = q.vintage && VINTAGE_LABELS[q.vintage] ? q.vintage : '';
   const lane = q.lane && LANE_LABELS[q.lane] ? q.lane : '';
+  const callbackOnly =
+    q.callback_requested === true ||
+    q.callback_requested === '1' ||
+    q.callback_requested === 'true';
   return (items || []).filter(function (item) {
+    if (callbackOnly && item.callback_requested !== true) return false;
     if (situation && item.situation !== situation) return false;
     if (vintage && item.vintage !== vintage) return false;
     if (lane && item.lane !== lane) return false;

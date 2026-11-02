@@ -202,13 +202,23 @@
     return KIND_LABELS[p.kind] || p.kind || '—';
   }
 
+  function callbackBadgeHtml(item) {
+    if (!item || item.callback_requested !== true) return '';
+    const phone = item.callback_phone
+      ? ' <span class="elm-ops-phone">' + esc(item.callback_phone) + '</span>'
+      : '';
+    return (
+      ' <span class="elm-ops-flag elm-ops-flag-callback">Pidió llamada</span>' + phone
+    );
+  }
+
   function processRowHtml(p, fmtDate, canAct) {
     const blocked = (p.blocked_cz_solicitud_ids || []).join(', ');
     const ev = p.last_event;
     return (
       '<tr data-process-id="' + esc(p.process_id) + '">' +
       '<td>' + esc(p.cz_solicitud_id) + '</td>' +
-      '<td>' + esc(p.ci || '—') + '</td>' +
+      '<td>' + esc(p.ci || '—') + callbackBadgeHtml(p) + '</td>' +
       '<td>' + esc(processKindLabel(p)) + '</td>' +
       '<td>' + esc(fmtDate(p.since)) + '</td>' +
       '<td>' + esc(fmtAge(p.age_hours)) + '</td>' +
@@ -312,7 +322,7 @@
     return (
       '<tr>' +
       '<td>' + esc(r.cz_solicitud_id) + '</td>' +
-      '<td>' + esc(r.ci || '—') + '</td>' +
+      '<td>' + esc(r.ci || '—') + callbackBadgeHtml(r) + '</td>' +
       '<td>' + esc(r.projected_estado) + '</td>' +
       '<td>' + esc(commercial) + '</td>' +
       '<td>' + (ev ? esc((ev.type || '—') + (ev.delivery_status ? ' · ' + ev.delivery_status : '')) : 'Sin eventos') + '</td>' +
@@ -683,10 +693,11 @@
     return false;
   }
 
-  function opportunityMatches(item, ciQuery, situation, vintage, lane) {
+  function opportunityMatches(item, ciQuery, situation, vintage, lane, callbackOnly) {
+    if (callbackOnly && item.callback_requested !== true) return false;
     if (situation && item.situation !== situation) return false;
     if (vintage && item.vintage !== vintage) return false;
-    if (lane && item.lane !== lane) return false;
+    if (lane && item.callback_requested !== true && item.lane !== lane) return false;
     const q = String(ciQuery || '').replace(/\D/g, '');
     if (!q) return true;
     const ci = String(item.ci || '').replace(/\D/g, '');
@@ -976,7 +987,7 @@
     const colSpan = gestion ? 15 : 11;
     return (
       '<tr data-elm-cz="' + esc(cz) + '"' + (open ? ' class="is-open"' : '') + '>' +
-      '<td>' + esc(item.ci || '—') + '</td>' +
+      '<td>' + esc(item.ci || '—') + callbackBadgeHtml(item) + '</td>' +
       '<td>' + esc(cz) + '</td>' +
       '<td><span class="elm-ops-flag">' +
         esc(item.vintage_label || '—') + '</span></td>' +
@@ -1065,6 +1076,7 @@
       const which = t.getAttribute('data-elm-ops-filter');
       if (which === 'vintage') state.vintage = t.value || '';
       else if (which === 'lane') state.lane = t.value || '';
+      else if (which === 'callback') state.callbackOnly = t.checked === true;
       else state.situation = t.value || '';
       render();
     });
@@ -1151,6 +1163,7 @@
       situation: '',
       vintage: '',
       lane: 'attention',
+      callbackOnly: false,
       openId: null,
       openAction: null,
       openSendCz: null,
@@ -1195,7 +1208,14 @@
 
     function visibleItems() {
       return state.items.filter(function (i) {
-        return opportunityMatches(i, state.ciQuery, state.situation, state.vintage, state.lane);
+        return opportunityMatches(
+          i,
+          state.ciQuery,
+          state.situation,
+          state.vintage,
+          state.callbackOnly ? '' : state.lane,
+          state.callbackOnly,
+        );
       });
     }
 
@@ -1243,6 +1263,9 @@
         '<label class="elm-ops-filter">Situación <select data-elm-ops-filter="situation">' +
         optionList(state.situations, state.situation, 'Todas las situaciones').join('') +
         '</select></label>' +
+        '<label class="elm-ops-filter"><input type="checkbox" data-elm-ops-filter="callback"' +
+        (state.callbackOnly ? ' checked' : '') +
+        '> Pidió llamada</label>' +
         '<span class="preaprobados-muted">' + vis.length + ' de ' + state.items.length + '</span>' +
         '</div>';
       if (state.error) html += '<div class="mcl-status mcl-error">' + esc(state.error) + '</div>';
@@ -1598,6 +1621,8 @@
     mount,
     mountRecoverable,
     opportunityRowHtml,
+    callbackBadgeHtml,
+    opportunityMatches,
     gestionAdminSlotHtml,
     gestionActionFormHtml,
     gestionSendFormHtml,

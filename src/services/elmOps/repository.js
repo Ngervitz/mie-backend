@@ -371,10 +371,89 @@ function createElmOpsRepository(supabaseOverride) {
     return out;
   }
 
+  /**
+   * Confirmed "Pidió llamada" events for elm_callback_invite. Read-only.
+   * @returns {Promise<Map<number, { ci: string|null, phone: string|null, confirmed_at: string|null, impact_id: string }>>}
+   */
+  async function listElmCallbackConfirmed() {
+    const {
+      PURPOSE,
+      EVENT_NAME,
+      EVENT_SOURCE,
+      callbackEventExternalId,
+    } = require('../../lib/elmCallbackInvite');
+    const { data: recs, error: recErr } = await db()
+      .from('email_campaign_recipients')
+      .select('cz_solicitud_id, ci, marketing_impact_id')
+      .eq('purpose', PURPOSE)
+      .not('marketing_impact_id', 'is', null);
+    if (recErr) throw rpcError('email_campaign_recipients callback read', recErr);
+    const rows = recs || [];
+    const out = new Map();
+    if (!rows.length) return out;
+
+    const impactIds = uniq(rows.map(function (r) { return r.marketing_impact_id; }));
+    const { data: events, error: evErr } = await db()
+      .from('marketing_impact_events')
+      .select('impact_id, occurred_at, event_name, external_event_id')
+      .eq('source', EVENT_SOURCE)
+      .eq('event_name', EVENT_NAME)
+      .in('impact_id', impactIds);
+    if (evErr) throw rpcError('marketing_impact_events callback read', evErr);
+
+    const confirmedByImpact = new Map();
+    for (const ev of events || []) {
+      const expected = callbackEventExternalId(ev.impact_id);
+      if (String(ev.external_event_id || '') !== expected) continue;
+      confirmedByImpact.set(String(ev.impact_id), ev);
+    }
+    if (!confirmedByImpact.size) return out;
+
+    const confirmedCz = [];
+    const pending = [];
+    for (const row of rows) {
+      const ev = confirmedByImpact.get(String(row.marketing_impact_id));
+      if (!ev) continue;
+      const cz = Number(row.cz_solicitud_id);
+      if (!Number.isSafeInteger(cz)) continue;
+      pending.push({
+        cz_solicitud_id: cz,
+        ci: row.ci != null ? String(row.ci) : null,
+        impact_id: String(row.marketing_impact_id),
+        confirmed_at: ev.occurred_at || null,
+      });
+      confirmedCz.push(cz);
+    }
+    const phones = new Map();
+    if (confirmedCz.length) {
+      const { data: sols, error: solErr } = await db()
+        .from('cz_funnel_solicitudes')
+        .select('cz_id, celular')
+        .in('cz_id', uniq(confirmedCz));
+      if (solErr) throw rpcError('cz_funnel_solicitudes callback phone read', solErr);
+      for (const s of sols || []) {
+        const phone = s.celular != null && String(s.celular).trim() !== ''
+          ? String(s.celular).trim()
+          : null;
+        phones.set(Number(s.cz_id), phone);
+      }
+    }
+    for (const row of pending) {
+      out.set(row.cz_solicitud_id, {
+        ci: row.ci,
+        phone: phones.has(row.cz_solicitud_id) ? phones.get(row.cz_solicitud_id) : null,
+        confirmed_at: row.confirmed_at,
+        impact_id: row.impact_id,
+      });
+    }
+    return out;
+  }
+
   return {
     listOpenFallbackRequests,
     listPhoneInvalidFinalized,
     czIdsWithEstado3,
+    listElmCallbackConfirmed,
     listOpenProcesses,
     getProcessById,
     getProcessByCzId,

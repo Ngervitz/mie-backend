@@ -22,6 +22,9 @@ const {
   EMAIL_AUDIENCE_MODES,
   resolveAudienceModeForCreate,
 } = require('../services/email-campaigns/audienceMode');
+const {
+  materializeElmCallbackInviteCampaign,
+} = require('../lib/elmCallbackInviteMaterialize');
 
 const router = express.Router();
 
@@ -352,6 +355,29 @@ router.post('/campaigns/:id/materialize', async (req, res) => {
       error: message,
     });
     return res.status(400).json({ error: message });
+  }
+});
+
+/**
+ * POST /email/campaigns/:id/materialize-elm-callback
+ * DIRECTED one-shot for the 7 authorized ELM recovery CIs. Does not send.
+ */
+router.post('/campaigns/:id/materialize-elm-callback', async (req, res) => {
+  const campaignId = req.params.id;
+  try {
+    const result = await materializeElmCallbackInviteCampaign(supabase, campaignId);
+    return res.status(200).json(result);
+  } catch (err) {
+    const status = err && err.statusCode ? err.statusCode : 400;
+    const message = err && err.message ? err.message : 'Materialize failed';
+    logger.error('POST /email/campaigns/:id/materialize-elm-callback failed', {
+      campaignId,
+      error: message,
+    });
+    return res.status(status).json({
+      error: message,
+      code: err && err.code ? err.code : undefined,
+    });
   }
 });
 

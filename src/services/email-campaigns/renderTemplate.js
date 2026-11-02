@@ -125,6 +125,19 @@ function renderOutboundEmail(input) {
     }
   }
 
+  if (purpose === EMAIL_PURPOSES.ELM_CALLBACK_INVITE) {
+    const check = validateRequiredTemplateVars(vars, [
+      'callback_url',
+      'unsubscribe_url',
+    ]);
+    if (!check.ok) {
+      return {
+        ok: false,
+        errorReason: 'missing_required_template_var:' + check.missing,
+      };
+    }
+  }
+
   const merge = buildMergeMap(vars, { nombreFallback: NOMBRE_FALLBACK });
   return {
     ok: true,

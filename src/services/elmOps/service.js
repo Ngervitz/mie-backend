@@ -34,6 +34,7 @@ const {
   REVIEW_CZ_OUTCOMES,
   PROCESS_CZ_OUTCOMES,
 } = require('../providerFallback/constants');
+const { applyCallbackFields } = require('../../lib/elmCallbackInvite');
 
 const PROCESS_RESOLUTIONS = Object.freeze({
   referral: Object.freeze([
@@ -269,20 +270,31 @@ function createElmOpsService(deps) {
   const postReferralStatuses =
     d.postReferralRejectionStatuses || readPostReferralRejectionStatuses();
 
-  async function listOpenProcesses(limit) {
+  async function loadCallbackMap() {
+    if (typeof repo.listElmCallbackConfirmed !== 'function') return new Map();
+    return repo.listElmCallbackConfirmed();
+  }
+
+  async function listOpenProcesses(limit, opts) {
     const nowMs = now();
     const rows = await repo.listOpenProcesses(limit);
-    const [events, blocked] = await Promise.all([
+    const [events, blocked, callbacks] = await Promise.all([
       repo.getPostbackEventsByIds(rows.map(function (r) { return r.last_postback_event_id; })),
       repo.listBlockedByRelated(rows.map(function (r) { return r.cz_solicitud_id; })),
+      loadCallbackMap(),
     ]);
-    return rows.map(function (p) {
-      return openProcessView(p, {
+    let items = rows.map(function (p) {
+      const view = openProcessView(p, {
         nowMs: nowMs,
         lastEvent: p.last_postback_event_id ? events.get(p.last_postback_event_id) || null : null,
         blockedCzIds: blocked.get(Number(p.cz_solicitud_id)) || [],
       });
+      return applyCallbackFields(view, callbacks.get(Number(p.cz_solicitud_id)) || null);
     });
+    if (opts && opts.callbackRequested === true) {
+      items = items.filter(function (p) { return p.callback_requested === true; });
+    }
+    return items;
   }
 
   async function listReviewCases(status, limit) {
@@ -450,8 +462,13 @@ function createElmOpsService(deps) {
   }
 
   async function listC1ActiveReferrals(limit) {
-    const rows = await repo.listC1ActiveReferrals(c1StaleHours, limit);
-    return rows.map(c1ReferralView);
+    const [rows, callbacks] = await Promise.all([
+      repo.listC1ActiveReferrals(c1StaleHours, limit),
+      loadCallbackMap(),
+    ]);
+    return rows.map(function (r) {
+      return applyCallbackFields(c1ReferralView(r), callbacks.get(Number(r.cz_solicitud_id)) || null);
+    });
   }
 
   async function listCzConflicts(status, limit) {
@@ -742,8 +759,33 @@ function createElmOpsService(deps) {
     (rec.items || []).forEach(function (item) {
       byId.set(item.cz_solicitud_id, item);
     });
+    const callbacks = await loadCallbackMap();
+    callbacks.forEach(function (cb, czId) {
+      const existing = byId.get(czId);
+      if (existing) {
+        applyCallbackFields(existing, cb);
+        return;
+      }
+      byId.set(
+        czId,
+        applyCallbackFields(
+          classifyOpportunity({
+            cz_solicitud_id: czId,
+            ci: cb.ci,
+            followup_kind: 'referred',
+            since: cb.confirmed_at,
+            dashboard: 'preaprobados',
+          }),
+          cb,
+        ),
+      );
+    });
+    byId.forEach(function (item) {
+      if (!item.callback_requested) applyCallbackFields(item, null);
+    });
     const merged = Array.from(byId.values());
     merged.sort(function (a, b) {
+      if (a.callback_requested !== b.callback_requested) return a.callback_requested ? -1 : 1;
       if (a.attention !== b.attention) return a.attention ? -1 : 1;
       if (a.vintage !== b.vintage) return a.vintage === 'historical' ? -1 : 1;
       return String(a.since || '').localeCompare(String(b.since || ''));
@@ -753,6 +795,7 @@ function createElmOpsService(deps) {
       situation: q.situation,
       vintage: q.vintage,
       lane: q.lane,
+      callback_requested: q.callback_requested,
     });
     const slice = filtered.slice(0, max);
     if (slice.length) {

@@ -7079,6 +7079,14 @@
   background: rgba(239, 68, 68, 0.18);
   color: #fca5a5;
 }
+#mie-dashboard-app .elm-ops-flag-callback {
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+}
+#mie-dashboard-app .elm-ops-phone {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 #mie-dashboard-app .elm-ops-form {
   display: flex;
   flex-wrap: wrap;
