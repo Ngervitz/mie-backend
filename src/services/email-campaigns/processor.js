@@ -13,6 +13,8 @@ const {
   resolveRecalculatedCampaignStatus,
 } = require('../../lib/rejectedSurveyInviteContinuousCampaigns');
 const { validateRule, filterBySegment } = require('./rule-engine');
+const { resolveSegmentAudienceSource, AUDIENCE_SOURCES } = require('./segmentAudienceSource');
+const { buildFunnelSolicitudAudienceEligible } = require('./funnelSolicitudAudience');
 const { renderOutboundEmail } = require('./renderTemplate');
 const {
   ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE,
@@ -448,11 +450,7 @@ async function materializeCampaign(campaignIdRaw) {
 
   validateRule(segment.rules);
 
-  const rawEncuestas = await fetchAllRows('cz_encuestas_synced', '*');
-  const normalizedEncuestas = [];
-  for (const row of rawEncuestas) {
-    normalizedEncuestas.push(normalizeEncuestaRecord(row));
-  }
+  const audienceSource = resolveSegmentAudienceSource(segment.rules);
 
   const suppressions = await fetchAllRows('email_suppressions', 'email');
   const suppressedSet = new Set(
@@ -463,23 +461,43 @@ async function materializeCampaign(campaignIdRaw) {
   let excludedNoConsent = 0;
   let excludedSuppressed = 0;
   let excludedDuplicates = 0;
+  let excludedTestOrControl = 0;
 
-  const eligible = [];
-  for (const record of normalizedEncuestas) {
-    const emailNorm = normalizeEmail(record.email);
-    if (!emailNorm) {
-      excludedNoEmail += 1;
-      continue;
+  let eligible = [];
+
+  if (audienceSource === AUDIENCE_SOURCES.FUNNEL_SOLICITUDES) {
+    const built = await buildFunnelSolicitudAudienceEligible(supabase, {
+      suppressedSet,
+    });
+    eligible = built.eligible;
+    excludedSuppressed = built.stats.excluded_suppressed;
+    excludedTestOrControl = built.stats.excluded_test_or_control;
+    excludedNoEmail = built.stats.excluded_invalid_or_duplicate_rows;
+    excludedNoConsent = 0;
+    logger.info('materializeCampaign funnel solicitud audience', built.stats);
+  } else {
+    const rawEncuestas = await fetchAllRows('cz_encuestas_synced', '*');
+    const normalizedEncuestas = [];
+    for (const row of rawEncuestas) {
+      normalizedEncuestas.push(normalizeEncuestaRecord(row));
     }
-    if (record.marketing_consent !== true) {
-      excludedNoConsent += 1;
-      continue;
+
+    for (const record of normalizedEncuestas) {
+      const emailNorm = normalizeEmail(record.email);
+      if (!emailNorm) {
+        excludedNoEmail += 1;
+        continue;
+      }
+      if (record.marketing_consent !== true) {
+        excludedNoConsent += 1;
+        continue;
+      }
+      if (suppressedSet.has(emailNorm)) {
+        excludedSuppressed += 1;
+        continue;
+      }
+      eligible.push({ ...record, email: emailNorm });
     }
-    if (suppressedSet.has(emailNorm)) {
-      excludedSuppressed += 1;
-      continue;
-    }
-    eligible.push({ ...record, email: emailNorm });
   }
 
   const matched = filterBySegment(segment.rules, eligible);
@@ -599,10 +617,12 @@ async function materializeCampaign(campaignIdRaw) {
   logger.info('materializeCampaign completed', {
     campaignId,
     recipientCount: inserted,
+    audienceSource,
     excluded: {
       noEmail: excludedNoEmail,
       noConsent: excludedNoConsent,
       suppressed: excludedSuppressed,
+      testOrControl: excludedTestOrControl,
       duplicates: excludedDuplicates,
     },
   });
@@ -610,10 +630,12 @@ async function materializeCampaign(campaignIdRaw) {
   return {
     campaignId,
     recipientCount: inserted,
+    audienceSource,
     excluded: {
       noEmail: excludedNoEmail,
       noConsent: excludedNoConsent,
       suppressed: excludedSuppressed,
+      testOrControl: excludedTestOrControl,
       duplicates: excludedDuplicates,
     },
   };
@@ -665,28 +687,36 @@ function buildTerminalFailPatch(nowIso, errorReason) {
 /**
  * @param {string|number} campaignId
  */
-async function recalculateCampaignStatus(campaignId) {
-  const { data: rows, error } = await supabase
+async function countRecipientsByStatus(campaignId, status) {
+  const { count, error } = await supabase
     .from('email_campaign_recipients')
-    .select('status')
-    .eq('campaign_id', campaignId);
-
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId)
+    .eq('status', status);
   if (error) {
-    logger.error('recalculateCampaignStatus: select failed', {
-      campaignId,
-      error: error.message,
-    });
-    throw new Error(`recalculateCampaignStatus failed: ${error.message}`);
+    throw new Error(
+      `recalculateCampaignStatus: count ${status} failed: ${error.message}`,
+    );
   }
+  return typeof count === 'number' ? count : 0;
+}
 
-  const list = rows || [];
+async function recalculateCampaignStatus(campaignId) {
   let queued = 0;
   let sent = 0;
   let failed = 0;
-  for (const r of list) {
-    if (r.status === 'queued') queued += 1;
-    else if (r.status === 'sent') sent += 1;
-    else if (r.status === 'failed') failed += 1;
+  try {
+    queued = await countRecipientsByStatus(campaignId, 'queued');
+    sent = await countRecipientsByStatus(campaignId, 'sent');
+    failed = await countRecipientsByStatus(campaignId, 'failed');
+  } catch (err) {
+    logger.error('recalculateCampaignStatus: count failed', {
+      campaignId,
+      error: err && err.message ? err.message : String(err),
+    });
+    throw new Error(
+      err && err.message ? err.message : 'recalculateCampaignStatus failed',
+    );
   }
 
   // Continuous STEP campaigns (env STEP1/2/3) stay always-open: never auto-complete.
@@ -726,13 +756,13 @@ async function recalculateCampaignStatus(campaignId) {
 /**
  * Process up to QUEUE_LIMIT queued recipients behind a job_locks mutex.
  *
- * @param {{ campaignId?: string|number|null }} [options]
+ * @param {{ campaignId?: string|number }} [options]
  * @returns {Promise<object>}
  */
 async function processQueue(options) {
-  const campaignIdFilter =
+  const filterCampaignId =
     options && options.campaignId != null && String(options.campaignId).trim() !== ''
-      ? String(options.campaignId).trim()
+      ? normalizeCampaignId(options.campaignId)
       : null;
   const lockedBy = randomUUID();
   const acquired = await acquireProcessQueueLock(lockedBy);
@@ -769,8 +799,8 @@ async function processQueue(options) {
       .select('*')
       .eq('status', 'queued')
       .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`);
-    if (campaignIdFilter != null) {
-      queueQuery = queueQuery.eq('campaign_id', campaignIdFilter);
+    if (filterCampaignId) {
+      queueQuery = queueQuery.eq('campaign_id', filterCampaignId);
     }
     const { data: recipients, error: queueErr } = await queueQuery
       .order('created_at', { ascending: true })
@@ -786,6 +816,7 @@ async function processQueue(options) {
     const list = recipients || [];
     summary.selected = list.length;
     if (!list.length) {
+      summary.filterCampaignId = filterCampaignId;
       return summary;
     }
 
@@ -1089,6 +1120,7 @@ async function processQueue(options) {
       await recalculateCampaignStatus(campaignId);
     }
 
+    summary.filterCampaignId = filterCampaignId;
     logger.info('processQueue completed', summary);
     return summary;
   } finally {
