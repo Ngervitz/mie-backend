@@ -58,11 +58,13 @@ function createProviderFallbackRepository(supabaseOverride) {
 
   /** @returns {Promise<object[]>} */
   async function claim(args) {
+    const excluded = Array.isArray(args.excludedCzSolicitudIds) ? args.excludedCzSolicitudIds : [];
     const { data, error } = await db().rpc('provider_fallback_claim', {
       p_worker_id: args.workerId,
       p_lease_seconds: args.leaseSeconds,
       p_limit: args.limit,
       p_cz_solicitud_id: args.czSolicitudId != null ? args.czSolicitudId : null,
+      p_excluded_cz_solicitud_ids: excluded,
     });
     if (error) throw rpcError('provider_fallback_claim', error);
     return Array.isArray(data) ? data : data ? [data] : [];

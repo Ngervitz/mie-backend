@@ -9,6 +9,8 @@
  *   PROVIDER_FALLBACK_WORKER_ENABLED         POST /jobs/run-provider-fallback-worker processes jobs
  *   PROVIDER_FALLBACK_CZ_AUTOMATIC_ENABLED   orchestrator accepts trigger_origin cz_automatic
  *   PROVIDER_FALLBACK_IMMEDIATE_KICK_ENABLED start also runs the worker for that solicitud now
+ *   PROVIDER_FALLBACK_KICK_RETRY_DELAY_MS      wait before retrying kick when claim is empty (default 20000)
+ *   PROVIDER_FALLBACK_KICK_RETRY_MAX           kick claim retries after concurrent same-CI start (default 2)
  *
  * C1 (CZ events / monthly lock):
  *   PROVIDER_FALLBACK_LATE_EVENTS_ENABLED    cron also emits late events (Convertido → 16,
@@ -28,7 +30,7 @@
 
 const { readElmConfig } = require('../elm/config');
 const { classifyProviderStatus } = require('../elm/providerStatus');
-const { REVIEW_PRIORITIES } = require('./constants');
+const { REVIEW_PRIORITIES, WORKER_AUTOMATIC_EXCLUDED_CZ_SOLICITUD_IDS } = require('./constants');
 
 const DEFAULT_MAX_NOT_STARTED_ATTEMPTS = 5;
 const DEFAULT_NOT_STARTED_RETRY_SECONDS = 300;
@@ -161,6 +163,9 @@ function readProviderFallbackConfig(envOverride, elmConfigOverride) {
       1,
       8760,
     ),
+    workerExcludedCzSolicitudIds: WORKER_AUTOMATIC_EXCLUDED_CZ_SOLICITUD_IDS,
+    kickRetryDelayMs: intIn(env.PROVIDER_FALLBACK_KICK_RETRY_DELAY_MS, 20_000, 5_000, 120_000),
+    kickRetryMaxAttempts: intIn(env.PROVIDER_FALLBACK_KICK_RETRY_MAX, 2, 1, 5),
   };
 }
 

@@ -268,6 +268,7 @@ function createProviderFallbackWorker(deps) {
       leaseSeconds: config.jobLeaseSeconds,
       limit: limit,
       czSolicitudId: o.czSolicitudId != null ? o.czSolicitudId : null,
+      excludedCzSolicitudIds: config.workerExcludedCzSolicitudIds,
     });
     const summary = {
       ok: true,
@@ -356,17 +357,34 @@ function createProviderFallbackWorker(deps) {
     if (!config.workerEnabled || !config.immediateKickEnabled) return false;
     if (activeKicks >= config.maxConcurrentKicks) return false;
     activeKicks += 1;
-    setImmediate(function () {
+
+    function attemptKick(attempt) {
       runOnce({ limit: 1, czSolicitudId: czSolicitudId, trigger: 'kick' })
+        .then(function (summary) {
+          const retry =
+            summary.claimed === 0 &&
+            !summary.skipped &&
+            attempt < config.kickRetryMaxAttempts;
+          if (retry) {
+            setTimeout(function () {
+              attemptKick(attempt + 1);
+            }, config.kickRetryDelayMs);
+            return;
+          }
+          activeKicks -= 1;
+        })
         .catch(function (err) {
           logger.error('provider fallback kick failed', {
             cz_solicitud_id: czSolicitudId,
+            attempt: attempt,
             error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
           });
-        })
-        .finally(function () {
           activeKicks -= 1;
         });
+    }
+
+    setImmediate(function () {
+      attemptKick(1);
     });
     return true;
   }

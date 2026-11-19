@@ -158,6 +158,14 @@ const BCU_RETRY = Object.freeze({
   maxAttempts: 2,
 });
 
+/**
+ * Ops triage 2026-11-19: never auto-claim these CZ solicitud ids (rows stay untouched).
+ * Editable only by an intentional code change — not a rolling age rule.
+ */
+const WORKER_AUTOMATIC_EXCLUDED_CZ_SOLICITUD_IDS = Object.freeze([
+  1490, 1491, 1948, 1962, 1966, 2424, 3115, 3532,
+]);
+
 /** elm_ci_lock_acquire / elm_claim_process blocked kinds */
 const CI_LOCK_BLOCK = Object.freeze({
   ACTIVE_REFERRAL: 'active_referral',
@@ -175,6 +183,7 @@ module.exports = {
   DEFINITIVE_REJECTION_REASONS,
   DEFINITIVE_S2_REJECTION_RESULTS,
   BCU_RETRY,
+  WORKER_AUTOMATIC_EXCLUDED_CZ_SOLICITUD_IDS,
   CI_LOCK_BLOCK,
   PROVIDER,
   EXEC,

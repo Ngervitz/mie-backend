@@ -1512,11 +1512,35 @@ router.post('/run-pre-cutoff-catchup-survey-invite', async (req, res) => {
 /**
  * Provider fallback worker (Fase 3A). Auth: X-Cron-Key or admin session (preaprobados section).
  * Cadence: cron-job.org → POST /jobs/run-provider-fallback-worker (every minute).
+ * Optional JSON body for scoped runs: { cz_solicitud_id, limit } (same as worker runOnce).
  * PROVIDER_FALLBACK_WORKER_ENABLED off → { skipped: 'worker_disabled' }.
  */
 router.post('/run-provider-fallback-worker', requireAdmin, async (req, res) => {
   try {
-    const result = await getDefaultProviderFallbackWorker().runOnce({ trigger: 'cron' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const rawCz = body.cz_solicitud_id != null ? body.cz_solicitud_id : req.query.cz_solicitud_id;
+    const rawLimit = body.limit != null ? body.limit : req.query.limit;
+    let czSolicitudId = null;
+    if (rawCz != null && String(rawCz).trim() !== '') {
+      const n = Number(String(rawCz).trim());
+      if (!Number.isInteger(n) || n <= 0) {
+        return res.status(400).json({ ok: false, error: 'invalid_cz_solicitud_id' });
+      }
+      czSolicitudId = n;
+    }
+    let limit = null;
+    if (rawLimit != null && String(rawLimit).trim() !== '') {
+      const n = Number(String(rawLimit).trim());
+      if (!Number.isInteger(n) || n <= 0 || n > 100) {
+        return res.status(400).json({ ok: false, error: 'invalid_limit' });
+      }
+      limit = n;
+    }
+    const result = await getDefaultProviderFallbackWorker().runOnce({
+      trigger: 'cron',
+      czSolicitudId: czSolicitudId,
+      limit: limit != null ? limit : undefined,
+    });
     if (!result.skipped) logger.info('provider_fallback_worker finished', result);
     return res.status(200).json(result);
   } catch (err) {
