@@ -182,7 +182,12 @@ function fakeOpsRepo(state) {
       return state.phoneInvalid || [];
     },
     async czIdsWithEstado3(ids) {
-      return new Set((state.estado3 || ids || []).map(Number));
+      const base = state.estado3 != null ? state.estado3 : [];
+      return new Set(base.map(Number));
+    },
+    async czIdsWithAppliedRejectionOutcome(ids) {
+      const base = state.appliedRejection3 != null ? state.appliedRejection3 : [];
+      return new Set(base.map(Number));
     },
     async listCzConflicts(status, limit) {
       calls.push(['c1Conflicts', status, limit]);
@@ -1485,6 +1490,63 @@ test('postback: internal_id / cedula accepted; disagreeing aliases are invalid, 
   assert.strictEqual(ciConflict.invalidCode, CODES.POSTBACK_CI_INVALID);
   const pb = readSrc('src/services/elm/postback.js');
   assert.ok(!/cz_funnel_solicitudes/.test(pb), 'postback association never depends on the mirror');
+});
+
+test('followup CZ 3983/3984: S1 rejected, projected 3, ACK applied, funnel not 3 → not rejected_pending_cz', async () => {
+  const rejectedC1 = (czId, ci, msg) => ({
+    id: 'proc-' + czId,
+    cz_solicitud_id: czId,
+    ci: ci,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'rejected',
+    s1_result_message: msg,
+    s2_status: 'not_started',
+    created_at: '2026-11-19T18:11:53Z',
+    updated_at: '2026-11-19T18:12:00Z',
+  });
+  const rows = [
+    rejectedC1(3983, 57589922, 'BCU'),
+    rejectedC1(3984, 29696161, 'Mocasist'),
+  ];
+  const { service } = setup({
+    processes: rows,
+    allProcesses: rows,
+    projected: [
+      [3983, 3],
+      [3984, 3],
+    ],
+    estado3: [],
+    appliedRejection3: [3983, 3984],
+  });
+  const items = await service.followup(50);
+  const ids = items.map((i) => i.cz_solicitud_id);
+  assert.ok(!ids.includes(3983), JSON.stringify(items));
+  assert.ok(!ids.includes(3984));
+});
+
+test('followup: rejected_pending_cz only while projected 3 without applied ACK', async () => {
+  const row = {
+    id: 'proc-3983',
+    cz_solicitud_id: 3983,
+    ci: 57589922,
+    trigger_origin: 'cz_automatic',
+    s1_status: 'rejected',
+    s1_result_message: 'BCU',
+    s2_status: 'not_started',
+    created_at: '2026-11-19T18:11:53Z',
+    updated_at: '2026-11-19T18:12:00Z',
+  };
+  const { service } = setup({
+    processes: [row],
+    allProcesses: [row],
+    projected: [[3983, 3]],
+    estado3: [],
+    appliedRejection3: [],
+  });
+  const items = await service.followup(50);
+  const hit = items.find((i) => i.cz_solicitud_id === 3983);
+  assert.ok(hit);
+  assert.strictEqual(hit.kind, 'rejected_pending_cz');
 });
 
 (async () => {

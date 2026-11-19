@@ -179,6 +179,8 @@ function deriveFromProcess(p, nowMs, retryPolicy) {
  * An S2 unknown that is the accepted answer (isS2Accepted) is an S2 referral (rule 3), not an
  * unknown (rule 1); every other S2 unknown stays in rule 1.
  * The monthly send limit is enforced afterwards by elm_ci_lock_acquire (DB, atomic per CI).
+ * SQL uncertain rules must treat provider_cz_state projected 3/16 as closedInCz (see migration
+ * 20261119_elm_ci_lock_closed_cz_uncertain: elm_ci_lock_try + elm_ci_lock_settle).
  *
  * @param {object[]} processes elm_lead_processes rows with the same CI (CI_GUARD_SELECT)
  * @param {number} selfCzId

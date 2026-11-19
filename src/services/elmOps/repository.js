@@ -345,6 +345,29 @@ function createElmOpsRepository(supabaseOverride) {
     return data || [];
   }
 
+  /**
+   * Definitive rejection already delivered to CZ (outcome → 3, ACK applied).
+   * Used so Gestión ELM does not wait on funnel mirror sync alone.
+   */
+  async function czIdsWithAppliedRejectionOutcome(czIds) {
+    const ids = uniq(czIds).map(Number);
+    const out = new Set();
+    for (let i = 0; i < ids.length; i += MAX_LIST) {
+      const chunk = ids.slice(i, i + MAX_LIST);
+      const { data, error } = await db()
+        .from('provider_cz_events')
+        .select('cz_solicitud_id')
+        .eq('event_type', 'outcome')
+        .eq('target_estado', 3)
+        .eq('delivery_status', 'acked')
+        .eq('cz_ack_result', 'applied')
+        .in('cz_solicitud_id', chunk);
+      if (error) throw rpcError('provider_cz_events read', error);
+      for (const r of data || []) out.add(Number(r.cz_solicitud_id));
+    }
+    return out;
+  }
+
   /** Subset of the given solicitudes that already show CZ estado 3 in the JANUS mirror. */
   async function czIdsWithEstado3(czIds) {
     const ids = uniq(czIds).map(Number);
@@ -452,6 +475,7 @@ function createElmOpsRepository(supabaseOverride) {
   return {
     listOpenFallbackRequests,
     listPhoneInvalidFinalized,
+    czIdsWithAppliedRejectionOutcome,
     czIdsWithEstado3,
     listElmCallbackConfirmed,
     listOpenProcesses,

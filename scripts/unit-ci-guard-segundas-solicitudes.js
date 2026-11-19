@@ -83,6 +83,19 @@ test('CI 34552857: prior 2023 same month S1 rejected Repetido → ci_monthly_quo
   assert.strictEqual(g.relatedCzId, 2023);
 });
 
+test('CZ 3975 / prior 1517: unknown Repetido closed in CZ (cross-month) → guard proceed, not ci_prior_unknown', () => {
+  const now = Date.parse('2026-11-19T17:41:23.000Z');
+  const prior = proc({
+    cz_solicitud_id: 1517,
+    s1_status: S1.UNKNOWN,
+    s1_result_message: 'Repetido. Rechazado',
+    s1_completed_at: '2026-10-14T23:57:54.461Z',
+    cz_projected_estado: CZ_ESTADO.REJECTED,
+  });
+  const g = evaluateCiGuard([prior], 3975, now);
+  assert.deepStrictEqual(g, { kind: 'proceed' });
+});
+
 test('CZ 1984 cross-month: prior Repetido closed → guard proceed (no fake elm_s1_rejected)', () => {
   const prior = proc({
     cz_solicitud_id: 1847,

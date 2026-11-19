@@ -512,8 +512,8 @@ function createFakeFallbackRepo(now, elmRepo) {
       firstProc(
         (p) =>
           !p.ops_resolved_at &&
-          (p.s1_status === S1.UNKNOWN ||
-            expired(p.s1_status, p.s1_lease_expires_at) ||
+          ((p.s1_status === S1.UNKNOWN && !closedInCz(p)) ||
+            (expired(p.s1_status, p.s1_lease_expires_at) && !closedInCz(p)) ||
             ((p.s2_status === S2.UNKNOWN || expired(p.s2_status, p.s2_lease_expires_at)) && !closedInCz(p))),
       );
     if (rel) return blocked('uncertain', rel);
@@ -1524,6 +1524,39 @@ test('CI duplication guard: unknown / active referral (any provider status) / in
   await env.mk('C').runOnce();
   assert.strictEqual(job(env, 942).outcome, OUTCOME.REFERRED, 'a previous rejection does not block next month');
   assert.deepStrictEqual(env.client.calls.s1.map((p) => p.docNumber), ['94000000']);
+});
+
+test('CZ 3975: prior 1517 S1 unknown with CZ projected 3 does not CI-lock uncertain (cross-month send)', async () => {
+  const env = setup();
+  const CI = 42542236;
+  const mkProc = async (czId, s1, extra) => {
+    const c = await env.elmRepo.claimProcess({
+      czSolicitudId: czId,
+      ci: CI,
+      sourceBrand: 'TestBrand',
+      triggerOrigin: 'cz_automatic',
+      triggeredByUserId: 'u',
+      s1Request: { docNumber: String(CI) },
+      leaseSeconds: ELM_CONFIG.inFlightLeaseSeconds,
+    });
+    if (s1 !== S1.IN_FLIGHT) await env.elmRepo.finishS1(c.process.id, { status: s1 });
+    Object.assign(env.elmRepo.rows.get(czId), Object.assign({ s1_result_message: 'Repetido. Rechazado' }, extra || {}));
+  };
+  await mkProc(1517, S1.UNKNOWN);
+  env.repo.czState.set(1517, { projected_estado: 3, last_seq: 1, ci: CI });
+  for (const l of env.repo.locks) {
+    if (Number(l.cz_solicitud_id) === 1517) Object.assign(l, { state: 'consumed', block_reason: null });
+  }
+  env.clock.t = Date.parse('2026-11-19T17:41:23.000Z');
+  env.repo.czState.set(3975, { projected_estado: 12, last_seq: 0, ci: CI });
+  await enqueue(env, 3975, CI);
+  const req = job(env, 3975);
+  const lock = await env.repo.acquireCiLock({ ci: CI, czSolicitudId: 3975, fallbackRequestId: req.id });
+  assert.strictEqual(
+    lock.status,
+    'acquired',
+    'prior closed in CZ must not elm_ci_lock_try uncertain (got ' + JSON.stringify(lock) + ')',
+  );
 });
 
 test('browser closed: start, cron worker, CZ polls pending, acks (duplicate ack idempotent)', async () => {

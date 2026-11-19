@@ -514,7 +514,8 @@ function createElmOpsService(deps) {
    * Seguimiento operativo: everything that is neither in Preaprobados nor in Rechazados yet.
    *   in_evaluation / review   any origin (S1 favorable waiting S2, in flight, uncertain,
    *                            technical error, negative answer not confirmed as definitive)
-   *   rejected_pending_cz      automatic definitive rejection CZ has not reflected as 3 yet
+   *   rejected_pending_cz      automatic rejection not yet settled in CZ (funnel mirror) and no
+   *                            applied outcome ACK with JANUS projected 3
    *   queued                   automatic fallback request without ELM process yet
    */
   async function followup(limit) {
@@ -549,11 +550,16 @@ function createElmOpsService(deps) {
       }
     }
     if (rejectedAutomatic.length) {
-      const reflected = await repo.czIdsWithEstado3(
-        rejectedAutomatic.map(function (i) { return i.cz_solicitud_id; }),
-      );
+      const rejIds = rejectedAutomatic.map(function (i) { return i.cz_solicitud_id; });
+      const reflected = await repo.czIdsWithEstado3(rejIds);
+      const ackedRejection =
+        typeof repo.czIdsWithAppliedRejectionOutcome === 'function'
+          ? await repo.czIdsWithAppliedRejectionOutcome(rejIds)
+          : new Set();
       for (const i of rejectedAutomatic) {
         if (reflected.has(i.cz_solicitud_id)) continue;
+        const projected = projectedByCz.has(i.cz_solicitud_id) ? Number(projectedByCz.get(i.cz_solicitud_id)) : null;
+        if (projected === 3 && ackedRejection.has(i.cz_solicitud_id)) continue;
         items.push(Object.assign({}, i, {
           kind: 'rejected_pending_cz',
           label: i.label + ' · pendiente de reflejo en Credizona (estado 3)',

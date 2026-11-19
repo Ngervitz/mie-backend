@@ -35,6 +35,7 @@ const MIGRATIONS = [
 const MIG_C1 = MIG('20261010_provider_fallback_c1_events.sql');
 const MIG_DUP = MIG('20261015_provider_fallback_duplicate_other_channel.sql');
 const MIG_PHONE = MIG('20261016_c1_mobilephone_needs_correction.sql');
+const MIG_LOCK_CLOSED = MIG('20261119_elm_ci_lock_closed_cz_uncertain.sql');
 const EXPECTED_DEFINITIVE_REASONS = [
   'ci_monthly_quota_used',
   'elm_date_of_birth_invalid',
@@ -119,6 +120,9 @@ async function main() {
   const phoneMig = fs.readFileSync(MIG_PHONE, 'utf8');
   await db.exec(phoneMig);
   await db.exec(phoneMig);
+  const lockClosedMig = fs.readFileSync(MIG_LOCK_CLOSED, 'utf8');
+  await db.exec(lockClosedMig);
+  await db.exec(lockClosedMig);
   const actor = (await db.query('INSERT INTO public.dashboard_users DEFAULT VALUES RETURNING id')).rows[0].id;
 
   const finSigs = await db.query("SELECT pronargs FROM pg_proc WHERE proname = 'provider_fallback_finalize'");
@@ -789,6 +793,62 @@ async function main() {
   assert.strictEqual(ca.action, 'resolved');
   assert.strictEqual((await state(401)).projected_estado, 3, 'resolving a conflict never changes CZ state');
   pass('ops: active referrals (13/14) with start, age, last ELM status, last event + unacked, conflicts, lock; conflict resolution audited, no state change');
+
+  // ------------------------------------------------------------------ CZ 3975 / prior 1517: unknown + CZ 3 allows send; open prior still blocks
+  const CI_3975 = 42542236;
+  const CZ_PRIOR = 991517;
+  const CZ_NEW = 993975;
+  const rPrior = await job(CZ_PRIOR, CI_3975);
+  await acquire(CI_3975, CZ_PRIOR, rPrior.id, OCT);
+  const pPrior = await claimProc(CZ_PRIOR, CI_3975);
+  await finishS1(pPrior.id, 'unknown', 'elm_http_timeout');
+  await finalize(rPrior.id, 'manual_review', 'elm_s1_unknown', pPrior.id);
+  assert.strictEqual((await state(CZ_PRIOR)).projected_estado, 14, 'prior at 14 like prod 1517');
+  const cPrior = await reviewCase(CZ_PRIOR);
+  assert.strictEqual((await resolveCase(CZ_PRIOR, cPrior, 'rejected')).cz_event.target_estado, 3);
+  assert.strictEqual((await state(CZ_PRIOR)).projected_estado, 3);
+  const pPriorRow = await one('SELECT s1_status, s1_result_message FROM public.elm_lead_processes WHERE cz_solicitud_id = $1', [
+    CZ_PRIOR,
+  ]);
+  assert.strictEqual(pPriorRow.s1_status, 'unknown', 'prior footprint stays S1 unknown after CZ 3');
+  await lockReconcile();
+  const lkPrior = await liveLock(CZ_PRIOR);
+  assert.strictEqual(lkPrior && lkPrior.blocks_future, false, 'uncertain_referral cleared after 14→3: ' + JSON.stringify(lkPrior));
+  const closedCz = await one(
+    'SELECT EXISTS (SELECT 1 FROM public.provider_cz_state s WHERE s.cz_solicitud_id = $1 AND s.projected_estado IN (3, 16)) AS ok',
+    [CZ_PRIOR],
+  );
+  assert.strictEqual(closedCz.ok, true, 'provider_cz_state closed for prior');
+  const lockSrc = String((await one("SELECT prosrc FROM pg_proc WHERE proname = 'elm_ci_lock_try'")).prosrc || '');
+  assert.ok(
+    lockSrc.includes("p.s1_status = 'unknown'") && lockSrc.includes('NOT EXISTS'),
+    'migration 20261119 applied to elm_ci_lock_try',
+  );
+  const rNew = await job(CZ_NEW, CI_3975);
+  const lockNew = await acquire(CI_3975, CZ_NEW, rNew.id, NOV);
+  assert.strictEqual(
+    lockNew.status,
+    'acquired',
+    'cross-month send after prior closed in CZ (3975): ' + JSON.stringify(lockNew),
+  );
+
+  const CI_OPEN = 51009901;
+  const CZ_OPEN = 992200;
+  const CZ_OPEN_NEW = 992201;
+  const rOpen = await job(CZ_OPEN, CI_OPEN);
+  await acquire(CI_OPEN, CZ_OPEN, rOpen.id, OCT);
+  const pOpen = await claimProc(CZ_OPEN, CI_OPEN);
+  await finishS1(pOpen.id, 'unknown', 'elm_http_timeout');
+  await finalize(rOpen.id, 'manual_review', 'elm_s1_unknown', pOpen.id);
+  assert.strictEqual((await state(CZ_OPEN)).projected_estado, 14, 'prior still open in CZ');
+  const rOpen2 = await job(CZ_OPEN_NEW, CI_OPEN);
+  const lockOpen = await acquire(CI_OPEN, CZ_OPEN_NEW, rOpen2.id, NOV);
+  assert.deepStrictEqual(
+    [lockOpen.status, lockOpen.block, Number(lockOpen.related_cz_solicitud_id)],
+    ['blocked', 'uncertain', CZ_OPEN],
+    'S1 unknown + CZ 14 still uncertain-blocks',
+  );
+  pass('CI lock 3975: prior S1 unknown at CZ 3 → acquire next month; prior still at CZ 14 → uncertain block');
 
   console.log('db-local-provider-fallback-c1-pglite: ' + groups + ' groups passed');
 }
