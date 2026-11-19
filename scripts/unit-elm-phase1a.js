@@ -597,6 +597,11 @@ async function runAll() {
       'hyphen is not the documented negative',
     );
     assert.strictEqual(classifyService1Result('BCU'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('BCU endeudamiento'), OUTCOME.NEGATIVE);
+    assert.strictEqual(classifyService1Result('bcu   endeudamiento'), OUTCOME.NEGATIVE);
+    const { matchesDocumentedList, SERVICE1_NEGATIVE } = require('../src/services/elm/client');
+    assert.ok(matchesDocumentedList('Repetido. Rechazado', SERVICE1_NEGATIVE));
+    assert.ok(!matchesDocumentedList('Repetido. Aprobado', SERVICE1_NEGATIVE));
     // "BCU error" is an explicit non-credit answer: technical_error, never a rejection.
     assert.strictEqual(classifyService1Result('BCU error'), OUTCOME.TECHNICAL_ERROR);
     assert.deepStrictEqual(classifyService1Response('BCU error'), {

@@ -445,6 +445,8 @@ test('6 S1/S2 documented success and rejection texts; BCU error technical; auth 
     ['service1', ok('Blacklist'), OUTCOME.NEGATIVE, null],
     ['service1', ok('BCU'), OUTCOME.NEGATIVE, null],
     ['service1', ok('Repetido. rechazado'), OUTCOME.NEGATIVE, null],
+    ['service1', ok('BCU endeudamiento'), OUTCOME.NEGATIVE, null],
+    ['service1', ok('  bcu   endeudamiento  '), OUTCOME.NEGATIVE, null],
     ['service1', ok('Repetido. Rechazado'), OUTCOME.NEGATIVE, null],
     ['service1', ok('REPETIDO. RECHAZADO'), OUTCOME.NEGATIVE, null],
     ['service1', ok('  Repetido. Rechazado  '), OUTCOME.NEGATIVE, null],

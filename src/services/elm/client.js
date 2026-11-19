@@ -53,6 +53,7 @@ const SERVICE1_NEGATIVE = Object.freeze([
   'Blacklist',
   'SCORE BAJO',
   'BCU',
+  'BCU endeudamiento',
   'Repetido. rechazado',
   'No hay oferta',
   'Mocasist',
@@ -64,15 +65,35 @@ const SERVICE1_DUPLICATE_KEYS = new Set(
     return s.trim().toLowerCase();
   }),
 );
+function collapseSpaces(text) {
+  return String(text).trim().replace(/\s+/g, ' ');
+}
+
+function normalizeListedS1Text(text) {
+  if (typeof text !== 'string') return '';
+  return collapseSpaces(text).toLowerCase();
+}
+
 const SERVICE1_NEGATIVE_KEYS = new Set(
   SERVICE1_NEGATIVE.map(function (s) {
-    return s.trim().toLowerCase();
+    return normalizeListedS1Text(s);
   }),
 );
 
 /** Persisted / received S1 text is a documented definitive rejection (case-insensitive). */
 function isService1Negative(text) {
-  return typeof text === 'string' && SERVICE1_NEGATIVE_KEYS.has(text.trim().toLowerCase());
+  const n = normalizeListedS1Text(text);
+  return n !== '' && SERVICE1_NEGATIVE_KEYS.has(n);
+}
+
+/** Match raw text against a documented list (case/space variants only; not substring). */
+function matchesDocumentedList(raw, list) {
+  const n = normalizeListedS1Text(raw);
+  if (!n) return false;
+  for (let i = 0; i < list.length; i += 1) {
+    if (normalizeListedS1Text(list[i]) === n) return true;
+  }
+  return false;
 }
 
 /** Explicit non-credit answers: result text → errorCode stored with technical_error. */
@@ -362,6 +383,7 @@ module.exports = {
   SERVICE1_TECHNICAL,
   isService1DuplicateOtherChannel,
   isService1Negative,
+  matchesDocumentedList,
   SERVICE2_POSITIVE,
   SERVICE2_NEGATIVE,
   classifyService1Response,
