@@ -44,6 +44,7 @@ require.cache[envPath] = {
 
 const {
   isContinuousRejectedSurveyCampaign,
+  isContinuousSurveyCampaignFrozen,
   resolveRecalculatedCampaignStatus,
 } = require('../src/lib/rejectedSurveyInviteContinuousCampaigns');
 const {
@@ -147,7 +148,7 @@ assert.strictEqual(
   'sending',
 );
 
-// partial_error unchanged for continuous
+// partial_error when no queued work remains
 assert.strictEqual(
   resolveRecalculatedCampaignStatus({
     queued: 0,
@@ -157,6 +158,20 @@ assert.strictEqual(
   }),
   'partial_error',
 );
+
+// queued wins over aggregate partial_error (freeze recovery path)
+assert.strictEqual(
+  resolveRecalculatedCampaignStatus({
+    queued: 292,
+    sent: 864,
+    failed: 1,
+    isContinuous: true,
+  }),
+  'sending',
+);
+
+assert.strictEqual(isContinuousSurveyCampaignFrozen('partial_error', 6), true);
+assert.strictEqual(isContinuousSurveyCampaignFrozen('partial_error', 99), false);
 
 assert.strictEqual(
   resolveRecalculatedCampaignStatus({
@@ -317,7 +332,7 @@ assert.strictEqual(
   console.log(label + ': PASS (deterministic contract)');
 }
 
-// Test 7 — PROCESSQUEUE ELIGIBILITY: sending is send-allowed; completed is not
+// Test 7 — PROCESSQUEUE ELIGIBILITY: sending is send-allowed; continuous unfreeze before loop
 {
   const proc = fs.readFileSync(
     path.join(
@@ -335,8 +350,13 @@ assert.strictEqual(
       "SEND_ALLOWED_STATUSES = new Set(['draft', 'scheduled', 'sending'])",
     ) !== -1,
   );
-  assert.ok(proc.indexOf('isContinuousRejectedSurveyCampaign') !== -1);
+  assert.ok(proc.indexOf('syncContinuousCampaignsBeforeQueueDrain') !== -1);
+  assert.ok(proc.indexOf('isContinuousSurveyCampaignFrozen') !== -1);
   assert.ok(proc.indexOf('resolveRecalculatedCampaignStatus') !== -1);
+  assert.ok(
+    proc.indexOf('SEND_ALLOWED_STATUSES.has(campaign.status)') !== -1,
+    'batch partial_error still skipped after sync',
+  );
 }
 
 // Snapshot frontier remains outside RPC (existing architecture)

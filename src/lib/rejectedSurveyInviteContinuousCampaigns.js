@@ -53,6 +53,26 @@ function isContinuousRejectedSurveyCampaign(campaignId, stepIds) {
  * }} input
  * @returns {'sending'|'completed'|'partial_error'|'error'}
  */
+/** Aggregate campaign statuses blocked by processQueue until reopened (continuous only). */
+const CONTINUOUS_QUEUE_UNFREEZE_STATUSES = Object.freeze([
+  'partial_error',
+  'error',
+]);
+
+/**
+ * True when a STEP1/2/3 continuous campaign may be stuck in aggregate partial_error/error
+ * while individual queued recipients still need drain.
+ *
+ * @param {unknown} campaignId
+ * @param {unknown} status
+ * @param {{1?: string|null, 2?: string|null, 3?: string|null}|null} [stepIds]
+ */
+function isContinuousSurveyCampaignFrozen(status, campaignId, stepIds) {
+  if (!isContinuousRejectedSurveyCampaign(campaignId, stepIds)) return false;
+  const s = status != null ? String(status) : '';
+  return CONTINUOUS_QUEUE_UNFREEZE_STATUSES.includes(s);
+}
+
 function resolveRecalculatedCampaignStatus(input) {
   const queued = Number(input.queued) || 0;
   const sent = Number(input.sent) || 0;
@@ -70,5 +90,7 @@ function resolveRecalculatedCampaignStatus(input) {
 
 module.exports = {
   isContinuousRejectedSurveyCampaign,
+  isContinuousSurveyCampaignFrozen,
+  CONTINUOUS_QUEUE_UNFREEZE_STATUSES,
   resolveRecalculatedCampaignStatus,
 };

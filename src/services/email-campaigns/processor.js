@@ -10,6 +10,7 @@ const logger = require('../../lib/logger');
 const { getEmailProvider } = require('../email-provider');
 const {
   isContinuousRejectedSurveyCampaign,
+  isContinuousSurveyCampaignFrozen,
   resolveRecalculatedCampaignStatus,
 } = require('../../lib/rejectedSurveyInviteContinuousCampaigns');
 const { validateRule, filterBySegment } = require('./rule-engine');
@@ -754,6 +755,39 @@ async function recalculateCampaignStatus(campaignId) {
 }
 
 /**
+ * Continuous STEP campaigns can sit in partial_error while queued recipients accumulate
+ * (one terminal failed row on the same campaign). Recalculate from exact counts so queued>0
+ * reopens to sending before the send loop. Batch/manual campaigns are unchanged.
+ *
+ * @param {Map<string, object>} campaignById
+ * @param {string[]} campaignIds
+ */
+async function syncContinuousCampaignsBeforeQueueDrain(campaignById, campaignIds) {
+  for (let i = 0; i < (campaignIds || []).length; i += 1) {
+    const cid = campaignIds[i];
+    const campaign = campaignById.get(cid);
+    if (!campaign) continue;
+    if (SEND_ALLOWED_STATUSES.has(campaign.status)) continue;
+    if (!isContinuousSurveyCampaignFrozen(campaign.status, cid)) continue;
+    try {
+      const previousStatus = campaign.status;
+      const nextStatus = await recalculateCampaignStatus(cid);
+      campaign.status = nextStatus;
+      logger.info('processQueue: continuous campaign status synced for queue drain', {
+        campaignId: cid,
+        previousStatus: previousStatus,
+        nextStatus: nextStatus,
+      });
+    } catch (err) {
+      logger.error('processQueue: continuous campaign sync failed', {
+        campaignId: cid,
+        error: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/**
  * Process up to QUEUE_LIMIT queued recipients behind a job_locks mutex.
  *
  * @param {{ campaignId?: string|number }} [options]
@@ -841,6 +875,11 @@ async function processQueue(options) {
     for (const c of campaigns || []) {
       campaignById.set(String(c.id), c);
     }
+
+    await syncContinuousCampaignsBeforeQueueDrain(
+      campaignById,
+      uniqueCampaignIds,
+    );
 
     const provider = getEmailProvider();
     const markedSending = new Set();
@@ -1148,4 +1187,7 @@ module.exports = {
   ERROR_PAYLOAD_SNAPSHOT_INCOMPLETE,
   PROVIDER_IDEMPOTENCY_TTL_MS,
   PROCESS_QUEUE_JOB_NAME,
+  syncContinuousCampaignsBeforeQueueDrain,
+  isContinuousSurveyCampaignFrozen,
+  SEND_ALLOWED_STATUSES,
 };
