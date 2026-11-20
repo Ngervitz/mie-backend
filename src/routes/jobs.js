@@ -1315,6 +1315,11 @@ router.post('/run-cz-data-sync', async (req, res) => {
         itemsUpserted: result.encuestas.itemsUpserted,
       },
       hasTokenDiagnostic: Boolean(result && result.tokenDiagnostic),
+      cdvEstado8Elm: result.cdvEstado8Elm && {
+        ok: result.cdvEstado8Elm.ok,
+        skipped: result.cdvEstado8Elm.skipped,
+        enqueue: result.cdvEstado8Elm.enqueue,
+      },
     });
     // result.tokenDiagnostic is attached by the job on Unauthorized / missing token
     return res.status(200).json(result);

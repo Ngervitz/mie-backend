@@ -258,9 +258,24 @@ function createProviderFallbackWorker(deps) {
   /**
    * @param {{ limit?: number, czSolicitudId?: number|null, trigger?: string }} [opts]
    */
+  async function runCdvEstado8Queue() {
+    try {
+      const { processCdvEstado8ElmQueue } = require('../../lib/cdvEstado8ElmAutomation');
+      return await processCdvEstado8ElmQueue({ nowMs: now() });
+    } catch (err) {
+      logger.warn('cdv_estado8_elm worker drain failed', {
+        error: err && err.message ? String(err.message).slice(0, 200) : 'unknown',
+      });
+      return { ok: false, error: 'cdv_estado8_drain_failed' };
+    }
+  }
+
   async function runOnce(opts) {
     const o = opts || {};
-    if (!config.workerEnabled) return { ok: true, skipped: 'worker_disabled' };
+    const cdvEstado8 = await runCdvEstado8Queue();
+    if (!config.workerEnabled) {
+      return { ok: true, skipped: 'worker_disabled', cdv_estado8: cdvEstado8 };
+    }
     const workerId = prefix + ':' + crypto.randomUUID();
     const limit = Number.isInteger(o.limit) && o.limit > 0 ? Math.min(o.limit, 100) : config.workerBatchLimit;
     const jobs = await repo.claim({
@@ -297,6 +312,7 @@ function createProviderFallbackWorker(deps) {
       summary.review_alerts = await reviewAlerts();
       summary.c1 = await c1Maintenance();
     }
+    summary.cdv_estado8 = cdvEstado8;
     return summary;
   }
 

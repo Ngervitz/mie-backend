@@ -703,6 +703,20 @@ async function runCzFunnelSync() {
     encuestas: null,
   };
 
+  const estado8CandidateMap = new Map();
+  async function upsertSolicitudesTrackEstado8(items) {
+    const detected = require('../lib/cdvEstado8ElmAutomation').detectEstado8CandidatesFromItems(
+      items,
+    );
+    for (const [czId, fechahora] of detected.entries()) {
+      const prev = estado8CandidateMap.get(czId);
+      if (!prev || Date.parse(fechahora) < Date.parse(prev)) {
+        estado8CandidateMap.set(czId, fechahora);
+      }
+    }
+    return upsertSolicitudes(items);
+  }
+
   try {
     summary.grantedLoans = await syncSource({
       sourceName: SOURCE_GRANTED,
@@ -712,11 +726,26 @@ async function runCzFunnelSync() {
     summary.solicitudes = await syncSource({
       sourceName: SOURCE_SOLICITUDES,
       apiPath: '/solicitudes',
-      upsertPage: upsertSolicitudes,
+      upsertPage: upsertSolicitudesTrackEstado8,
       // Full refresh: CZ `updated` does not move on estado changes, so
       // last_since alone would skip historico changes on older solicitudes.
       fullRefresh: true,
     });
+
+    if (summary.solicitudes && summary.solicitudes.status !== 'error') {
+      try {
+        summary.cdvEstado8Elm = await require('../lib/cdvEstado8ElmAutomation').enqueueCdvEstado8FromSync(
+          estado8CandidateMap,
+        );
+      } catch (elmAutoErr) {
+        const msg =
+          elmAutoErr && elmAutoErr.message ? String(elmAutoErr.message) : 'unknown';
+        logger.error('cdv_estado8_elm after sync failed', {
+          error: msg.slice(0, 300),
+        });
+        summary.cdvEstado8Elm = { ok: false, error: msg.slice(0, 300) };
+      }
+    }
 
     // Post-sync reconcile: once per job, even when solicitudes itemsFetched=0.
     // Loads persisted estado 8 from Janus → Google Sheet (fail-open).

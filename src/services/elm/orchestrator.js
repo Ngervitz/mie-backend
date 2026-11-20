@@ -401,6 +401,18 @@ function createElmOrchestrator(deps) {
       error_code: step.errorCode,
       trigger_origin: ctx.triggerOrigin,
     });
+    if (stepName === 's2' && finished && finished.s2_status === S2.REFERRED && finished.referred_at) {
+      try {
+        const { trySendElmS2ReferredSms } = require('../../lib/elmS2ReferredSms');
+        await trySendElmS2ReferredSms(finished);
+      } catch (smsErr) {
+        logger.warn('elm_s2_referred_sms after s2 referred failed', {
+          cz_solicitud_id: czId,
+          error:
+            smsErr && smsErr.message ? String(smsErr.message).slice(0, 200) : 'unknown',
+        });
+      }
+    }
     return { ok: true, process: toProcessView(finished, now()) };
   }
 

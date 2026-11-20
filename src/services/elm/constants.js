@@ -29,6 +29,8 @@ const TRIGGER_ORIGINS = Object.freeze([
   'janus_manual',
   'janus_batch',
   'cz_automatic',
+  /** Post-sync CDV estado 8 automation (no provider_fallback / no CZ events). */
+  'cdv_estado_8',
 ]);
 
 /** Only janus_manual is wired in Fase 1A. */
