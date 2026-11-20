@@ -24,6 +24,7 @@ require.cache[envPath] = {
 };
 
 const { S2, CODES } = require('../src/services/elm/constants');
+const { gsm7Septets, smsSegmentsGsm7 } = require('../src/lib/affiliateInviteSmsPilot10');
 const {
   MESSAGE_TEXT,
   phoneFromS2Request,
@@ -33,7 +34,10 @@ const {
 } = require('../src/lib/elmS2ReferredSms');
 
 assert.equal(SOURCE_SYSTEM, 'elm_s2_referred');
-assert.ok(MESSAGE_TEXT.includes('ELM'));
+assert.ok(MESSAGE_TEXT.includes('Préstamos en la Mano'));
+const gsm = gsm7Septets(MESSAGE_TEXT);
+assert.equal(gsm.encoding, 'GSM-7', 'expected GSM-7: ' + (gsm.invalid_char || ''));
+assert.equal(smsSegmentsGsm7(gsm.septets), 1, 'septets=' + gsm.septets);
 
 const referred = {
   id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',

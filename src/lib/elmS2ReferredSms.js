@@ -11,9 +11,8 @@ const { S2, CODES } = require('../services/elm/constants');
 
 const SOURCE_SYSTEM = 'elm_s2_referred';
 const MESSAGE_TEXT =
-  'Credizona: ¡Buenas noticias! También conseguimos una alternativa de crédito para vos con ELM. ' +
-  'Un asesor de ELM se comunicará contigo próximamente para continuar la gestión. ' +
-  'No necesitás hacer ningún trámite adicional.';
+  'Credizona: Tenés una alternativa de crédito con Préstamos en la Mano. ' +
+  'Un asesor te llamara pronto para continuar tu solicitud.';
 
 function readElmS2ReferredSmsConfig(env) {
   const e = env || process.env;
