@@ -14718,7 +14718,7 @@ init();
     if (!row || den <= 0) {
       return renderKpiCard(
         '—',
-        'Conversión de encuestas · ' + (row ? ratio : 'sin cohorte'),
+        'Personas que completaron encuesta · ' + (row ? ratio : 'sin CI solicitantes'),
         'neutral',
       );
     }
@@ -14729,7 +14729,15 @@ init();
           maximumFractionDigits: 1,
         }) + ' %'
       : '—';
-    return renderKpiCard(pct, 'Conversión de encuestas · ' + ratio, 'accent');
+    return renderKpiCard(
+      pct,
+      'Personas que completaron encuesta · ' +
+        num +
+        ' CI completadas / ' +
+        den +
+        ' CI solicitantes',
+      'accent',
+    );
   }
 
   function renderCalidad(encRow, conversionRow) {

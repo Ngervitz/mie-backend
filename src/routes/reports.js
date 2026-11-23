@@ -46,8 +46,9 @@ const {
 } = require('../steps/serpQueryOnCreateEnrichment');
 const { computeAuctionPressure } = require('../services/auction-pressure');
 const { summarizeSurveyScoresByMonth } = require('../lib/czSurveyVersion');
-const { surveyConversionByRejectionMonth } = require('../lib/czSurveyConversion');
 const { loadCzFunnelSummarySources } = require('../lib/czFunnelSummaryRead');
+const { surveyConversionByCi } = require('../lib/czSurveyConversionByCi');
+const { formatYmdMontevideo } = require('../lib/montevideo-week');
 const {
   getPropertyId,
   buildGa4Client,
@@ -3181,7 +3182,6 @@ router.get('/cz-funnel-summary', async (req, res) => {
       grantedLoans: loansData,
       solicitudes: solData,
       encuestas: encData,
-      estadoRows: estadoData,
     } = await loadCzFunnelSummarySources(supabase);
 
     function monthKey(iso) {
@@ -3228,7 +3228,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
         encuestaScoreByVersion:
           'score_promedio = V1 only (0–30); score_promedio_v2 = V2 only (0–27); unknown version excluded from averages',
         surveyConversion:
-          'Unique CIs by month of their first historico estado-3 rejection in that month. Denominator excludes CIs who had already completed a survey. Numerator is those who completed at that rejection or later. Not invite eligibility.',
+          'Distinct CI with at least one solicitud (fecha_reg) in the month. Numerator: those CI with earliest encuesta completed_at on or before month cut-off (now for current month, else end of month Montevideo). Overall uses all solicitud CI vs completions by now. Not S1/S2/S3 eligibility.',
       },
       totals: {
         solicitudes: solData.length,
@@ -3244,13 +3244,13 @@ router.get('/cz-funnel-summary', async (req, res) => {
         }))
         .sort(sortMonthAsc),
       encuestasByMonth: summarizeSurveyScoresByMonth(encData, monthKey),
-      surveyConversionByMonth: surveyConversionByRejectionMonth(
+      ...surveyConversionByCi(
+        { solicitudRows: solData, surveyRows: encData },
         {
-          estadoRows: estadoData,
-          solicitudRows: solData,
-          surveyRows: encData,
+          monthKey,
+          nowMs: Date.now(),
+          currentMonthKey: formatYmdMontevideo().slice(0, 7),
         },
-        monthKey,
       ),
     });
   } catch (err) {

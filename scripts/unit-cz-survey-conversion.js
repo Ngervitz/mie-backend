@@ -213,7 +213,7 @@ const dashboard = fs.readFileSync(
 assert.ok(dashboard.includes("renderKpiCard(String(count), '📋 Encuestas del mes', 'neutral')"));
 assert.ok(dashboard.includes("'⭐ Score promedio'"));
 assert.ok(dashboard.includes("'⭐ Score promedio V2 (0–27)'"));
-assert.ok(dashboard.includes('Conversión de encuestas · '));
+assert.ok(dashboard.includes('Personas que completaron encuesta'));
 assert.ok(dashboard.includes('renderCalidad(encRow, conversionRow)'));
 assert.ok(dashboard.includes('data.surveyConversionByMonth'));
 assert.ok(!dashboard.includes('resolveLastRejectionByCi'));
@@ -222,8 +222,8 @@ const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'repor
 const summaryStart = route.indexOf("router.get('/cz-funnel-summary'");
 const summaryEnd = route.indexOf("router.get('/cz-funnel-channel-utility'");
 const summary = route.slice(summaryStart, summaryEnd);
-assert.ok(summary.includes('surveyConversionByRejectionMonth'));
-assert.ok(summary.includes('surveyConversionByMonth'));
+assert.ok(summary.includes('surveyConversionByCi'));
+assert.ok(summary.includes('...surveyConversionByCi('));
 assert.ok(summary.includes('loadCzFunnelSummarySources'));
 assert.ok(!summary.includes('resolveLastRejectionByCi'));
 

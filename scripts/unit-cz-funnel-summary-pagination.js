@@ -8,7 +8,7 @@ const {
   fetchAllPaginated,
   loadCzFunnelSummarySources,
 } = require('../src/lib/czFunnelSummaryRead');
-const { surveyConversionByRejectionMonth } = require('../src/lib/czSurveyConversion');
+const { surveyConversionByCi } = require('../src/lib/czSurveyConversionByCi');
 
 function monthKey(iso) {
   if (!iso) return null;
@@ -187,11 +187,15 @@ async function run() {
       });
     }
   }
-  const conv = surveyConversionByRejectionMonth(
-    { estadoRows: est, solicitudRows: sol, surveyRows: enc },
-    monthKey,
+  const conv = surveyConversionByCi(
+    { solicitudRows: sol, surveyRows: enc },
+    {
+      monthKey,
+      nowMs: Date.parse('2026-11-23T18:00:00.000Z'),
+      currentMonthKey: '2026-11',
+    },
   );
-  const nov = conv.find(function (r) {
+  const nov = conv.surveyConversionByMonth.find(function (r) {
     return r.month === '2026-11';
   });
   assert.strictEqual(nov.denominator, 12);
@@ -202,11 +206,15 @@ async function run() {
     return { cz_id: i, ci: 700000 + i, fecha_reg: '2025-01-01T12:00:00.000Z' };
   });
   const fullSol = padSol.concat(sol);
-  const fullConv = surveyConversionByRejectionMonth(
-    { estadoRows: est, solicitudRows: fullSol, surveyRows: enc },
-    monthKey,
+  const fullConv = surveyConversionByCi(
+    { solicitudRows: fullSol, surveyRows: enc },
+    {
+      monthKey,
+      nowMs: Date.parse('2026-11-23T18:00:00.000Z'),
+      currentMonthKey: '2026-11',
+    },
   );
-  const fullNov = fullConv.find(function (r) {
+  const fullNov = fullConv.surveyConversionByMonth.find(function (r) {
     return r.month === '2026-11';
   });
   assert.deepStrictEqual(fullNov, nov, 'cohort stable when solicitudes > 1000');
