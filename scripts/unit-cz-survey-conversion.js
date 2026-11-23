@@ -224,6 +224,7 @@ const summaryEnd = route.indexOf("router.get('/cz-funnel-channel-utility'");
 const summary = route.slice(summaryStart, summaryEnd);
 assert.ok(summary.includes('surveyConversionByRejectionMonth'));
 assert.ok(summary.includes('surveyConversionByMonth'));
+assert.ok(summary.includes('loadCzFunnelSummarySources'));
 assert.ok(!summary.includes('resolveLastRejectionByCi'));
 
 const lib = fs.readFileSync(

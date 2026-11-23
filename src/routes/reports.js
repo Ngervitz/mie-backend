@@ -46,10 +46,8 @@ const {
 } = require('../steps/serpQueryOnCreateEnrichment');
 const { computeAuctionPressure } = require('../services/auction-pressure');
 const { summarizeSurveyScoresByMonth } = require('../lib/czSurveyVersion');
-const {
-  REJECTED_ESTADO_ID,
-  surveyConversionByRejectionMonth,
-} = require('../lib/czSurveyConversion');
+const { surveyConversionByRejectionMonth } = require('../lib/czSurveyConversion');
+const { loadCzFunnelSummarySources } = require('../lib/czFunnelSummaryRead');
 const {
   getPropertyId,
   buildGa4Client,
@@ -3179,26 +3177,12 @@ router.get('/sync-run-summaries', async (req, res) => {
  */
 router.get('/cz-funnel-summary', async (req, res) => {
   try {
-    const [loansRes, solRes, encRes, estadoRes] = await Promise.all([
-      supabase
-        .from('cz_funnel_granted_loans')
-        .select('cz_id, monto_otorgado, updated_at_src'),
-      supabase
-        .from('cz_funnel_solicitudes')
-        .select('cz_id, ci, fecha_reg'),
-      supabase
-        .from('cz_funnel_encuestas')
-        .select('cz_id, ci, score_v2, version_cuestionario, completed_at'),
-      supabase
-        .from('cz_funnel_solicitud_estados')
-        .select('cz_solicitud_id, solicitudes_estados_id, fechahora_src, cz_historico_id')
-        .eq('solicitudes_estados_id', REJECTED_ESTADO_ID),
-    ]);
-
-    if (loansRes.error) throw new Error(loansRes.error.message);
-    if (solRes.error) throw new Error(solRes.error.message);
-    if (encRes.error) throw new Error(encRes.error.message);
-    if (estadoRes.error) throw new Error(estadoRes.error.message);
+    const {
+      grantedLoans: loansData,
+      solicitudes: solData,
+      encuestas: encData,
+      estadoRows: estadoData,
+    } = await loadCzFunnelSummarySources(supabase);
 
     function monthKey(iso) {
       if (!iso) return null;
@@ -3212,7 +3196,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
     }
 
     const solicitudesByMonth = new Map();
-    for (const row of solRes.data || []) {
+    for (const row of solData) {
       const key = monthKey(row.fecha_reg);
       if (!key) continue;
       const bucket = solicitudesByMonth.get(key) || { month: key, total_solicitudes: 0 };
@@ -3221,7 +3205,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
     }
 
     const grantedByMonth = new Map();
-    for (const row of loansRes.data || []) {
+    for (const row of loansData) {
       const key = monthKey(row.updated_at_src);
       if (!key) continue;
       const bucket = grantedByMonth.get(key) || {
@@ -3247,9 +3231,9 @@ router.get('/cz-funnel-summary', async (req, res) => {
           'Unique CIs by month of their first historico estado-3 rejection in that month. Denominator excludes CIs who had already completed a survey. Numerator is those who completed at that rejection or later. Not invite eligibility.',
       },
       totals: {
-        solicitudes: (solRes.data || []).length,
-        grantedLoans: (loansRes.data || []).length,
-        encuestas: (encRes.data || []).length,
+        solicitudes: solData.length,
+        grantedLoans: loansData.length,
+        encuestas: encData.length,
       },
       solicitudesByMonth: [...solicitudesByMonth.values()].sort(sortMonthAsc),
       grantedByMonth: [...grantedByMonth.values()]
@@ -3259,12 +3243,12 @@ router.get('/cz-funnel-summary', async (req, res) => {
           monto_total_otorgado: b.monto_total_otorgado,
         }))
         .sort(sortMonthAsc),
-      encuestasByMonth: summarizeSurveyScoresByMonth(encRes.data || [], monthKey),
+      encuestasByMonth: summarizeSurveyScoresByMonth(encData, monthKey),
       surveyConversionByMonth: surveyConversionByRejectionMonth(
         {
-          estadoRows: estadoRes.data || [],
-          solicitudRows: solRes.data || [],
-          surveyRows: encRes.data || [],
+          estadoRows: estadoData,
+          solicitudRows: solData,
+          surveyRows: encData,
         },
         monthKey,
       ),
