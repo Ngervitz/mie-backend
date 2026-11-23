@@ -48,7 +48,6 @@ const { computeAuctionPressure } = require('../services/auction-pressure');
 const { summarizeSurveyScoresByMonth } = require('../lib/czSurveyVersion');
 const { loadCzFunnelSummarySources } = require('../lib/czFunnelSummaryRead');
 const { surveyConversionByCi } = require('../lib/czSurveyConversionByCi');
-const { formatYmdMontevideo } = require('../lib/montevideo-week');
 const {
   getPropertyId,
   buildGa4Client,
