@@ -5,6 +5,9 @@
  */
 
 const assert = require('assert');
+const {
+  handleGuardedUpsertRpc,
+} = require('./lib/mock-cz-funnel-guarded-upsert-rpc');
 
 const FAKE_CI = 19999998;
 const OBSERVACIONES = 'CV rechazó la proporcionar una oferta.';
@@ -171,6 +174,19 @@ function createStore(options) {
         if (opts.rpcError) {
           return Promise.resolve({ data: null, error: opts.rpcError });
         }
+        if (name === 'sms_contacts_exclude_old_base_by_ci') {
+          return Promise.resolve({ data: null, error: null });
+        }
+        if (name === 'cz_funnel_upsert_solicitudes_guarded') {
+          if (opts.failGuardedRpc) {
+            return Promise.resolve({
+              data: null,
+              error: { message: 'forced guarded failure' },
+            });
+          }
+          const stats = handleGuardedUpsertRpc(args, solicitudes, estados);
+          return Promise.resolve({ data: stats, error: null });
+        }
         return Promise.resolve({ data: true, error: null });
       },
       from: function (table) {
@@ -200,6 +216,9 @@ function createStore(options) {
                       data.push({
                         cz_id: row.cz_id,
                         tracking_data_summary: row.tracking_data_summary,
+                        celular: row.celular,
+                        updated_at_src: row.updated_at_src,
+                        solicitudes_estados_id: row.solicitudes_estados_id,
                       });
                     }
                   });
@@ -431,7 +450,7 @@ function resetLogs() {
     return u.table === SOURCE_SOLICITUD_ESTADOS;
   }).length;
   const emptyCount = await upsertSolicitudes([solicitudItem({ historico: [] })]);
-  assert.strictEqual(emptyCount, 1);
+  assert.strictEqual(emptyCount, 0);
   assert.strictEqual(store.estados.size, 2);
   assert.ok(store.estados.get(4));
   assert.ok(store.estados.get(3));
@@ -477,8 +496,8 @@ function resetLogs() {
   assert.strictEqual(store.estados.get(30).solicitudes_estados_id, 7);
   assert.strictEqual(store.estados.get(31).solicitudes_estados_id, 11);
 
-  // Padre falla → no hijos de ese batch
-  const failParent = createStore({ failTable: SOURCE_SOLICITUDES });
+  // Padre falla (RPC) tras historico del mismo batch — hijos sí persisten
+  const failParent = createStore({ failGuardedRpc: true });
   failParent.seedEstado({
     cz_historico_id: 999,
     cz_solicitud_id: 1,
@@ -491,17 +510,17 @@ function resetLogs() {
     parentErr = err;
   }
   assert.ok(parentErr);
-  assert.match(String(parentErr.message), /cz_funnel_solicitudes upsert failed/);
-  assert.strictEqual(failParent.estados.size, 1);
+  assert.match(String(parentErr.message), /guarded upsert failed/);
+  assert.strictEqual(failParent.estados.size, 2);
   assert.ok(failParent.estados.get(999));
-  assert.ok(!failParent.estados.has(50));
+  assert.ok(failParent.estados.has(50));
   assert.ok(
-    !failParent.calls.upserts.some(function (u) {
+    failParent.calls.upserts.some(function (u) {
       return u.table === SOURCE_SOLICITUD_ESTADOS;
     }),
   );
 
-  // Hijo falla → padre ya persistido, sin delete
+  // Hijo falla → padre no alcanza a ejecutarse (historico primero)
   const failChild = createStore({ failTable: SOURCE_SOLICITUD_ESTADOS });
   let childErr = null;
   try {
@@ -511,8 +530,7 @@ function resetLogs() {
   }
   assert.ok(childErr);
   assert.match(String(childErr.message), /cz_funnel_solicitud_estados upsert failed/);
-  assert.strictEqual(failChild.solicitudes.size, 1);
-  assert.ok(failChild.solicitudes.get(1153));
+  assert.strictEqual(failChild.solicitudes.size, 0);
   assert.strictEqual(failChild.estados.size, 0);
   assert.strictEqual(failChild.calls.deletes.length, 0);
 

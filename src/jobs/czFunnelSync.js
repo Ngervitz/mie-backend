@@ -27,6 +27,7 @@ const {
   parseCzDateOnly,
   resolveLatestCelularByCi,
 } = require('../lib/czFunnelSolicitudProfile');
+const { toGuardedUpsertPayloadRow } = require('../lib/czFunnelSolicitudesUpsertFreshness');
 const {
   syncCdvSheetAfterHistoricoPersist: defaultCdvSheetSync,
 } = require('../lib/cdvSheetSync');
@@ -303,7 +304,9 @@ async function loadExistingJtByCzId(czIds) {
     const chunk = czIds.slice(i, i + EXISTING_SUMMARY_SELECT_CHUNK);
     const { data, error } = await supabase
       .from(SOURCE_SOLICITUDES)
-      .select('cz_id, tracking_data_summary, celular')
+      .select(
+        'cz_id, tracking_data_summary, celular, updated_at_src, solicitudes_estados_id',
+      )
       .in('cz_id', chunk);
     if (error) {
       throw new Error(
@@ -326,6 +329,11 @@ async function loadExistingJtByCzId(czIds) {
             ? summary
             : null,
         celular: row.celular != null && row.celular !== '' ? String(row.celular) : null,
+        updated_at_src: row.updated_at_src,
+        solicitudes_estados_id:
+          row.solicitudes_estados_id != null
+            ? Number(row.solicitudes_estados_id)
+            : null,
       });
     }
   }
@@ -361,19 +369,21 @@ async function upsertGrantedLoans(items) {
   return rows.length;
 }
 
-async function upsertSolicitudes(items) {
+async function upsertSolicitudes(items, opts) {
   const now = new Date().toISOString();
-  const rows = [];
+  const itemsByCzId = new Map();
+  const mappedRows = [];
   for (const item of items) {
     if (!item || item.id == null) continue;
     const czId = Number(item.id);
     if (!Number.isFinite(czId)) continue;
+    itemsByCzId.set(czId, item);
     const updatedRaw =
       item.updated != null ? String(item.updated) : null;
     const fechaRaw =
       item.fechaReg != null ? String(item.fechaReg) : null;
     const profile = mapSolicitudProfileFields(item);
-    rows.push({
+    mappedRows.push({
       cz_id: czId,
       solicitudes_estados_id:
         item.solicitudes_estados_id != null
@@ -398,14 +408,16 @@ async function upsertSolicitudes(items) {
       synced_at: now,
     });
   }
-  if (!rows.length) return 0;
-  const existingJt = await loadExistingJtByCzId(
-    rows.map(function (r) {
-      return r.cz_id;
-    }),
-  );
-  for (const row of rows) {
+
+  const allCzIds = mappedRows.map(function (r) {
+    return r.cz_id;
+  });
+  const existingJt = await loadExistingJtByCzId(allCzIds);
+
+  const payloadRows = [];
+  for (const row of mappedRows) {
     const existing = existingJt.get(row.cz_id) || null;
+    const sourceItem = itemsByCzId.get(row.cz_id);
     const applied = applyJtFirstValidWins(
       row.cz_id,
       row.tracking_data_summary,
@@ -420,12 +432,7 @@ async function upsertSolicitudes(items) {
       row.celular,
       existing && existing.celular ? existing.celular : null,
     );
-  }
-  const { error } = await supabase.from(SOURCE_SOLICITUDES).upsert(rows, {
-    onConflict: 'cz_id',
-  });
-  if (error) {
-    throw new Error(`${SOURCE_SOLICITUDES} upsert failed: ${error.message}`);
+    payloadRows.push(toGuardedUpsertPayloadRow(row, sourceItem));
   }
 
   const mapped = mapHistoricoRows(items, now);
@@ -441,13 +448,33 @@ async function upsertSolicitudes(items) {
     upserted: histUpserted,
   });
 
+  let parentUpserted = 0;
+  let parentSkippedStale = 0;
+  if (payloadRows.length) {
+    const { data, error } = await supabase.rpc('cz_funnel_upsert_solicitudes_guarded', {
+      p_rows: payloadRows,
+    });
+    if (error) {
+      throw new Error(`${SOURCE_SOLICITUDES} guarded upsert failed: ${error.message}`);
+    }
+    const parsed = data && typeof data === 'object' ? data : {};
+    parentUpserted = Number(parsed.applied) || 0;
+    parentSkippedStale = Number(parsed.skipped) || 0;
+  }
+
   await excludeOldBaseContactsByCi(
-    rows
+    payloadRows
       .map((r) => r.ci)
       .filter((ci) => ci != null),
   );
 
-  return rows.length;
+  const stats = {
+    parentUpserted: parentUpserted,
+    parentSkippedStale: parentSkippedStale,
+    historicoUpserted: histUpserted,
+  };
+  if (opts && opts.returnStats === true) return stats;
+  return stats.parentUpserted;
 }
 
 /**
@@ -847,4 +874,6 @@ module.exports = {
   pullEncuestasOnDemand,
   setCdvSheetSyncForTests,
   runCdvSheetSyncFailOpen,
+  readCursor,
+  writeCursor,
 };

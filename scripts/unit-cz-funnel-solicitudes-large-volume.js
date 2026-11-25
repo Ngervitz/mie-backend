@@ -10,6 +10,9 @@
  */
 
 const assert = require('assert');
+const {
+  handleGuardedUpsertRpc,
+} = require('./lib/mock-cz-funnel-guarded-upsert-rpc');
 
 delete process.env.CDV_GOOGLE_SERVICE_ACCOUNT_JSON;
 delete process.env.CDV_GOOGLE_SHEET_ID;
@@ -58,11 +61,15 @@ require.cache[supabasePath] = {
   filename: supabasePath,
   loaded: true,
   exports: {
-    rpc: async function (name) {
+    rpc: async function (name, args) {
       if (name === 'acquire_job_lock') return { data: true, error: null };
       if (name === 'release_job_lock') return { data: true, error: null };
       if (name === 'sms_contacts_exclude_old_base_by_ci') {
         return { data: null, error: null };
+      }
+      if (name === 'cz_funnel_upsert_solicitudes_guarded') {
+        const stats = handleGuardedUpsertRpc(args, solicitudesById, historicoById);
+        return { data: stats, error: null };
       }
       return { data: null, error: { message: 'unexpected rpc ' + name } };
     },

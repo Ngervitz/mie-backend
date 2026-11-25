@@ -37,6 +37,7 @@ const { runFacebookCommentsPoll } = require('../jobs/facebookCommentsPoll');
 const { runFacebookReplyRecovery } = require('../jobs/facebookReplyRecovery');
 const { runCzSync } = require('../jobs/czSync');
 const { runCzFunnelSync } = require('../jobs/czFunnelSync');
+const { runCzFunnelSolicitudesTipSync } = require('../jobs/czFunnelSolicitudesTipSync');
 const { runAffiliateAttribution } = require('../jobs/affiliateAttributionRun');
 const { runBcuUsdRateSync } = require('../jobs/bcuUsdRateSync');
 const { runMiplanDebtOptinSync } = require('../jobs/miplanDebtOptinSync');
@@ -1268,6 +1269,47 @@ router.post('/run-cz-sync', async (req, res) => {
  * Auth: session cookie (dashboard) or X-Cron-Key.
  * Section gate: cz-funnel via dashboardSections map.
  */
+/**
+ * Credizona /solicitudes tip pass (48h window) — estado 8 enqueue only.
+ * Auth: session cookie (cz-funnel) or X-Cron-Key. Planned cron: every minute (not wired yet).
+ */
+router.post('/run-cz-solicitudes-tip-sync', async (req, res) => {
+  logger.info('POST /jobs/run-cz-solicitudes-tip-sync — started');
+  try {
+    const result = await runCzFunnelSolicitudesTipSync();
+    if (result && result.reason === 'lock_not_acquired') {
+      return res.status(409).json(result);
+    }
+    logger.info('cz_funnel_solicitudes_tip_sync finished', {
+      ok: result.ok,
+      pagesFetched: result.pagesFetched,
+      itemsFetched: result.itemsFetched,
+      itemsUpserted: result.itemsUpserted,
+      parentSkippedStale: result.parentSkippedStale,
+      passComplete: result.passComplete,
+      cdvEstado8Elm: result.cdvEstado8Elm && {
+        ok: result.cdvEstado8Elm.ok,
+        skipped: result.cdvEstado8Elm.skipped,
+        enqueue: result.cdvEstado8Elm.enqueue,
+      },
+    });
+    const status = result && result.status === 'error' ? 500 : 200;
+    return res.status(status).json(result);
+  } catch (err) {
+    const message = err && err.message ? err.message : 'unknown';
+    const authRelated =
+      /unauthorized/i.test(message) ||
+      /\b401\b/.test(message) ||
+      /CZ_API_BEARER_TOKEN/i.test(message);
+    const payload = { ok: false, error: message };
+    if (authRelated) {
+      payload.tokenDiagnostic = getCzApiBearerTokenDiagnostic();
+    }
+    logger.error('cz_funnel_solicitudes_tip_sync failed', { error: message });
+    return res.status(500).json(payload);
+  }
+});
+
 router.post('/run-cz-data-sync', async (req, res) => {
   logger.info('POST /jobs/run-cz-data-sync — started');
   try {
