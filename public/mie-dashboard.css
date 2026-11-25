@@ -793,6 +793,32 @@
   gap: 6px;
 }
 
+#mie-dashboard-app .kpi-label.kpi-label--stack {
+  display: block;
+  line-height: 1.4;
+}
+
+#mie-dashboard-app .kpi-label.kpi-label--stack .kpi-label-title {
+  display: block;
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+#mie-dashboard-app .kpi-label.kpi-label--stack > span + span {
+  display: block;
+  margin-top: 2px;
+}
+
+#mie-dashboard-app .kpi-value.kpi-value--dual .kpi-value-sub {
+  display: block;
+  margin-top: 6px;
+  font-size: 1rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
 #mie-dashboard-app .kpi-label .ti {
   font-size: 16px;
   line-height: 1;

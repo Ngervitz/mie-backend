@@ -29,7 +29,8 @@ async function fetchAllPaginated(runPage) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  */
 async function loadCzFunnelSummarySources(supabase) {
-  const [grantedLoans, solicitudes, encuestas, estadoRows] = await Promise.all([
+  const [grantedLoans, solicitudes, encuestas, estadoRows, outreachInterest] =
+    await Promise.all([
     fetchAllPaginated(function (from, to) {
       return supabase
         .from('cz_funnel_granted_loans')
@@ -47,7 +48,7 @@ async function loadCzFunnelSummarySources(supabase) {
     fetchAllPaginated(function (from, to) {
       return supabase
         .from('cz_funnel_encuestas')
-        .select('cz_id, ci, score_v2, version_cuestionario, completed_at')
+        .select('cz_id, ci, score_v2, version_cuestionario, completed_at, tipo')
         .order('cz_id', { ascending: true })
         .range(from, to);
     }),
@@ -61,13 +62,23 @@ async function loadCzFunnelSummarySources(supabase) {
         .order('cz_historico_id', { ascending: true })
         .range(from, to);
     }),
-  ]);
+    fetchAllPaginated(function (from, to) {
+      return supabase
+        .from('rejected_ci_outreach')
+        .select('ci, mi_plan_interest_at, mi_plan_interest_source')
+        .not('mi_plan_interest_at', 'is', null)
+        .eq('mi_plan_interest_source', 'credizona_rejected_thank_you')
+        .order('ci', { ascending: true })
+        .range(from, to);
+    }),
+    ]);
 
   return {
     grantedLoans,
     solicitudes,
     encuestas,
     estadoRows,
+    outreachInterest,
   };
 }
 

@@ -14740,7 +14740,78 @@ init();
     );
   }
 
-  function renderCalidad(encRow, conversionRow) {
+  function formatMiPlanRatePct(rate) {
+    const n = Number(rate);
+    if (!Number.isFinite(n)) return '—';
+    return (
+      n.toLocaleString('es-UY', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ' %'
+    );
+  }
+
+  function miPlanInterestPeriodPct(row) {
+    if (!row || row.available === false) return null;
+    const den = numOrZero(row.denominator);
+    if (den <= 0) return null;
+    const rate = Number(row.rate);
+    return Number.isFinite(rate) ? rate : null;
+  }
+
+  function renderMiPlanInterestCard(monthRow, overallRow) {
+    function periodDetail(prefix, row) {
+      if (!row || row.available === false) {
+        return escapeHtml(prefix) + ': N/D';
+      }
+      const den = numOrZero(row.denominator);
+      const num = numOrZero(row.numerator);
+      const pct = miPlanInterestPeriodPct(row);
+      return (
+        escapeHtml(prefix) +
+        ' · ' +
+        escapeHtml(String(num)) +
+        ' / ' +
+        escapeHtml(String(den)) +
+        ' · ' +
+        escapeHtml(pct == null ? '—' : formatMiPlanRatePct(pct))
+      );
+    }
+
+    const monthPct = miPlanInterestPeriodPct(monthRow);
+    const overallPct = miPlanInterestPeriodPct(overallRow);
+    const monthVal =
+      monthRow && monthRow.available === false
+        ? 'N/D'
+        : monthPct == null
+          ? '—'
+          : formatMiPlanRatePct(monthPct);
+    const overallVal = overallPct == null ? '—' : formatMiPlanRatePct(overallPct);
+    const tone = monthPct != null || overallPct != null ? 'accent' : 'neutral';
+
+    return (
+      '<div class="kpi-card is-' +
+      escapeHtml(tone) +
+      '">' +
+      '<div class="kpi-value kpi-value--dual">' +
+      escapeHtml(monthVal) +
+      (overallRow && overallRow.available !== false
+        ? '<span class="kpi-value-sub">Acum. ' + escapeHtml(overallVal) + '</span>'
+        : '') +
+      '</div>' +
+      '<div class="kpi-label kpi-label--stack">' +
+      '<span class="kpi-label-title">Interesados en Mi Plan</span>' +
+      '<span>' +
+      periodDetail('Mes corriente', monthRow) +
+      '</span>' +
+      '<span>' +
+      periodDetail('Acum. desde 06/10/2026', overallRow) +
+      '</span>' +
+      '</div></div>'
+    );
+  }
+
+  function renderCalidad(encRow, conversionRow, miPlanInterestRow, miPlanInterestOverall) {
     const count = encRow ? numOrZero(encRow.total_encuestas) : 0;
     const scoreRaw = encRow && encRow.score_promedio;
     const scoreNum = Number(scoreRaw);
@@ -14768,6 +14839,7 @@ init();
       ) +
       (hasV2 ? renderKpiCard(scoreV2, '⭐ Score promedio V2 (0–27)', 'accent') : '') +
       renderSurveyConversionCard(conversionRow) +
+      renderMiPlanInterestCard(miPlanInterestRow, miPlanInterestOverall) +
       '</div></section>'
     );
   }
@@ -14930,6 +15002,13 @@ init();
       const conversionRow = (data.surveyConversionByMonth || []).find(function (r) {
         return r.month === monthKey;
       });
+      const miPlanInterestRow =
+        (data.miPlanInterestConversionByMonth || []).find(function (r) {
+          return r.month === monthKey;
+        }) ||
+        (monthKey.localeCompare('2026-10') < 0
+          ? { available: false }
+          : null);
       if (monthKpisEl) {
         monthKpisEl.innerHTML =
           '<section class="cz-funnel-month-summary">' +
@@ -14937,7 +15016,12 @@ init();
           escapeHtml(formatCzMonthLabel(monthKey)) +
           '</h2>' +
           resultadoNegocioHtml +
-          renderCalidad(encRow, conversionRow) +
+          renderCalidad(
+            encRow,
+            conversionRow,
+            miPlanInterestRow,
+            data.miPlanInterestConversionOverall || null,
+          ) +
           '</section>';
       }
       resultsEl.innerHTML =

@@ -48,6 +48,7 @@ const { computeAuctionPressure } = require('../services/auction-pressure');
 const { summarizeSurveyScoresByMonth } = require('../lib/czSurveyVersion');
 const { loadCzFunnelSummarySources } = require('../lib/czFunnelSummaryRead');
 const { surveyConversionByCi } = require('../lib/czSurveyConversionByCi');
+const { miPlanInterestConversion } = require('../lib/czMiplanInterestConversion');
 const {
   getPropertyId,
   buildGa4Client,
@@ -3181,6 +3182,7 @@ router.get('/cz-funnel-summary', async (req, res) => {
       grantedLoans: loansData,
       solicitudes: solData,
       encuestas: encData,
+      outreachInterest: outreachData,
     } = await loadCzFunnelSummarySources(supabase);
 
     function monthKey(iso) {
@@ -3228,6 +3230,8 @@ router.get('/cz-funnel-summary', async (req, res) => {
           'score_promedio = V1 only (0–30); score_promedio_v2 = V2 only (0–27); unknown version excluded from averages',
         surveyConversion:
           'Distinct CI with at least one solicitud (fecha_reg) in the month. Numerator: those CI with earliest encuesta completed_at on or before month cut-off (now for current month, else end of month Montevideo). Overall uses all solicitud CI vs completions by now. Not S1/S2/S3 eligibility.',
+        miPlanInterestConversion:
+          'Since 2026-10-06 waitlist CTA: denominator = distinct CI with encuesta tipo prestamo-rechazado (completed_at on/after launch). Monthly numerator = those cohort CI with mi_plan_interest_at by month cut-off; overall = all interested CI in that denominator. Months before 2026-10: available false.',
       },
       totals: {
         solicitudes: solData.length,
@@ -3245,6 +3249,14 @@ router.get('/cz-funnel-summary', async (req, res) => {
       encuestasByMonth: summarizeSurveyScoresByMonth(encData, monthKey),
       ...surveyConversionByCi(
         { solicitudRows: solData, surveyRows: encData },
+        {
+          monthKey,
+          nowMs: Date.now(),
+          currentMonthKey: formatYmdMontevideo().slice(0, 7),
+        },
+      ),
+      ...miPlanInterestConversion(
+        { encuestaRows: encData, outreachRows: outreachData },
         {
           monthKey,
           nowMs: Date.now(),

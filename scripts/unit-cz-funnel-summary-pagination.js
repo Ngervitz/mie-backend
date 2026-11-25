@@ -42,6 +42,9 @@ function mockTable(rows, pk) {
             eq: function () {
               return chain;
             },
+            not: function () {
+              return chain;
+            },
             range: async function (from, to) {
               calls += 1;
               return {
@@ -119,7 +122,7 @@ async function run() {
   );
 }
 
-// --- loadCzFunnelSummarySources paginates all four tables ---
+// --- loadCzFunnelSummarySources paginates all funnel + outreach tables ---
 {
   const solicitudes = makeRows('sol', 1200, function (i) {
     return { cz_id: i, ci: 100000 + i, fecha_reg: '2026-06-01T12:00:00.000Z' };
@@ -143,11 +146,14 @@ async function run() {
   });
   const loans = [{ cz_id: 1, monto_otorgado: 100, updated_at_src: '2026-06-01T12:00:00.000Z' }];
 
+  const outreach = [{ ci: 999, mi_plan_interest_at: '2026-11-01T12:00:00.000Z', mi_plan_interest_source: 'credizona_rejected_thank_you' }];
+
   const tables = {
     cz_funnel_granted_loans: mockTable(loans, 'cz_id'),
     cz_funnel_solicitudes: mockTable(solicitudes, 'cz_id'),
     cz_funnel_encuestas: mockTable(encuestas, 'cz_id'),
     cz_funnel_solicitud_estados: mockTable(estados, 'cz_historico_id'),
+    rejected_ci_outreach: mockTable(outreach, 'ci'),
   };
 
   const sb = mockSupabase(tables);
@@ -156,6 +162,7 @@ async function run() {
   assert.strictEqual(loaded.encuestas.length, 1100);
   assert.strictEqual(loaded.estadoRows.length, 1050);
   assert.strictEqual(loaded.grantedLoans.length, 1);
+  assert.strictEqual(loaded.outreachInterest.length, 1);
   assert.ok(tables.cz_funnel_solicitudes.calls() >= 2);
   assert.ok(tables.cz_funnel_encuestas.calls() >= 2);
   assert.ok(tables.cz_funnel_solicitud_estados.calls() >= 2);
@@ -230,6 +237,7 @@ async function run() {
     route.indexOf("router.get('/cz-funnel-channel-utility'"),
   );
   assert.ok(block.includes('loadCzFunnelSummarySources'));
+  assert.ok(block.includes('miPlanInterestConversion'));
   assert.ok(!block.includes(".from('cz_funnel_solicitudes')"));
 }
 
