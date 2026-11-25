@@ -7,7 +7,7 @@
 const supabase = require('../clients/supabase');
 const logger = require('./logger');
 const { readCdvEstado8ElmConfig, PREAPROBADOS_ESTADO_ID } = require('./cdvEstado8ElmConfig');
-const { ENABLED_TRIGGER_ORIGINS } = require('../services/elm/constants');
+const { ENABLED_TRIGGER_ORIGINS, CODES } = require('../services/elm/constants');
 const { createElmOrchestrator } = require('../services/elm/orchestrator');
 const { createElmRepository } = require('../services/elm/repository');
 const { evaluateCiResendHold, readElmSendRowsByCis } = require('./rejectedElmResendGuard');
@@ -15,6 +15,60 @@ const { readPostReferralRejectionStatuses } = require('../services/elm/classific
 
 const QUEUE_TABLE = 'cdv_estado8_elm_queue';
 const STALE_PROCESSING_MS = 20 * 60 * 1000;
+
+/** Terminal queue status for exhausted retries: commercial vs technical (not skipped_ineligible). */
+const COMMERCIAL_TERMINAL_CODES = new Set([
+  CODES.CDV_GRANTED,
+  CODES.MISSING_REQUIRED_FIELDS,
+  CODES.ACTIVITY_TYPE_MAPPING_MISSING,
+  CODES.DATE_OF_BIRTH_INVALID,
+  CODES.MOBILEPHONE_NEEDS_CORRECTION,
+  CODES.MOBILEPHONE_INVALID,
+  CODES.SALARY_INVALID,
+  CODES.S1_NOT_ELIGIBLE,
+  CODES.INVALID_CONTEXT,
+  CODES.TRIGGER_ORIGIN_NOT_ENABLED,
+]);
+
+function isCdvEstado8RetryableFailure(code) {
+  return (
+    code === CODES.SEND_DISABLED ||
+    code === CODES.CI_LOCK_BLOCKED ||
+    code === CODES.CLIENT_THREW ||
+    code === CODES.PERSIST_FAILED ||
+    code === CODES.LEASE_EXPIRED ||
+    code === CODES.LATE_RESULT_DISCARDED ||
+    code === 'exception' ||
+    code === CODES.SOLICITUD_NOT_FOUND ||
+    code === CODES.TRANSPORT_ERROR ||
+    code === CODES.HTTP_TIMEOUT
+  );
+}
+
+function formatCdvEstado8QueueError(sendResult) {
+  const code = sendResult && sendResult.code ? String(sendResult.code) : 'elm_send_blocked';
+  const detail =
+    sendResult && sendResult.detail != null && String(sendResult.detail).trim()
+      ? String(sendResult.detail).trim()
+      : '';
+  const text = detail ? code + ': ' + detail : code;
+  return text.slice(0, 500);
+}
+
+/**
+ * @param {{ code?: string }} sendResult
+ * @param {number} attemptNext
+ * @param {number} maxAttempts
+ * @returns {'failed'|'completed'|'skipped_ineligible'}
+ */
+function resolveCdvEstado8QueueTerminalStatus(sendResult, attemptNext, maxAttempts) {
+  const code = sendResult && sendResult.code ? String(sendResult.code) : 'elm_send_blocked';
+  if (code === CODES.PROCESS_EXISTS) return 'completed';
+  if (isCdvEstado8RetryableFailure(code) && attemptNext < maxAttempts) return 'failed';
+  if (isCdvEstado8RetryableFailure(code)) return 'failed';
+  if (COMMERCIAL_TERMINAL_CODES.has(code)) return 'skipped_ineligible';
+  return 'skipped_ineligible';
+}
 
 function toMs(raw) {
   if (raw == null || raw === '') return null;
@@ -131,14 +185,14 @@ function createOrchestrator(config) {
   });
 }
 
-async function loadCiHold(ci, czId, nowMs) {
+async function loadCiHold(ci, czId, nowMs, sbClient) {
   const cis = [Number(ci)].filter(function (n) {
     return Number.isSafeInteger(n) && n > 0;
   });
   if (!cis.length) {
     return { reason: 'elm_ci_history_unverifiable', related_cz_solicitud_id: null };
   }
-  const rows = await readElmSendRowsByCis(supabase, cis);
+  const rows = await readElmSendRowsByCis(sbClient || supabase, cis);
   return evaluateCiResendHold({
     ci: Number(ci),
     czSolicitudId: Number(czId),
@@ -151,9 +205,10 @@ async function loadCiHold(ci, czId, nowMs) {
   });
 }
 
-async function reconcileStaleProcessing(nowMs) {
+async function reconcileStaleProcessing(nowMs, sbClient) {
+  const db = sbClient || supabase;
   const cutoff = new Date(nowMs - STALE_PROCESSING_MS).toISOString();
-  const { error } = await supabase
+  const { error } = await db
     .from(QUEUE_TABLE)
     .update({ status: 'failed', last_error: 'stale_processing_reset' })
     .eq('status', 'processing')
@@ -174,6 +229,7 @@ async function reconcileStaleProcessing(nowMs) {
  */
 async function processCdvEstado8ElmQueue(deps) {
   const d = deps || {};
+  const sb = d.supabase || supabase;
   const config = d.config || readCdvEstado8ElmConfig();
   if (!config.automationEnabled) {
     return { ok: true, skipped: 'automation_disabled' };
@@ -186,9 +242,9 @@ async function processCdvEstado8ElmQueue(deps) {
   const orchestrator = d.orchestrator || createOrchestrator(config);
   const nowMs = d.nowMs != null ? Number(d.nowMs) : Date.now();
 
-  await reconcileStaleProcessing(nowMs);
+  await reconcileStaleProcessing(nowMs, sb);
 
-  const { data: queueRows, error: qErr } = await supabase
+  const { data: queueRows, error: qErr } = await sb
     .from(QUEUE_TABLE)
     .select('cz_solicitud_id, attempts, status')
     .in('status', ['pending', 'failed'])
@@ -204,7 +260,7 @@ async function processCdvEstado8ElmQueue(deps) {
   for (const row of queueRows || []) {
     const czId = Number(row.cz_solicitud_id);
     if (excludedSet.has(czId)) {
-      await supabase
+      await sb
         .from(QUEUE_TABLE)
         .update({ status: 'skipped_excluded', last_attempt_at: new Date().toISOString() })
         .eq('cz_solicitud_id', czId);
@@ -212,14 +268,14 @@ async function processCdvEstado8ElmQueue(deps) {
       continue;
     }
 
-    const { data: sol } = await supabase
+    const { data: sol } = await sb
       .from('cz_funnel_solicitudes')
       .select('cz_id, ci')
       .eq('cz_id', czId)
       .maybeSingle();
     const ci = sol && sol.ci != null ? Number(sol.ci) : null;
     if (!ci) {
-      await supabase
+      await sb
         .from(QUEUE_TABLE)
         .update({
           status: 'failed',
@@ -232,10 +288,10 @@ async function processCdvEstado8ElmQueue(deps) {
       continue;
     }
 
-    const hold = await loadCiHold(ci, czId, nowMs);
+    const hold = await loadCiHold(ci, czId, nowMs, sb);
     if (hold) {
       if (terminalSkipFromHold(hold)) {
-        await supabase
+        await sb
           .from(QUEUE_TABLE)
           .update({
             status: 'skipped_hold',
@@ -246,7 +302,7 @@ async function processCdvEstado8ElmQueue(deps) {
         processed.push({ cz_solicitud_id: czId, status: 'skipped_hold', hold: hold.reason });
         continue;
       }
-      await supabase
+      await sb
         .from(QUEUE_TABLE)
         .update({
           attempts: Number(row.attempts || 0) + 1,
@@ -258,7 +314,7 @@ async function processCdvEstado8ElmQueue(deps) {
       continue;
     }
 
-    await supabase
+    await sb
       .from(QUEUE_TABLE)
       .update({ status: 'processing', last_attempt_at: new Date().toISOString() })
       .eq('cz_solicitud_id', czId)
@@ -271,18 +327,18 @@ async function processCdvEstado8ElmQueue(deps) {
       sendResult = {
         ok: false,
         code: 'exception',
-        detail: err && err.message ? err.message : 'unknown',
+        detail: err && err.message ? String(err.message) : 'unknown',
       };
     }
 
     const attemptNext = Number(row.attempts || 0) + 1;
     if (sendResult.ok && !sendResult.s2_blocked) {
-      const { data: proc } = await supabase
+      const { data: proc } = await sb
         .from('elm_lead_processes')
         .select('id')
         .eq('cz_solicitud_id', czId)
         .maybeSingle();
-      await supabase
+      await sb
         .from(QUEUE_TABLE)
         .update({
           status: 'completed',
@@ -296,46 +352,57 @@ async function processCdvEstado8ElmQueue(deps) {
       continue;
     }
     if (sendResult.ok && sendResult.s2_blocked) {
-      await supabase
+      const s2Code = String(sendResult.s2_blocked.code || 's2_blocked');
+      const s2Blocked = { ok: false, code: s2Code, detail: null };
+      const nextStatus =
+        attemptNext < config.maxAttempts && isCdvEstado8RetryableFailure(s2Code)
+          ? 'failed'
+          : resolveCdvEstado8QueueTerminalStatus(s2Blocked, attemptNext, config.maxAttempts);
+      await sb
         .from(QUEUE_TABLE)
         .update({
-          status: attemptNext < config.maxAttempts ? 'failed' : 'skipped_ineligible',
+          status: nextStatus,
           attempts: attemptNext,
           last_attempt_at: new Date().toISOString(),
-          last_error: String(sendResult.s2_blocked.code || 's2_blocked').slice(0, 500),
+          last_error: formatCdvEstado8QueueError(s2Blocked),
         })
         .eq('cz_solicitud_id', czId);
       processed.push({
         cz_solicitud_id: czId,
-        status: 'failed',
-        code: sendResult.s2_blocked.code || 's2_blocked',
+        status: nextStatus,
+        code: s2Code,
       });
       continue;
     }
 
     const code = sendResult.code || 'elm_send_blocked';
-    const retryable =
-      code === 'elm_send_disabled' ||
-      code === 'elm_ci_lock_blocked' ||
-      code === 'elm_client_threw' ||
-      code === 'elm_persist_failed' ||
-      code === 'elm_in_flight_lease_expired' ||
-      code === 'elm_late_result_discarded' ||
-      code === 'exception';
     const nextStatus =
-      retryable && attemptNext < config.maxAttempts
+      isCdvEstado8RetryableFailure(String(code)) && attemptNext < config.maxAttempts
         ? 'failed'
-        : code === 'elm_process_exists'
-          ? 'completed'
-          : 'skipped_ineligible';
+        : resolveCdvEstado8QueueTerminalStatus(sendResult, attemptNext, config.maxAttempts);
 
-    await supabase
+    let elmProcessId = null;
+    if (nextStatus === 'completed') {
+      if (sendResult.process && sendResult.process.id) {
+        elmProcessId = sendResult.process.id;
+      } else {
+        const { data: procRow } = await sb
+          .from('elm_lead_processes')
+          .select('id')
+          .eq('cz_solicitud_id', czId)
+          .maybeSingle();
+        elmProcessId = procRow && procRow.id ? procRow.id : null;
+      }
+    }
+
+    await sb
       .from(QUEUE_TABLE)
       .update({
         status: nextStatus,
         attempts: attemptNext,
         last_attempt_at: new Date().toISOString(),
-        last_error: String(code).slice(0, 500),
+        last_error: nextStatus === 'completed' ? null : formatCdvEstado8QueueError(sendResult),
+        elm_process_id: elmProcessId,
       })
       .eq('cz_solicitud_id', czId);
     processed.push({ cz_solicitud_id: czId, status: nextStatus, code: code });
@@ -349,4 +416,7 @@ module.exports = {
   enqueueEstado8Candidates,
   enqueueCdvEstado8FromSync,
   processCdvEstado8ElmQueue,
+  formatCdvEstado8QueueError,
+  resolveCdvEstado8QueueTerminalStatus,
+  isCdvEstado8RetryableFailure,
 };

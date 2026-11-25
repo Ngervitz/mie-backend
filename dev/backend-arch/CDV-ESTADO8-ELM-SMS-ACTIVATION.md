@@ -6,6 +6,7 @@
 
 1. `migrations/20261120_cdv_estado8_elm_automation.sql` — cola `cdv_estado8_elm_queue`, trigger `cdv_estado_8`, seed `skipped_historical` del cohorte estado 8 actual.
 2. `migrations/20261120_elm_s2_referred_sms_idempotency.sql` — índice único `sms_messages` para `elm_s2_referred`.
+3. `migrations/20261124_cdv_estado8_elm_send_origin.sql` — `elm_claim_process` + `send_origin` para `cdv_estado_8` (requerido antes de activar envíos automáticos).
 
 ## Variables Railway (`mie-backend` / production)
 
