@@ -165,12 +165,14 @@ function createStore(options) {
     tables: [],
     selects: [],
     ins: [],
+    sequence: [],
   };
 
   function install() {
     supabaseImpl = {
       rpc: function (name, args) {
         calls.rpcs.push({ name: name, args: args });
+        calls.sequence.push({ kind: 'rpc', name: name });
         if (opts.rpcError) {
           return Promise.resolve({ data: null, error: opts.rpcError });
         }
@@ -233,6 +235,9 @@ function createStore(options) {
               rows: rows,
               onConflict: spec && spec.onConflict,
             });
+            if ((rows || []).length) {
+              calls.sequence.push({ kind: 'upsert', table: table });
+            }
             if (opts.failTable === table) {
               return Promise.resolve({
                 error: { message: 'forced failure' },
@@ -496,7 +501,7 @@ function resetLogs() {
   assert.strictEqual(store.estados.get(30).solicitudes_estados_id, 7);
   assert.strictEqual(store.estados.get(31).solicitudes_estados_id, 11);
 
-  // Padre falla (RPC) tras historico del mismo batch — hijos sí persisten
+  // Padre falla (RPC) → historico del mismo batch no debe persistir
   const failParent = createStore({ failGuardedRpc: true });
   failParent.seedEstado({
     cz_historico_id: 999,
@@ -511,16 +516,11 @@ function resetLogs() {
   }
   assert.ok(parentErr);
   assert.match(String(parentErr.message), /guarded upsert failed/);
-  assert.strictEqual(failParent.estados.size, 2);
+  assert.strictEqual(failParent.estados.size, 1);
   assert.ok(failParent.estados.get(999));
-  assert.ok(failParent.estados.has(50));
-  assert.ok(
-    failParent.calls.upserts.some(function (u) {
-      return u.table === SOURCE_SOLICITUD_ESTADOS;
-    }),
-  );
+  assert.ok(!failParent.estados.has(50));
 
-  // Hijo falla → padre no alcanza a ejecutarse (historico primero)
+  // Hijo falla → padre ya persistido vía guarded
   const failChild = createStore({ failTable: SOURCE_SOLICITUD_ESTADOS });
   let childErr = null;
   try {
@@ -530,9 +530,47 @@ function resetLogs() {
   }
   assert.ok(childErr);
   assert.match(String(childErr.message), /cz_funnel_solicitud_estados upsert failed/);
-  assert.strictEqual(failChild.solicitudes.size, 0);
+  assert.strictEqual(failChild.solicitudes.size, 1);
   assert.strictEqual(failChild.estados.size, 0);
   assert.strictEqual(failChild.calls.deletes.length, 0);
+
+  // Padre stale: fila existente + historico nuevo debe persistir
+  const staleStore = createStore();
+  staleStore.solicitudes.set(5001, {
+    cz_id: 5001,
+    solicitudes_estados_id: 8,
+    updated_at_src: '2026-11-25T14:30:00Z',
+    tracking_data_summary: {},
+  });
+  await upsertSolicitudes([
+    solicitudItem({
+      id: 5001,
+      solicitudes_estados_id: 4,
+      updated: '2026-11-25T13:00:00Z',
+      historico: [
+        {
+          id: 77,
+          solicitudes_estados_id: 9,
+          fechahora: '2026-11-25T14:35:00Z',
+        },
+      ],
+    }),
+  ]);
+  assert.strictEqual(staleStore.solicitudes.get(5001).solicitudes_estados_id, 8);
+  assert.ok(staleStore.estados.has(77));
+
+  // Parent guarded upsert runs before historico persist (dedicated store)
+  const orderStore = createStore();
+  await upsertSolicitudes([solicitudItem({ id: 5050 })]);
+  const guardedSeq = orderStore.calls.sequence.findIndex(function (s) {
+    return s.kind === 'rpc' && s.name === 'cz_funnel_upsert_solicitudes_guarded';
+  });
+  const histSeq = orderStore.calls.sequence.findIndex(function (s) {
+    return s.kind === 'upsert' && s.table === SOURCE_SOLICITUD_ESTADOS;
+  });
+  assert.ok(guardedSeq >= 0);
+  assert.ok(histSeq >= 0);
+  assert.ok(guardedSeq < histSeq);
 
   // Granted intacto si se llama por su propio upsert, y solicitudes no lo toca
   const grantedStore = createStore();

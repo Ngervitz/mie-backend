@@ -55,6 +55,25 @@ function assertNoDuplicateKeys(rows, key, table) {
   }
 }
 
+function lookupSolicitudesByCzIds(col, ids) {
+  if (col !== 'cz_id') return { data: [], error: null };
+  const data = (ids || [])
+    .map(function (id) {
+      return solicitudesById.get(Number(id));
+    })
+    .filter(Boolean)
+    .map(function (row) {
+      return {
+        cz_id: Number(row.cz_id),
+        tracking_data_summary: row.tracking_data_summary || {},
+        celular: row.celular,
+        updated_at_src: row.updated_at_src,
+        solicitudes_estados_id: row.solicitudes_estados_id,
+      };
+    });
+  return { data: data, error: null };
+}
+
 const supabasePath = require.resolve('../src/clients/supabase');
 require.cache[supabasePath] = {
   id: supabasePath,
@@ -85,13 +104,13 @@ require.cache[supabasePath] = {
                   }
                   return { data: null, error: null };
                 },
-                in: async function () {
-                  return { data: [], error: null };
+                in: async function (col, ids) {
+                  return lookupSolicitudesByCzIds(col, ids);
                 },
               };
             },
-            in: async function () {
-              return { data: [], error: null };
+            in: async function (col, ids) {
+              return lookupSolicitudesByCzIds(col, ids);
             },
           };
         },

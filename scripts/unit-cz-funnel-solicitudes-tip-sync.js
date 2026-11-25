@@ -35,6 +35,7 @@ const cursors = new Map();
 const solicitudesById = new Map();
 const historicoById = new Map();
 const enqueueCalls = [];
+let failHistoricoUpsert = false;
 const {
   handleGuardedUpsertRpc,
 } = require('./lib/mock-cz-funnel-guarded-upsert-rpc');
@@ -105,6 +106,9 @@ require.cache[supabasePath] = {
             return { error: null };
           }
           if (table === 'cz_funnel_solicitud_estados') {
+            if (failHistoricoUpsert) {
+              return { error: { message: 'forced historico failure' } };
+            }
             list.forEach(function (r) {
               historicoById.set(Number(r.cz_historico_id), Object.assign({}, r));
             });
@@ -321,6 +325,45 @@ async function testErrorRecoveryCursor() {
   assert.strictEqual(cur.last_sync_status, 'error');
 }
 
+async function testPersistFailureNoCursorAdvance() {
+  cursors.set('cz_funnel_solicitudes_tip', {
+    source_name: 'cz_funnel_solicitudes_tip',
+    last_since: '2026-11-25T14:00:00Z',
+    last_sync_status: 'success',
+    last_sync_error: null,
+  });
+  enqueueCalls.length = 0;
+  failHistoricoUpsert = true;
+  setFetchPagesForTests(async function () {
+    return {
+      items: [
+        apiItem(9010, {
+          solicitudes_estados_id: 8,
+          historico: [
+            { id: 10, solicitudes_estados_id: 8, fechahora: '2026-11-25T14:00:05Z' },
+          ],
+        }),
+      ],
+      pagesFetched: 1,
+      itemsFetched: 1,
+      nextSince: '2026-11-25T14:30:00Z',
+      incomplete: false,
+    };
+  });
+  try {
+    const result = await runCzFunnelSolicitudesTipSync({ skipLock: true, nowMs });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.status, 'error');
+    const cur = cursors.get('cz_funnel_solicitudes_tip');
+    assert.strictEqual(cur.last_sync_status, 'error');
+    assert.strictEqual(cur.last_since, '2026-11-25T14:00:00Z');
+    assert.ok(String(cur.last_sync_error).includes('cz_funnel_solicitud_estados'));
+    assert.strictEqual(enqueueCalls.length, 0);
+  } finally {
+    failHistoricoUpsert = false;
+  }
+}
+
 (async function main() {
   await testNewEstado8();
   await testLaterEstado8Transition();
@@ -330,6 +373,7 @@ async function testErrorRecoveryCursor() {
   testLongGapWithoutResumeMarker();
   testResumeBeyond48h();
   await testErrorRecoveryCursor();
+  await testPersistFailureNoCursorAdvance();
   console.log('unit-cz-funnel-solicitudes-tip-sync: OK');
 })().catch(function (err) {
   console.error(err);

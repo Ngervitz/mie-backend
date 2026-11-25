@@ -297,6 +297,28 @@ async function upsertSolicitudEstados(rows) {
   return upserted;
 }
 
+async function loadExistingParentCzIds(czIds) {
+  const set = new Set();
+  if (!czIds.length) return set;
+  for (let i = 0; i < czIds.length; i += EXISTING_SUMMARY_SELECT_CHUNK) {
+    const chunk = czIds.slice(i, i + EXISTING_SUMMARY_SELECT_CHUNK);
+    const { data, error } = await supabase
+      .from(SOURCE_SOLICITUDES)
+      .select('cz_id')
+      .in('cz_id', chunk);
+    if (error) {
+      throw new Error(
+        `${SOURCE_SOLICITUDES} parent existence lookup failed: ${error.message}`,
+      );
+    }
+    for (const row of data || []) {
+      const id = Number(row.cz_id);
+      if (Number.isFinite(id)) set.add(id);
+    }
+  }
+  return set;
+}
+
 async function loadExistingJtByCzId(czIds) {
   const map = new Map();
   if (!czIds.length) return map;
@@ -442,11 +464,6 @@ async function upsertSolicitudes(items, opts) {
     valid: mapped.rows.length,
     skipped_no_id: mapped.skippedNoId,
   });
-  const histUpserted = await upsertSolicitudEstados(mapped.rows);
-  logger.info('CZ funnel historico upserted', {
-    kind: 'cz_funnel_historico',
-    upserted: histUpserted,
-  });
 
   let parentUpserted = 0;
   let parentSkippedStale = 0;
@@ -461,6 +478,52 @@ async function upsertSolicitudes(items, opts) {
     parentUpserted = Number(parsed.applied) || 0;
     parentSkippedStale = Number(parsed.skipped) || 0;
   }
+
+  let histRows = mapped.rows;
+  if (histRows.length) {
+    const parentCzIds = [
+      ...new Set(
+        histRows
+          .map(function (r) {
+            return Number(r.cz_solicitud_id);
+          })
+          .filter(function (id) {
+            return Number.isFinite(id);
+          }),
+      ),
+    ];
+    const parentExists = await loadExistingParentCzIds(parentCzIds);
+    const missingParentCzIds = [
+      ...new Set(
+        histRows
+          .filter(function (r) {
+            return !parentExists.has(Number(r.cz_solicitud_id));
+          })
+          .map(function (r) {
+            return Number(r.cz_solicitud_id);
+          })
+          .filter(function (id) {
+            return Number.isFinite(id);
+          }),
+      ),
+    ];
+    if (missingParentCzIds.length > 0) {
+      const sample = missingParentCzIds.slice(0, 8).join(',');
+      const more =
+        missingParentCzIds.length > 8
+          ? ` (+${missingParentCzIds.length - 8} more)`
+          : '';
+      throw new Error(
+        `${SOURCE_SOLICITUD_ESTADOS} upsert blocked: parent row missing after guarded upsert for cz_solicitud_id [${sample}]${more}`,
+      );
+    }
+  }
+
+  const histUpserted = await upsertSolicitudEstados(histRows);
+  logger.info('CZ funnel historico upserted', {
+    kind: 'cz_funnel_historico',
+    upserted: histUpserted,
+  });
 
   await excludeOldBaseContactsByCi(
     payloadRows
